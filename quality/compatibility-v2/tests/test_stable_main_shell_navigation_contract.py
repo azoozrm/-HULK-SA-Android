@@ -56,8 +56,8 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
         presentation = self.read(TV_RAIL_PRESENTATION)
         catalog = self.section(
             source,
-            "private fun ReorderableCatalogCategoryBar(",
-            "private fun CatalogInteractionHints(",
+            "private fun CatalogCategoryBar(",
+            "private fun LiveCategoryBar(",
         )
         live = source[source.index("private fun LiveCategoryBar(") :]
 

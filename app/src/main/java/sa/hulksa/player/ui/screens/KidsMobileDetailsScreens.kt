@@ -446,7 +446,7 @@ fun KidsMobileSeriesDetailsScreen(
                             compact = true,
                             scaleOnFocus = false,
                             accent = notificationsEnabled,
-                            leadingIcon = Icons.Rounded.Notifications,
+                            trailingIcon = Icons.Rounded.Notifications,
                             textMaxLines = 2,
                             textSizeSp = seriesNotificationButtonTextSizeSp(isTv = false),
                             modifier = Modifier

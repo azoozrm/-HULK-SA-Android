@@ -55,6 +55,284 @@ class PlayerProEpisodeNavigationTest {
     }
 
     @Test
+    fun episodeMediaShortcutsAreBlockedWhileAForegroundDecisionOwnsInput() {
+        assertTrue(
+            playerProEpisodeShortcutEligible(
+                foregroundModalActive = false,
+                panelActive = false,
+                errorModalActive = false,
+            ),
+        )
+        // Resume/lock/countdown foreground decision blocks the parent episode shortcuts.
+        assertEquals(
+            false,
+            playerProEpisodeShortcutEligible(
+                foregroundModalActive = true,
+                panelActive = false,
+                errorModalActive = false,
+            ),
+        )
+        // The More panel and the error card own input exactly the same way.
+        assertEquals(
+            false,
+            playerProEpisodeShortcutEligible(
+                foregroundModalActive = false,
+                panelActive = true,
+                errorModalActive = false,
+            ),
+        )
+        assertEquals(
+            false,
+            playerProEpisodeShortcutEligible(
+                foregroundModalActive = false,
+                panelActive = false,
+                errorModalActive = true,
+            ),
+        )
+    }
+
+    @Test
+    fun lockedControlsFlipTheAuthoritativeForegroundSignalEvenWithoutTheUnlockOverlay() {
+        // Locked while the unlock overlay is not visible is still a foreground decision owner.
+        assertTrue(
+            playerVodForegroundDecisionActive(
+                isLive = false,
+                resumePromptVisible = false,
+                errorModalActive = false,
+                unlockVisible = false,
+                nextCountdownActive = false,
+                controlsLocked = true,
+            ),
+        )
+        // Unlocking clears the signal, and each other surface keeps owning input.
+        assertEquals(
+            false,
+            playerVodForegroundDecisionActive(
+                isLive = false,
+                resumePromptVisible = false,
+                errorModalActive = false,
+                unlockVisible = false,
+                nextCountdownActive = false,
+                controlsLocked = false,
+            ),
+        )
+        assertTrue(
+            playerVodForegroundDecisionActive(
+                isLive = false,
+                resumePromptVisible = true,
+                errorModalActive = false,
+                unlockVisible = false,
+                nextCountdownActive = false,
+                controlsLocked = false,
+            ),
+        )
+        assertTrue(
+            playerVodForegroundDecisionActive(
+                isLive = false,
+                resumePromptVisible = false,
+                errorModalActive = true,
+                unlockVisible = false,
+                nextCountdownActive = false,
+                controlsLocked = false,
+            ),
+        )
+        assertTrue(
+            playerVodForegroundDecisionActive(
+                isLive = false,
+                resumePromptVisible = false,
+                errorModalActive = false,
+                unlockVisible = true,
+                nextCountdownActive = false,
+                controlsLocked = false,
+            ),
+        )
+        assertTrue(
+            playerVodForegroundDecisionActive(
+                isLive = false,
+                resumePromptVisible = false,
+                errorModalActive = false,
+                unlockVisible = false,
+                nextCountdownActive = true,
+                controlsLocked = false,
+            ),
+        )
+        // Live keeps its independent foreground owners.
+        assertEquals(
+            false,
+            playerVodForegroundDecisionActive(
+                isLive = true,
+                resumePromptVisible = true,
+                errorModalActive = true,
+                unlockVisible = true,
+                nextCountdownActive = true,
+                controlsLocked = true,
+            ),
+        )
+    }
+
+    @Test
+    fun initialEpisodeShortcutDispatchesOnceAndHeldRepeatsAreConsumed() {
+        val initial = playerProEpisodeShortcutDisposition(
+            eligible = true,
+            isMediaPrevious = true,
+            isMediaNext = false,
+            repeatCount = 0,
+            previousAvailable = true,
+            nextAvailable = true,
+        )
+        assertEquals(PlayerProEpisodeShortcutDisposition.PlayPrevious, initial)
+
+        val nextInitial = playerProEpisodeShortcutDisposition(
+            eligible = true,
+            isMediaPrevious = false,
+            isMediaNext = true,
+            repeatCount = 0,
+            previousAvailable = true,
+            nextAvailable = true,
+        )
+        assertEquals(PlayerProEpisodeShortcutDisposition.PlayNext, nextInitial)
+
+        for (repeat in 1..4) {
+            assertEquals(
+                PlayerProEpisodeShortcutDisposition.Consume,
+                playerProEpisodeShortcutDisposition(
+                    eligible = true,
+                    isMediaPrevious = true,
+                    isMediaNext = false,
+                    repeatCount = repeat,
+                    previousAvailable = true,
+                    nextAvailable = true,
+                ),
+            )
+        }
+
+        // A missing authoritative neighbor or callback never dispatches.
+        assertEquals(
+            PlayerProEpisodeShortcutDisposition.Ignore,
+            playerProEpisodeShortcutDisposition(
+                eligible = true,
+                isMediaPrevious = true,
+                isMediaNext = false,
+                repeatCount = 0,
+                previousAvailable = false,
+                nextAvailable = true,
+            ),
+        )
+        assertEquals(
+            PlayerProEpisodeShortcutDisposition.Ignore,
+            playerProEpisodeShortcutDisposition(
+                eligible = true,
+                isMediaPrevious = false,
+                isMediaNext = true,
+                repeatCount = 0,
+                previousAvailable = true,
+                nextAvailable = false,
+            ),
+        )
+        // Non-media keys stay untouched by the episode shortcut owner.
+        assertEquals(
+            PlayerProEpisodeShortcutDisposition.Ignore,
+            playerProEpisodeShortcutDisposition(
+                eligible = false,
+                isMediaPrevious = false,
+                isMediaNext = false,
+                repeatCount = 0,
+                previousAvailable = true,
+                nextAvailable = true,
+            ),
+        )
+    }
+
+    @Test
+    fun zeroEpisodeCallbacksRunBehindEveryForegroundOwnerIncludingLock() {
+        val surfaces = mapOf(
+            "resume" to playerVodForegroundDecisionActive(
+                isLive = false,
+                resumePromptVisible = true,
+                errorModalActive = false,
+                unlockVisible = false,
+                nextCountdownActive = false,
+                controlsLocked = false,
+            ),
+            "error" to playerVodForegroundDecisionActive(
+                isLive = false,
+                resumePromptVisible = false,
+                errorModalActive = true,
+                unlockVisible = false,
+                nextCountdownActive = false,
+                controlsLocked = false,
+            ),
+            "unlock" to playerVodForegroundDecisionActive(
+                isLive = false,
+                resumePromptVisible = false,
+                errorModalActive = false,
+                unlockVisible = true,
+                nextCountdownActive = false,
+                controlsLocked = false,
+            ),
+            "countdown" to playerVodForegroundDecisionActive(
+                isLive = false,
+                resumePromptVisible = false,
+                errorModalActive = false,
+                unlockVisible = false,
+                nextCountdownActive = true,
+                controlsLocked = false,
+            ),
+            "lock" to playerVodForegroundDecisionActive(
+                isLive = false,
+                resumePromptVisible = false,
+                errorModalActive = false,
+                unlockVisible = false,
+                nextCountdownActive = false,
+                controlsLocked = true,
+            ),
+        )
+        var callbacks = 0
+        for ((surface, foregroundActive) in surfaces) {
+            for (mediaPrevious in listOf(true, false)) {
+                val disposition = playerProEpisodeShortcutDisposition(
+                    eligible = playerProEpisodeShortcutEligible(
+                        foregroundModalActive = foregroundActive,
+                        panelActive = false,
+                        errorModalActive = false,
+                    ),
+                    isMediaPrevious = mediaPrevious,
+                    isMediaNext = !mediaPrevious,
+                    repeatCount = 0,
+                    previousAvailable = true,
+                    nextAvailable = true,
+                )
+                if (
+                    disposition == PlayerProEpisodeShortcutDisposition.PlayPrevious ||
+                    disposition == PlayerProEpisodeShortcutDisposition.PlayNext
+                ) {
+                    callbacks += 1
+                }
+                assertEquals(
+                    "no dispatch behind $surface",
+                    PlayerProEpisodeShortcutDisposition.Consume,
+                    disposition,
+                )
+            }
+        }
+        // The More child panel owns input through the panel signal, not the foreground signal.
+        val panelDisposition = playerProEpisodeShortcutDisposition(
+            eligible = playerProEpisodeShortcutEligible(
+                foregroundModalActive = false,
+                panelActive = true,
+                errorModalActive = false,
+            ),
+            isMediaPrevious = false,
+            isMediaNext = true,
+            repeatCount = 0,
+            previousAvailable = true,
+            nextAvailable = true,
+        )
+        assertEquals(PlayerProEpisodeShortcutDisposition.Consume, panelDisposition)
+        assertEquals(0, callbacks)
+    }
+
+    @Test
     fun favoritesZappingWrapsInsideFavoritesAcrossUnderlyingCategories() {
         val channels = listOf(
             channel(1, "news"),

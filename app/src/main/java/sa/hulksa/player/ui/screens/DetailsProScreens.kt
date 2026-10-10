@@ -45,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
@@ -75,6 +76,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.data.SeriesCardMetadataStore
@@ -92,9 +94,12 @@ import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.CompactPosterCard
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
+import sa.hulksa.player.ui.components.movieRecentElapsedText
+import sa.hulksa.player.ui.components.movieRecentTotalText
+import sa.hulksa.player.ui.components.OrderedNumberWordInline
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.components.MoviesCatalogBoxedCard
-import sa.hulksa.player.ui.components.SeriesPosterCard
+import sa.hulksa.player.ui.components.SeriesCatalogBoxedCard
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
 
@@ -105,33 +110,6 @@ private data class DetailsProMovieTechnicalMetadata(
     val quality: String? = null,
     val durationMs: Long? = null,
 )
-
-private data class DetailsProAction(
-    val text: String,
-    val onClick: () -> Unit,
-    val requester: FocusRequester,
-    val primary: Boolean = false,
-    val enabled: Boolean = true,
-    val mobileWeight: Float = 1f,
-    val scaleOnFocus: Boolean = true,
-    val minimumHeightDp: Int = 0,
-    val accent: Boolean = false,
-    val leadingIcon: ImageVector? = null,
-    val textMaxLines: Int = 1,
-    val textSizeSp: Int? = null,
-)
-
-internal fun detailsProMobileActionColumns(screenWidthDp: Int): Int =
-    if (screenWidthDp < 360) 1 else 2
-
-internal fun detailsProActionsUseSingleRow(isTv: Boolean, wide: Boolean, actionCount: Int): Boolean =
-    isTv || (wide && actionCount <= 2)
-
-internal fun seriesDetailsActionColumns(isTv: Boolean): Int = if (isTv) 3 else 2
-
-internal fun seriesDetailsActionCount(): Int = 5
-
-internal fun seriesDetailsPrimarySpansFullWidth(isTv: Boolean): Boolean = !isTv
 
 internal fun seriesDetailsActionHeightDp(): Int = 50
 
@@ -636,6 +614,7 @@ fun SeriesDetailsProScreen(
     onToggleNotifications: () -> Unit,
     onToggleRelatedFavorite: (ContentItem) -> Unit,
     onOpenRelated: (ContentItem) -> Unit,
+    onRetryDetails: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -670,8 +649,6 @@ fun SeriesDetailsProScreen(
             Triple(episode, entry, progress)
         }.maxByOrNull { it.second.updatedAtEpochMs }
     }
-    val mobileResumeHeroExtraDp = if (!isTv && resumePair != null) 30 else 0
-    val seriesNotificationActionExtraDp = 56
     val completedCount = remember(orderedEpisodes, historyByKey) {
         orderedEpisodes.count { episode ->
             historyByKey["SERIES:${episode.id}"]?.detailsProCompleted() == true
@@ -716,16 +693,12 @@ fun SeriesDetailsProScreen(
         if (selectedSeason == 0) orderedEpisodes else orderedEpisodes.filter { it.season == selectedSeason }
     }
     val heroEpisode = targetEpisode ?: resumePair?.first ?: orderedEpisodes.firstOrNull()
-    val previousEpisode = detailsProAdjacentEpisode(orderedEpisodes, heroEpisode?.id, -1)
-    val nextEpisode = detailsProAdjacentEpisode(orderedEpisodes, heroEpisode?.id, 1)
     val backdrop = details?.backdropUrl ?: series.backdropUrl ?: series.posterUrl
 
     val backRequester = remember(series.id) { FocusRequester() }
     val playRequester = remember(series.id) { FocusRequester() }
     val favoriteRequester = remember(series.id) { FocusRequester() }
     val notificationRequester = remember(series.id) { FocusRequester() }
-    val previousRequester = remember(series.id) { FocusRequester() }
-    val nextRequester = remember(series.id) { FocusRequester() }
     val seasonKeys = seasons.toList()
     val seasonRequesters = remember(seasonKeys) {
         seasons.associateWith { FocusRequester() }
@@ -740,10 +713,168 @@ fun SeriesDetailsProScreen(
     val selectedSeasonRequester = seasonRequesters[selectedSeason]
         ?: seasons.firstOrNull()?.let(seasonRequesters::get)
     val firstEpisodeRequester = visibleEpisodes.firstOrNull()?.let { episodeTargets[it.id]?.card }
-    val heroDownTarget = selectedSeasonRequester ?: firstEpisodeRequester
-    val hasMobileSeriesInfo = !isTv && detailsProHasInformation(details)
-    val episodeStartGridIndex = if (hasMobileSeriesInfo) 3 else 2
-    val relatedGridIndex = episodeStartGridIndex + visibleEpisodes.size
+    val tabRequesters = remember(series.id) {
+        SeriesDetailsTab.entries.associateWith { FocusRequester() }
+    }
+    val detailsErrorRetryRequester = remember(series.id) { FocusRequester() }
+    var detailsErrorRetryFocused by remember(series.id) { mutableStateOf(false) }
+    val focusRestoration = remember(series.id) { SeriesFocusRestorationOwner() }
+    val detailsNetworkUsable by rememberUsableNetworkState()
+    val detailsOffline = errorMessage != null && !detailsNetworkUsable
+    val detailsErrorCopy = moviesDetailsErrorCopy(
+        offline = detailsOffline,
+        serverMessage = errorMessage,
+        mediaLabel = "المسلسل",
+    )
+    var selectedTab by rememberSaveable(series.id) {
+        mutableStateOf(
+            if (targetEpisode != null) SeriesDetailsTab.EPISODES else SeriesDetailsTab.STORY,
+        )
+    }
+    // Hero actions hand DOWN to the selected details tab; the Episodes tab itself hands DOWN to
+    // its season selector/episode grid.
+    val heroDownTarget = tabRequesters.getValue(selectedTab)
+    val episodesDownTarget = selectedSeasonRequester ?: firstEpisodeRequester
+    var pageScrollJob by remember(series.id) { mutableStateOf<Job?>(null) }
+    var tabRevealTarget by remember(series.id) { mutableStateOf<SeriesDetailsTab?>(null) }
+    var tabRevealRequestId by remember(series.id) { mutableIntStateOf(0) }
+    val selectTab: (SeriesDetailsTab) -> Unit = { tab ->
+        selectedTab = tab
+        focusRestoration.invalidate()
+        if (seriesDetailsTabSelectionNeedsReveal(tab)) {
+            tabRevealTarget = tab
+            tabRevealRequestId += 1
+        }
+    }
+    val seriesTabsIndex = seriesDetailsTabsItemIndex(errorMessage != null)
+    val episodeStartGridIndex = seriesTabsIndex + 2
+    // One parent reveal owner: after an explicit tab selection has been laid out, scroll the page
+    // so the selected section starts visible. Obsolete rapid selections cancel the previous
+    // animation; metadata refresh never re-triggers it.
+    LaunchedEffect(tabRevealRequestId) {
+        val target = tabRevealTarget ?: return@LaunchedEffect
+        if (target != selectedTab) return@LaunchedEffect
+        withFrameNanos { }
+        val layout = gridState.layoutInfo
+        val sectionKey = seriesDetailsSectionItemKey(target, tvPolished = false)
+        val section = layout.visibleItemsInfo.firstOrNull { it.key == sectionKey }
+        val needsReveal = section == null ||
+            section.offset.y < layout.viewportStartOffset ||
+            section.offset.y + section.size.height > layout.viewportEndOffset
+        if (needsReveal) {
+            pageScrollJob?.cancel()
+            pageScrollJob = navigationScope.launch {
+                gridState.animateScrollToItem(seriesTabsIndex)
+            }
+        }
+    }
+    // A focused Retry whose notice disappears restores one attached surviving target through the
+    // existing page owners: the selected tab when it is still attached, otherwise the primary
+    // watch action. The request carries a generation token: a new error, a tab selection, a new
+    // user key, Retry regaining focus or leaving the route invalidates it, so the restore job can
+    // never focus a stale target after the error state or ownership changed.
+    LaunchedEffect(errorMessage) {
+        if (errorMessage != null) {
+            focusRestoration.invalidate()
+            return@LaunchedEffect
+        }
+        if (!detailsErrorRetryFocused) return@LaunchedEffect
+        detailsErrorRetryFocused = false
+        val token = focusRestoration.begin()
+        pageScrollJob?.cancel()
+        pageScrollJob = navigationScope.launch {
+            seriesDetailsRestoreFocus(
+                isCurrent = { focusRestoration.isCurrent(token) },
+                reveal = {
+                    val tabsIndex = seriesTabsIndex
+                    if (gridState.layoutInfo.visibleItemsInfo.none { it.index == tabsIndex }) {
+                        gridState.scrollToItem(tabsIndex)
+                        snapshotFlow {
+                            gridState.layoutInfo.visibleItemsInfo.any { it.index == tabsIndex }
+                        }.first { it }
+                        withFrameNanos { }
+                    }
+                },
+                requests = listOf(
+                    { tabRequesters.getValue(selectedTab).requestFocus() },
+                    { playRequester.requestFocus() },
+                    { heroReturnRequester.requestFocus() },
+                ),
+            )
+        }
+    }
+    // Usable D-pad reading path for the Story and Information panels: the selected tab keeps focus
+    // and steps the parent page, so long content stays reachable. The first UP from the two
+    // informational tabs hands off to the primary watch action in one reveal/focus transition.
+    val handleSelectedTabScrollKey: (KeyEvent) -> Boolean = { event ->
+        if (event.type != KeyEventType.KeyDown) {
+            false
+        } else {
+            // A newer user key invalidates any pending restore/handoff before it can focus.
+            focusRestoration.invalidate()
+            val layout = gridState.layoutInfo
+            val viewportHeight = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(1)
+            val step = (viewportHeight * 3 / 4).coerceAtLeast(1)
+            when (event.key) {
+                Key.DirectionDown -> when (selectedTab) {
+                    SeriesDetailsTab.EPISODES, SeriesDetailsTab.RELATED -> false
+                    else -> {
+                        val sectionKey = seriesDetailsSectionItemKey(selectedTab, tvPolished = false)
+                        val section = layout.visibleItemsInfo.firstOrNull { it.key == sectionKey }
+                        val needsMoreScroll = section == null ||
+                            section.offset.y + section.size.height > layout.viewportEndOffset
+                        if (needsMoreScroll) {
+                            pageScrollJob?.cancel()
+                            pageScrollJob = navigationScope.launch {
+                                gridState.scrollBy(step.toFloat())
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                }
+                Key.DirectionUp -> {
+                    if (errorMessage == null && seriesDetailsTabUpHandsOffToWatchAction(selectedTab)) {
+                        val token = focusRestoration.begin()
+                        pageScrollJob?.cancel()
+                        pageScrollJob = navigationScope.launch {
+                            seriesDetailsRestoreFocus(
+                                isCurrent = { focusRestoration.isCurrent(token) },
+                                reveal = {
+                                    if (gridState.layoutInfo.visibleItemsInfo.none { it.index == 0 }) {
+                                        gridState.scrollToItem(0)
+                                        snapshotFlow {
+                                            gridState.layoutInfo.visibleItemsInfo.any { it.index == 0 }
+                                        }.first { it }
+                                        withFrameNanos { }
+                                    }
+                                },
+                                requests = listOf(
+                                    { playRequester.requestFocus() },
+                                    { backRequester.requestFocus() },
+                                ),
+                            )
+                        }
+                        true
+                    } else {
+                        val atPageTop = gridState.firstVisibleItemIndex == 0 &&
+                            gridState.firstVisibleItemScrollOffset == 0
+                        if (atPageTop) {
+                            false
+                        } else {
+                            pageScrollJob?.cancel()
+                            pageScrollJob = navigationScope.launch {
+                                gridState.scrollBy(-step.toFloat())
+                            }
+                            true
+                        }
+                    }
+                }
+                else -> false
+            }
+        }
+    }
 
     fun requestEpisodeAt(index: Int): Boolean {
         val episode = visibleEpisodes.getOrNull(index) ?: return false
@@ -759,20 +890,14 @@ fun SeriesDetailsProScreen(
         }
         return true
     }
-
-    fun requestRelatedFirst(): Boolean {
-        val requester = relatedRequesters.firstOrNull() ?: return false
-        val visible = gridState.layoutInfo.visibleItemsInfo.any { it.index == relatedGridIndex }
-        if (visible && runCatching { requester.requestFocus() }.getOrDefault(false)) return true
-        navigationScope.launch {
-            runCatching { gridState.scrollToItem(relatedGridIndex) }
-            delay(DETAILS_PRO_GRID_FOCUS_DELAY_MS)
-            runCatching { requester.requestFocus() }
+    LaunchedEffect(targetEpisode?.id) {
+        if (targetEpisode != null && selectedTab != SeriesDetailsTab.EPISODES) {
+            selectedTab = SeriesDetailsTab.EPISODES
         }
-        return true
     }
 
-    LaunchedEffect(targetEpisode?.id, selectedSeason, visibleEpisodes) {
+    LaunchedEffect(targetEpisode?.id, selectedSeason, visibleEpisodes, selectedTab) {
+        if (selectedTab != SeriesDetailsTab.EPISODES) return@LaunchedEffect
         val index = visibleEpisodes.indexOfFirst { it.id == targetEpisode?.id }
         if (index >= 0) {
             delay(DETAILS_PRO_GRID_FOCUS_DELAY_MS)
@@ -787,74 +912,6 @@ fun SeriesDetailsProScreen(
         }
     }
 
-    val heroActions = buildList {
-        add(
-            DetailsProAction(
-                text = if (resumePair != null) "▶ متابعة المشاهدة" else "▶ ابدا المشاهدة",
-                onClick = { heroEpisode?.let(onPlay) },
-                requester = playRequester,
-                primary = true,
-                enabled = heroEpisode != null,
-                scaleOnFocus = false,
-                minimumHeightDp = 48,
-            ),
-        )
-        add(
-            DetailsProAction(
-                text = previousEpisode?.let { episode ->
-                    if (isTv || episode.season != heroEpisode?.season) {
-                        "السابق S${episode.season} E${episode.episodeNumber}"
-                    } else {
-                        "السابق · E${episode.episodeNumber}"
-                    }
-                } ?: "السابق",
-                onClick = { previousEpisode?.let(onPlay) },
-                requester = previousRequester,
-                enabled = previousEpisode != null,
-                scaleOnFocus = false,
-                minimumHeightDp = 48,
-            ),
-        )
-        add(
-            DetailsProAction(
-                text = nextEpisode?.let { episode ->
-                    if (isTv || episode.season != heroEpisode?.season) {
-                        "التالي S${episode.season} E${episode.episodeNumber}"
-                    } else {
-                        "التالي · E${episode.episodeNumber}"
-                    }
-                } ?: "التالي",
-                onClick = { nextEpisode?.let(onPlay) },
-                requester = nextRequester,
-                enabled = nextEpisode != null,
-                scaleOnFocus = false,
-                minimumHeightDp = 48,
-            ),
-        )
-        add(
-            DetailsProAction(
-                text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
-                onClick = onToggleFavorite,
-                requester = favoriteRequester,
-                scaleOnFocus = false,
-                minimumHeightDp = 48,
-            ),
-        )
-        add(
-            DetailsProAction(
-                text = seriesNotificationButtonLabel(notificationsEnabled, isTv),
-                onClick = onToggleNotifications,
-                requester = notificationRequester,
-                enabled = notificationsEnabled || notificationToggleAvailable,
-                scaleOnFocus = false,
-                minimumHeightDp = 48,
-                accent = notificationsEnabled,
-                leadingIcon = Icons.Rounded.Notifications,
-                textMaxLines = 2,
-                textSizeSp = seriesNotificationButtonTextSizeSp(isTv),
-            ),
-        )
-    }
 
     Box(
         modifier = Modifier
@@ -869,17 +926,14 @@ fun SeriesDetailsProScreen(
             horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 8.dp),
             verticalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 8.dp),
         ) {
-            item(
+                        item(
                 key = "series_hero",
                 span = { GridItemSpan(maxLineSpan) },
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(
-                            (metrics.heroHeightDp + mobileResumeHeroExtraDp +
-                                seriesNotificationActionExtraDp).dp,
-                        )
+                        .height(movieCompactHeroHeightDp(adaptiveUi.screenHeightDp).dp)
                         .background(colors.background),
                 ) {
                     if (!backdrop.isNullOrBlank()) {
@@ -893,8 +947,8 @@ fun SeriesDetailsProScreen(
                         BrandLogo(
                             Modifier
                                 .align(Alignment.Center)
-                                .size((metrics.heroPosterWidthDp * 1.15f).dp)
-                                .graphicsLayer { alpha = .18f },
+                                .size((metrics.heroPosterWidthDp * 1.18f).dp)
+                                .graphicsLayer { alpha = .16f },
                         )
                     }
                     DetailsProHeroScrim()
@@ -925,223 +979,281 @@ fun SeriesDetailsProScreen(
                         BrandBadge(Modifier.size(if (isTv) 52.dp else 44.dp))
                     }
 
-                    Row(
+                    Column(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                             .padding(
-                                start = seriesHorizontalPaddingDp.dp,
-                                end = seriesHorizontalPaddingDp.dp,
+                                start = metrics.horizontalPaddingDp.dp,
+                                end = metrics.horizontalPaddingDp.dp,
                                 bottom = metrics.verticalPaddingDp.dp,
                             ),
-                        verticalAlignment = Alignment.Bottom,
-                        horizontalArrangement = Arrangement.spacedBy(
-                            if (metrics.wideLayout) 22.dp else 12.dp,
-                        ),
+                        horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                text = "مسلسل",
-                                color = colors.goldBright,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = series.name,
-                                color = Color.White,
-                                fontSize = metrics.titleSizeSp.sp,
-                                lineHeight = (metrics.titleSizeSp + 5).sp,
-                                fontWeight = FontWeight.Black,
-                                maxLines = if (metrics.compactHeight) 1 else 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Spacer(Modifier.height(7.dp))
-                            DetailsProSeriesPills(
-                                series = series,
-                                genre = details?.genre ?: series.genre,
-                                technicalMetadata = technicalMetadata,
-                                seasonCount = seasons.size,
-                                episodeCount = orderedEpisodes.size,
-                                compact = !metrics.wideLayout,
-                            )
-                            val plot = details?.plot ?: series.plot
-                            if (!plot.isNullOrBlank()) {
-                                Spacer(Modifier.height(7.dp))
-                                Text(
-                                    text = plot,
-                                    color = Color(0xFFE3DFD5),
-                                    fontSize = metrics.plotSizeSp.sp,
-                                    lineHeight = (metrics.plotSizeSp + 6).sp,
-                                    maxLines = when {
-                                        metrics.compactHeight -> 1
-                                        isTv -> 3
-                                        else -> 2
-                                    },
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            if (resumePair != null) {
-                                Spacer(Modifier.height(9.dp))
-                                val entry = resumePair.second
-                                DetailsProProgress(
-                                    progress = resumePair.third,
-                                    label = "متابعة من ${detailsProFormatTime(entry.positionMs)}",
-                                    modifier = Modifier.fillMaxWidth(if (metrics.wideLayout) .72f else 1f),
-                                )
-                            }
-                            Spacer(Modifier.height(if (metrics.compactHeight) 9.dp else 12.dp))
-                            DetailsProActions(
-                                actions = heroActions,
-                                isTv = isTv,
-                                upTarget = backRequester,
-                                downTarget = heroDownTarget,
-                                onFocused = { heroReturnRequester = it },
-                                wide = metrics.wideLayout,
-                                seriesActionLayout = true,
+                        Text(
+                            text = series.name,
+                            color = colors.text,
+                            fontSize = metrics.titleSizeSp.sp,
+                            lineHeight = (metrics.titleSizeSp + 5).sp,
+                            fontWeight = FontWeight.Black,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth(.94f),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        SeriesDetailsHeroMetadataRow(
+                            series = series,
+                            genre = details?.genre ?: series.genre,
+                            qualityLabel = technicalMetadata.quality,
+                            ratingLabel = detailsProRatingLabel(series.rating),
+                            episodeCount = orderedEpisodes.size,
+                            seasonCount = technicalMetadata.seasonCount ?: seasons.size,
+                            isTv = false,
+                            modifier = Modifier.fillMaxWidth(.96f),
+                        )
+                        if (resumePair != null) {
+                            Spacer(Modifier.height(10.dp))
+                            MovieInlineResumeStrip(
+                                positionMs = resumePair.second.positionMs,
+                                durationMs = resumePair.second.durationMs,
+                                progress = resumePair.third,
+                                isTv = false,
+                                modifier = Modifier.fillMaxWidth(if (metrics.wideLayout) .78f else 1f),
                             )
                         }
+                        Spacer(Modifier.height(if (metrics.compactHeight) 9.dp else 13.dp))
+                        SeriesDetailsActionsBar(
+                            isTv = false,
+                            rowFraction = if (metrics.wideLayout) .78f else 1f,
+                            minimumActionHeightDp = movieActionHeightDp(
+                                isTv = false,
+                                compactHeight = metrics.compactHeight,
+                            ),
+                            resumePositionMs = resumePair?.second?.positionMs,
+                            isFavorite = isFavorite,
+                            notificationsEnabled = notificationsEnabled,
+                            notificationToggleAvailable = notificationToggleAvailable,
+                            playRequester = playRequester,
+                            favoriteRequester = favoriteRequester,
+                            notificationRequester = notificationRequester,
+                            upRequester = null,
+                            tabsDownRequester = heroDownTarget,
+                            onActionFocused = {
+                                heroReturnRequester = it
+                                seriesDetailsNoteNewFocusOwner(focusRestoration)
+                            },
+                            onPlay = { heroEpisode?.let(onPlay) },
+                            onToggleFavorite = onToggleFavorite,
+                            onToggleNotifications = onToggleNotifications,
+                        )
+                    }
 
-                        DetailsProPoster(
-                            posterUrl = series.posterUrl,
-                            title = series.name,
-                            modifier = Modifier.width(metrics.heroPosterWidthDp.dp),
+                    if (isLoading) {
+                        LoadingRing(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(
+                                    start = (metrics.horizontalPaddingDp + 64).dp,
+                                    top = metrics.verticalPaddingDp.dp,
+                                ),
                         )
                     }
                 }
             }
-
-            if (hasMobileSeriesInfo) {
+            if (errorMessage != null) {
                 item(
-                    key = "series_info_mobile",
+                    key = "series_error",
                     span = { GridItemSpan(maxLineSpan) },
                 ) {
-                    DetailsProInformationPanel(
-                        title = "معلومات المسلسل",
-                        details = details,
+                    MoviesErrorNotice(
+                        title = detailsErrorCopy.title,
+                        body = detailsErrorCopy.body,
+                        onRetry = onRetryDetails,
                         isTv = false,
-                        horizontalPaddingDp = seriesHorizontalPaddingDp,
-                        modifier = Modifier.fillMaxWidth(),
+                        networkFailure = detailsOffline,
+                        retryRequester = detailsErrorRetryRequester,
+                        onRetryFocusChanged = { focused ->
+                            detailsErrorRetryFocused = focused
+                            if (focused) focusRestoration.invalidate()
+                        },
+                        onRetryUp = {
+                            runCatching { heroReturnRequester.requestFocus() }.getOrDefault(false)
+                        },
+                        onRetryDown = {
+                            runCatching { tabRequesters.getValue(selectedTab).requestFocus() }
+                                .getOrDefault(false)
+                        },
+                        modifier = Modifier.padding(
+                            horizontal = seriesHorizontalPaddingDp.dp,
+                            vertical = 8.dp,
+                        ),
                     )
                 }
             }
 
             item(
-                key = "series_episode_header",
+                key = "series_tabs",
                 span = { GridItemSpan(maxLineSpan) },
             ) {
-                SeriesDetailsProHeader(
-                    selectedSeason = selectedSeason,
-                    seasons = seasons,
-                    totalEpisodes = orderedEpisodes.size,
-                    completedEpisodes = completedCount,
-                    resumeEpisode = resumePair?.first,
-                    resumeEntry = resumePair?.second,
-                    isTv = isTv,
-                    horizontalPaddingDp = seriesHorizontalPaddingDp,
-                    seasonRequesters = seasonRequesters,
-                    upRequester = heroReturnRequester,
-                    downRequester = firstEpisodeRequester,
-                    onSelectSeason = { selectedSeason = it },
-                    errorMessage = errorMessage,
-                )
-            }
-
-            gridItemsIndexed(
-                items = visibleEpisodes,
-                key = { _, episode -> "episode:${episode.id}" },
-                contentType = { _, _ -> "details_pro_episode" },
-            ) { index, episode ->
-                val download = downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
-                val row = index / metrics.episodeColumns
-                val rowStart = row * metrics.episodeColumns
-                val rowEnd = minOf(rowStart + metrics.episodeColumns - 1, visibleEpisodes.lastIndex)
-                val leftTarget = if (index < rowEnd) {
-                    episodeTargets[visibleEpisodes[index + 1].id]?.card
-                } else {
-                    null
-                }
-                val rightTarget = if (index > rowStart) {
-                    episodeTargets[visibleEpisodes[index - 1].id]?.card
-                } else {
-                    null
-                }
-                val upTarget = if (index - metrics.episodeColumns >= 0) {
-                    episodeTargets[visibleEpisodes[index - metrics.episodeColumns].id]?.card
-                } else {
-                    selectedSeasonRequester ?: playRequester
-                }
-                val nextRowIndex = index + metrics.episodeColumns
-                val targets = checkNotNull(episodeTargets[episode.id])
-
-                EpisodeDetailsProCard(
-                    episode = episode,
-                    highlighted = targetEpisode?.id == episode.id,
-                    fallbackBackdrop = backdrop,
-                    download = download,
-                    historyEntry = historyByKey["SERIES:${episode.id}"],
-                    isTv = isTv,
-                    targets = targets,
-                    upTarget = upTarget,
-                    leftTarget = leftTarget,
-                    rightTarget = rightTarget,
-                    onDownFromActions = {
-                        if (nextRowIndex < visibleEpisodes.size) {
-                            requestEpisodeAt(nextRowIndex)
-                        } else {
-                            requestRelatedFirst()
-                        }
-                    },
-                    onPlay = { onPlay(episode) },
-                    onDownload = { onDownload(episode) },
-                    onCancelDownload = { onCancelDownload(episode) },
-                    modifier = Modifier.padding(
-                        start = if (isTv) 10.dp else 0.dp,
-                        end = if (isTv) 10.dp else 0.dp,
-                        bottom = if (isTv) 8.dp else 5.dp,
-                    ),
-                )
-            }
-
-            if (relatedItems.isNotEmpty()) {
-                item(
-                    key = "series_related",
-                    span = { GridItemSpan(maxLineSpan) },
-                ) {
-                    DetailsProRelatedRow(
-                        title = "مسلسلات مشابهة",
-                        items = relatedItems,
-                        isTv = isTv,
-                        cardWidthDp = metrics.relatedCardWidthDp,
-                        horizontalPaddingDp = metrics.horizontalPaddingDp,
-                        requesters = relatedRequesters,
-                        upRequester = null,
-                        onUpOverride = {
-                            if (visibleEpisodes.isNotEmpty()) {
-                                requestEpisodeAt(visibleEpisodes.lastIndex)
-                            } else {
-                                heroReturnRequester.requestFocus()
-                            }
-                        },
-                        isFavorite = isRelatedFavorite,
-                        onToggleFavorite = onToggleRelatedFavorite,
-                        onOpen = onOpenRelated,
+                Column(Modifier.fillMaxWidth()) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Color.White.copy(alpha = .08f)),
+                    )
+                    SeriesDetailsTabRow(
+                        selected = selectedTab,
+                        onSelect = selectTab,
+                        requesters = tabRequesters,
+                        upTarget = heroReturnRequester,
+                        downTargets = mapOf(
+                            SeriesDetailsTab.EPISODES to episodesDownTarget,
+                            SeriesDetailsTab.RELATED to relatedRequesters.firstOrNull(),
+                        ),
+                        isTv = false,
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        onSelectedTabScrollKey = handleSelectedTabScrollKey,
+                    )
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Color.White.copy(alpha = .08f)),
                     )
                 }
             }
 
-            if (isTv && detailsProHasInformation(details)) {
-                item(
+            when (selectedTab) {
+                SeriesDetailsTab.STORY -> item(
+                    key = "series_story",
+                    span = { GridItemSpan(maxLineSpan) },
+                ) {
+                    MovieDetailsStoryContent(
+                        plot = details?.plot ?: series.plot,
+                        isTv = false,
+                        horizontalPaddingDp = metrics.horizontalPaddingDp,
+                        emptyMessage = "لا يوجد وصف متاح لهذا المسلسل",
+                    )
+                }
+
+                SeriesDetailsTab.INFORMATION -> item(
                     key = "series_info",
                     span = { GridItemSpan(maxLineSpan) },
                 ) {
-                    DetailsProInformationPanel(
-                        title = "معلومات المسلسل",
+                    SeriesDetailsInfoGrid(
+                        series = series,
                         details = details,
-                        isTv = true,
-                        horizontalPaddingDp = metrics.horizontalPaddingDp,
-                        modifier = Modifier.fillMaxWidth(),
+                        seasonCount = technicalMetadata.seasonCount ?: seasons.size,
+                        episodeCount = orderedEpisodes.size,
+                        qualityLabel = technicalMetadata.quality,
+                        ratingLabel = detailsProRatingLabel(series.rating),
+                        horizontalPaddingDp = seriesHorizontalPaddingDp,
+                        isTv = false,
                     )
+                }
+
+                SeriesDetailsTab.RELATED -> item(
+                    key = "series_related",
+                    span = { GridItemSpan(maxLineSpan) },
+                ) {
+                    if (relatedItems.isEmpty()) {
+                        MovieDetailsEmptyTabMessage("لا توجد مسلسلات مشابهة متاحة", isTv = false)
+                    } else {
+                        DetailsProRelatedRow(
+                            title = "",
+                            showTitle = false,
+                            items = relatedItems,
+                            isTv = false,
+                            cardWidthDp = metrics.relatedCardWidthDp,
+                            horizontalPaddingDp = metrics.horizontalPaddingDp,
+                            requesters = relatedRequesters,
+                            upRequester = tabRequesters.getValue(SeriesDetailsTab.RELATED),
+                            isFavorite = isRelatedFavorite,
+                            onToggleFavorite = onToggleRelatedFavorite,
+                            onOpen = onOpenRelated,
+                        )
+                    }
+                }
+
+                SeriesDetailsTab.EPISODES -> {
+                    item(
+                        key = "series_episode_header",
+                        span = { GridItemSpan(maxLineSpan) },
+                    ) {
+                        SeriesDetailsProHeader(
+                            selectedSeason = selectedSeason,
+                            seasons = seasons,
+                            totalEpisodes = orderedEpisodes.size,
+                            completedEpisodes = completedCount,
+                            resumeEpisode = resumePair?.first,
+                            resumeEntry = resumePair?.second,
+                            isTv = isTv,
+                            horizontalPaddingDp = seriesHorizontalPaddingDp,
+                            seasonRequesters = seasonRequesters,
+                            upRequester = heroReturnRequester,
+                            downRequester = firstEpisodeRequester,
+                            onSelectSeason = { selectedSeason = it },
+                            errorMessage = null,
+                        )
+                    }
+
+                    gridItemsIndexed(
+                        items = visibleEpisodes,
+                        key = { _, episode -> "episode:${episode.id}" },
+                        contentType = { _, _ -> "details_pro_episode" },
+                    ) { index, episode ->
+                        val download = downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
+                        val row = index / metrics.episodeColumns
+                        val rowStart = row * metrics.episodeColumns
+                        val rowEnd = minOf(rowStart + metrics.episodeColumns - 1, visibleEpisodes.lastIndex)
+                        val leftTarget = if (index < rowEnd) {
+                            episodeTargets[visibleEpisodes[index + 1].id]?.card
+                        } else {
+                            null
+                        }
+                        val rightTarget = if (index > rowStart) {
+                            episodeTargets[visibleEpisodes[index - 1].id]?.card
+                        } else {
+                            null
+                        }
+                        val upTarget = if (index - metrics.episodeColumns >= 0) {
+                            episodeTargets[visibleEpisodes[index - metrics.episodeColumns].id]?.card
+                        } else {
+                            selectedSeasonRequester ?: playRequester
+                        }
+                        val nextRowIndex = index + metrics.episodeColumns
+                        val targets = checkNotNull(episodeTargets[episode.id])
+
+                        EpisodeDetailsProCard(
+                            episode = episode,
+                            highlighted = targetEpisode?.id == episode.id,
+                            fallbackBackdrop = backdrop,
+                            download = download,
+                            historyEntry = historyByKey["SERIES:${episode.id}"],
+                            isTv = isTv,
+                            targets = targets,
+                            upTarget = upTarget,
+                            leftTarget = leftTarget,
+                            rightTarget = rightTarget,
+                            onDownFromActions = {
+                                if (nextRowIndex < visibleEpisodes.size) {
+                                    requestEpisodeAt(nextRowIndex)
+                                } else {
+                                    false
+                                }
+                            },
+                            onPlay = { onPlay(episode) },
+                            onDownload = { onDownload(episode) },
+                            onCancelDownload = { onCancelDownload(episode) },
+                            modifier = Modifier.padding(
+                                start = if (isTv) 10.dp else 0.dp,
+                                end = if (isTv) 10.dp else 0.dp,
+                                bottom = if (isTv) 8.dp else 5.dp,
+                            ),
+                        )
+                    }
                 }
             }
         }
@@ -1189,40 +1301,6 @@ private fun DetailsProHeroScrim() {
     )
 }
 
-@Composable
-private fun DetailsProPoster(
-    posterUrl: String?,
-    title: String,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalHulkColors.current
-    val shape = RoundedCornerShape(15.dp)
-    Box(
-        modifier = modifier
-            .aspectRatio(2f / 3f)
-            .clip(shape)
-            .background(Color(0xFF15160F))
-            .border(1.dp, colors.gold.copy(alpha = .50f), shape),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (!posterUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = posterUrl,
-                contentDescription = title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
-        } else {
-            BrandLogo(
-                Modifier
-                    .fillMaxSize()
-                    .padding(22.dp)
-                    .graphicsLayer { alpha = .50f },
-            )
-        }
-    }
-}
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DetailsProMoviePills(
@@ -1252,38 +1330,6 @@ private fun DetailsProMoviePills(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DetailsProSeriesPills(
-    series: ContentItem,
-    genre: String?,
-    technicalMetadata: SeriesCardTechnicalMetadata,
-    seasonCount: Int,
-    episodeCount: Int,
-    compact: Boolean,
-) {
-    val verifiedSeasonCount = technicalMetadata.seasonCount?.takeIf { it > 0 } ?: seasonCount.takeIf { it > 0 }
-    val seasonLabel = verifiedSeasonCount?.let { "$it موسم" }
-    val episodeLabel = episodeCount.takeIf { it > 0 }?.let { "$it حلقة" }
-    val values = buildList {
-        detailsProRating(series.rating)?.let { add("★ $it") }
-        genre
-            ?.trim()
-            ?.takeIf(String::isNotBlank)
-            ?.let { add(it.take(27)) }
-        technicalMetadata.quality?.takeIf(String::isNotBlank)?.let(::add)
-        seasonLabel?.let(::add)
-        episodeLabel?.let(::add)
-    }
-
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp),
-        verticalArrangement = Arrangement.spacedBy(5.dp),
-        maxItemsInEachRow = 5,
-    ) {
-        values.forEach { DetailsProPill(it, compact = compact) }
-    }
-}
-
-@Composable
 private fun DetailsProPill(
     text: String,
     compact: Boolean = false,
@@ -1305,194 +1351,6 @@ private fun DetailsProPill(
                 vertical = if (compact) 3.dp else 4.dp,
             ),
     )
-}
-
-@Composable
-private fun DetailsProProgress(
-    progress: Float,
-    label: String,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalHulkColors.current
-    Column(modifier) {
-        Text(
-            text = label,
-            color = colors.goldBright,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(4.dp))
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(5.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(Color.White.copy(alpha = .17f)),
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth(progress.coerceIn(0f, 1f))
-                    .fillMaxHeight()
-                    .background(colors.goldBright),
-            )
-        }
-    }
-}
-
-@Composable
-private fun DetailsProActions(
-    actions: List<DetailsProAction>,
-    isTv: Boolean,
-    upTarget: FocusRequester?,
-    downTarget: FocusRequester?,
-    onFocused: (FocusRequester) -> Unit,
-    wide: Boolean,
-    seriesActionLayout: Boolean = false,
-) {
-    val adaptiveUi = LocalAdaptiveUi.current
-    if (!seriesActionLayout && detailsProActionsUseSingleRow(isTv, wide, actions.size)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().focusGroup(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            actions.forEachIndexed { index, action ->
-                val leftTarget = actions.getOrNull(index + 1)?.requester
-                val rightTarget = actions.getOrNull(index - 1)?.requester
-                FocusButton(
-                    text = action.text,
-                    onClick = action.onClick,
-                    primary = action.primary,
-                    enabled = action.enabled,
-                    compact = true,
-                    outlined = !action.primary,
-                    scaleOnFocus = action.scaleOnFocus,
-                    accent = action.accent,
-                    leadingIcon = action.leadingIcon,
-                    textMaxLines = action.textMaxLines,
-                    textSizeSp = action.textSizeSp,
-                    modifier = Modifier
-                        .weight(if (action.primary) 1.18f else 1f)
-                        .then(
-                            if (action.minimumHeightDp > 0) {
-                                Modifier.heightIn(min = action.minimumHeightDp.dp)
-                            } else {
-                                Modifier
-                            },
-                        )
-                        .detailsProTvTarget(
-                            isTv = isTv,
-                            requester = action.requester,
-                            upTarget = upTarget,
-                            downTarget = downTarget,
-                            leftTarget = leftTarget,
-                            rightTarget = rightTarget,
-                            onFocused = { onFocused(action.requester) },
-                        ),
-                )
-            }
-        }
-    } else {
-        val actionColumns = if (seriesActionLayout) {
-            seriesDetailsActionColumns(isTv)
-        } else {
-            detailsProMobileActionColumns(adaptiveUi.screenWidthDp)
-        }
-        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            if (seriesActionLayout && seriesDetailsPrimarySpansFullWidth(isTv)) {
-                actions.firstOrNull()?.let { action ->
-                    FocusButton(
-                        text = action.text,
-                        onClick = action.onClick,
-                        primary = action.primary,
-                        enabled = action.enabled,
-                        compact = true,
-                        outlined = !action.primary,
-                        scaleOnFocus = action.scaleOnFocus,
-                        accent = action.accent,
-                        leadingIcon = action.leadingIcon,
-                        textMaxLines = action.textMaxLines,
-                        textSizeSp = action.textSizeSp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(seriesDetailsActionHeightDp().dp)
-                            .detailsProTvTarget(
-                                isTv = false,
-                                requester = action.requester,
-                                upTarget = upTarget,
-                                downTarget = actions.getOrNull(1)?.requester ?: downTarget,
-                                leftTarget = null,
-                                rightTarget = null,
-                                onFocused = { onFocused(action.requester) },
-                            ),
-                    )
-                }
-            }
-            val gridActions = if (seriesActionLayout && seriesDetailsPrimarySpansFullWidth(isTv)) {
-                actions.drop(1)
-            } else {
-                actions
-            }
-            gridActions.chunked(actionColumns).forEachIndexed { rowIndex, row ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
-                    row.forEachIndexed { columnIndex, action ->
-                        val actionIndex = rowIndex * actionColumns + columnIndex
-                        val previousRowTarget = gridActions.getOrNull(actionIndex - actionColumns)?.requester
-                            ?: if (seriesActionLayout && seriesDetailsPrimarySpansFullWidth(isTv)) {
-                                actions.firstOrNull()?.requester
-                            } else {
-                                upTarget
-                            }
-                        val nextRowTarget = gridActions.getOrNull(actionIndex + actionColumns)?.requester
-                            ?: downTarget
-                        val leftTarget = row.getOrNull(columnIndex + 1)?.requester
-                        val rightTarget = row.getOrNull(columnIndex - 1)?.requester
-                        FocusButton(
-                            text = action.text,
-                            onClick = action.onClick,
-                            primary = action.primary,
-                            enabled = action.enabled,
-                            compact = true,
-                            outlined = !action.primary,
-                            scaleOnFocus = action.scaleOnFocus,
-                            accent = action.accent,
-                            leadingIcon = action.leadingIcon,
-                            textMaxLines = action.textMaxLines,
-                            textSizeSp = action.textSizeSp,
-                            modifier = Modifier
-                                .weight(action.mobileWeight)
-                                .then(
-                                    if (seriesActionLayout) {
-                                        Modifier.height(seriesDetailsActionHeightDp().dp)
-                                    } else if (action.minimumHeightDp > 0) {
-                                        Modifier.heightIn(min = action.minimumHeightDp.dp)
-                                    } else {
-                                        Modifier
-                                    },
-                                )
-                                .detailsProTvTarget(
-                                    isTv = isTv,
-                                    requester = action.requester,
-                                    upTarget = previousRowTarget,
-                                    downTarget = nextRowTarget,
-                                    leftTarget = leftTarget,
-                                    rightTarget = rightTarget,
-                                    onFocused = { onFocused(action.requester) },
-                                ),
-                        )
-                    }
-                    repeat(actionColumns - row.size) {
-                        Spacer(Modifier.weight(1f))
-                    }
-                }
-            }
-        }
-    }
 }
 
 @Composable
@@ -1530,43 +1388,30 @@ private fun SeriesDetailsProHeader(
                     fontSize = if (isTv) 23.sp else 19.sp,
                     fontWeight = FontWeight.Black,
                 )
-                Text(
-                    text = if (completedEpisodes > 0) {
-                        "$completedEpisodes مكتملة من $totalEpisodes"
-                    } else {
-                        "$totalEpisodes حلقة"
-                    },
-                    color = colors.textMuted,
-                    fontSize = 10.sp,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    if (completedEpisodes > 0) {
+                        OrderedNumberWordInline(
+                            count = completedEpisodes,
+                            word = "مكتملة",
+                            fontSizeSp = 10,
+                            lineHeightSp = 12,
+                            textColor = colors.textMuted,
+                        )
+                        Text("من", color = colors.textMuted, fontSize = 10.sp)
+                    }
+                    OrderedNumberWordInline(
+                        count = totalEpisodes,
+                        word = "حلقة",
+                        fontSizeSp = 10,
+                        lineHeightSp = 12,
+                        textColor = colors.textMuted,
+                    )
+                }
             }
             Spacer(Modifier.weight(1f))
-            if (isTv && resumeEpisode != null && resumeEntry != null) {
-                Text(
-                    text = "الحلقة الحالية : S${resumeEpisode.season} E${resumeEpisode.episodeNumber} · ${detailsProFormatTime(resumeEntry.positionMs)}",
-                    color = colors.goldBright,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                )
-            }
-        }
-
-        if (!isTv && resumeEpisode != null && resumeEntry != null) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "الحلقة الحالية : S${resumeEpisode.season} E${resumeEpisode.episodeNumber}  •  ${detailsProFormatTime(resumeEntry.positionMs)}",
-                color = colors.goldBright,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Black,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.surface.copy(alpha = .82f))
-                    .border(1.dp, colors.gold.copy(alpha = .45f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-            )
         }
 
         if (seasons.isNotEmpty()) {
@@ -1586,6 +1431,9 @@ private fun SeriesDetailsProHeader(
                         primary = selectedSeason == season,
                         compact = true,
                         outlined = selectedSeason != season,
+                        // The accepted focus frame must cover the entire season button without any
+                        // focus scale growing it past the LazyRow viewport and clipping its corners.
+                        scaleOnFocus = false,
                         modifier = Modifier.detailsProTvTarget(
                             isTv = isTv,
                             requester = requester,
@@ -1624,205 +1472,60 @@ private fun EpisodeDetailsProCard(
     onCancelDownload: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val colors = LocalHulkColors.current
-    var focused by remember(episode.id) { mutableStateOf(false) }
-    val showFocused = focused && LocalAdaptiveUi.current.showFocusHighlights
-    val scale by animateFloatAsState(if (showFocused) 1.028f else 1f, label = "detailsProEpisodeScale")
     val progress = historyEntry?.detailsProWatchProgress()
     val completed = historyEntry?.detailsProCompleted() == true
-    val artwork = episode.posterUrl?.takeIf(String::isNotBlank) ?: fallbackBackdrop
-    val duration = detailsProEpisodeDuration(episode.duration)
-    val hasSecondaryAction = download != null &&
-        download.status != OfflineStatus.COMPLETED &&
-        download.status != OfflineStatus.FAILED
-
-    Column(modifier = modifier.fillMaxWidth().focusGroup()) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                    shadowElevation = if (showFocused) 12.dp.toPx() else 0f
-                }
-                .aspectRatio(if (isTv) 16f / 9f else 1.45f)
-                .clip(RoundedCornerShape(13.dp))
-                .background(Color(0xFF13140F))
-                .border(
-                    if (showFocused) 3.dp else if (highlighted) 2.dp else 1.dp,
-                    if (showFocused || highlighted) colors.goldBright else colors.line.copy(alpha = .38f),
-                    RoundedCornerShape(13.dp),
-                )
-                .onFocusChanged { focused = it.isFocused }
-                .detailsProTvTarget(
-                    isTv = isTv,
-                    requester = targets.card,
-                    upTarget = upTarget,
-                    downTarget = targets.primaryAction,
-                    leftTarget = leftTarget,
-                    rightTarget = rightTarget,
-                )
-                .clickable(role = Role.Button, onClick = onPlay),
-        ) {
-            if (!artwork.isNullOrBlank()) {
-                AsyncImage(
-                    model = artwork,
-                    contentDescription = episode.title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
-            } else {
-                BrandLogo(
-                    Modifier
-                        .align(Alignment.Center)
-                        .size(58.dp)
-                        .graphicsLayer { alpha = .28f },
-                )
-            }
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            0f to Color.Transparent,
-                            .52f to Color.Transparent,
-                            .78f to Color.Black.copy(alpha = .68f),
-                            1f to Color.Black.copy(alpha = .96f),
-                        ),
-                    ),
-            )
-            Text(
-                text = "S${episode.season} · E${episode.episodeNumber}",
-                color = Color.White,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier
-                    .align(AbsoluteAlignment.TopLeft)
-                    .padding(7.dp)
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(Color.Black.copy(alpha = .76f))
-                    .padding(horizontal = 7.dp, vertical = 4.dp),
-            )
-            duration?.let { value ->
-                Text(
-                    text = value,
-                    color = Color.White,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .align(AbsoluteAlignment.TopRight)
-                        .padding(7.dp)
-                        .clip(RoundedCornerShape(7.dp))
-                        .background(Color.Black.copy(alpha = .76f))
-                        .padding(horizontal = 7.dp, vertical = 4.dp),
-                )
-            }
-
-            Column(
-                Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 9.dp),
-            ) {
-                Text(
-                    text = "الحلقة ${episode.episodeNumber}",
-                    color = Color.White,
-                    fontSize = if (isTv) 14.sp else 12.sp,
-                    fontWeight = FontWeight.Black,
-                    maxLines = 1,
-                )
-                detailsProUsefulEpisodeTitle(episode)?.let { title ->
-                    Text(
-                        text = title,
-                        color = Color.White.copy(alpha = .80f),
-                        fontSize = 9.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                when {
-                    completed -> Text(
-                        text = "✓ تمت المشاهدة",
-                        color = colors.goldBright,
-                        fontSize = 8.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    progress != null && historyEntry != null -> Text(
-                        text = "استكمال ${detailsProFormatTime(historyEntry.positionMs)}",
-                        color = colors.goldBright,
-                        fontSize = 8.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    else -> Unit
-                }
-            }
-
-            if (progress != null || completed) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .background(Color.White.copy(alpha = .16f)),
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(if (completed) 1f else progress ?: 0f)
-                            .fillMaxHeight()
-                            .background(colors.goldBright),
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(5.dp))
-        if (download != null && download.status != OfflineStatus.COMPLETED && download.status != OfflineStatus.FAILED) {
-            DetailsProDownloadProgress(download, Modifier.fillMaxWidth())
-            Spacer(Modifier.height(5.dp))
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth().focusGroup(),
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-        ) {
-            FocusButton(
-                text = detailsProEpisodeDownloadLabel(download),
-                onClick = if (download?.status == OfflineStatus.COMPLETED) onCancelDownload else onDownload,
-                primary = false,
-                compact = true,
-                outlined = true,
-                modifier = Modifier
-                    .weight(1f)
-                    .detailsProTvActionExit(
-                        isTv = isTv,
-                        requester = targets.primaryAction,
-                        upTarget = targets.card,
-                        leftTarget = if (hasSecondaryAction) targets.secondaryAction else null,
-                        rightTarget = null,
-                        onDown = onDownFromActions,
-                    ),
-            )
-            if (hasSecondaryAction) {
-                FocusButton(
-                    text = "الغاء",
-                    onClick = onCancelDownload,
-                    primary = false,
-                    compact = true,
-                    outlined = true,
-                    modifier = Modifier
-                        .weight(.58f)
-                        .detailsProTvActionExit(
-                            isTv = isTv,
-                            requester = targets.secondaryAction,
-                            upTarget = targets.card,
-                            leftTarget = null,
-                            rightTarget = targets.primaryAction,
-                            onDown = onDownFromActions,
-                        ),
-                )
-            }
-        }
+    val cancelCaption = download?.let {
+        if (it.status == OfflineStatus.COMPLETED) "حذف" else "الغاء"
     }
+    EpisodeBoxedCard(
+        episodeId = episode.id,
+        identityLabel = "S${episode.season} · E${episode.episodeNumber}",
+        title = "الحلقة ${episode.episodeNumber}",
+        subtitle = detailsProUsefulEpisodeTitle(episode),
+        statusLabel = when {
+            completed -> "تمت المشاهدة"
+            progress != null && historyEntry != null -> "اكمل المشاهدة"
+            else -> null
+        },
+        statusElapsedText = if (!completed && progress != null && historyEntry != null) {
+            movieRecentElapsedText(historyEntry.positionMs)
+        } else {
+            null
+        },
+        statusTotalText = if (!completed && progress != null && historyEntry != null) {
+            movieRecentTotalText(historyEntry.durationMs)
+        } else {
+            null
+        },
+        durationLabel = detailsProEpisodeDuration(episode.duration),
+        progress = progress,
+        completed = completed,
+        artworkUrl = episode.posterUrl?.takeIf(String::isNotBlank) ?: fallbackBackdrop,
+        download = download,
+        downloadCaption = episodeDownloadControlCaption(download),
+        downloadEnabled = download?.status != OfflineStatus.COMPLETED,
+        cancelCaption = cancelCaption,
+        isTv = isTv,
+        highlighted = highlighted,
+        cardRequester = targets.card,
+        actionRequester = targets.primaryAction,
+        cardLinks = EpisodeFocusLinks(
+            up = upTarget,
+            down = targets.primaryAction,
+            left = leftTarget,
+            right = rightTarget,
+        ),
+        actionLinks = EpisodeFocusLinks(
+            up = targets.card,
+        ),
+        cancelRequester = if (cancelCaption != null) targets.secondaryAction else null,
+        cancelLinks = EpisodeFocusLinks(),
+        onActionDown = onDownFromActions,
+        onPlay = onPlay,
+        onDownload = onDownload,
+        onCancelDownload = onCancelDownload,
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -1908,7 +1611,9 @@ private fun DetailsProRelatedRow(
                     }
 
                 if (item.type == ContentType.SERIES) {
-                    SeriesPosterCard(
+                    // Similar Series uses the same approved boxed catalog card as the Series grid
+                    // (square artwork, stable title/footer, truthful rating/season metadata).
+                    SeriesCatalogBoxedCard(
                         item = item,
                         isFavorite = isFavorite(item),
                         onClick = { onOpen(item) },
@@ -1930,126 +1635,6 @@ private fun DetailsProRelatedRow(
 }
 
 @Composable
-private fun DetailsProInformationPanel(
-    title: String,
-    details: ContentDetails?,
-    isTv: Boolean,
-    horizontalPaddingDp: Int,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalHulkColors.current
-    Box(
-        modifier = modifier.padding(
-            start = horizontalPaddingDp.dp,
-            end = horizontalPaddingDp.dp,
-            top = 8.dp,
-            bottom = if (isTv) 20.dp else 16.dp,
-        ),
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth(if (isTv) .78f else 1f)
-                .clip(RoundedCornerShape(14.dp))
-                .background(colors.surface.copy(alpha = .82f))
-                .border(1.dp, colors.line.copy(alpha = .72f), RoundedCornerShape(14.dp))
-                .padding(horizontal = if (isTv) 18.dp else 15.dp, vertical = 14.dp),
-        ) {
-            Text(
-                text = title,
-                color = colors.text,
-                fontSize = if (isTv) 18.sp else 17.sp,
-                fontWeight = FontWeight.Black,
-            )
-            Spacer(Modifier.height(8.dp))
-            details?.releaseDate?.takeIf(String::isNotBlank)?.let {
-                DetailsProInformationLine("تاريخ العرض", it, isTv)
-            }
-            details?.director?.takeIf(String::isNotBlank)?.let {
-                DetailsProInformationLine("الاخراج", it, isTv)
-            }
-            details?.cast?.takeIf(String::isNotBlank)?.let {
-                DetailsProInformationLine("البطولة", it, isTv)
-            }
-        }
-    }
-}
-
-@Composable
-private fun DetailsProInformationLine(
-    label: String,
-    value: String,
-    isTv: Boolean,
-) {
-    val colors = LocalHulkColors.current
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Text(
-            text = label,
-            color = colors.goldBright,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.width(if (isTv) 88.dp else 84.dp),
-        )
-        Text(
-            text = value,
-            color = colors.textMuted,
-            fontSize = if (isTv) 11.sp else 10.sp,
-            lineHeight = if (isTv) 17.sp else 16.sp,
-            maxLines = if (isTv) 2 else 3,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
-private fun DetailsProDownloadProgress(
-    download: OfflineDownload,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalHulkColors.current
-    val percent = (download.progress * 100).toInt().coerceIn(0, 100)
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(9.dp))
-            .background(Color.White.copy(alpha = .05f))
-            .border(1.dp, colors.line.copy(alpha = .35f), RoundedCornerShape(9.dp))
-            .padding(horizontal = 9.dp, vertical = 6.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = detailsProDownloadState(download),
-                color = colors.textMuted,
-                fontSize = 8.sp,
-                maxLines = 1,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = "$percent%",
-                color = colors.goldBright,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Black,
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .clip(RoundedCornerShape(5.dp))
-                .background(Color.White.copy(alpha = .13f)),
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth(download.progress.coerceIn(0f, 1f))
-                    .fillMaxHeight()
-                    .background(colors.goldBright),
-            )
-        }
-    }
-}
 
 private fun Modifier.detailsProTvTarget(
     isTv: Boolean,
@@ -2227,32 +1812,7 @@ private fun detailsProMovieDownloadLabel(download: OfflineDownload?): String = w
     null -> "↓ تحميل الفيلم"
 }
 
-private fun detailsProEpisodeDownloadLabel(download: OfflineDownload?): String = when (download?.status) {
-    OfflineStatus.COMPLETED -> "حذف التحميل"
-    OfflineStatus.QUEUED,
-    OfflineStatus.CHECKING,
-    OfflineStatus.DOWNLOADING,
-    -> "⏸ ايقاف ${(download.progress * 100).toInt().coerceIn(0, 100)}%"
-    OfflineStatus.PAUSED,
-    OfflineStatus.WAITING_SCHEDULE,
-    OfflineStatus.WAITING_NETWORK,
-    OfflineStatus.WAITING_STORAGE,
-    -> "▶ استئناف"
-    OfflineStatus.FAILED -> "↻ اعادة"
-    null -> "↓ تحميل"
-}
 
-private fun detailsProDownloadState(download: OfflineDownload): String = when (download.status) {
-    OfflineStatus.COMPLETED -> "تم التحميل"
-    OfflineStatus.QUEUED -> "في قائمة الانتظار"
-    OfflineStatus.CHECKING -> "جاري فحص الحجم"
-    OfflineStatus.DOWNLOADING -> "جاري التحميل"
-    OfflineStatus.PAUSED -> "متوقف مؤقتا"
-    OfflineStatus.WAITING_SCHEDULE -> "مجدول للتحميل"
-    OfflineStatus.WAITING_NETWORK -> "بانتظار الشبكة"
-    OfflineStatus.WAITING_STORAGE -> "بانتظار مساحة"
-    OfflineStatus.FAILED -> "تعذر التحميل"
-}
 
 private fun detailsProFormatTime(ms: Long): String {
     val totalSeconds = (ms / 1_000L).coerceAtLeast(0L)

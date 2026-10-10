@@ -3,7 +3,6 @@
 package sa.hulksa.player.ui.screens
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
 import android.net.ConnectivityManager
 import android.net.Network
@@ -18,7 +17,6 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -132,7 +130,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -176,7 +173,6 @@ import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -245,49 +241,53 @@ internal fun shouldAdvancePlayerAutoplayCountdown(
     countdown: Int,
 ): Boolean = appForeground && countdown >= 0
 
-/** One authoritative Movie entry/player presentation. */
-internal enum class MoviePlayerPresentation { ERROR_CARD, RESUME, PLAYER }
+/** One authoritative VOD entry/player presentation. */
+internal enum class VodPlayerPresentation { ERROR_CARD, RESUME, PLAYER }
 
 /**
- * Single presentation decision for a Movie request: a blocking failure or remote offline entry
- * wins, otherwise an unresolved saved-position decision, otherwise normal player presentation.
- * Connectivity is typed state; localized message equality is never used.
+ * Single presentation decision for a Movie or Series request: a blocking failure or remote offline
+ * entry wins, otherwise an unresolved saved-position decision, otherwise normal player
+ * presentation. Connectivity is typed state; localized message equality is never used.
  */
-internal fun moviePlayerPresentation(
-    isMovie: Boolean,
+internal fun vodPlayerPresentation(
+    isVod: Boolean,
     localPlayback: Boolean,
     networkAvailable: Boolean,
     offlineFailure: Boolean,
     finalErrorPresent: Boolean,
     resumePromptPending: Boolean,
     offlineInitial: Boolean,
-): MoviePlayerPresentation = when {
-    isMovie && !localPlayback && (offlineInitial || (!networkAvailable && (offlineFailure || finalErrorPresent))) ->
-        MoviePlayerPresentation.ERROR_CARD
-    isMovie && finalErrorPresent -> MoviePlayerPresentation.ERROR_CARD
-    resumePromptPending -> MoviePlayerPresentation.RESUME
-    else -> MoviePlayerPresentation.PLAYER
+): VodPlayerPresentation = when {
+    isVod && !localPlayback && (offlineInitial || (!networkAvailable && (offlineFailure || finalErrorPresent))) ->
+        VodPlayerPresentation.ERROR_CARD
+    isVod && finalErrorPresent -> VodPlayerPresentation.ERROR_CARD
+    resumePromptPending -> VodPlayerPresentation.RESUME
+    else -> VodPlayerPresentation.PLAYER
 }
 
 /**
- * First-frame offline entry: a remote movie opened while the validated connectivity snapshot is
- * already offline shows the offline card immediately, before any delayed network effect can let
- * the Resume dialog, player chrome or an old error flash first.
+ * First-frame offline entry: a remote Movie or Series episode opened while the validated
+ * connectivity snapshot is already offline shows the offline card immediately, before any delayed
+ * network effect can let the Resume dialog, player chrome or an old error flash first.
  */
-internal fun movieOfflineInitialVisible(
-    isMovie: Boolean,
+internal fun vodOfflineInitialVisible(
+    isVod: Boolean,
     localPlayback: Boolean,
     networkAvailable: Boolean,
     isPlaying: Boolean,
     playbackReady: Boolean,
-): Boolean = isMovie && !localPlayback && !networkAvailable && !isPlaying && !playbackReady
+): Boolean = isVod && !localPlayback && !networkAvailable && !isPlaying && !playbackReady
 
-/** Copy for the single Movie error card: offline wording only for real unusable connectivity. */
+/**
+ * Copy for the single shared VOD error card: offline wording only for real unusable connectivity.
+ * `mediaLabel` selects the truthful media noun ("الفلم" or "الحلقة").
+ */
 internal fun moviePlayerErrorCopy(
     offline: Boolean,
     resumePending: Boolean,
     formattedSavedTime: String,
     failureMessage: String?,
+    mediaLabel: String,
 ): MovieOfflineCardCopy = when {
     offline && resumePending -> movieOfflineCardCopy(
         resumePending = true,
@@ -298,7 +298,7 @@ internal fun moviePlayerErrorCopy(
         formattedSavedTime = formattedSavedTime,
     )
     else -> MovieOfflineCardCopy(
-        title = "تعذر تشغيل الفلم",
+        title = "تعذر تشغيل $mediaLabel",
         body = failureMessage?.trim()?.takeIf { it.isNotEmpty() }
             ?: "حدث خطا اثناء التشغيل. حاول مرة اخرى.",
         context = if (resumePending) {
@@ -467,6 +467,8 @@ fun PlayerScreen(
     onLastChannel: (() -> Unit)? = null,
     onBack: () -> Unit,
     onProgress: (request: PlaybackRequest, positionMs: Long, durationMs: Long) -> Unit,
+    previousEpisodeTitle: String? = null,
+    onPlayPreviousEpisode: (() -> Unit)? = null,
     nextEpisodeTitle: String? = null,
     onPlayNextEpisode: (() -> Unit)? = null,
     liveControlsRevealRequested: Boolean = false,
@@ -480,6 +482,7 @@ fun PlayerScreen(
     onErrorModalActiveChanged: (Boolean) -> Unit = {},
     onBrowserVisibilityChanged: (Boolean) -> Unit = {},
     onPanelActiveChanged: (Boolean) -> Unit = {},
+    onVodForegroundModalActiveChanged: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -537,7 +540,6 @@ fun PlayerScreen(
     var offlineWasPlaying by remember(request) { mutableStateOf(false) }
     var restoredPlayWhenReady by remember(request) { mutableStateOf<Boolean?>(null) }
     var networkAvailable by remember(context, request) { mutableStateOf(hasUsableNetwork(context)) }
-    val isMovieVod = !request.isLive && request.streamKind.equals("movie", ignoreCase = true)
     var buffering by remember(request) { mutableStateOf(true) }
     var controlsVisible by remember(request) {
         mutableStateOf(liveControlsVisibleOnRequestStart(request.isLive, liveControlsRevealRequested))
@@ -575,13 +577,14 @@ fun PlayerScreen(
     var resumePromptVisible by remember(request) {
         mutableStateOf(playbackSettings.resumePlayback && !request.isLive && request.resumePositionMs > 0L)
     }
-    // Request-owned progress persistence: while a Movie Resume decision is pending, preparation,
+    // Request-owned progress persistence: while a VOD Resume decision is pending, preparation,
     // cancellation, lifecycle/disposal and late callbacks must not overwrite the stored position
     // or duration with the provisional zero. Only an explicit Resume/Restart decision clears it.
-    var movieProgressPersistenceBlocked by remember(request) {
+    // This protects Series episode progress exactly like Movie progress.
+    var vodProgressPersistenceBlocked by remember(request) {
         mutableStateOf(
-            movieProgressPersistenceBlockedInitially(
-                isMovie = isMovieVod,
+            vodProgressPersistenceBlockedInitially(
+                isVod = !request.isLive,
                 resumePlaybackEnabled = playbackSettings.resumePlayback,
                 resumePositionMs = request.resumePositionMs,
             ),
@@ -653,55 +656,21 @@ fun PlayerScreen(
     val vodFavorite = remember(vodItem, favoriteKeys) {
         vodFavoriteControl(item = vodItem, favoriteKeys = favoriteKeys)
     }
-    // Preview work binds to the session's planned/prepared source, not the first raw candidate.
-    val vodPreviewSource = remember(playerSession, candidateIndex) {
-        playerSession.sourcePlan.candidate(candidateIndex)?.uri
-    }
-    // The Movies seek preview is cancelled: Movies never construct the extraction worker, never
-    // warm up and never request or decode a frame. Only the shared Series surface keeps the
-    // existing pre-R23 preview source.
-    // The bounded Series seek-preview surface is never shown for Live playback, so Live commits
-    // must not construct or dispose its executor/scope/StateFlow on every channel switch.
-    val vodPreviewFrames = remember(request, vodPreviewSource, isMovieVod) {
-        if (isMovieVod || request.isLive) {
-            null
-        } else {
-            VodSeekPreviewFrames(
-                source = vodPreviewSource,
-                extractor = MediaMetadataVodPreviewExtractor(context.applicationContext),
-            )
-        }
-    }
-    DisposableEffect(vodPreviewFrames) {
-        onDispose { vodPreviewFrames?.close() }
-    }
     val vodDirectSeekActive = focusTimelineOnReveal && !request.isLive
-    // Active-seek control visibility no longer depends on the cancelled preview window: controls
-    // stay usable while the Movies TV timeline/direct-seek interaction is live and ordinary
-    // auto-hide resumes after exit.
+    // Active-seek control visibility no longer depends on a preview window: controls stay usable
+    // while the shared VOD TV timeline/direct-seek interaction is live and ordinary auto-hide
+    // resumes after exit.
     val vodActiveSeekInteraction = vodActiveSeekHoldsControls(
-        isMovie = isMovieVod,
+        isVod = !request.isLive,
         remoteInput = tvRemoteInput,
         timelineFocused = vodTimelineFocused,
         directSeekActive = vodDirectSeekActive,
     )
-    // Pre-R22 shared seek-target presentation: the explicit scrub target wins, otherwise the
-    // transient direct-seek target shows while the remote interaction is active. This drives the
-    // timeline thumb and progress; it is not an extraction request by itself.
-    val vodEffectivePreviewMs = vodSeekPreviewMs
+    // Shared seek-target presentation: the explicit scrub target wins, otherwise the transient
+    // direct-seek target shows while the remote interaction is active. This drives the timeline
+    // thumb and progress; it is never an image-preview or floating-bubble request.
+    val vodEffectiveSeekMs = vodSeekPreviewMs
         ?: manualSeekTargetMs?.takeIf { focusTimelineOnReveal && !request.isLive }
-    // Series keeps the shared preview card; Movies have no preview source or publication.
-    val vodEmptyPreviewPublication = remember { MutableStateFlow<VodSeekPreviewResult<Bitmap>?>(null) }
-    val vodPreviewPublication by (vodPreviewFrames?.publication ?: vodEmptyPreviewPublication).collectAsState()
-    val vodPreviewFrame = vodPreviewValueFor(
-        publication = vodPreviewPublication,
-        sourceKey = vodPreviewFrames?.sourceKey ?: 0,
-        targetMs = vodEffectivePreviewMs,
-    )
-    LaunchedEffect(vodEffectivePreviewMs, vodPreviewFrames) {
-        val target = vodEffectivePreviewMs ?: return@LaunchedEffect
-        vodPreviewFrames?.request(target)
-    }
     val liveControlsLayout = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp, tvRemoteInput) {
         liveControlsLayoutMetrics(
             screenWidthDp = adaptiveUi.screenWidthDp,
@@ -742,19 +711,19 @@ fun PlayerScreen(
         playerFactory.create(audioOutputMode)
     }
     // The validated connectivity snapshot is authoritative from the first composition, so a
-    // remote movie opened offline renders the offline card immediately instead of flashing the
-    // Resume dialog, player chrome or an old error while the delayed network effect catches up.
-    val movieOfflineInitial = movieOfflineInitialVisible(
-        isMovie = isMovieVod,
+    // remote VOD entry opened offline renders the offline card immediately instead of flashing
+    // the Resume dialog, player chrome or an old error while the delayed network effect catches up.
+    val movieOfflineInitial = vodOfflineInitialVisible(
+        isVod = !request.isLive,
         localPlayback = localPlayback,
         networkAvailable = networkAvailable,
         isPlaying = isPlaying,
         playbackReady = player.playbackState == Player.STATE_READY,
     )
     // One authoritative presentation branch for rendering, focus, semantics and input. The
-    // Resume dialog and any Movie error card are therefore mutually exclusive by construction.
-    val moviePresentation = moviePlayerPresentation(
-        isMovie = isMovieVod,
+    // Resume dialog and any VOD error card are therefore mutually exclusive by construction.
+    val moviePresentation = vodPlayerPresentation(
+        isVod = !request.isLive,
         localPlayback = localPlayback,
         networkAvailable = networkAvailable,
         offlineFailure = offlineFailure,
@@ -762,10 +731,11 @@ fun PlayerScreen(
         resumePromptPending = resumePromptVisible,
         offlineInitial = movieOfflineInitial,
     )
-    val movieErrorActive = isMovieVod && moviePresentation == MoviePlayerPresentation.ERROR_CARD
-    val movieModalActive = isMovieVod && moviePresentation != MoviePlayerPresentation.PLAYER
+    val movieErrorActive = !request.isLive && moviePresentation == VodPlayerPresentation.ERROR_CARD
+    val movieModalActive = !request.isLive && moviePresentation != VodPlayerPresentation.PLAYER
     // The card uses offline wording/icon only for genuinely unusable connectivity.
-    val movieErrorCardOffline = isMovieVod && !localPlayback && (movieOfflineInitial || !networkAvailable)
+    val movieErrorCardOffline = !request.isLive && !localPlayback && (movieOfflineInitial || !networkAvailable)
+    val vodErrorMediaLabel = if (request.streamKind.equals("series", ignoreCase = true)) "الحلقة" else "الفلم"
     // One foreground eligibility shared by the error path's rendering, key/pointer ownership and
     // focus acquisition. While a Live error-origin surface owns input, all three are suspended.
     val liveErrorForegroundActive = playerErrorForegroundActive(
@@ -961,7 +931,7 @@ fun PlayerScreen(
     }
 
     fun saveCurrentProgress() {
-        if (!request.isLive && !movieProgressPersistenceBlocked) {
+        if (!request.isLive && !vodProgressPersistenceBlocked) {
             onProgress(request, player.currentPosition.coerceAtLeast(0L), player.duration.coerceAtLeast(0L))
         }
     }
@@ -1352,7 +1322,7 @@ fun PlayerScreen(
         }
         player.addListener(listener)
         onDispose {
-            if (!request.isLive && !movieProgressPersistenceBlocked) {
+            if (!request.isLive && !vodProgressPersistenceBlocked) {
                 onProgress(request, player.currentPosition.coerceAtLeast(0L), player.duration.coerceAtLeast(0L))
             }
             player.removeListener(listener)
@@ -1560,7 +1530,7 @@ fun PlayerScreen(
         if (request.isLive) return@LaunchedEffect
         while (isActive) {
             delay(5_000L)
-            if (!movieProgressPersistenceBlocked) {
+            if (!vodProgressPersistenceBlocked) {
                 onProgress(request, player.currentPosition.coerceAtLeast(0L), player.duration.coerceAtLeast(0L))
             }
         }
@@ -1606,7 +1576,15 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(nextCountdown, appForeground) {
+    // One countdown owner: while a foreground decision (Resume, error card, panel, unlock, lock,
+    // browser) owns input, the timer freezes instead of dispatching an episode change behind it.
+    val autoplayCountdownBlocked = movieModalActive || resumePromptVisible || controlsLocked ||
+        unlockVisible || activePanel != null || liveMorePanel != null || vodMorePanel != null ||
+        vodGoToTimeVisible || browserVisible
+    LaunchedEffect(nextCountdown, appForeground, autoplayCountdownBlocked) {
+        if (autoplayCountdownBlocked) {
+            return@LaunchedEffect
+        }
         if (!shouldAdvancePlayerAutoplayCountdown(appForeground, nextCountdown)) {
             return@LaunchedEffect
         }
@@ -1685,6 +1663,25 @@ fun PlayerScreen(
         onDispose { latestOnPanelActiveChanged(false) }
     }
 
+    // Non-live foreground decision surfaces (Resume, error card, unlock, next-episode countdown)
+    // and the actual locked-controls state own input exactly like the panels above. The Pro layer
+    // gates the parent MEDIA_NEXT/PREVIOUS episode shortcuts on this signal so no episode can
+    // change behind a pending decision or while the controls are locked, including the locked
+    // window where the unlock overlay is not currently visible.
+    val vodForegroundModalActive = playerVodForegroundDecisionActive(
+        isLive = request.isLive,
+        resumePromptVisible = resumePromptVisible,
+        errorModalActive = movieErrorActive,
+        unlockVisible = unlockVisible,
+        nextCountdownActive = nextCountdown >= 0,
+        controlsLocked = controlsLocked,
+    )
+    val latestOnVodForegroundModalActiveChanged by rememberUpdatedState(onVodForegroundModalActiveChanged)
+    DisposableEffect(vodForegroundModalActive) {
+        latestOnVodForegroundModalActiveChanged(vodForegroundModalActive)
+        onDispose { latestOnVodForegroundModalActiveChanged(false) }
+    }
+
     val interactionModifier = Modifier
         // movieModalActive is a derived plain value; it must be a key so the tap detector is
         // re-registered when a Resume/error/offline modal closes, otherwise the block created while
@@ -1698,7 +1695,7 @@ fun PlayerScreen(
                 }
                 when {
                     liveMorePanel != null -> closeLiveMorePanelToTrigger()
-                    isMovieVod && vodMorePanel != null -> closeVodMorePanelToTrigger()
+                    vodMorePanel != null -> closeVodMorePanelToTrigger()
                     controlsLocked -> { unlockVisible = true; controlsVisible = true }
                     else -> controlsVisible = !controlsVisible
                 }
@@ -1891,7 +1888,7 @@ fun PlayerScreen(
                         true
                     } else false
                     AndroidKeyEvent.KEYCODE_DPAD_DOWN -> if (
-                        isMovieVod && tvRemoteInput && surfaceFocused && focusTimelineOnReveal &&
+                        !request.isLive && tvRemoteInput && surfaceFocused && focusTimelineOnReveal &&
                         controlsVisible
                     ) {
                         // Direct-seek exit: the first DOWN from the video surface leaves the
@@ -1964,8 +1961,8 @@ fun PlayerScreen(
                 speed = playbackSpeed,
                 channel = currentChannel.takeIf { request.isLive },
                 onBack = ::saveAndBack,
-                backFocusRequester = topBarBackFocus.takeIf { isMovieVod },
-                backDownFocus = seekBarFocus.takeIf { isMovieVod },
+                backFocusRequester = topBarBackFocus.takeIf { !request.isLive },
+                backDownFocus = seekBarFocus.takeIf { !request.isLive },
             )
         }
 
@@ -2099,62 +2096,46 @@ fun PlayerScreen(
                             bottom = liveControlsLayout.outerBottomPaddingDp.dp,
                         ),
                     strip = {
-                        if (isMovieVod) {
-                            VodCompactControlStrip(
-                                isPlaying = isPlaying,
-                                positionMs = currentPositionMs,
-                                durationMs = durationMs,
-                                bufferedPercent = bufferedPercent,
-                                seekPreviewMs = vodEffectivePreviewMs,
-                                favorite = vodFavorite.favorite,
-                                favoriteEnabled = vodFavorite.enabled,
-                                moreOpen = vodMorePanel != null,
-                                inputMuted = vodMorePanel != null || vodGoToTimeVisible,
-                                onMore = ::openVodMorePanel,
-                                onRewind = { seekBy(-seekStepMs) },
-                                onForward = { seekBy(seekStepMs) },
-                                onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
-                                onFavorite = { vodItem?.let(onToggleFavorite) },
-                                onPreview = ::previewVodSeek,
-                                onCommit = ::commitVodSeek,
-                                onPreviewCancel = ::cancelVodSeekPreview,
-                                onTimelineFocusChanged = { vodTimelineFocused = it },
-                                primaryFocus = primaryFocus,
-                                moreTriggerFocus = moreTriggerFocus,
-                                seekBarFocusRequester = seekBarFocus,
-                                remoteSeekActive = focusTimelineOnReveal,
-                                seekStepMs = seekStepMs,
-                                layoutMetrics = liveControlsLayout,
-                                metrics = liveControlMetrics,
-                                topBarBackFocus = topBarBackFocus,
-                            )
-                        } else {
-                            VodControlStrip(
-                                isPlaying = isPlaying,
-                                positionMs = currentPositionMs,
-                                durationMs = durationMs,
-                                bufferedPercent = bufferedPercent,
-                                seekPreviewMs = vodEffectivePreviewMs,
-                                seekPreviewFrame = vodPreviewFrame,
-                                favorite = vodFavorite.favorite,
-                                favoriteEnabled = vodFavorite.enabled,
-                                moreOpen = vodMorePanel != null,
-                                onMore = ::openVodMorePanel,
-                                onRewind = { seekBy(-seekStepMs) },
-                                onForward = { seekBy(seekStepMs) },
-                                onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
-                                onFavorite = { vodItem?.let(onToggleFavorite) },
-                                onPreview = ::previewVodSeek,
-                                onCommit = ::commitVodSeek,
-                                onPreviewCancel = ::cancelVodSeekPreview,
-                                primaryFocus = primaryFocus,
-                                moreTriggerFocus = moreTriggerFocus,
-                                seekBarFocusRequester = seekBarFocus,
-                                remoteSeekActive = focusTimelineOnReveal,
-                                seekStepMs = seekStepMs,
-                                layoutMetrics = liveControlsLayout,
-                            )
-                        }
+                        VodCompactControlStrip(
+                            isPlaying = isPlaying,
+                            positionMs = currentPositionMs,
+                            durationMs = durationMs,
+                            bufferedPercent = bufferedPercent,
+                            seekPreviewMs = vodEffectiveSeekMs,
+                            favorite = vodFavorite.favorite,
+                            favoriteEnabled = vodFavorite.enabled,
+                            moreOpen = vodMorePanel != null,
+                            inputMuted = vodMorePanel != null || vodGoToTimeVisible,
+                            onMore = ::openVodMorePanel,
+                            onRewind = { seekBy(-seekStepMs) },
+                            onForward = { seekBy(seekStepMs) },
+                            onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
+                            onFavorite = { vodItem?.let(onToggleFavorite) },
+                            onPreview = ::previewVodSeek,
+                            onCommit = ::commitVodSeek,
+                            onPreviewCancel = ::cancelVodSeekPreview,
+                            onTimelineFocusChanged = { vodTimelineFocused = it },
+                            previousEpisodeCaption = "الحلقة السابقة".takeIf {
+                                request.streamKind.equals("series", ignoreCase = true)
+                            },
+                            previousEpisodeEnabled = previousEpisodeTitle != null &&
+                                onPlayPreviousEpisode != null,
+                            onPreviousEpisode = onPlayPreviousEpisode,
+                            nextEpisodeCaption = "الحلقة التالية".takeIf {
+                                request.streamKind.equals("series", ignoreCase = true)
+                            },
+                            nextEpisodeEnabled = nextEpisodeTitle != null &&
+                                onPlayNextEpisode != null,
+                            onNextEpisode = onPlayNextEpisode,
+                            primaryFocus = primaryFocus,
+                            moreTriggerFocus = moreTriggerFocus,
+                            seekBarFocusRequester = seekBarFocus,
+                            remoteSeekActive = focusTimelineOnReveal,
+                            seekStepMs = seekStepMs,
+                            layoutMetrics = liveControlsLayout,
+                            metrics = liveControlMetrics,
+                            topBarBackFocus = topBarBackFocus,
+                        )
                     },
                     panel = { panelMaxHeight, panelModifier ->
                         vodMorePanel?.let { panelView ->
@@ -2166,7 +2147,6 @@ fun PlayerScreen(
                                     menuFocusRow = vodMoreMenuFocusRow,
                                     focusTick = vodPanelFocusTick,
                                     panelWidthDp = liveControlMetrics.morePanelWidthDp,
-                                    movieStyle = isMovieVod,
                                     inputMuted = vodGoToTimeVisible,
                                     onBackToMenu = ::handleVodMoreBack,
                                     onOpenGoToTime = {
@@ -2253,6 +2233,7 @@ fun PlayerScreen(
                 resumePending = resumePromptVisible,
                 savedPositionMs = request.resumePositionMs,
                 failureMessage = finalError,
+                mediaLabel = vodErrorMediaLabel,
                 onRetry = {
                     // While connectivity is unusable the same card stays; otherwise the generic
                     // failure uses the existing manual retry owner.
@@ -2273,9 +2254,18 @@ fun PlayerScreen(
                 title = playerDisplayTitle,
                 positionMs = request.resumePositionMs,
                 durationMs = durationMs,
+                identity = if (
+                    request.streamKind.equals("series", ignoreCase = true) &&
+                    request.season != null &&
+                    request.episodeNumber != null
+                ) {
+                    "الموسم ${request.season} • الحلقة ${request.episodeNumber}"
+                } else {
+                    null
+                },
                 onResume = {
-                    movieProgressPersistenceBlocked = movieProgressPersistenceBlockedAfterDecision(
-                        blocked = movieProgressPersistenceBlocked,
+                    vodProgressPersistenceBlocked = vodProgressPersistenceBlockedAfterDecision(
+                        blocked = vodProgressPersistenceBlocked,
                         decisionAccepted = true,
                     )
                     player.seekTo(request.resumePositionMs)
@@ -2285,8 +2275,8 @@ fun PlayerScreen(
                     player.play()
                 },
                 onRestart = {
-                    movieProgressPersistenceBlocked = movieProgressPersistenceBlockedAfterDecision(
-                        blocked = movieProgressPersistenceBlocked,
+                    vodProgressPersistenceBlocked = vodProgressPersistenceBlockedAfterDecision(
+                        blocked = vodProgressPersistenceBlocked,
                         decisionAccepted = true,
                     )
                     player.seekTo(0L)
@@ -2340,15 +2330,26 @@ fun PlayerScreen(
             )
         }
 
-        if (nextCountdown >= 0 && nextEpisodeTitle != null && onPlayNextEpisode != null) {
+        if (
+            nextCountdown >= 0 &&
+            nextEpisodeTitle != null &&
+            onPlayNextEpisode != null &&
+            !autoplayCountdownBlocked
+        ) {
             NextEpisodePrompt(
                 title = nextEpisodeTitle,
                 seconds = nextCountdown,
                 playFocusRequester = nextEpisodePlayFocus,
                 cancelFocusRequester = nextEpisodeCancelFocus,
-                onPlayNow = { nextCountdown = -1; saveAndPlayNext() },
+                onPlayNow = {
+                    // Guarded so a press racing the final tick can never advance twice.
+                    if (nextCountdown >= 0) {
+                        nextCountdown = -1
+                        saveAndPlayNext()
+                    }
+                },
                 onCancel = { nextCountdown = -1 },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(32.dp),
+                modifier = Modifier.align(Alignment.Center),
             )
         }
 
@@ -2476,7 +2477,11 @@ fun PlayerScreen(
             VodGoToTimeDialog(
                 currentPositionMs = currentPositionMs,
                 durationMs = durationMs,
-                exclusiveInput = isMovieVod,
+                durationLabel = if (request.streamKind.equals("series", ignoreCase = true)) {
+                    "مدة الحلقة"
+                } else {
+                    "مدة الفلم"
+                },
                 onConfirm = { target ->
                     vodGoToTimeVisible = false
                     closeVodMorePanelForSelection()
@@ -2616,271 +2621,6 @@ private fun PlayerTopBar(
     }
 }
 
-@Composable
-private fun VodControlStrip(
-    isPlaying: Boolean,
-    positionMs: Long,
-    durationMs: Long,
-    bufferedPercent: Int,
-    seekPreviewMs: Long?,
-    seekPreviewFrame: Bitmap?,
-    favorite: Boolean,
-    favoriteEnabled: Boolean,
-    moreOpen: Boolean,
-    onMore: () -> Unit,
-    onRewind: () -> Unit,
-    onForward: () -> Unit,
-    onPlayPause: () -> Unit,
-    onFavorite: () -> Unit,
-    onPreview: (Long) -> Unit,
-    onCommit: (Long) -> Unit,
-    onPreviewCancel: () -> Unit,
-    primaryFocus: FocusRequester,
-    moreTriggerFocus: FocusRequester,
-    seekBarFocusRequester: FocusRequester,
-    remoteSeekActive: Boolean,
-    seekStepMs: Long,
-    layoutMetrics: LiveControlsLayoutMetrics,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalHulkColors.current
-    val stepSeconds = (seekStepMs / 1_000L).coerceAtLeast(1L)
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        Color.Transparent,
-                        Color.Black.copy(alpha = .48f),
-                        Color.Black.copy(alpha = .84f),
-                    ),
-                ),
-            )
-            .navigationBarsPadding()
-            .padding(
-                start = layoutMetrics.outerHorizontalPaddingDp.dp,
-                end = layoutMetrics.outerHorizontalPaddingDp.dp,
-                top = layoutMetrics.outerTopPaddingDp.dp,
-                bottom = layoutMetrics.outerBottomPaddingDp.dp,
-            ),
-    ) {
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val stripWidth = maxWidth
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xF00C0D0A))
-                    .border(1.dp, colors.gold.copy(alpha = .55f), RoundedCornerShape(16.dp))
-                    .padding(horizontal = 8.dp, vertical = 7.dp),
-            ) {
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(formatTime(positionMs), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            "-${formatTime((durationMs - positionMs).coerceAtLeast(0L))}",
-                            color = colors.textMuted,
-                            fontSize = 13.sp,
-                        )
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    VodSeekBar(
-                        positionMs = positionMs,
-                        durationMs = durationMs,
-                        buffered = bufferedPercent / 100f,
-                        previewMs = seekPreviewMs,
-                        onPreview = onPreview,
-                        onCommit = onCommit,
-                        onPreviewCancel = onPreviewCancel,
-                        focusRequester = seekBarFocusRequester,
-                        remoteActive = remoteSeekActive,
-                        seekStepMs = seekStepMs,
-                    )
-                    Spacer(Modifier.height(9.dp))
-                    val compactControls = stripWidth < 620.dp
-                    if (compactControls) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            VodControlButton(
-                                icon = Icons.Rounded.MoreHoriz,
-                                caption = "المزيد",
-                                onClick = onMore,
-                                selected = moreOpen,
-                                focusRequester = moreTriggerFocus,
-                            )
-                            VodControlButton(
-                                icon = Icons.Rounded.Replay,
-                                caption = "رجوع $stepSeconds ث",
-                                onClick = onRewind,
-                            )
-                            VodControlButton(
-                                icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                caption = if (isPlaying) "ايقاف مؤقت" else "تشغيل",
-                                onClick = onPlayPause,
-                                emphasis = true,
-                                focusRequester = primaryFocus,
-                            )
-                            VodControlButton(
-                                icon = Icons.Rounded.Redo,
-                                caption = "تقديم $stepSeconds ث",
-                                onClick = onForward,
-                            )
-                            VodControlButton(
-                                icon = if (favorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
-                                caption = "المفضلة",
-                                onClick = onFavorite,
-                                enabled = favoriteEnabled,
-                                selected = favorite,
-                            )
-                        }
-                    } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            VodControlButton(
-                                icon = Icons.Rounded.MoreHoriz,
-                                caption = "المزيد",
-                                onClick = onMore,
-                                selected = moreOpen,
-                                focusRequester = moreTriggerFocus,
-                                modifier = Modifier.weight(1f),
-                            )
-                            VodControlButton(
-                                icon = Icons.Rounded.Replay,
-                                caption = "رجوع $stepSeconds ث",
-                                onClick = onRewind,
-                                modifier = Modifier.weight(1f),
-                            )
-                            VodControlButton(
-                                icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                caption = if (isPlaying) "ايقاف مؤقت" else "تشغيل",
-                                onClick = onPlayPause,
-                                emphasis = true,
-                                focusRequester = primaryFocus,
-                                modifier = Modifier.weight(1f),
-                            )
-                            VodControlButton(
-                                icon = Icons.Rounded.Redo,
-                                caption = "تقديم $stepSeconds ث",
-                                onClick = onForward,
-                                modifier = Modifier.weight(1f),
-                            )
-                            VodControlButton(
-                                icon = if (favorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
-                                caption = "المفضلة",
-                                onClick = onFavorite,
-                                enabled = favoriteEnabled,
-                                selected = favorite,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    }
-                }
-            }
-            seekPreviewMs?.let { target ->
-                val cardWidth = if (maxWidth < 420.dp) 170.dp else 216.dp
-                val cardHeight = cardWidth * 9f / 16f
-                val fraction = vodPreviewCardFraction(target, durationMs)
-                val horizontalRoom = (maxWidth - cardWidth).coerceAtLeast(0.dp)
-                val cardX = (maxWidth * fraction - cardWidth / 2).coerceIn(0.dp, horizontalRoom)
-                VodSeekPreviewCard(
-                    frame = seekPreviewFrame,
-                    positionMs = target,
-                    cardWidth = cardWidth,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .offset(x = cardX, y = -(cardHeight + 16.dp)),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun VodControlButton(
-    icon: ImageVector,
-    caption: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    emphasis: Boolean = false,
-    selected: Boolean = false,
-    enabled: Boolean = true,
-    focusRequester: FocusRequester? = null,
-) {
-    val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    var focused by remember { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
-    val shape = RoundedCornerShape(12.dp)
-    val contentColor = when {
-        !enabled -> colors.textMuted.copy(alpha = .45f)
-        emphasis -> Color(0xFF14120A)
-        showFocused -> colors.goldBright
-        selected -> colors.goldBright
-        else -> colors.text
-    }
-    Row(
-        modifier = modifier
-            .heightIn(min = 40.dp)
-            .clip(shape)
-            .background(
-                when {
-                    emphasis -> colors.gold
-                    showFocused -> Color(0xFF2A281B)
-                    else -> Color(0xFF15160F)
-                },
-            )
-            .border(
-                width = when {
-                    showFocused -> 2.dp
-                    emphasis -> 0.dp
-                    else -> 1.dp
-                },
-                color = when {
-                    showFocused -> colors.goldBright
-                    emphasis -> Color.Transparent
-                    else -> colors.gold.copy(alpha = .45f)
-                },
-                shape = shape,
-            )
-            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .semantics(mergeDescendants = true) { contentDescription = caption }
-            .padding(horizontal = 10.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = contentColor,
-            modifier = Modifier.size(18.dp),
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(
-            text = caption,
-            color = contentColor,
-            fontSize = 13.sp,
-            fontWeight = if (emphasis || selected) FontWeight.Black else FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
 /**
  * Owner-approved Movie player tools strip.
  *
@@ -2888,6 +2628,11 @@ private fun VodControlButton(
  * compact pale-gold focus hitboxes around the glyph. The five approved tools keep their physical
  * left-to-right order. One row is used only when the measured complete captions fit; otherwise the
  * same tools reflow into a bounded two-row arrangement. Captions are never ellipsized or shrunk.
+ *
+ * Bounded Series exception (owner direction 2026-10-08-R02): a Series episode additionally shows
+ * directly visible `الحلقة السابقة` / `الحلقة التالية` episode tools at the outer ends, wired to
+ * the authoritative neighbors and disabled (and skipped in navigation) when unavailable. Movies
+ * always render exactly the five approved tools.
  *
  * While the More panel owns input the strip stays visible but every tool and the timeline are
  * input-muted, so no playback/seek action can fire underneath the open panel.
@@ -2912,6 +2657,12 @@ private fun VodCompactControlStrip(
     onCommit: (Long) -> Unit,
     onPreviewCancel: () -> Unit,
     onTimelineFocusChanged: (Boolean) -> Unit = {},
+    previousEpisodeCaption: String? = null,
+    previousEpisodeEnabled: Boolean = false,
+    onPreviousEpisode: (() -> Unit)? = null,
+    nextEpisodeCaption: String? = null,
+    nextEpisodeEnabled: Boolean = false,
+    onNextEpisode: (() -> Unit)? = null,
     primaryFocus: FocusRequester,
     moreTriggerFocus: FocusRequester,
     seekBarFocusRequester: FocusRequester,
@@ -2929,6 +2680,8 @@ private fun VodCompactControlStrip(
     val rewindFocus = remember { FocusRequester() }
     val forwardFocus = remember { FocusRequester() }
     val favoriteFocus = remember { FocusRequester() }
+    val previousEpisodeFocus = remember { FocusRequester() }
+    val nextEpisodeFocus = remember { FocusRequester() }
     var stripBounds by remember { mutableStateOf<Rect?>(null) }
     var timelineRowBounds by remember { mutableStateOf<Rect?>(null) }
     var toolsRowBounds by remember { mutableStateOf<Rect?>(null) }
@@ -2991,13 +2744,25 @@ private fun VodCompactControlStrip(
         rewindCaption,
         forwardCaption,
         playPauseCaption,
+        previousEpisodeCaption,
+        nextEpisodeCaption,
         density.fontScale,
         density.density,
         textMeasurer,
     ) {
         val glyphBoxPx = with(density) { (movieGlyphDp + 22).dp.roundToPx() }
         val spacingPx = with(density) { toolSpacing.roundToPx() }
-        val captions = listOf("المزيد", rewindCaption, playPauseCaption, forwardCaption, "المفضلة")
+        // Physical LEFT-to-RIGHT order: More, Previous, Rewind, Play/Pause, Forward, Next,
+        // Favorite; episode tools only exist for Series.
+        val captions = buildList {
+            add("المزيد")
+            previousEpisodeCaption?.let(::add)
+            add(rewindCaption)
+            add(playPauseCaption)
+            add(forwardCaption)
+            nextEpisodeCaption?.let(::add)
+            add("المفضلة")
+        }
         vodToolsRequiredWidthPx(
             iconBoxesPx = List(captions.size) { glyphBoxPx },
             captionWidthsPx = captions.map { caption ->
@@ -3103,6 +2868,21 @@ private fun VodCompactControlStrip(
                         upFocus = seekBarFocusRequester,
                         downFocus = FocusRequester.Cancel,
                     )
+                    previousEpisodeCaption?.let { caption ->
+                        VodCompactControl(
+                            icon = Icons.Rounded.SkipPrevious,
+                            caption = caption,
+                            onClick = { onPreviousEpisode?.invoke() },
+                            enabled = previousEpisodeEnabled && onPreviousEpisode != null,
+                            inputMuted = inputMuted,
+                            iconSizeDp = movieGlyphDp,
+                            captionSizeSp = metrics.captionSizeSp,
+                            modifier = if (weightedTools) Modifier.weight(1f) else Modifier,
+                            focusRequester = previousEpisodeFocus,
+                            upFocus = seekBarFocusRequester,
+                            downFocus = FocusRequester.Cancel,
+                        )
+                    }
                     VodCompactControl(
                         icon = MovieRewind10Icon,
                         caption = rewindCaption,
@@ -3143,6 +2923,21 @@ private fun VodCompactControlStrip(
                         upFocus = seekBarFocusRequester,
                         downFocus = FocusRequester.Cancel,
                     )
+                    nextEpisodeCaption?.let { caption ->
+                        VodCompactControl(
+                            icon = Icons.Rounded.SkipNext,
+                            caption = caption,
+                            onClick = { onNextEpisode?.invoke() },
+                            enabled = nextEpisodeEnabled && onNextEpisode != null,
+                            inputMuted = inputMuted,
+                            iconSizeDp = movieGlyphDp,
+                            captionSizeSp = metrics.captionSizeSp,
+                            modifier = if (weightedTools) Modifier.weight(1f) else Modifier,
+                            focusRequester = nextEpisodeFocus,
+                            upFocus = seekBarFocusRequester,
+                            downFocus = FocusRequester.Cancel,
+                        )
+                    }
                     VodCompactControl(
                         icon = if (favorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
                         caption = "المفضلة",
@@ -3250,110 +3045,6 @@ private fun VodCompactControl(
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
         )
-    }
-}
-
-@Composable
-private fun VodSeekPreviewCard(
-    frame: Bitmap?,
-    positionMs: Long,
-    cardWidth: Dp,
-    truthfulFallback: Boolean = false,
-    pointerOffsetPx: Int? = null,
-    fallbackHeight: Dp? = null,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalHulkColors.current
-    val density = LocalDensity.current
-    val shape = RoundedCornerShape(10.dp)
-    Column(modifier = modifier.width(cardWidth), horizontalAlignment = Alignment.CenterHorizontally) {
-        if (frame != null || !truthfulFallback) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(shape)
-                    .background(Color.Black.copy(alpha = .94f))
-                    .border(1.dp, colors.gold.copy(alpha = .85f), shape),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(16f / 9f)
-                        .background(Color(0xFF0A0B08)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (frame != null) {
-                        Image(
-                            bitmap = frame.asImageBitmap(),
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop,
-                        )
-                    }
-                    Text(
-                        text = formatTime(positionMs),
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .background(Color.Black.copy(alpha = .62f))
-                            .padding(vertical = 3.dp),
-                        textAlign = TextAlign.Center,
-                    )
-                }
-            }
-        } else {
-            // No decodable frame: a compact truthful time-only card sized from its content and
-            // accepted padding instead of an empty picture.
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(fallbackHeight ?: 56.dp)
-                    .clip(shape)
-                    .background(Color(0xF20A0B08))
-                    .border(1.dp, colors.gold.copy(alpha = .85f), shape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = formatTime(positionMs),
-                    color = colors.goldBright,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-        }
-        if (pointerOffsetPx != null) {
-            val pointerSize = 14.dp
-            val maxOffset = (cardWidth - pointerSize).coerceAtLeast(0.dp)
-            val offset = with(density) { pointerOffsetPx.toDp() }.coerceIn(0.dp, maxOffset)
-            Box(Modifier.fillMaxWidth()) {
-                Canvas(
-                    Modifier
-                        .offset(x = offset)
-                        .size(width = pointerSize, height = 7.dp),
-                ) {
-                    val pointer = Path().apply {
-                        moveTo(0f, 0f)
-                        lineTo(size.width, 0f)
-                        lineTo(size.width / 2f, size.height)
-                        close()
-                    }
-                    drawPath(pointer, colors.goldBright)
-                }
-            }
-        } else {
-            Canvas(Modifier.size(width = 14.dp, height = 7.dp)) {
-                val pointer = Path().apply {
-                    moveTo(0f, 0f)
-                    lineTo(size.width, 0f)
-                    lineTo(size.width / 2f, size.height)
-                    close()
-                }
-                drawPath(pointer, colors.goldBright)
-            }
-        }
     }
 }
 
@@ -4288,88 +3979,6 @@ private fun LiveMoreRow(
     }
 }
 
-/**
- * Legacy Series non-Movie More row, preserved exactly as before the Live alignment: Series
- * migration is a later bounded task and this task must not change Series behavior.
- */
-@Composable
-private fun LegacySeriesMoreRow(
-    text: String,
-    icon: ImageVector,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    value: String? = null,
-    selected: Boolean = false,
-    showChevron: Boolean = false,
-    focusRequester: FocusRequester? = null,
-) {
-    val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    var focused by remember { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
-    val shape = RoundedCornerShape(11.dp)
-    val foreground = if (showFocused) Color(0xFF14120A) else colors.text
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(
-                when {
-                    showFocused -> colors.gold
-                    selected -> colors.gold.copy(alpha = .16f)
-                    else -> Color.Transparent
-                },
-            )
-            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics(mergeDescendants = true) { contentDescription = text }
-            .padding(horizontal = 11.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(9.dp),
-    ) {
-        Text(
-            text = text,
-            color = foreground,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (showFocused) Color(0xFF14120A) else colors.goldBright,
-            modifier = Modifier.size(19.dp),
-        )
-        value?.let {
-            Text(
-                text = it,
-                color = if (showFocused) Color(0xFF14120A) else colors.textMuted,
-                fontSize = 12.sp,
-                maxLines = 1,
-            )
-        }
-        if (selected) {
-            Icon(
-                imageVector = Icons.Rounded.Check,
-                contentDescription = null,
-                tint = if (showFocused) Color(0xFF14120A) else colors.goldBright,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-        if (showChevron) {
-            Icon(
-                imageVector = Icons.Rounded.ChevronLeft,
-                contentDescription = null,
-                tint = if (showFocused) Color(0xFF14120A) else colors.textMuted,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-    }
-}
-
 // Movie timeline geometry. The coordinate diameter is shared with the preview overlay and is
 // constant, so focus changes never move the knob center. The focused ring is reserved inside the
 // constant 20.dp slot, so focus decoration never changes layout or clips at the endpoints.
@@ -4655,7 +4264,6 @@ private fun VodMorePanel(
     onSelectPictureSize: (Int) -> Unit,
     onRestart: () -> Unit,
     onLock: () -> Unit,
-    movieStyle: Boolean = false,
     maxHeight: Dp? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -4666,13 +4274,13 @@ private fun VodMorePanel(
     val pictureFocus = remember { FocusRequester() }
     val restartFocus = remember { FocusRequester() }
     val lockFocus = remember { FocusRequester() }
-    val selectedOptionFocus = remember { FocusRequester() }
     val headerFocus = remember { FocusRequester() }
     val speedOptionFocus = remember { VOD_PLAYER_SPEED_OPTIONS.map { FocusRequester() } }
     val pictureOptionFocus = remember { LIVE_PLAYER_RESIZE_LABELS.map { FocusRequester() } }
 
-    // Movie-style panel: node 0 is the header, nodes 1..N are the body rows in visual order. The
-    // vertical focus cycle is closed so boundary arrows cannot leak to the strip or the player.
+    // The shared VOD More panel keeps node 0 as the header and nodes 1..N as the body rows in
+    // visual order. The vertical focus cycle is closed so boundary arrows cannot leak to the strip
+    // or the player.
     val movieRowFocus = when (view) {
         VodMorePanelView.MENU -> listOf(goToTimeFocus, speedFocus, pictureFocus, restartFocus, lockFocus)
         VodMorePanelView.SPEED -> speedOptionFocus
@@ -4700,11 +4308,7 @@ private fun VodMorePanel(
             }
             VodMorePanelView.SPEED,
             VodMorePanelView.PICTURE_SIZE,
-            -> if (movieStyle) {
-                movieRowFocus.getOrNull(selectedOptionIndex) ?: selectedOptionFocus
-            } else {
-                selectedOptionFocus
-            }
+            -> movieRowFocus.getOrNull(selectedOptionIndex) ?: headerFocus
         }
         withFrameNanos { }
         runCatching { target.requestFocus() }
@@ -4737,26 +4341,22 @@ private fun VodMorePanel(
                     VodMorePanelView.SPEED -> "سرعة التشغيل"
                     VodMorePanelView.PICTURE_SIZE -> "حجم الصورة"
                 },
-                color = if (movieStyle) colors.text else Color.White,
+                color = colors.text,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (movieStyle) {
-                LiveMoreHeaderAction(
-                    caption = if (view == VodMorePanelView.MENU) "اغلاق" else "رجوع",
-                    onClick = onBackToMenu,
-                    icon = if (view == VodMorePanelView.MENU) Icons.Rounded.Close else null,
-                    focusRequester = headerFocus,
-                    upFocus = movieUp(0),
-                    downFocus = movieDown(0),
-                    enabled = !inputMuted,
-                )
-            } else {
-                LiveMoreHeaderAction(caption = "رجوع", onClick = onBackToMenu)
-            }
+            LiveMoreHeaderAction(
+                caption = if (view == VodMorePanelView.MENU) "اغلاق" else "رجوع",
+                onClick = onBackToMenu,
+                icon = if (view == VodMorePanelView.MENU) Icons.Rounded.Close else null,
+                focusRequester = headerFocus,
+                upFocus = movieUp(0),
+                downFocus = movieDown(0),
+                enabled = !inputMuted,
+            )
         }
         Spacer(Modifier.height(8.dp))
         Column(
@@ -4764,165 +4364,91 @@ private fun VodMorePanel(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState()),
         ) {
-            if (movieStyle) {
-                when (view) {
-                    VodMorePanelView.MENU -> {
-                        VodMoreRow(
-                            text = "الانتقال الى وقت",
-                            icon = Icons.Rounded.Schedule,
-                            showChevron = true,
-                            onClick = onOpenGoToTime,
-                            focusRequester = goToTimeFocus,
+            when (view) {
+                VodMorePanelView.MENU -> {
+                    VodMoreRow(
+                        text = "الانتقال الى وقت",
+                        icon = Icons.Rounded.Schedule,
+                        showChevron = true,
+                        onClick = onOpenGoToTime,
+                        focusRequester = goToTimeFocus,
+                        inputMuted = inputMuted,
+                        upFocus = movieUp(1),
+                        downFocus = movieDown(1),
+                    )
+                    VodPanelDivider()
+                    VodMoreRow(
+                        text = "السرعة",
+                        icon = Icons.Rounded.Speed,
+                        value = vodSpeedLabel(speed),
+                        showChevron = true,
+                        onClick = onOpenSpeed,
+                        focusRequester = speedFocus,
+                        inputMuted = inputMuted,
+                        upFocus = movieUp(2),
+                        downFocus = movieDown(2),
+                    )
+                    VodPanelDivider()
+                    VodMoreRow(
+                        text = "حجم الصورة",
+                        icon = vodPictureSizeGlyph(pictureSizeIndex),
+                        value = livePlayerResizeLabel(pictureSizeIndex),
+                        showChevron = true,
+                        onClick = onOpenPictureSize,
+                        focusRequester = pictureFocus,
+                        inputMuted = inputMuted,
+                        upFocus = movieUp(3),
+                        downFocus = movieDown(3),
+                    )
+                    VodPanelDivider()
+                    VodDirectActionRow(
+                        text = "من البداية",
+                        icon = Icons.Rounded.Replay,
+                        onClick = onRestart,
+                        focusRequester = restartFocus,
+                        inputMuted = inputMuted,
+                        upFocus = movieUp(4),
+                        downFocus = movieDown(4),
+                    )
+                    VodPanelDivider()
+                    VodDirectActionRow(
+                        text = "قفل التحكم",
+                        icon = Icons.Rounded.Lock,
+                        onClick = onLock,
+                        focusRequester = lockFocus,
+                        inputMuted = inputMuted,
+                        upFocus = movieUp(5),
+                        downFocus = movieDown(5),
+                    )
+                }
+                VodMorePanelView.SPEED -> {
+                    VOD_PLAYER_SPEED_OPTIONS.forEachIndexed { index, option ->
+                        if (index > 0) VodPanelDivider()
+                        VodNumericOptionRow(
+                            value = vodSpeedLabel(option),
+                            selected = kotlin.math.abs(option - speed) < 0.001f,
+                            onClick = { onSelectSpeed(option) },
+                            focusRequester = speedOptionFocus[index],
                             inputMuted = inputMuted,
-                            upFocus = movieUp(1),
-                            downFocus = movieDown(1),
+                            upFocus = movieUp(index + 1),
+                            downFocus = movieDown(index + 1),
                         )
-                        VodPanelDivider()
-                        VodMoreRow(
-                            text = "السرعة",
-                            icon = Icons.Rounded.Speed,
-                            value = vodSpeedLabel(speed),
-                            showChevron = true,
-                            onClick = onOpenSpeed,
-                            focusRequester = speedFocus,
-                            inputMuted = inputMuted,
-                            upFocus = movieUp(2),
-                            downFocus = movieDown(2),
-                        )
-                        VodPanelDivider()
-                        VodMoreRow(
-                            text = "حجم الصورة",
-                            icon = vodPictureSizeGlyph(pictureSizeIndex),
-                            value = livePlayerResizeLabel(pictureSizeIndex),
-                            showChevron = true,
-                            onClick = onOpenPictureSize,
-                            focusRequester = pictureFocus,
-                            inputMuted = inputMuted,
-                            upFocus = movieUp(3),
-                            downFocus = movieDown(3),
-                        )
-                        VodPanelDivider()
-                        VodDirectActionRow(
-                            text = "من البداية",
-                            icon = Icons.Rounded.Replay,
-                            onClick = onRestart,
-                            focusRequester = restartFocus,
-                            inputMuted = inputMuted,
-                            upFocus = movieUp(4),
-                            downFocus = movieDown(4),
-                        )
-                        VodPanelDivider()
-                        VodDirectActionRow(
-                            text = "قفل التحكم",
-                            icon = Icons.Rounded.Lock,
-                            onClick = onLock,
-                            focusRequester = lockFocus,
-                            inputMuted = inputMuted,
-                            upFocus = movieUp(5),
-                            downFocus = movieDown(5),
-                        )
-                    }
-                    VodMorePanelView.SPEED -> {
-                        VOD_PLAYER_SPEED_OPTIONS.forEachIndexed { index, option ->
-                            if (index > 0) VodPanelDivider()
-                            VodNumericOptionRow(
-                                value = vodSpeedLabel(option),
-                                selected = kotlin.math.abs(option - speed) < 0.001f,
-                                onClick = { onSelectSpeed(option) },
-                                focusRequester = speedOptionFocus[index],
-                                inputMuted = inputMuted,
-                                upFocus = movieUp(index + 1),
-                                downFocus = movieDown(index + 1),
-                            )
-                        }
-                    }
-                    VodMorePanelView.PICTURE_SIZE -> {
-                        LIVE_PLAYER_RESIZE_LABELS.forEachIndexed { index, label ->
-                            if (index > 0) VodPanelDivider()
-                            VodMoreRow(
-                                text = label,
-                                icon = vodPictureSizeGlyph(index),
-                                selected = index == pictureSizeIndex,
-                                reserveCheckSlot = true,
-                                onClick = { onSelectPictureSize(index) },
-                                focusRequester = pictureOptionFocus[index],
-                                inputMuted = inputMuted,
-                                upFocus = movieUp(index + 1),
-                                downFocus = movieDown(index + 1),
-                            )
-                        }
                     }
                 }
-            } else {
-                when (view) {
-                    VodMorePanelView.MENU -> {
-                        LegacySeriesMoreRow(
-                            text = "الانتقال الى وقت",
-                            icon = Icons.Rounded.Schedule,
-                            onClick = onOpenGoToTime,
-                            focusRequester = goToTimeFocus,
+                VodMorePanelView.PICTURE_SIZE -> {
+                    LIVE_PLAYER_RESIZE_LABELS.forEachIndexed { index, label ->
+                        if (index > 0) VodPanelDivider()
+                        VodMoreRow(
+                            text = label,
+                            icon = vodPictureSizeGlyph(index),
+                            selected = index == pictureSizeIndex,
+                            reserveCheckSlot = true,
+                            onClick = { onSelectPictureSize(index) },
+                            focusRequester = pictureOptionFocus[index],
+                            inputMuted = inputMuted,
+                            upFocus = movieUp(index + 1),
+                            downFocus = movieDown(index + 1),
                         )
-                        Spacer(Modifier.height(6.dp))
-                        LegacySeriesMoreRow(
-                            text = "السرعة",
-                            icon = Icons.Rounded.Speed,
-                            value = vodSpeedLabel(speed),
-                            showChevron = true,
-                            onClick = onOpenSpeed,
-                            focusRequester = speedFocus,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        LegacySeriesMoreRow(
-                            text = "حجم الصورة",
-                            icon = Icons.Rounded.CropFree,
-                            value = livePlayerResizeLabel(pictureSizeIndex),
-                            showChevron = true,
-                            onClick = onOpenPictureSize,
-                            focusRequester = pictureFocus,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        LegacySeriesMoreRow(
-                            text = "من البداية",
-                            icon = Icons.Rounded.Replay,
-                            onClick = onRestart,
-                            focusRequester = restartFocus,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        LegacySeriesMoreRow(
-                            text = "قفل التحكم",
-                            icon = Icons.Rounded.Lock,
-                            onClick = onLock,
-                            focusRequester = lockFocus,
-                        )
-                    }
-                    VodMorePanelView.SPEED -> {
-                        VOD_PLAYER_SPEED_OPTIONS.forEachIndexed { index, option ->
-                            if (index > 0) Spacer(Modifier.height(6.dp))
-                            val selected = kotlin.math.abs(option - speed) < 0.001f
-                            LegacySeriesMoreRow(
-                                text = vodSpeedLabel(option),
-                                icon = Icons.Rounded.Speed,
-                                selected = selected,
-                                onClick = { onSelectSpeed(option) },
-                                focusRequester = if (selected) selectedOptionFocus else null,
-                            )
-                        }
-                    }
-                    VodMorePanelView.PICTURE_SIZE -> {
-                        LIVE_PLAYER_RESIZE_LABELS.forEachIndexed { index, label ->
-                            if (index > 0) Spacer(Modifier.height(6.dp))
-                            LegacySeriesMoreRow(
-                                text = label,
-                                icon = when (index) {
-                                    1 -> Icons.Rounded.ZoomIn
-                                    2 -> Icons.Rounded.OpenInFull
-                                    else -> Icons.Rounded.CropFree
-                                },
-                                selected = index == pictureSizeIndex,
-                                onClick = { onSelectPictureSize(index) },
-                                focusRequester = if (index == pictureSizeIndex) selectedOptionFocus else null,
-                            )
-                        }
                     }
                 }
             }
@@ -5192,9 +4718,9 @@ private fun vodPictureSizeGlyph(index: Int): ImageVector = when (index) {
 private fun VodGoToTimeDialog(
     currentPositionMs: Long,
     durationMs: Long,
+    durationLabel: String,
     onConfirm: (Long) -> Unit,
     onDismiss: () -> Unit,
-    exclusiveInput: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
@@ -5220,25 +4746,23 @@ private fun VodGoToTimeDialog(
     )
     val shape = RoundedCornerShape(22.dp)
 
-    // Closed TAB / SHIFT+TAB cycle over every eligible dialog node for the exclusive Movies input:
-    // header fields, six step buttons and the enabled actions. Disabled duration paths keep only
-    // the always-attached Back node so TAB can never leave the window.
-    val tabNodes = remember(exclusiveInput, fieldsEnabled, confirmEnabled) {
+    // Closed TAB / SHIFT+TAB cycle over every eligible dialog node: header fields, six step
+    // buttons and the enabled actions. Disabled duration paths keep only the always-attached Back
+    // node so TAB can never leave the window.
+    val tabNodes = remember(fieldsEnabled, confirmEnabled) {
         buildList {
-            if (exclusiveInput) {
-                add(backFocus)
-                if (confirmEnabled) add(confirmFocus)
-                if (fieldsEnabled) {
-                    add(hourUpFocus)
-                    add(hoursFocus)
-                    add(hourDownFocus)
-                    add(minuteUpFocus)
-                    add(minutesFocus)
-                    add(minuteDownFocus)
-                    add(secondUpFocus)
-                    add(secondsFocus)
-                    add(secondDownFocus)
-                }
+            add(backFocus)
+            if (confirmEnabled) add(confirmFocus)
+            if (fieldsEnabled) {
+                add(hourUpFocus)
+                add(hoursFocus)
+                add(hourDownFocus)
+                add(minuteUpFocus)
+                add(minutesFocus)
+                add(minuteDownFocus)
+                add(secondUpFocus)
+                add(secondsFocus)
+                add(secondDownFocus)
             }
         }
     }
@@ -5248,8 +4772,7 @@ private fun VodGoToTimeDialog(
         if (index < 0) return target
         return tabNodes[(index + delta + tabNodes.size) % tabNodes.size]
     }
-    val tabNeighbor: ((FocusRequester, Int) -> FocusRequester)? =
-        if (exclusiveInput) ({ target, delta -> tabTarget(target, delta) }) else null
+    val tabNeighbor: (FocusRequester, Int) -> FocusRequester = { target, delta -> tabTarget(target, delta) }
 
     LaunchedEffect(Unit) {
         withFrameNanos { }
@@ -5287,7 +4810,7 @@ private fun VodGoToTimeDialog(
             Text("الانتقال الى وقت", color = colors.goldBright, fontSize = 24.sp, fontWeight = FontWeight.Black)
             Spacer(Modifier.height(5.dp))
             Text(
-                text = if (durationMs > 0L) "مدة الفلم ${formatTime(durationMs)}" else "مدة الفلم غير متاحة",
+                text = if (durationMs > 0L) "$durationLabel ${formatTime(durationMs)}" else "$durationLabel غير متاحة",
                 color = colors.textMuted,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
@@ -5383,13 +4906,9 @@ private fun VodGoToTimeDialog(
                             right = FocusRequester.Cancel
                         }
                         .then(
-                            if (exclusiveInput) {
-                                Modifier.focusProperties {
-                                    next = tabTarget(confirmFocus, 1)
-                                    previous = tabTarget(confirmFocus, -1)
-                                }
-                            } else {
-                                Modifier
+                            Modifier.focusProperties {
+                                next = tabTarget(confirmFocus, 1)
+                                previous = tabTarget(confirmFocus, -1)
                             },
                         ),
                 )
@@ -5411,13 +4930,9 @@ private fun VodGoToTimeDialog(
                             left = FocusRequester.Cancel
                         }
                         .then(
-                            if (exclusiveInput) {
-                                Modifier.focusProperties {
-                                    next = tabTarget(backFocus, 1)
-                                    previous = tabTarget(backFocus, -1)
-                                }
-                            } else {
-                                Modifier
+                            Modifier.focusProperties {
+                                next = tabTarget(backFocus, 1)
+                                previous = tabTarget(backFocus, -1)
                             },
                         ),
                 )
@@ -5609,6 +5124,7 @@ private fun ResumePrompt(
     title: String,
     positionMs: Long,
     durationMs: Long,
+    identity: String? = null,
     onResume: () -> Unit,
     onRestart: () -> Unit,
     onBack: () -> Unit,
@@ -5665,6 +5181,17 @@ private fun ResumePrompt(
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
         )
+        identity?.takeIf(String::isNotBlank)?.let { identityText ->
+            Spacer(Modifier.height(3.dp))
+            Text(
+                identityText,
+                color = colors.gold,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                textAlign = TextAlign.Center,
+            )
+        }
         Spacer(Modifier.height(6.dp))
         Text(
             "توقفت عند ${formatTime(positionMs)}",
@@ -5887,6 +5414,7 @@ private fun MoviePlayerErrorCard(
     resumePending: Boolean,
     savedPositionMs: Long,
     failureMessage: String?,
+    mediaLabel: String,
     onRetry: () -> Unit,
     onBack: () -> Unit,
     retryFocusRequester: FocusRequester,
@@ -5900,6 +5428,7 @@ private fun MoviePlayerErrorCard(
         resumePending = resumePending,
         formattedSavedTime = formatTime(savedPositionMs),
         failureMessage = failureMessage,
+        mediaLabel = mediaLabel,
     )
     BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
         val cardMaxHeight = (maxHeight - 24.dp).coerceAtLeast(0.dp)
@@ -6018,6 +5547,11 @@ private fun MoviePlayerErrorCard(
     }
 }
 
+/**
+ * Centered end-of-episode decision card in the accepted dark/gold/ivory dialog family. Shows the
+ * real next episode and the existing countdown with complete "تشغيل الان" / "الغاء" captions,
+ * initial Play Now focus and a closed directional graph in every measured arrangement.
+ */
 @Composable
 private fun NextEpisodePrompt(
     title: String,
@@ -6029,45 +5563,164 @@ private fun NextEpisodePrompt(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    Column(
-        modifier = modifier
-            .width(430.dp)
-            .focusGroup()
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xF2141510))
-            .border(1.dp, colors.gold.copy(alpha = .45f), RoundedCornerShape(20.dp))
-            .padding(18.dp),
-    ) {
-        Text("الحلقة التالية خلال $seconds", color = colors.goldBright, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Spacer(Modifier.height(13.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FocusButton(
-                "تشغيل الان",
-                onPlayNow,
-                modifier = Modifier.focusRequester(playFocusRequester).focusProperties {
-                    left = cancelFocusRequester
-                    right = cancelFocusRequester
-                    up = FocusRequester.Cancel
-                    down = FocusRequester.Cancel
-                },
-                compact = true,
+    BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
+        val dialogMaxHeight = (maxHeight - 24.dp).coerceAtLeast(0.dp)
+        Column(
+            modifier = Modifier
+                .widthIn(max = 560.dp)
+                .fillMaxWidth(.78f)
+                .heightIn(max = dialogMaxHeight)
+                .focusGroup()
+                .clip(RoundedCornerShape(22.dp))
+                .background(Color(0xF2141510))
+                .border(1.dp, colors.gold.copy(alpha = .60f), RoundedCornerShape(22.dp))
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 22.dp, vertical = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(58.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = .40f))
+                    .border(1.dp, colors.gold.copy(alpha = .55f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.SkipNext,
+                    contentDescription = null,
+                    tint = colors.goldBright,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "الحلقة التالية خلال $seconds",
+                color = colors.goldBright,
+                fontSize = 23.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
             )
-            FocusButton(
-                "الغاء",
-                onCancel,
-                modifier = Modifier.focusRequester(cancelFocusRequester).focusProperties {
-                    left = playFocusRequester
-                    right = playFocusRequester
-                    up = FocusRequester.Cancel
-                    down = FocusRequester.Cancel
-                },
-                primary = false,
-                compact = true,
+            Spacer(Modifier.height(3.dp))
+            Text(
+                title,
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
             )
+            Spacer(Modifier.height(16.dp))
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val density = LocalDensity.current
+                val textMeasurer = rememberTextMeasurer()
+                val captionStyle = LocalTextStyle.current.copy(
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                val actionGap = 9.dp
+                val requiredWidths = remember(maxWidth, density.fontScale, density.density, captionStyle) {
+                    val horizontalPaddingPx = with(density) { 12.dp.roundToPx() }
+                    val iconPx = with(density) { 17.dp.roundToPx() }
+                    val gapPx = with(density) { 6.dp.roundToPx() }
+                    val bufferPx = with(density) { 6.dp.roundToPx() }
+                    listOf("تشغيل الان" to true, "الغاء" to false).map { (caption, hasIcon) ->
+                        movieActionRequiredWidthPx(
+                            captionWidthPx = textMeasurer.measure(caption, captionStyle).size.width,
+                            iconSizePx = if (hasIcon) iconPx else 0,
+                            horizontalPaddingPx = horizontalPaddingPx,
+                            gapPx = gapPx,
+                        ) + bufferPx
+                    }
+                }
+                val availableWidthPx = with(density) { maxWidth.roundToPx() }
+                val gapPx = with(density) { actionGap.roundToPx() }
+                val fitsSingleRow = requiredWidths.maxOrNull()?.let { maxRequired ->
+                    2 * maxRequired + gapPx <= availableWidthPx
+                } == true
+                val playAction: @Composable (Modifier, Modifier) -> Unit = { actionModifier, focusModifier ->
+                    FocusButton(
+                        text = "تشغيل الان",
+                        onClick = onPlayNow,
+                        trailingIcon = Icons.Rounded.PlayArrow,
+                        scaleOnFocus = false,
+                        textMaxLines = 1,
+                        modifier = actionModifier
+                            .heightIn(min = 46.dp)
+                            .focusRequester(playFocusRequester)
+                            .then(focusModifier),
+                    )
+                }
+                val cancelAction: @Composable (Modifier, Modifier) -> Unit = { actionModifier, focusModifier ->
+                    FocusButton(
+                        text = "الغاء",
+                        onClick = onCancel,
+                        primary = false,
+                        outlined = true,
+                        scaleOnFocus = false,
+                        textMaxLines = 1,
+                        modifier = actionModifier
+                            .heightIn(min = 46.dp)
+                            .focusRequester(cancelFocusRequester)
+                            .then(focusModifier),
+                    )
+                }
+                if (fitsSingleRow) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                        horizontalArrangement = Arrangement.spacedBy(actionGap),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        playAction(
+                            Modifier.weight(1f),
+                            Modifier.focusProperties {
+                                left = cancelFocusRequester
+                                right = FocusRequester.Cancel
+                                up = FocusRequester.Cancel
+                                down = FocusRequester.Cancel
+                            },
+                        )
+                        cancelAction(
+                            Modifier.weight(1f),
+                            Modifier.focusProperties {
+                                left = FocusRequester.Cancel
+                                right = playFocusRequester
+                                up = FocusRequester.Cancel
+                                down = FocusRequester.Cancel
+                            },
+                        )
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(actionGap),
+                    ) {
+                        playAction(
+                            Modifier.fillMaxWidth(),
+                            Modifier.focusProperties {
+                                up = FocusRequester.Cancel
+                                down = cancelFocusRequester
+                                left = FocusRequester.Cancel
+                                right = FocusRequester.Cancel
+                            },
+                        )
+                        cancelAction(
+                            Modifier.fillMaxWidth(),
+                            Modifier.focusProperties {
+                                up = playFocusRequester
+                                down = FocusRequester.Cancel
+                                left = FocusRequester.Cancel
+                                right = FocusRequester.Cancel
+                            },
+                        )
+                    }
+                }
+            }
         }
     }
 }
+
 
 @Composable
 private fun UnlockPrompt(

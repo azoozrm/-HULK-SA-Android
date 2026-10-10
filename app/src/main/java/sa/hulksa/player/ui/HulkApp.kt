@@ -17,6 +17,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -62,6 +63,9 @@ fun HulkApp(
     catalogNavigationMemory: ProfileCatalogNavigationMemory,
 ) {
     val state by viewModel.state.collectAsState()
+    // Preserves the Series details composition state (selected tab, season and scroll position)
+    // across the playback round-trip for the exact series the user opened.
+    val seriesDetailsStateHolder = rememberSaveableStateHolder()
     val (adaptiveUi, adaptiveInputController) = rememberAdaptiveUiState(isTelevisionDevice)
     val isTv = adaptiveUi.isTelevision
     val context = LocalContext.current
@@ -347,6 +351,7 @@ fun HulkApp(
                     HulkScreen.SERIES -> {
                         val series = state.selectedSeries
                         if (series != null) {
+                            seriesDetailsStateHolder.SaveableStateProvider("series_details_${series.id}") {
                             val relatedSeries = detailsProRelatedItems(
                                 source = series,
                                 candidates = state.catalogs[ContentType.SERIES]?.items.orEmpty(),
@@ -416,7 +421,9 @@ fun HulkApp(
                                     )
                                 },
                                 onOpenRelated = viewModel::open,
+                                onRetryDetails = { viewModel.open(series) },
                             )
+                            }
                         } else {
                             LaunchedEffect(state.screen) { viewModel.back() }
                         }

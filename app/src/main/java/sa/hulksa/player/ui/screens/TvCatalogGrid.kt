@@ -47,7 +47,7 @@ import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
 import sa.hulksa.player.ui.components.CompactPosterCard
 import sa.hulksa.player.ui.components.MoviesCatalogBoxedCard
-import sa.hulksa.player.ui.components.SeriesPosterCard
+import sa.hulksa.player.ui.components.SeriesCatalogBoxedCard
 
 // Legibility floor for the Movie-only compact fallback on unusually short usable windows.
 internal const val MOVIE_COMPACT_ARTWORK_MIN_HEIGHT_DP = 96
@@ -97,7 +97,7 @@ internal fun movieCatalogColumnCount(
 internal fun tvCatalogMetrics(
     screenWidthDp: Int,
     screenHeightDp: Int,
-    movieCards: Boolean = false,
+    boxedCards: Boolean = false,
 ): TvCatalogMetrics {
     val width = screenWidthDp.coerceAtLeast(1)
     val height = screenHeightDp.coerceAtLeast(1)
@@ -112,7 +112,7 @@ internal fun tvCatalogMetrics(
     }
 
     return TvCatalogMetrics(
-        minCellWidthDp = if (movieCards) {
+        minCellWidthDp = if (boxedCards) {
             movieCatalogMinCellWidthDp(width)
         } else {
             (132f * densityScale).coerceIn(124f, 146f)
@@ -126,7 +126,7 @@ internal fun tvCatalogMetrics(
         },
         // Movie-only: the physical LEFT end (RTL) uses the real TV safe inset so the focused
         // card border is not cropped by overscan. Other catalogs keep the historical 6dp.
-        endContentPaddingDp = if (movieCards) policy.horizontalSafeInsetDp else 6f,
+        endContentPaddingDp = if (boxedCards) policy.horizontalSafeInsetDp else 6f,
         bottomContentPaddingDp = maxOf(44f, policy.verticalSafeInsetDp + 30f),
         focusViewportInsetDp = when {
             compact -> 9f
@@ -136,7 +136,7 @@ internal fun tvCatalogMetrics(
         // Movie-only: the settled focused-card reveal also protects the physical bottom safe
         // area so the footer and its in-bounds focus edge are never cropped by TV overscan.
         // Other catalogs keep the historical viewport bounds.
-        focusSafeBottomInsetDp = if (movieCards) policy.verticalSafeInsetDp else 0f,
+        focusSafeBottomInsetDp = if (boxedCards) policy.verticalSafeInsetDp else 0f,
     )
 }
 
@@ -301,12 +301,13 @@ internal fun TvCatalogGrid(
     require(contentKeys.size == content.size)
 
     val adaptiveUi = LocalAdaptiveUi.current
-    val movieCards = destination == MainDestination.MOVIES
-    val metrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp, movieCards) {
+    val boxedCards = destination == MainDestination.MOVIES ||
+        destination == MainDestination.SERIES
+    val metrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp, boxedCards) {
         tvCatalogMetrics(
             screenWidthDp = adaptiveUi.screenWidthDp,
             screenHeightDp = adaptiveUi.screenHeightDp,
-            movieCards = movieCards,
+            boxedCards = boxedCards,
         )
     }
     val minCellWidth = metrics.minCellWidthDp.dp
@@ -334,7 +335,7 @@ internal fun TvCatalogGrid(
     // relocation must not move the viewport after focus (Downloads uses the same pattern).
     val inheritedBringIntoViewSpec = LocalBringIntoViewSpec.current
     val moviesBringIntoViewSpec = remember { moviesNoBringIntoViewSpec() }
-    val gridBringIntoViewSpec = if (movieCards) moviesBringIntoViewSpec else inheritedBringIntoViewSpec
+    val gridBringIntoViewSpec = if (boxedCards) moviesBringIntoViewSpec else inheritedBringIntoViewSpec
     var focusedIndex by remember(contentKeys) { mutableIntStateOf(-1) }
     DisposableEffect(focusMoveState) {
         onDispose { focusMoveState.job?.cancel() }
@@ -349,7 +350,7 @@ internal fun TvCatalogGrid(
             itemBottom = targetInfo.offset.y + targetInfo.size.height,
             usableStart = layoutInfo.viewportStartOffset + focusViewportInsetPx,
             usableEnd = layoutInfo.viewportEndOffset - focusSafeBottomInsetPx - focusViewportInsetPx,
-            marginPx = if (movieCards) focusViewportInsetPx else 0,
+            marginPx = if (boxedCards) focusViewportInsetPx else 0,
         )
     }
 
@@ -360,7 +361,7 @@ internal fun TvCatalogGrid(
             focusInsetPx = focusViewportInsetPx,
             safeBottomInsetPx = focusSafeBottomInsetPx,
             // Movies add the extra focus margin; Series keeps its historical single-inset bound.
-            extraMarginPx = if (movieCards) focusViewportInsetPx else 0,
+            extraMarginPx = if (boxedCards) focusViewportInsetPx else 0,
         )
     }
 
@@ -416,7 +417,7 @@ internal fun TvCatalogGrid(
         val availableGridWidth = (
             maxWidth - horizontalContentPadding - focusSafeEndPadding
         ).coerceAtLeast(minCellWidth)
-        val columnCount = if (movieCards) {
+        val columnCount = if (boxedCards) {
             movieCatalogColumnCount(
                 availableWidthDp = availableGridWidth.value,
                 spacingDp = horizontalSpacing.value,
@@ -435,11 +436,11 @@ internal fun TvCatalogGrid(
         val usableGridHeightPx = with(density) {
             (maxHeight - horizontalContentPadding - focusSafeBottomInset).coerceAtLeast(1.dp).roundToPx()
         }
-        var movieFooterHeightPx by remember(contentKeys) { mutableIntStateOf(0) }
-        val compactArtworkHeightPx = if (movieCards && movieFooterHeightPx > 0) {
+        var boxedFooterHeightPx by remember(contentKeys) { mutableIntStateOf(0) }
+        val compactArtworkHeightPx = if (boxedCards && boxedFooterHeightPx > 0) {
             movieCompactArtworkHeightPx(
                 cellWidthPx = with(density) { cellWidth.roundToPx() },
-                footerHeightPx = movieFooterHeightPx,
+                footerHeightPx = boxedFooterHeightPx,
                 usableHeightPx = usableGridHeightPx,
                 minArtworkHeightPx = with(density) { MOVIE_COMPACT_ARTWORK_MIN_HEIGHT_DP.dp.roundToPx() },
             )
@@ -461,7 +462,7 @@ internal fun TvCatalogGrid(
         CompositionLocalProvider(LocalBringIntoViewSpec provides gridBringIntoViewSpec) {
         LazyVerticalGrid(
             state = gridState,
-            columns = if (movieCards) GridCells.Fixed(columnCount) else GridCells.Adaptive(minCellWidth),
+            columns = if (boxedCards) GridCells.Fixed(columnCount) else GridCells.Adaptive(minCellWidth),
             horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
             verticalArrangement = Arrangement.spacedBy(verticalSpacing),
             contentPadding = PaddingValues(
@@ -525,7 +526,7 @@ internal fun TvCatalogGrid(
                             viewportStart = layoutInfo.viewportStartOffset + focusViewportInsetPx,
                             viewportEnd = layoutInfo.viewportEndOffset -
                                 focusSafeBottomInsetPx - focusViewportInsetPx,
-                            extraMargin = if (movieCards) focusViewportInsetPx else 0,
+                            extraMargin = if (boxedCards) focusViewportInsetPx else 0,
                         )
                         if (focusPath == TvCatalogFocusPath.INVALID) {
                             return@onPreviewKeyEvent false
@@ -562,13 +563,17 @@ internal fun TvCatalogGrid(
                 }
 
                 if (destination == MainDestination.SERIES) {
-                    SeriesPosterCard(
+                    SeriesCatalogBoxedCard(
                         item = item,
                         isFavorite = isFavorite(item),
                         onClick = { onOpen(item) },
                         modifier = cardModifier,
                         onLongClick = { onToggleFavorite(item) },
                         onFocused = onFocusedCard,
+                        artworkHeightDp = compactArtworkHeightPx?.let { heightPx ->
+                            with(density) { heightPx.toDp() }
+                        },
+                        onFooterHeightMeasured = { boxedFooterHeightPx = it },
                     )
                 } else if (destination == MainDestination.MOVIES) {
                     MoviesCatalogBoxedCard(
@@ -581,7 +586,7 @@ internal fun TvCatalogGrid(
                         artworkHeightDp = compactArtworkHeightPx?.let { heightPx ->
                             with(density) { heightPx.toDp() }
                         },
-                        onFooterHeightMeasured = { movieFooterHeightPx = it },
+                        onFooterHeightMeasured = { boxedFooterHeightPx = it },
                     )
                 } else {
                     CompactPosterCard(

@@ -200,7 +200,9 @@ import sa.hulksa.player.ui.components.ChannelLogo
 import sa.hulksa.player.ui.components.ChannelListItem
 import sa.hulksa.player.ui.components.UniversalPosterCard
 import sa.hulksa.player.ui.components.MoviesCatalogBoxedCard
-import sa.hulksa.player.ui.components.MoviesHistoryCard
+import sa.hulksa.player.ui.components.SeriesCatalogBoxedCard
+import sa.hulksa.player.ui.components.BoxedHistoryCard
+import sa.hulksa.player.ui.components.seriesHistoryIdentityText
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.goldFocusEdge
@@ -2170,18 +2172,34 @@ private fun PosterCatalogScreen(
 ) {
     val colors = LocalHulkColors.current
     val context = LocalContext.current
-    val movieCategoryManagement = destination == MainDestination.MOVIES
+    val seriesCategoryManagement = destination == MainDestination.SERIES
+    val categoryManagement = destination == MainDestination.MOVIES || seriesCategoryManagement
     val catalog = state.catalogs[type]
-    // One committed Movies order + hidden owner per account/profile for the selector and the
-    // manager. The manager interaction scope is captured when it opens so a later profile change
-    // cannot redirect an in-flight write to a newer scope.
-    val movieStateScope = context.movieCategoryStateScope()
-    var hiddenCategoryIds by remember(movieStateScope, catalog) {
-        mutableStateOf(if (movieCategoryManagement) context.movieHiddenCategoryIds() else emptySet())
+    // One committed order + hidden owner per account/profile for the selector and the manager,
+    // namespaced per section so Series never reads or writes the Movie/Live state. The manager
+    // interaction scope is captured when it opens so a later profile change cannot redirect an
+    // in-flight write to a newer scope.
+    val categoryStateScope = if (seriesCategoryManagement) {
+        context.seriesCategoryStateScope()
+    } else {
+        context.movieCategoryStateScope()
     }
-    var committedOrderIds by remember(movieStateScope, catalog) {
+    var hiddenCategoryIds by remember(categoryStateScope, catalog) {
         mutableStateOf(
-            if (movieCategoryManagement) context.movieCommittedCategoryOrderIds() else emptyList(),
+            when {
+                !categoryManagement -> emptySet()
+                seriesCategoryManagement -> context.seriesHiddenCategoryIds()
+                else -> context.movieHiddenCategoryIds()
+            },
+        )
+    }
+    var committedOrderIds by remember(categoryStateScope, catalog) {
+        mutableStateOf(
+            when {
+                !categoryManagement -> emptyList()
+                seriesCategoryManagement -> context.seriesCommittedCategoryOrderIds()
+                else -> context.movieCommittedCategoryOrderIds()
+            },
         )
     }
     var managerScope by remember { mutableStateOf<AccountProfileStateScope?>(null) }
@@ -2189,34 +2207,44 @@ private fun PosterCatalogScreen(
     var restoreManagerEntryFocus by remember { mutableStateOf(false) }
     val manageCategoriesRequester = remember { FocusRequester() }
     val toggleCategoryVisibility: (String) -> Unit = { categoryId ->
-        if (movieCategoryManagement) {
+        if (categoryManagement) {
             val updated = if (categoryId in hiddenCategoryIds) {
                 hiddenCategoryIds - categoryId
             } else {
                 hiddenCategoryIds + categoryId
             }
             hiddenCategoryIds = updated
-            context.saveMovieHiddenCategoryIds(updated, managerScope)
+            if (seriesCategoryManagement) {
+                context.saveSeriesHiddenCategoryIds(updated, managerScope)
+            } else {
+                context.saveMovieHiddenCategoryIds(updated, managerScope)
+            }
         }
     }
-    val serverCategories = remember(catalog?.categories, committedOrderIds, movieCategoryManagement) {
-        if (movieCategoryManagement) {
-            orderedMovieServerCategories(catalog?.categories.orEmpty(), committedOrderIds)
-        } else {
-            emptyList()
+    val serverCategories = remember(catalog?.categories, committedOrderIds, categoryManagement) {
+        when {
+            !categoryManagement -> emptyList()
+            seriesCategoryManagement ->
+                orderedSeriesServerCategories(catalog?.categories.orEmpty(), committedOrderIds)
+            else -> orderedMovieServerCategories(catalog?.categories.orEmpty(), committedOrderIds)
         }
     }
     val visibleServerCategories = remember(serverCategories, hiddenCategoryIds) {
         serverCategories.filterNot { it.id in hiddenCategoryIds }
     }
-    LaunchedEffect(movieStateScope, catalog) {
-        if (movieCategoryManagement) {
-            context.adoptMovieCommittedCategoryOrderOnce()
-            committedOrderIds = context.movieCommittedCategoryOrderIds()
+    LaunchedEffect(categoryStateScope, catalog) {
+        if (categoryManagement) {
+            if (seriesCategoryManagement) {
+                context.adoptSeriesCommittedCategoryOrderOnce()
+                committedOrderIds = context.seriesCommittedCategoryOrderIds()
+            } else {
+                context.adoptMovieCommittedCategoryOrderOnce()
+                committedOrderIds = context.movieCommittedCategoryOrderIds()
+            }
         }
     }
     // An account/profile switch invalidates an open manager session before any stale draft can act.
-    LaunchedEffect(movieStateScope) {
+    LaunchedEffect(categoryStateScope) {
         if (showCategoryManager) {
             showCategoryManager = false
             managerScope = null
@@ -2239,7 +2267,7 @@ private fun PosterCatalogScreen(
     val resultCount = if (showingContinue) continueWatching.size else visible.size
     val catalogErrorMessage = state.errorMessage
     val moviesNetworkUsable by rememberUsableNetworkState()
-    val moviesError = movieCategoryManagement && catalogErrorMessage != null
+    val moviesError = categoryManagement && catalogErrorMessage != null
     val moviesOfflineError = moviesError && !moviesNetworkUsable
     val moviesErrorCopy = moviesCatalogErrorCopy(
         offline = moviesOfflineError,
@@ -2309,8 +2337,8 @@ private fun PosterCatalogScreen(
             categoryContentFocusRequest = null
         }
     }
-    LaunchedEffect(movieCategoryManagement, hiddenCategoryIds, state.selectedCategoryId, catalog) {
-        if (movieCategoryManagement && isHiddenServerCategorySelection(state.selectedCategoryId, hiddenCategoryIds)) {
+    LaunchedEffect(categoryManagement, hiddenCategoryIds, state.selectedCategoryId, catalog) {
+        if (categoryManagement && isHiddenServerCategorySelection(state.selectedCategoryId, hiddenCategoryIds)) {
             navigationMemory.save(destination, itemKey = "", itemIndex = 0)
             onSelectCategory(null)
         }
@@ -2364,19 +2392,23 @@ private fun PosterCatalogScreen(
                 isTv = isTv,
                 onMoveToCategories = categoryFocusRestoreController::requestFromSource,
                 countUnit = catalogCountUnit(type),
-                onManageCategories = if (movieCategoryManagement) {
+                onManageCategories = if (categoryManagement) {
                     {
-                        managerScope = context.movieCategoryStateScope()
+                        managerScope = if (seriesCategoryManagement) {
+                            context.seriesCategoryStateScope()
+                        } else {
+                            context.movieCategoryStateScope()
+                        }
                         restoreManagerEntryFocus = true
                         showCategoryManager = true
                     }
                 } else {
                     null
                 },
-                manageCategoriesRequester = manageCategoriesRequester.takeIf { movieCategoryManagement },
-                searchIcon = Icons.Rounded.Search.takeIf { movieCategoryManagement },
-                toolbarIconTint = colors.gold.takeIf { movieCategoryManagement },
-                refreshRequester = refreshRequester.takeIf { movieCategoryManagement },
+                manageCategoriesRequester = manageCategoriesRequester.takeIf { categoryManagement },
+                searchIcon = Icons.Rounded.Search.takeIf { categoryManagement },
+                toolbarIconTint = colors.gold.takeIf { categoryManagement },
+                refreshRequester = refreshRequester.takeIf { categoryManagement },
                 downOverrideRequester = noticeRetryRequester.takeIf { moviesError && resultCount > 0 },
             )
             if (moviesError && resultCount > 0) {
@@ -2392,39 +2424,18 @@ private fun PosterCatalogScreen(
                     onRetryUp = { runCatching { refreshRequester.requestFocus() }.getOrDefault(false) },
                     onRetryDown = { categoryFocusRestoreController.requestFromSource() },
                 )
-            } else if (catalogErrorMessage != null && !movieCategoryManagement) {
-                Spacer(Modifier.height(10.dp))
-                ErrorNotice(catalogErrorMessage)
             }
             Spacer(Modifier.height(11.dp))
-            if (movieCategoryManagement) {
-                MovieCategoryBar(
-                    serverCategories = visibleServerCategories,
-                    selectedId = state.selectedCategoryId,
-                    onSelect = selectCategoryAndEnterContent,
-                    isTv = isTv,
-                    focusRestoreController = categoryFocusRestoreController,
-                    initialAllFocusRequester = initialAllFocusRequester,
-                    initialAllFocusPending = initialAllFocusPending,
-                    noticeRetryRequester = noticeRetryRequester.takeIf { moviesError && resultCount > 0 },
-                )
-            } else {
-                ReorderableCatalogCategoryBar(
-                    type = type,
-                    categories = catalog?.categories.orEmpty(),
-                    selectedId = state.selectedCategoryId,
-                    onSelect = selectCategoryAndEnterContent,
-                    isTv = isTv,
-                    focusRestoreController = categoryFocusRestoreController,
-                    initialAllFocusRequester = initialAllFocusRequester,
-                    initialAllFocusPending = initialAllFocusPending,
-                    hiddenCategoryIds = hiddenCategoryIds,
-                    noticeRetryRequester = noticeRetryRequester.takeIf { moviesError && resultCount > 0 },
-                )
-            }
-            if (!movieCategoryManagement) {
-                CatalogInteractionHints(isTv)
-            }
+            CatalogCategoryBar(
+                serverCategories = visibleServerCategories,
+                selectedId = state.selectedCategoryId,
+                onSelect = selectCategoryAndEnterContent,
+                isTv = isTv,
+                focusRestoreController = categoryFocusRestoreController,
+                initialAllFocusRequester = initialAllFocusRequester,
+                initialAllFocusPending = initialAllFocusPending,
+                noticeRetryRequester = noticeRetryRequester.takeIf { moviesError && resultCount > 0 },
+            )
             Spacer(Modifier.height(9.dp))
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -2439,40 +2450,23 @@ private fun PosterCatalogScreen(
             } else if (model == null) {
                 LoadingRing(label = "جاري تجهيز $title…", modifier = Modifier.align(Alignment.Center))
             } else if (showingContinue && continueWatching.isNotEmpty()) {
-                if (destination == MainDestination.MOVIES) {
-                    MoviesHistoryGrid(
-                        entries = continueWatching,
-                        isTv = isTv,
-                        navigationMemory = navigationMemory,
-                        onOpen = onOpenHistory,
-                        focusFirstItemRequestId = categoryContentFocusRequest
-                            ?.takeIf { categoryContentFocusReady && it.focusFirstItem }
-                            ?.requestId
-                            ?: 0L,
-                        focusContentRequestId = categoryContentFocusRequest
-                            ?.takeIf { categoryContentFocusReady }
-                            ?.requestId
-                            ?: 0L,
-                        onMoveToCategories = categoryFocusRestoreController::requestFromSource,
-                    )
-                } else {
-                    HistoryGrid(
-                        entries = continueWatching,
-                        isTv = isTv,
-                        destination = destination,
-                        navigationMemory = navigationMemory,
-                        onOpen = onOpenHistory,
-                        focusFirstItemRequestId = categoryContentFocusRequest
-                            ?.takeIf { categoryContentFocusReady && it.focusFirstItem }
-                            ?.requestId
-                            ?: 0L,
-                        focusContentRequestId = categoryContentFocusRequest
-                            ?.takeIf { categoryContentFocusReady }
-                            ?.requestId
-                            ?: 0L,
-                        onMoveToCategories = categoryFocusRestoreController::requestFromSource,
-                    )
-                }
+                BoxedHistoryGrid(
+                    destination = destination,
+                    entries = continueWatching,
+                    isTv = isTv,
+                    navigationMemory = navigationMemory,
+                    onOpen = onOpenHistory,
+                    focusFirstItemRequestId = categoryContentFocusRequest
+                        ?.takeIf { categoryContentFocusReady && it.focusFirstItem }
+                        ?.requestId
+                        ?: 0L,
+                    focusContentRequestId = categoryContentFocusRequest
+                        ?.takeIf { categoryContentFocusReady }
+                        ?.requestId
+                        ?: 0L,
+                    onMoveToCategories = categoryFocusRestoreController::requestFromSource,
+                    seriesCards = destination == MainDestination.SERIES,
+                )
             } else if (showingContinue) {
                 if (moviesOfflineEmpty) {
                     MoviesOfflineEmptyState(
@@ -2523,7 +2517,7 @@ private fun PosterCatalogScreen(
                 )
             }
         }
-        if (movieCategoryManagement && showCategoryManager) {
+        if (categoryManagement && showCategoryManager) {
             CategoryManagerDialog(
                 categories = serverCategories,
                 hiddenIds = hiddenCategoryIds,
@@ -2533,12 +2527,20 @@ private fun PosterCatalogScreen(
                     managerScope = null
                 },
                 title = "ادارة الفئات",
-                scopeText = "الترتيب والاخفاء يطبقان على فئات الافلام",
+                scopeText = if (seriesCategoryManagement) {
+                    "الترتيب والاخفاء يطبقان على فئات المسلسلات"
+                } else {
+                    "الترتيب والاخفاء يطبقان على فئات الافلام"
+                },
                 emptyText = "لا توجد فئات",
                 liveStyle = true,
                 onCommitOrder = { ids ->
                     committedOrderIds = ids
-                    context.saveMovieCommittedCategoryOrderIds(managerScope, ids)
+                    if (seriesCategoryManagement) {
+                        context.saveSeriesCommittedCategoryOrderIds(managerScope, ids)
+                    } else {
+                        context.saveMovieCommittedCategoryOrderIds(managerScope, ids)
+                    }
                 },
             )
         }
@@ -4636,6 +4638,15 @@ private fun ContentGrid(
                     onLongClick = { onToggleFavorite(item) },
                     onFocused = { navigationMemory.save(destination, key, index) },
                 )
+            } else if (destination == MainDestination.SERIES) {
+                SeriesCatalogBoxedCard(
+                    item = item,
+                    isFavorite = isFavorite(item),
+                    onClick = { onOpen(item) },
+                    modifier = cardModifier,
+                    onLongClick = { onToggleFavorite(item) },
+                    onFocused = { navigationMemory.save(destination, key, index) },
+                )
             } else {
                 UniversalPosterCard(
                     item = item,
@@ -4650,93 +4661,21 @@ private fun ContentGrid(
     }
 }
 
-@Composable
-private fun HistoryGrid(
-    entries: List<HistoryEntry>,
-    isTv: Boolean,
-    destination: MainDestination,
-    navigationMemory: NavigationMemoryStore,
-    onOpen: (HistoryEntry) -> Unit,
-    focusFirstItemRequestId: Long = 0L,
-    focusContentRequestId: Long = 0L,
-    onMoveToCategories: (() -> Boolean)? = null,
-) {
-    val remembered = navigationMemory.position(destination)
-    val targetIndex = if (focusFirstItemRequestId != 0L) {
-        0
-    } else {
-        remembered.itemIndex.coerceIn(0, entries.lastIndex.coerceAtLeast(0))
-    }
-    val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = targetIndex)
-    LaunchedEffect(gridState, entries, destination) {
-        snapshotFlow { gridState.firstVisibleItemIndex }.collect { index ->
-            entries.getOrNull(index)?.let { navigationMemory.save(destination, it.key, index) }
-        }
-    }
-    val targetRequester = remember { FocusRequester() }
-    LaunchedEffect(entries, remembered.itemKey, focusFirstItemRequestId, focusContentRequestId) {
-        val shouldRestore = focusContentRequestId != 0L || remembered.itemKey.isNotBlank()
-        if (shouldRestore && entries.isNotEmpty()) {
-            gridState.scrollToItem(targetIndex)
-            snapshotFlow { gridState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex } }
-                .first { it }
-            withFrameNanos { }
-            runCatching { targetRequester.requestFocus() }
-        }
-    }
-    LazyVerticalGrid(
-        state = gridState,
-        columns = GridCells.Adaptive(if (isTv) 232.dp else 180.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 9.dp),
-        verticalArrangement = Arrangement.spacedBy(if (isTv) 15.dp else 10.dp),
-        contentPadding = PaddingValues(5.dp, 5.dp, 5.dp, 28.dp),
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        itemsIndexed(entries, key = { _, entry -> entry.key }) { index, entry ->
-            val restore = if (focusFirstItemRequestId != 0L) {
-                index == 0
-            } else {
-                remembered.itemKey == entry.key || (remembered.itemKey.isBlank() && index == targetIndex)
-            }
-            HistoryCard(
-                entry,
-                { onOpen(entry) },
-                Modifier
-                    .fillMaxWidth()
-                    .restoreFocus(restore, targetRequester)
-                    .then(
-                        if (isTv && onMoveToCategories != null) {
-                            Modifier.onPreviewKeyEvent { event ->
-                                val row = gridState.layoutInfo.visibleItemsInfo
-                                    .firstOrNull { it.index == index }
-                                    ?.row
-                                event.type == KeyEventType.KeyDown &&
-                                    event.key == Key.DirectionUp &&
-                                    row == 0 &&
-                                    onMoveToCategories()
-                            }
-                        } else {
-                            Modifier
-                        },
-                    ),
-                onFocused = { navigationMemory.save(destination, entry.key, index) },
-            )
-        }
-    }
-}
 
 private class MovieHistoryFocusRevealState {
     var job: Job? = null
 }
 
 /**
- * Movie-only Recent grid. Uses the adopted Movie catalog slot policy (the same shared column
- * calculation and TV safe physical-left end padding, or the mobile adaptive slot) together with
- * [MoviesHistoryCard] so Recent matches normal catalog card geometry. History keys/order, resume
- * callbacks, focus restoration and long-press removal semantics are preserved.
+ * Boxed Recent grid for Movies and Series. Uses the adopted catalog slot policy (the same shared
+ * column calculation and TV safe physical-left end padding, or the mobile adaptive slot) together
+ * with [BoxedHistoryCard] so Recent matches normal catalog card geometry. Series cards additionally
+ * show the real season/episode identity. History keys/order, resume callbacks, focus restoration
+ * and long-press removal semantics are preserved.
  */
 @Composable
-private fun MoviesHistoryGrid(
+private fun BoxedHistoryGrid(
+    destination: MainDestination,
     entries: List<HistoryEntry>,
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
@@ -4744,16 +4683,17 @@ private fun MoviesHistoryGrid(
     focusFirstItemRequestId: Long = 0L,
     focusContentRequestId: Long = 0L,
     onMoveToCategories: (() -> Boolean)? = null,
+    seriesCards: Boolean = false,
 ) {
     val adaptiveUi = LocalAdaptiveUi.current
     val metrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
         tvCatalogMetrics(
             screenWidthDp = adaptiveUi.screenWidthDp,
             screenHeightDp = adaptiveUi.screenHeightDp,
-            movieCards = true,
+            boxedCards = true,
         )
     }
-    val remembered = navigationMemory.position(MainDestination.MOVIES)
+    val remembered = navigationMemory.position(destination)
     val targetIndex = if (focusFirstItemRequestId != 0L) {
         0
     } else {
@@ -4762,7 +4702,7 @@ private fun MoviesHistoryGrid(
     val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = targetIndex)
     LaunchedEffect(gridState, entries) {
         snapshotFlow { gridState.firstVisibleItemIndex }.collect { index ->
-            entries.getOrNull(index)?.let { navigationMemory.save(MainDestination.MOVIES, it.key, index) }
+            entries.getOrNull(index)?.let { navigationMemory.save(destination, it.key, index) }
         }
     }
     val targetRequester = remember { FocusRequester() }
@@ -4812,11 +4752,11 @@ private fun MoviesHistoryGrid(
         val usableGridHeightPx = with(density) {
             (maxHeight - horizontalContentPadding - safeBottomInsetPx.toDp()).coerceAtLeast(1.dp).roundToPx()
         }
-        var movieFooterHeightPx by remember(entries) { mutableStateOf(0) }
-        val compactArtworkHeightPx = if (isTv && movieFooterHeightPx > 0 && cellWidth > 0.dp) {
+        var boxedFooterHeightPx by remember(entries) { mutableStateOf(0) }
+        val compactArtworkHeightPx = if (isTv && boxedFooterHeightPx > 0 && cellWidth > 0.dp) {
             movieCompactArtworkHeightPx(
                 cellWidthPx = with(density) { cellWidth.roundToPx() },
-                footerHeightPx = movieFooterHeightPx,
+                footerHeightPx = boxedFooterHeightPx,
                 usableHeightPx = usableGridHeightPx,
                 minArtworkHeightPx = with(density) { MOVIE_COMPACT_ARTWORK_MIN_HEIGHT_DP.dp.roundToPx() },
             )
@@ -4863,7 +4803,7 @@ private fun MoviesHistoryGrid(
                 } else {
                     remembered.itemKey == entry.key || (remembered.itemKey.isBlank() && index == targetIndex)
                 }
-                MoviesHistoryCard(
+                BoxedHistoryCard(
                     entry,
                     { onOpen(entry) },
                     Modifier
@@ -4884,9 +4824,11 @@ private fun MoviesHistoryGrid(
                                 Modifier
                             },
                         ),
+                    identityText = seriesHistoryIdentityText(entry).takeIf { seriesCards },
+                    reserveIdentitySlot = seriesCards,
                     onFocused = {
                         focusedEntryIndex = index
-                        navigationMemory.save(MainDestination.MOVIES, entry.key, index)
+                        navigationMemory.save(destination, entry.key, index)
                         if (isTv) {
                             // One bounded correction after focus settles, matching the catalog's
                             // single-owner movement instead of competing settling passes.
@@ -4906,7 +4848,7 @@ private fun MoviesHistoryGrid(
                     artworkHeightDp = compactArtworkHeightPx?.let { heightPx ->
                         with(density) { heightPx.toDp() }
                     },
-                    onFooterHeightMeasured = { movieFooterHeightPx = it },
+                    onFooterHeightMeasured = { boxedFooterHeightPx = it },
                 )
             }
         }
@@ -5395,222 +5337,6 @@ private fun CategoryBar(
     }
 }
 
-@Composable
-private fun ReorderableCatalogCategoryBar(
-    type: ContentType,
-    categories: List<Category>,
-    selectedId: String?,
-    onSelect: (String?) -> Unit,
-    isTv: Boolean,
-    focusRestoreController: CategoryFocusRestoreController,
-    initialAllFocusRequester: FocusRequester? = null,
-    initialAllFocusPending: Boolean = false,
-    hiddenCategoryIds: Set<String> = emptySet(),
-    noticeRetryRequester: FocusRequester? = null,
-) {
-    val context = LocalContext.current
-    val prefs = remember(type) { context.getSharedPreferences("catalog_category_order_${type.name}", android.content.Context.MODE_PRIVATE) }
-    var ids by remember(categories, type) {
-        mutableStateOf(prefs.getString("ids", "").orEmpty().split(',').filter { it.isNotBlank() })
-    }
-    var moving by remember { mutableStateOf<String?>(null) }
-    val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-    val ownedAllFocusRequester = remember(type) { FocusRequester() }
-    val allFocusRequester = initialAllFocusRequester ?: ownedAllFocusRequester
-    val favoritesFocusRequester = remember(type) { FocusRequester() }
-    val continueFocusRequester = remember(type) { FocusRequester() }
-    val stableCategoryIds = remember(categories, type) { categories.map(Category::id) }
-    val categoryFocusRequesters = remember(type, stableCategoryIds) {
-        stableCategoryIds.associateWith { FocusRequester() }
-    }
-    var categoryBarHasFocus by remember(type) { mutableStateOf(false) }
-    val allOrdered = remember(categories, ids) {
-        val byId = categories.associateBy { it.id }
-        (ids.mapNotNull(byId::get) + categories.filterNot { it.id in ids }).distinctBy { it.id }
-    }
-    val ordered = remember(allOrdered, hiddenCategoryIds) {
-        allOrdered.filterNot { it.id in hiddenCategoryIds }
-    }
-    val leadingIds = remember { listOf<String?>(null, FAVORITES_CATEGORY_ID, CONTINUE_CATEGORY_ID) }
-    val baseContentPadding = if (isTv) 8.dp else 24.dp
-    val sidebarUnderlap = rememberCategorySidebarUnderlap(isTv, baseContentPadding)
-
-    fun selectedFocusTarget(): CategoryFocusTarget? {
-        val targetIndex = selectedCategoryFocusIndex(
-            selectedId = selectedId,
-            leadingIds = leadingIds,
-            orderedIds = ordered.map(Category::id),
-        ) ?: return null
-        val requester = when (selectedId) {
-            null -> allFocusRequester
-            FAVORITES_CATEGORY_ID -> favoritesFocusRequester
-            CONTINUE_CATEGORY_ID -> continueFocusRequester
-            else -> selectedId?.let(categoryFocusRequesters::get)
-        } ?: return null
-        return CategoryFocusTarget(selectedId, targetIndex, requester)
-    }
-    focusRestoreController.resolveTarget = { selectedFocusTarget() }
-    focusRestoreController.restore = { cancelDefaultEntry ->
-        restoreSelectedCategoryFocus(
-            listState = listState,
-            scope = scope,
-            controller = focusRestoreController,
-            cancelDefaultEntry = cancelDefaultEntry,
-        )
-    }
-    DisposableEffect(focusRestoreController) {
-        onDispose {
-            focusRestoreController.restore = null
-            focusRestoreController.resolveTarget = null
-            focusRestoreController.cancel()
-        }
-    }
-
-    LaunchedEffect(isTv, selectedId, ordered) {
-        if (isTv) return@LaunchedEffect
-        val targetIndex = selectedCategoryFocusIndex(
-            selectedId = selectedId,
-            leadingIds = leadingIds,
-            orderedIds = ordered.map(Category::id),
-        )
-        if (targetIndex != null) {
-            val anchorIndex = (targetIndex - 1).coerceAtLeast(0)
-            listState.scrollToItem(anchorIndex)
-        }
-    }
-
-    fun move(id: String, direction: Int) {
-        val values = ordered.map { it.id }.toMutableList()
-        val from = values.indexOf(id)
-        val to = (from + direction).coerceIn(0, values.lastIndex)
-        if (from >= 0 && from != to) {
-            values.add(to, values.removeAt(from))
-            ids = values
-            prefs.edit().putString("ids", values.joinToString(",")).apply()
-            scope.launch {
-                delay(40L)
-                val targetIndex = to + 3
-                val anchorIndex = (targetIndex - 1).coerceAtLeast(0)
-                listState.scrollToItem(anchorIndex)
-            }
-        }
-    }
-    LazyRow(
-        state = listState,
-        modifier = Modifier
-            .focusProperties {
-                onEnter = {
-                    if (isTv) {
-                        restoreSelectedCategoryFocus(
-                            listState = listState,
-                            scope = scope,
-                            controller = focusRestoreController,
-                            cancelDefaultEntry = { cancelFocusChange() },
-                        )
-                    }
-                }
-            }
-            .focusGroup()
-            .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus }
-            .then(
-                // With a visible notice, UP from any category chip returns to its Retry; without
-                // one the accepted spatial route is untouched.
-                if (noticeRetryRequester != null) {
-                    Modifier.onPreviewKeyEvent { event ->
-                        event.type == KeyEventType.KeyDown &&
-                            event.key == Key.DirectionUp &&
-                            runCatching { noticeRetryRequester.requestFocus() }.getOrDefault(false)
-                    }
-                } else {
-                    Modifier
-                },
-            )
-            .extendCategoryViewportTowardStart(sidebarUnderlap.viewportExtraDp.dp),
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-        contentPadding = PaddingValues(
-            start = sidebarUnderlap.startContentPaddingDp.dp,
-            top = 8.dp,
-            end = baseContentPadding,
-            bottom = 8.dp,
-        ),
-    ) {
-        item {
-            FocusButton(
-                "الكل",
-                { onSelect(null) },
-                primary = selectedId == null,
-                compact = true,
-                modifier = Modifier
-                    .categoryChipFocus(
-                        isTv, null, selectedId, categoryBarHasFocus,
-                        allFocusRequester, focusRestoreController,
-                        allowInitialEntry = initialAllFocusPending,
-                    ),
-            )
-        }
-        item {
-            FocusButton(
-                text = "★ المفضلة",
-                onClick = { onSelect(FAVORITES_CATEGORY_ID) },
-                primary = selectedId == FAVORITES_CATEGORY_ID,
-                compact = true,
-                modifier = Modifier
-                    .categoryChipFocus(
-                        isTv, FAVORITES_CATEGORY_ID, selectedId, categoryBarHasFocus,
-                        favoritesFocusRequester, focusRestoreController,
-                    ),
-            )
-        }
-        item {
-            FocusButton(
-                text = "▶ استكمال اخر مشاهدة",
-                onClick = { onSelect(CONTINUE_CATEGORY_ID) },
-                primary = selectedId == CONTINUE_CATEGORY_ID,
-                compact = true,
-                modifier = Modifier
-                    .categoryChipFocus(
-                        isTv, CONTINUE_CATEGORY_ID, selectedId, categoryBarHasFocus,
-                        continueFocusRequester, focusRestoreController,
-                    ),
-            )
-        }
-        items(ordered, key = Category::id) { category ->
-            LiveCategoryChip(
-                category = category,
-                selected = selectedId == category.id,
-                moving = moving == category.id,
-                onClick = { if (moving == category.id) moving = null else onSelect(category.id) },
-                onLongClick = { moving = category.id },
-                onMoveLeft = { move(category.id, 1) },
-                onMoveRight = { move(category.id, -1) },
-                modifier = Modifier
-                    .categoryChipFocus(
-                        isTv, category.id, selectedId, categoryBarHasFocus,
-                        categoryFocusRequesters.getValue(category.id), focusRestoreController,
-                    ),
-            )
-        }
-    }
-}
-
-@Composable
-private fun CatalogInteractionHints(isTv: Boolean) {
-    val colors = LocalHulkColors.current
-    Column(Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
-        Text(
-            if (isTv) "ترتيب الفئات: اضغط مطولا OK، حرك بالاسهم، ثم اضغط OK للحفظ" else "لترتيب الفئات: اضغط مطولا على الفئة، اسحبها يمينا او يسارا، ثم اضغط عليها للحفظ",
-            color = colors.textMuted,
-            fontSize = 9.sp,
-        )
-        Text(
-            if (isTv) "المفضلة: اضغط مطولا OK فوق العنصر" else "المفضلة: اضغط مطولا على العنصر",
-            color = colors.textMuted,
-            fontSize = 9.sp,
-        )
-    }
-}
-
 private data class LiveCategoryStripMetrics(
     val itemMinHeight: Dp = 36.dp,
     val iconSize: Dp = 24.dp,
@@ -5645,14 +5371,14 @@ private fun rememberLiveCategoryStripMetrics(): LiveCategoryStripMetrics {
 }
 
 /**
- * Movies category selector, adopting the accepted Live strip appearance.
+ * Movies/Series category selector, adopting the accepted Live strip appearance.
  *
  * Selection only: All, Favorites and Recent are fixed semantic rows and the real server categories
- * follow in the single committed order shared with the Movies manager. Long-press reorder no longer
- * exists on this surface; a held activation can never reorder or hide.
+ * follow in the single committed order shared with that section's manager. Long-press reorder no
+ * longer exists on this surface; a held activation can never reorder or hide.
  */
 @Composable
-private fun MovieCategoryBar(
+private fun CatalogCategoryBar(
     serverCategories: List<Category>,
     selectedId: String?,
     onSelect: (String?) -> Unit,
@@ -6819,8 +6545,11 @@ internal fun isHiddenServerCategorySelection(
     selectedId in hiddenIds
 
 /** Owner-approved catalog count unit: Movies counts films, every other catalog counts items. */
-internal fun catalogCountUnit(type: ContentType): String =
-    if (type == ContentType.MOVIE) "فلم" else "عنصر"
+internal fun catalogCountUnit(type: ContentType): String = when (type) {
+    ContentType.MOVIE -> "فلم"
+    ContentType.SERIES -> "مسلسل"
+    else -> "عنصر"
+}
 
 private data class DestinationEntry(val destination: MainDestination, val icon: ImageVector, val label: String)
 

@@ -38,6 +38,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Icon
@@ -93,6 +94,7 @@ import coil3.compose.AsyncImage
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.R
 import sa.hulksa.player.data.HomeHeroMetadataStore
+import sa.hulksa.player.data.SeriesCardMetadataStore
 import sa.hulksa.player.data.decodeHomeHeroMetadataToken
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
@@ -789,15 +791,120 @@ fun PosterCard(
 ) = CompactPosterCard(item, isFavorite, onClick, modifier, onLongClick)
 
 /**
- * Owner-approved Movies catalog card: square artwork area with natural crop plus one fixed footer.
- *
- * Every card reserves exactly two title lines (a one-line title leaves the second line blank) and
- * an identical metadata row even when values are missing, so loading/cached metadata arrival and
- * missing values never change neighboring card geometry. Warm-gold star/clock/heart icons sit on
- * the physical left of their ivory values. Opt-in for the Movies destination only.
+ * Truthful numeric-first count element: null for missing/zero data instead of a fabricated count.
+ */
+internal fun orderedCountNumber(count: Int): String? = count.takeIf { it > 0 }?.toString()
+
+/**
+ * Ordered aggregate count group: physical positions are icon (optional) LEFT, word MIDDLE and the
+ * number RIGHT, so Arabic reading from the right is number, word, then the icon. The number is a
+ * separate stable LTR element independent of the surrounding layout direction.
  */
 @Composable
-fun MoviesCatalogBoxedCard(
+internal fun OrderedNumberWordInline(
+    count: Int,
+    word: String,
+    fontSizeSp: Int,
+    lineHeightSp: Int,
+    textColor: Color,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    iconSizeDp: Int = 0,
+    iconTint: Color = Color.Unspecified,
+    fontWeight: FontWeight = FontWeight.Bold,
+) {
+    val number = orderedCountNumber(count) ?: return
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Row(
+            modifier = modifier,
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            icon?.let { imageVector ->
+                Icon(
+                    imageVector = imageVector,
+                    contentDescription = null,
+                    tint = iconTint,
+                    modifier = Modifier.size(iconSizeDp.dp),
+                )
+            }
+            Text(
+                text = word,
+                color = textColor,
+                fontSize = fontSizeSp.sp,
+                lineHeight = lineHeightSp.sp,
+                fontWeight = fontWeight,
+                maxLines = 1,
+            )
+            Text(
+                text = number,
+                color = textColor,
+                fontSize = fontSizeSp.sp,
+                lineHeight = lineHeightSp.sp,
+                fontWeight = fontWeight,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/**
+ * Ordered Series season-count group: number RIGHT, `موسم` MIDDLE, existing Layers icon LEFT.
+ */
+@Composable
+internal fun SeriesSeasonCountInline(
+    count: Int,
+    iconSizeDp: Int,
+    fontSizeSp: Int,
+    lineHeightSp: Int,
+    iconTint: Color,
+    textColor: Color,
+    fontWeight: FontWeight = FontWeight.Bold,
+    modifier: Modifier = Modifier,
+) {
+    OrderedNumberWordInline(
+        count = count,
+        word = "موسم",
+        fontSizeSp = fontSizeSp,
+        lineHeightSp = lineHeightSp,
+        textColor = textColor,
+        modifier = modifier,
+        icon = Icons.Rounded.Layers,
+        iconSizeDp = iconSizeDp,
+        iconTint = iconTint,
+        fontWeight = fontWeight,
+    )
+}
+
+/** Ordered Series aggregate count group: number RIGHT, fixed singular word MIDDLE, no icon. */
+@Composable
+internal fun SeriesEpisodeCountInline(
+    count: Int,
+    word: String = "حلقة",
+    fontSizeSp: Int,
+    lineHeightSp: Int,
+    textColor: Color,
+    fontWeight: FontWeight = FontWeight.Bold,
+    modifier: Modifier = Modifier,
+) {
+    OrderedNumberWordInline(
+        count = count,
+        word = word,
+        fontSizeSp = fontSizeSp,
+        lineHeightSp = lineHeightSp,
+        textColor = textColor,
+        modifier = modifier,
+        fontWeight = fontWeight,
+    )
+}
+
+/**
+ * Shared accepted boxed catalog card: square artwork plus a fixed two-line title and one metadata
+ * footer slot. Movies and Series supply their own truthful footer metadata while geometry, focus,
+ * long-press favorite, fallback artwork and reserved footer slots stay identical.
+ */
+@Composable
+internal fun BoxedCatalogCard(
     item: ContentItem,
     isFavorite: Boolean,
     onClick: () -> Unit,
@@ -806,35 +913,13 @@ fun MoviesCatalogBoxedCard(
     onFocused: (() -> Unit)? = null,
     artworkHeightDp: Dp? = null,
     onFooterHeightMeasured: ((Int) -> Unit)? = null,
+    footerPrimary: String?,
+    footerSecondary: String?,
+    footerSecondaryIcon: ImageVector,
+    footerSeasonCount: Int? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
-    val context = LocalContext.current
-    val metadataStore = remember(context) { HomeHeroMetadataStore.get(context) }
-    val metadataOwner = metadataStore.currentOwner()
-    val viewModel = remember(context) {
-        context.findViewModelStoreOwner()?.let { owner -> ViewModelProvider(owner)[HulkViewModel::class.java] }
-    }
-    var verifiedMovieMetadata by remember(item.id, metadataOwner) {
-        val cached = metadataStore.cached(metadataOwner, item)
-        mutableStateOf(
-            VerifiedMovieCardMetadata(
-                quality = cached.quality,
-                durationMs = cached.durationMs,
-            ),
-        )
-    }
-    LaunchedEffect(item.id, metadataOwner, viewModel) {
-        if (viewModel != null) {
-            viewModel.prefetchMovieCardMetadata(item) { quality, durationMs ->
-                verifiedMovieMetadata = VerifiedMovieCardMetadata(
-                    quality = quality,
-                    durationMs = durationMs,
-                )
-            }
-        }
-    }
-
     var focused by remember { mutableStateOf(false) }
     var artworkFailed by remember(item.posterUrl) { mutableStateOf(false) }
     var remoteLongPressHandled by remember { mutableStateOf(false) }
@@ -854,8 +939,9 @@ fun MoviesCatalogBoxedCard(
         }
     }
     val shape = RoundedCornerShape(if (adaptiveUi.isTelevision) 12.dp else 10.dp)
-    val rating = compactMovieRating(item.rating)
-    val duration = compactMovieDuration(verifiedMovieMetadata.durationMs)
+    val rating = footerPrimary
+    val duration = footerSecondary
+    val secondSecondaryPresent = footerSeasonCount != null || duration != null
     Column(
         modifier = modifier
             .then(focusTransform)
@@ -997,7 +1083,7 @@ fun MoviesCatalogBoxedCard(
                         maxLines = 1,
                         minLines = 1,
                     )
-                    if (rating != null && duration != null) {
+                    if (rating != null && secondSecondaryPresent) {
                         Spacer(Modifier.width(7.dp))
                         Box(
                             Modifier
@@ -1007,28 +1093,155 @@ fun MoviesCatalogBoxedCard(
                         )
                         Spacer(Modifier.width(7.dp))
                     }
-                    if (duration != null) {
-                        Icon(
-                            imageVector = Icons.Rounded.Schedule,
-                            contentDescription = null,
-                            tint = colors.gold,
-                            modifier = Modifier.size(12.dp),
+                    if (footerSeasonCount != null) {
+                        SeriesSeasonCountInline(
+                            count = footerSeasonCount,
+                            iconSizeDp = 12,
+                            fontSizeSp = 10,
+                            lineHeightSp = 12,
+                            iconTint = colors.gold,
+                            textColor = colors.text,
                         )
-                        Spacer(Modifier.width(3.dp))
+                    } else {
+                        if (duration != null) {
+                            Icon(
+                                imageVector = footerSecondaryIcon,
+                                contentDescription = null,
+                                tint = colors.gold,
+                                modifier = Modifier.size(12.dp),
+                            )
+                            Spacer(Modifier.width(3.dp))
+                        }
+                        Text(
+                            text = duration.orEmpty(),
+                            color = if (duration != null) colors.text else Color.Transparent,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            minLines = 1,
+                        )
                     }
-                    Text(
-                        text = duration.orEmpty(),
-                        color = if (duration != null) colors.text else Color.Transparent,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        minLines = 1,
-                    )
                 }
             }
         }
     }
+
 }
+
+/**
+ * Owner-approved Movies catalog card: square artwork area with natural crop plus one fixed footer.
+ *
+ * Every card reserves exactly two title lines (a one-line title leaves the second line blank) and
+ * an identical metadata row even when values are missing, so loading/cached metadata arrival and
+ * missing values never change neighboring card geometry. Warm-gold star/clock/heart icons sit on
+ * the physical left of their ivory values.
+ */
+@Composable
+fun MoviesCatalogBoxedCard(
+    item: ContentItem,
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
+    onFocused: (() -> Unit)? = null,
+    artworkHeightDp: Dp? = null,
+    onFooterHeightMeasured: ((Int) -> Unit)? = null,
+) {
+    val context = LocalContext.current
+    val metadataStore = remember(context) { HomeHeroMetadataStore.get(context) }
+    val metadataOwner = metadataStore.currentOwner()
+    val viewModel = remember(context) {
+        context.findViewModelStoreOwner()?.let { owner -> ViewModelProvider(owner)[HulkViewModel::class.java] }
+    }
+    var verifiedMovieMetadata by remember(item.id, metadataOwner) {
+        val cached = metadataStore.cached(metadataOwner, item)
+        mutableStateOf(
+            VerifiedMovieCardMetadata(
+                quality = cached.quality,
+                durationMs = cached.durationMs,
+            ),
+        )
+    }
+    LaunchedEffect(item.id, metadataOwner, viewModel) {
+        if (viewModel != null) {
+            viewModel.prefetchMovieCardMetadata(item) { quality, durationMs ->
+                verifiedMovieMetadata = VerifiedMovieCardMetadata(
+                    quality = quality,
+                    durationMs = durationMs,
+                )
+            }
+        }
+    }
+
+    BoxedCatalogCard(
+        item = item,
+        isFavorite = isFavorite,
+        onClick = onClick,
+        modifier = modifier,
+        onLongClick = onLongClick,
+        onFocused = onFocused,
+        artworkHeightDp = artworkHeightDp,
+        onFooterHeightMeasured = onFooterHeightMeasured,
+        footerPrimary = compactMovieRating(item.rating),
+        footerSecondary = compactMovieDuration(verifiedMovieMetadata.durationMs),
+        footerSecondaryIcon = Icons.Rounded.Schedule,
+    )
+}
+
+/**
+ * Series catalog card: the shared boxed geometry with the real Series metadata footer
+ * (rating and verified season count only; missing data stays an empty reserved slot).
+ */
+@Composable
+fun SeriesCatalogBoxedCard(
+    item: ContentItem,
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
+    onFocused: (() -> Unit)? = null,
+    artworkHeightDp: Dp? = null,
+    onFooterHeightMeasured: ((Int) -> Unit)? = null,
+) {
+    require(item.type == ContentType.SERIES)
+    val context = LocalContext.current
+    val metadataStore = remember(context) { SeriesCardMetadataStore.get(context) }
+    val metadataOwner = metadataStore.currentOwner()
+    var metadata by remember(item.id, metadataOwner) {
+        mutableStateOf(metadataStore.cached(metadataOwner, item.id))
+    }
+    LaunchedEffect(item.id, metadataOwner, metadataStore) {
+        val owner = metadataOwner ?: return@LaunchedEffect
+        val loaded = metadataStore.metadata(owner, item.id)
+        metadataStore.publishIfCurrent(owner) { metadata = loaded }
+    }
+    val seasonCount = metadata.seasonCount?.takeIf { it > 0 }
+    BoxedCatalogCard(
+        item = item,
+        isFavorite = isFavorite,
+        onClick = onClick,
+        modifier = modifier,
+        onLongClick = onLongClick,
+        onFocused = onFocused,
+        artworkHeightDp = artworkHeightDp,
+        onFooterHeightMeasured = onFooterHeightMeasured,
+        footerPrimary = compactSeriesCardRating(item.rating),
+        footerSecondary = null,
+        footerSecondaryIcon = Icons.Rounded.Layers,
+        footerSeasonCount = seasonCount,
+    )
+}
+
+private fun compactSeriesCardRating(raw: String?): String? {
+    val value = raw
+        ?.trim()
+        ?.toDoubleOrNull()
+        ?.takeIf { it > 0.0 }
+        ?: return null
+    return String.format(Locale.US, "%.1f", value)
+}
+
+
 
 @Composable
 fun HistoryCard(
@@ -1251,6 +1464,77 @@ internal fun movieRecentTimeText(positionMs: Long, durationMs: Long): String {
     }
 }
 
+/** Elapsed part of the approved Recent time group; the numeric value stays internally LTR. */
+internal fun movieRecentElapsedText(positionMs: Long): String = formatHistoryTime(positionMs)
+
+/** Total part of the approved Recent time group; null when no real positive duration is stored. */
+internal fun movieRecentTotalText(durationMs: Long): String? =
+    if (durationMs > 0L) formatHistoryTime(durationMs) else null
+
+/**
+ * Shared Episodes/Series Recent time group reused by [BoxedHistoryCard] and the Series episode
+ * card footer. Forced LTR keeps elapsed then total in numeric reading order, and separate layout
+ * elements keep the warm-gold clock physically LEFT of the time so the Arabic layout direction
+ * can never move the icon right of the time or reverse the two values. A blank [elapsedText]
+ * keeps the same measured height with invisible content (stable footer) instead of collapsing it.
+ */
+@Composable
+internal fun RecentTimeRow(
+    elapsedText: String,
+    totalText: String?,
+    iconSize: Dp,
+    fontSize: TextUnit,
+    lineHeight: TextUnit,
+    valueColor: Color = LocalHulkColors.current.text,
+) {
+    val colors = LocalHulkColors.current
+    val hasTime = elapsedText.isNotBlank()
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Schedule,
+                contentDescription = null,
+                tint = if (hasTime) colors.gold else Color.Transparent,
+                modifier = Modifier.size(iconSize),
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = elapsedText,
+                color = if (hasTime) valueColor else Color.Transparent,
+                fontSize = fontSize,
+                lineHeight = lineHeight,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                minLines = 1,
+            )
+            if (!totalText.isNullOrBlank()) {
+                Text(
+                    text = " / ",
+                    color = valueColor,
+                    fontSize = fontSize,
+                    lineHeight = lineHeight,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    minLines = 1,
+                )
+                Text(
+                    text = totalText,
+                    color = valueColor,
+                    fontSize = fontSize,
+                    lineHeight = lineHeight,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    minLines = 1,
+                )
+            }
+        }
+    }
+}
+
 /**
  * Movie-only Recent played fraction. Invalid totals yield an empty (muted) track instead of a
  * fabricated minimum; legitimate fractions are clamped and a tiny value stays tiny.
@@ -1260,23 +1544,33 @@ internal fun movieRecentPlayedFraction(positionMs: Long, durationMs: Long): Floa
     return (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
 }
 
+/** Real Series season/episode identity for the Recent card; null when the entry carries none. */
+internal fun seriesHistoryIdentityText(entry: HistoryEntry): String? {
+    val season = entry.season ?: return null
+    val episode = entry.episodeNumber ?: return null
+    return "الموسم $season • الحلقة $episode"
+}
+
 /**
- * Movie-only Recent card. Reuses the approved catalog card chrome (square artwork, common
- * two-line title area and identical footer paddings) and replaces the catalog metadata row with
- * the authoritative saved time and a thin informational progress track. The warm-gold clock sits
- * physically LEFT of the LTR numeric group; the gold played segment starts at the physical RIGHT
- * (RTL layout start), matching [sa.hulksa.player.ui.screens.MovieInlineResumeStrip]. No rating,
- * seek thumb, fake minimum fill or extra playback/delete control. Long-press removal keeps the
- * exact [HistoryCard] semantics including the pre-removal focus move.
+ * Shared boxed Recent card (Movies and Series). Reuses the approved catalog card chrome (square
+ * artwork, common two-line title area and identical footer paddings) and replaces the catalog
+ * metadata row with the authoritative saved time and a thin informational progress track. The
+ * warm-gold clock sits physically LEFT of the LTR numeric group; the gold played segment starts at
+ * the physical RIGHT (RTL layout start), matching [sa.hulksa.player.ui.screens.MovieInlineResumeStrip].
+ * `identityText`/`reserveIdentitySlot` add the Series season/episode line without changing the
+ * Movie footer. No rating, seek thumb, fake minimum fill or extra playback/delete control.
+ * Long-press removal keeps the exact [HistoryCard] semantics including the pre-removal focus move.
  */
 @Composable
-fun MoviesHistoryCard(
+fun BoxedHistoryCard(
     entry: HistoryEntry,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onFocused: (() -> Unit)? = null,
     artworkHeightDp: Dp? = null,
     onFooterHeightMeasured: ((Int) -> Unit)? = null,
+    identityText: String? = null,
+    reserveIdentitySlot: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -1307,7 +1601,6 @@ fun MoviesHistoryCard(
     }
     val shape = RoundedCornerShape(if (adaptiveUi.isTelevision) 12.dp else 10.dp)
     val title = historyPrimaryTitle(entry)
-    val timeText = movieRecentTimeText(entry.positionMs, entry.durationMs)
     val playedFraction = movieRecentPlayedFraction(entry.positionMs, entry.durationMs)
     val dismissFromContinueWatching: (Boolean) -> Unit = { moveFocusFirst ->
         if (canDismiss && viewModel != null) {
@@ -1418,30 +1711,29 @@ fun MoviesHistoryCard(
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(5.dp))
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Schedule,
-                        contentDescription = null,
-                        tint = colors.gold,
-                        modifier = Modifier.size(12.dp),
-                    )
-                    Spacer(Modifier.width(4.dp))
+            if (reserveIdentitySlot || !identityText.isNullOrBlank()) {
+                Spacer(Modifier.height(3.dp))
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                     Text(
-                        text = timeText,
-                        color = colors.text,
-                        fontSize = 10.sp,
+                        text = identityText.orEmpty(),
+                        color = colors.gold,
+                        fontSize = if (adaptiveUi.isTelevision) 10.sp else 9.sp,
+                        lineHeight = if (adaptiveUi.isTelevision) 12.sp else 11.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         minLines = 1,
+                        textAlign = TextAlign.Center,
                     )
                 }
             }
+            Spacer(Modifier.height(5.dp))
+            RecentTimeRow(
+                elapsedText = movieRecentElapsedText(entry.positionMs),
+                totalText = movieRecentTotalText(entry.durationMs),
+                iconSize = 12.dp,
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+            )
             Spacer(Modifier.height(6.dp))
             Box(
                 Modifier

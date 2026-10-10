@@ -170,86 +170,6 @@ internal fun vodSeekThumbCenterPx(
 }
 
 /**
- * Compact time-only preview bubble width from the measured timestamp plus accepted horizontal
- * padding, bounded by the available timeline width and never an image-sized reservation.
- */
-internal fun vodPreviewFallbackWidthPx(
-    textWidthPx: Int,
-    horizontalPaddingPx: Int,
-    availableWidthPx: Int,
-): Int {
-    val padding = horizontalPaddingPx.coerceAtLeast(0)
-    val wanted = (textWidthPx.coerceAtLeast(0) + 2 * padding).coerceAtLeast(padding * 2)
-    return if (availableWidthPx > 0) wanted.coerceAtMost(availableWidthPx) else wanted
-}
-
-/**
- * Preview pointer x-offset inside the clamped preview card, so the triangle stays under the real
- * seek thumb at the timeline coordinate while the bubble moves for edge clamping.
- */
-internal fun vodPreviewPointerOffsetPx(
-    thumbXpx: Float,
-    cardLeftPx: Float,
-    cardWidthPx: Float,
-    pointerWidthPx: Float,
-): Float {
-    val maxOffset = (cardWidthPx - pointerWidthPx).coerceAtLeast(0f)
-    return (thumbXpx - cardLeftPx - pointerWidthPx / 2f).coerceIn(0f, maxOffset)
-}
-
-/**
- * Clamped preview bubble position for a thumb on the measured timeline. The bubble stays inside the
- * timeline width while its pointer keeps the real thumb coordinate.
- */
-internal fun vodPreviewCardLeftPx(
-    thumbXpx: Float,
-    cardWidthPx: Float,
-    timelineWidthPx: Float,
-): Float = (thumbXpx - cardWidthPx / 2f).coerceIn(0f, (timelineWidthPx - cardWidthPx).coerceAtLeast(0f))
-
-/**
- * Measured placement of the seek-preview overlay.
- *
- * `heightContributionPx` is always zero: the overlay draws above the timeline without entering the
- * control-strip measurement, so the transport allocation cannot move when a preview appears.
- */
-internal data class VodPreviewOverlayPlacement(
-    val cardLeftPx: Float,
-    val pointerOffsetPx: Float,
-    val topOffsetPx: Float,
-    val heightContributionPx: Int,
-)
-
-internal fun vodPreviewOverlayPlacement(
-    thumbXpx: Float,
-    timelineWidthPx: Float,
-    timelineHeightPx: Float,
-    cardWidthPx: Float,
-    cardHeightPx: Float,
-    pointerWidthPx: Float,
-    pointerHeightPx: Float,
-    topGapPx: Float,
-): VodPreviewOverlayPlacement {
-    val cardLeft = vodPreviewCardLeftPx(
-        thumbXpx = thumbXpx,
-        cardWidthPx = cardWidthPx,
-        timelineWidthPx = timelineWidthPx,
-    )
-    return VodPreviewOverlayPlacement(
-        cardLeftPx = cardLeft,
-        pointerOffsetPx = vodPreviewPointerOffsetPx(
-            thumbXpx = thumbXpx,
-            cardLeftPx = cardLeft,
-            cardWidthPx = cardWidthPx,
-            pointerWidthPx = pointerWidthPx,
-        ),
-        // The pointer tip lands on the timeline vertical center; the bubble grows upward.
-        topOffsetPx = -(cardHeightPx + pointerHeightPx) + timelineHeightPx / 2f - topGapPx,
-        heightContributionPx = 0,
-    )
-}
-
-/**
  * Closed vertical focus cycle for the Movie More panel.
  *
  * Node 0 is the panel header and nodes 1..count-1 are the body rows. UP/DOWN wrap around the
@@ -367,92 +287,40 @@ internal fun vodSpeedLabel(speed: Float): String = when {
 internal fun vodNormalizedSpeed(speed: Float): Float =
     VOD_PLAYER_SPEED_OPTIONS.firstOrNull { kotlin.math.abs(it - speed) < 0.001f } ?: 1f
 
-/**
- * The bounded seek preview only attempts real frame decoding for direct, authorized media sources.
- * Playlists (.m3u/.m3u8) keep the timestamp-only fallback instead of pretending an image exists.
- */
-internal fun vodPreviewDecodableCandidate(candidate: String?): Boolean {
-    val source = candidate?.trim().orEmpty()
-    if (source.isBlank()) return false
-    val lower = source.lowercase()
-    if (lower.contains(".m3u8") || lower.contains(".m3u")) return false
-    return lower.startsWith("http://") ||
-        lower.startsWith("https://") ||
-        lower.startsWith("file://") ||
-        lower.startsWith("content://") ||
-        (!lower.contains("://") && source.contains('.'))
-}
-
-/** Quantize preview frames so a bounded cache can reuse them while scrubbing. */
-internal fun vodPreviewBucketMs(timeMs: Long, bucketMs: Long = 5_000L): Long =
-    (timeMs.coerceAtLeast(0L) / bucketMs) * bucketMs
-
+/** Clamped timeline fraction for a seek target; never produces an out-of-range thumb. */
 internal fun vodPreviewCardFraction(previewMs: Long, durationMs: Long): Float =
     if (durationMs <= 0L) 0f else (previewMs.toFloat() / durationMs).coerceIn(0f, 1f)
 
 /**
- * Movies TV preview window: it stays open while the actual timeline is focused or the existing
- * remote direct-seek mode remains active. The window is explicitly opt-in for Movies with
- * TV/remote input; Series, Live and touch callers keep their previous direct-seek behavior, and
- * hiding the controls (Back, modal, lock, error, disposal) suppresses the window with them.
- */
-internal fun vodPreviewWindowActive(
-    isMovie: Boolean,
-    isLive: Boolean,
-    remoteInput: Boolean,
-    controlsVisible: Boolean,
-    timelineFocused: Boolean,
-    directSeekActive: Boolean,
-): Boolean = isMovie && !isLive && remoteInput && controlsVisible &&
-    (timelineFocused || directSeekActive)
-
-/**
- * Effective seek-preview target.
- *
- * An explicit scrub intent (focus seed or touch drag) always publishes its own target. Otherwise
- * the resting hold stays visible only while the opt-in Movies TV window is active, so a committed
- * seek survives settlement and idle without following playback, and a closed window can never be
- * reopened by a late frame completion. Every non-opt-in caller keeps the pre-R22 transient
- * direct-seek target through [legacyFallbackTargetMs].
- */
-internal fun vodEffectivePreviewTargetMs(
-    scrubTargetMs: Long?,
-    holdTargetMs: Long?,
-    windowActive: Boolean,
-    legacyFallbackTargetMs: Long? = null,
-): Long? = scrubTargetMs ?: holdTargetMs?.takeIf { windowActive } ?: legacyFallbackTargetMs
-
-/**
  * Active-seek control visibility for the shared VOD strip.
  *
- * While the Movies TV timeline focus or the existing remote direct-seek interaction is active, the
- * controls stay usable; after the interaction exits, ordinary auto-hide resumes. The cancelled
- * Movies preview window no longer participates in control visibility, and non-opt-in callers keep
+ * While the VOD TV timeline focus or the existing remote direct-seek interaction is active, the
+ * controls stay usable; after the interaction exits, ordinary auto-hide resumes. Live callers keep
  * their existing behavior.
  */
 internal fun vodActiveSeekHoldsControls(
-    isMovie: Boolean,
+    isVod: Boolean,
     remoteInput: Boolean,
     timelineFocused: Boolean,
     directSeekActive: Boolean,
-): Boolean = isMovie && remoteInput && (timelineFocused || directSeekActive)
+): Boolean = isVod && remoteInput && (timelineFocused || directSeekActive)
 
 /**
- * Whether Movie progress dispatches must stay blocked while the Resume decision is pending.
+ * Whether VOD progress dispatches must stay blocked while the Resume decision is pending.
  *
- * A Movie opened with a saved position and resume playback enabled prepares at zero behind the
- * decision, so video preparation, cancellation, lifecycle/disposal and late callbacks must not
- * overwrite the stored position or duration. Non-Movies and Movies without a pending decision keep
- * their existing progress-saving behavior.
+ * A Movie or Series episode opened with a saved position and resume playback enabled prepares at
+ * zero behind the decision, so video preparation, cancellation, lifecycle/disposal and late
+ * callbacks must not overwrite the stored position or duration. Live and VOD entries without a
+ * pending decision keep their existing progress-saving behavior.
  */
-internal fun movieProgressPersistenceBlockedInitially(
-    isMovie: Boolean,
+internal fun vodProgressPersistenceBlockedInitially(
+    isVod: Boolean,
     resumePlaybackEnabled: Boolean,
     resumePositionMs: Long,
-): Boolean = isMovie && resumePlaybackEnabled && resumePositionMs > 0L
+): Boolean = isVod && resumePlaybackEnabled && resumePositionMs > 0L
 
 /** An explicit Resume/Restart acceptance clears the block permanently for the request. */
-internal fun movieProgressPersistenceBlockedAfterDecision(
+internal fun vodProgressPersistenceBlockedAfterDecision(
     blocked: Boolean,
     decisionAccepted: Boolean,
 ): Boolean = blocked && !decisionAccepted
@@ -489,22 +357,4 @@ internal fun movieResumeBackDisposition(
     isBackKey && remoteInput -> MovieResumeBackDisposition.HANDLE_AND_CONSUME
     isBackKey -> MovieResumeBackDisposition.PASS_TO_SYSTEM
     else -> MovieResumeBackDisposition.PASS_TO_DIALOG
-}
-
-/**
- * Bounded speculative Movies seek-preview warm-up set around a prepared playback/resume position.
- *
- * The lookahead reuses the existing five-second bucket and the default ten-second seek step: the
- * anchor bucket plus three forward buckets (about 15 s) covers one forward step plus the bucket
- * right after it, and never exceeds half of the eight-frame preview cache.
- */
-internal const val VOD_PREVIEW_WARM_UP_BUCKETS = 4
-
-internal fun vodPreviewWarmUpBuckets(
-    timeMs: Long,
-    count: Int = VOD_PREVIEW_WARM_UP_BUCKETS,
-): List<Long> {
-    if (count <= 0) return emptyList()
-    val anchor = vodPreviewBucketMs(timeMs)
-    return List(count) { index -> anchor + index * 5_000L }
 }

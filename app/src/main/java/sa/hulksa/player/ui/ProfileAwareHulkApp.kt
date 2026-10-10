@@ -70,6 +70,7 @@ import sa.hulksa.player.ui.screens.ProfilePinUnlockScreen
 import sa.hulksa.player.ui.screens.RequiredUpdateScreen
 import sa.hulksa.player.ui.screens.removeLiveCategoryVisibilityProfileState
 import sa.hulksa.player.ui.screens.removeMovieCategoryVisibilityProfileState
+import sa.hulksa.player.ui.screens.removeSeriesCategoryVisibilityProfileState
 import sa.hulksa.player.ui.screens.removeLiveTvProProfileState
 
 internal val LocalProfileSwitchRequester = staticCompositionLocalOf<() -> Unit> { {} }
@@ -1143,6 +1144,7 @@ fun ProfileAwareHulkApp(
                             context.removeLiveTvProProfileState(expectedAccountId, profileId)
                             context.removeLiveCategoryVisibilityProfileState(expectedAccountId, profileId)
                             context.removeMovieCategoryVisibilityProfileState(expectedAccountId, profileId)
+                            context.removeSeriesCategoryVisibilityProfileState(expectedAccountId, profileId)
                             profilePreferencesStore.removeProfilePreferences(
                                 expectedAccountId,
                                 profileId,

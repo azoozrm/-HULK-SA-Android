@@ -88,12 +88,12 @@ class MoviesOfflinePolicyTest {
     }
 
     @Test
-    fun moviePlayerPresentationIsExclusiveForEveryCombination() {
+    fun vodPlayerPresentationIsExclusiveForEveryCombination() {
         // Remote movie, pending Resume, offline at entry, no final error yet.
         assertEquals(
-            MoviePlayerPresentation.ERROR_CARD,
-            moviePlayerPresentation(
-                isMovie = true,
+            VodPlayerPresentation.ERROR_CARD,
+            vodPlayerPresentation(
+                isVod = true,
                 localPlayback = false,
                 networkAvailable = false,
                 offlineFailure = false,
@@ -104,9 +104,9 @@ class MoviesOfflinePolicyTest {
         )
         // Remote movie, pending Resume, offline, generic final error already present.
         assertEquals(
-            MoviePlayerPresentation.ERROR_CARD,
-            moviePlayerPresentation(
-                isMovie = true,
+            VodPlayerPresentation.ERROR_CARD,
+            vodPlayerPresentation(
+                isVod = true,
                 localPlayback = false,
                 networkAvailable = false,
                 offlineFailure = true,
@@ -117,9 +117,9 @@ class MoviesOfflinePolicyTest {
         )
         // Connected pending Resume with a generic final failure.
         assertEquals(
-            MoviePlayerPresentation.ERROR_CARD,
-            moviePlayerPresentation(
-                isMovie = true,
+            VodPlayerPresentation.ERROR_CARD,
+            vodPlayerPresentation(
+                isVod = true,
                 localPlayback = false,
                 networkAvailable = true,
                 offlineFailure = false,
@@ -130,9 +130,9 @@ class MoviesOfflinePolicyTest {
         )
         // Connected pending Resume only.
         assertEquals(
-            MoviePlayerPresentation.RESUME,
-            moviePlayerPresentation(
-                isMovie = true,
+            VodPlayerPresentation.RESUME,
+            vodPlayerPresentation(
+                isVod = true,
                 localPlayback = false,
                 networkAvailable = true,
                 offlineFailure = false,
@@ -143,9 +143,9 @@ class MoviesOfflinePolicyTest {
         )
         // Normal player.
         assertEquals(
-            MoviePlayerPresentation.PLAYER,
-            moviePlayerPresentation(
-                isMovie = true,
+            VodPlayerPresentation.PLAYER,
+            vodPlayerPresentation(
+                isVod = true,
                 localPlayback = false,
                 networkAvailable = true,
                 offlineFailure = false,
@@ -157,9 +157,9 @@ class MoviesOfflinePolicyTest {
         // Local downloaded movie never takes the offline classification; a real local media
         // failure still uses the generic Movie error card.
         assertEquals(
-            MoviePlayerPresentation.ERROR_CARD,
-            moviePlayerPresentation(
-                isMovie = true,
+            VodPlayerPresentation.ERROR_CARD,
+            vodPlayerPresentation(
+                isVod = true,
                 localPlayback = true,
                 networkAvailable = false,
                 offlineFailure = true,
@@ -170,9 +170,9 @@ class MoviesOfflinePolicyTest {
         )
         // A local downloaded movie with usable local media plays without the offline card.
         assertEquals(
-            MoviePlayerPresentation.PLAYER,
-            moviePlayerPresentation(
-                isMovie = true,
+            VodPlayerPresentation.PLAYER,
+            vodPlayerPresentation(
+                isVod = true,
                 localPlayback = true,
                 networkAvailable = false,
                 offlineFailure = false,
@@ -181,11 +181,11 @@ class MoviesOfflinePolicyTest {
                 offlineInitial = false,
             ),
         )
-        // Series keeps its own legacy route.
+        // Live keeps its own channel-error route (no VOD saved-position or error-card path here).
         assertEquals(
-            MoviePlayerPresentation.RESUME,
-            moviePlayerPresentation(
-                isMovie = false,
+            VodPlayerPresentation.RESUME,
+            vodPlayerPresentation(
+                isVod = false,
                 localPlayback = false,
                 networkAvailable = true,
                 offlineFailure = false,
@@ -195,9 +195,22 @@ class MoviesOfflinePolicyTest {
             ),
         )
         assertEquals(
-            MoviePlayerPresentation.PLAYER,
-            moviePlayerPresentation(
-                isMovie = false,
+            VodPlayerPresentation.PLAYER,
+            vodPlayerPresentation(
+                isVod = false,
+                localPlayback = false,
+                networkAvailable = true,
+                offlineFailure = false,
+                finalErrorPresent = true,
+                resumePromptPending = false,
+                offlineInitial = false,
+            ),
+        )
+        // A Series episode uses the shared VOD error card exactly like a Movie.
+        assertEquals(
+            VodPlayerPresentation.ERROR_CARD,
+            vodPlayerPresentation(
+                isVod = true,
                 localPlayback = false,
                 networkAvailable = true,
                 offlineFailure = false,
@@ -209,12 +222,13 @@ class MoviesOfflinePolicyTest {
     }
 
     @Test
-    fun moviePlayerErrorCopyIsOfflineOnlyForRealConnectivityLoss() {
+    fun vodPlayerErrorCopyIsOfflineOnlyForRealConnectivityLoss() {
         val offlinePending = moviePlayerErrorCopy(
             offline = true,
             resumePending = true,
             formattedSavedTime = "03:52",
             failureMessage = null,
+            mediaLabel = "الفلم",
         )
         assertEquals("لا يوجد اتصال بالانترنت", offlinePending.title)
         assertEquals("اتصل بالانترنت لاكمال المشاهدة", offlinePending.body)
@@ -225,6 +239,7 @@ class MoviesOfflinePolicyTest {
             resumePending = false,
             formattedSavedTime = "03:52",
             failureMessage = null,
+            mediaLabel = "الفلم",
         )
         assertEquals("انقطع اتصال الانترنت", offlineInterrupted.title)
         assertEquals("سيعود التشغيل تلقائيا عند عودة الاتصال", offlineInterrupted.body)
@@ -234,6 +249,7 @@ class MoviesOfflinePolicyTest {
             resumePending = false,
             formattedSavedTime = "03:52",
             failureMessage = "تعذر تشغيل المحتوى. اعد المحاولة او اختر مصدرا اخر عند توفره.",
+            mediaLabel = "الفلم",
         )
         assertEquals("تعذر تشغيل الفلم", generic.title)
         assertEquals("تعذر تشغيل المحتوى. اعد المحاولة او اختر مصدرا اخر عند توفره.", generic.body)
@@ -246,17 +262,27 @@ class MoviesOfflinePolicyTest {
             resumePending = true,
             formattedSavedTime = "03:52",
             failureMessage = "  ",
+            mediaLabel = "الفلم",
         )
         assertEquals("تعذر تشغيل الفلم", genericFallback.title)
         assertEquals("حدث خطا اثناء التشغيل. حاول مرة اخرى.", genericFallback.body)
         assertEquals("توقفت عند 03:52", genericFallback.context)
+
+        val seriesGeneric = moviePlayerErrorCopy(
+            offline = false,
+            resumePending = false,
+            formattedSavedTime = "03:52",
+            failureMessage = null,
+            mediaLabel = "الحلقة",
+        )
+        assertEquals("تعذر تشغيل الحلقة", seriesGeneric.title)
     }
 
     @Test
-    fun movieOfflineInitialEntryNeverWaitsForTheDelayedEffect() {
+    fun vodOfflineInitialEntryNeverWaitsForTheDelayedEffect() {
         assertTrue(
-            movieOfflineInitialVisible(
-                isMovie = true,
+            vodOfflineInitialVisible(
+                isVod = true,
                 localPlayback = false,
                 networkAvailable = false,
                 isPlaying = false,
@@ -264,8 +290,8 @@ class MoviesOfflinePolicyTest {
             ),
         )
         assertFalse(
-            movieOfflineInitialVisible(
-                isMovie = true,
+            vodOfflineInitialVisible(
+                isVod = true,
                 localPlayback = false,
                 networkAvailable = true,
                 isPlaying = false,
@@ -273,8 +299,8 @@ class MoviesOfflinePolicyTest {
             ),
         )
         assertFalse(
-            movieOfflineInitialVisible(
-                isMovie = true,
+            vodOfflineInitialVisible(
+                isVod = true,
                 localPlayback = false,
                 networkAvailable = false,
                 isPlaying = true,
@@ -282,8 +308,8 @@ class MoviesOfflinePolicyTest {
             ),
         )
         assertFalse(
-            movieOfflineInitialVisible(
-                isMovie = false,
+            vodOfflineInitialVisible(
+                isVod = false,
                 localPlayback = false,
                 networkAvailable = false,
                 isPlaying = false,
@@ -291,8 +317,8 @@ class MoviesOfflinePolicyTest {
             ),
         )
         assertFalse(
-            movieOfflineInitialVisible(
-                isMovie = true,
+            vodOfflineInitialVisible(
+                isVod = true,
                 localPlayback = true,
                 networkAvailable = false,
                 isPlaying = false,
