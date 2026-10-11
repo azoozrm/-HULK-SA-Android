@@ -1753,6 +1753,157 @@ fun BoxedHistoryCard(
     }
 }
 
+/**
+ * Home live channel card: 16:9 contained channel artwork, the real channel name and the
+ * «بث مباشر» caption in one centered footer. Live cards never grow a VOD duration, rating or
+ * resume footer. Focus uses the shared boxed-card treatment inside stable bounds; the favorite
+ * badge and long-press behavior match the accepted boxed VOD card family. The last-channel
+ * variant passes no favorite state and no long-press, preserving its open-only behavior.
+ */
+@Composable
+fun LiveChannelHomeCard(
+    name: String,
+    artworkUrl: String?,
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
+    onFocused: (() -> Unit)? = null,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    var focused by remember { mutableStateOf(false) }
+    var artworkFailed by remember(artworkUrl) { mutableStateOf(false) }
+    var remoteLongPressHandled by remember(name) { mutableStateOf(false) }
+    val showFocused = focused && adaptiveUi.showFocusHighlights
+    val scale = if (adaptiveUi.isTelevision) {
+        1f
+    } else {
+        animateFloatAsState(if (showFocused) 1.035f else 1f, label = "liveChannelHomeScale").value
+    }
+    val focusTransform = if (adaptiveUi.isTelevision) {
+        Modifier
+    } else {
+        Modifier.graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+            shadowElevation = if (showFocused) 14.dp.toPx() else 0f
+        }
+    }
+    val shape = RoundedCornerShape(if (adaptiveUi.isTelevision) 12.dp else 10.dp)
+    Column(
+        modifier = modifier
+            .then(focusTransform)
+            .clip(shape)
+            .background(Color(0xFF10110C))
+            .goldFocusEdge(shape = shape, visible = showFocused && adaptiveUi.isTelevision)
+            .border(
+                width = if (showFocused) 2.dp else 1.dp,
+                color = if (showFocused) colors.goldBright else Color.White.copy(alpha = .10f),
+                shape = shape,
+            )
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused?.invoke()
+            }
+            .onPreviewKeyEvent { event ->
+                if (onLongClick == null || !event.nativeKeyEvent.isRemoteSelectKey()) {
+                    false
+                } else if (event.type == KeyEventType.KeyDown) {
+                    if (
+                        (event.nativeKeyEvent.repeatCount > 0 || event.nativeKeyEvent.isLongPress) &&
+                        !remoteLongPressHandled
+                    ) {
+                        remoteLongPressHandled = true
+                        onLongClick()
+                    }
+                    true
+                } else if (event.type == KeyEventType.KeyUp) {
+                    if (!remoteLongPressHandled) onClick()
+                    remoteLongPressHandled = false
+                    true
+                } else {
+                    false
+                }
+            }
+            .combinedClickable(
+                role = Role.Button,
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .background(Color(0xFF15160F)),
+        ) {
+            if (!artworkUrl.isNullOrBlank() && !artworkFailed) {
+                AsyncImage(
+                    model = artworkUrl,
+                    contentDescription = name,
+                    modifier = Modifier.fillMaxSize().padding(8.dp),
+                    contentScale = ContentScale.Fit,
+                    placeholder = painterResource(R.drawable.hulk_sa_channel_placeholder),
+                    onError = { artworkFailed = true },
+                )
+            } else {
+                BrandLogo(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 30.dp, vertical = 10.dp)
+                        .graphicsLayer { alpha = .5f },
+                )
+            }
+            if (isFavorite) {
+                Box(
+                    modifier = Modifier
+                        .align(AbsoluteAlignment.TopRight)
+                        .padding(7.dp)
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = .78f))
+                        .border(1.dp, Color.White.copy(alpha = .16f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Favorite,
+                        contentDescription = null,
+                        tint = colors.gold,
+                        modifier = Modifier.size(13.dp),
+                    )
+                }
+            }
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF12130E))
+                .padding(horizontal = 8.dp, vertical = 7.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = name,
+                color = colors.text,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (adaptiveUi.isTelevision) 12.sp else 11.sp,
+                lineHeight = if (adaptiveUi.isTelevision) 15.sp else 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = "بث مباشر",
+                color = colors.textMuted,
+                fontSize = if (adaptiveUi.isTelevision) 10.sp else 9.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
 @Composable
 fun ChannelListItem(
     item: ContentItem,

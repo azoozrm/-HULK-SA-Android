@@ -455,3 +455,153 @@ Primary source owners, relative to repository:
 
 Read the active source and live contracts. Old mockups and handoff snapshots illustrate history;
 they do not override the accepted Movies implementation and later owner decisions recorded here.
+
+## 12. Home section adoption record
+
+The owner accepted the Home model `home-design-20261009-r01`
+(`HULK-Home-Design-20261009.zip`, SHA-256
+`2a91f9c8a164d3761e52e0b58bb9b221f5f5ea4d65ea30da5ba61a6a96eb9a7d`) and directed its Android
+implementation (`home-ui-alignment-20261010`). The adopted Home presentation reuses this
+contract's foundations and adds no competing owners:
+
+- Hero keeps the original backdrop/gradient, the real content title, plot, genre and available
+  technical metadata, the physical right-aligned Arabic composition, the gold primary action on
+  the existing `onOpen` route at physical right and the honest favorite state to its left. Focus
+  keeps stable geometry (`scaleOnFocus = false`) with the shared edge; no focus scale, clipping or
+  neighbor movement.
+- Home VOD rows use `MoviesCatalogBoxedCard` / `SeriesCatalogBoxedCard` with their real footers;
+  Continue Watching uses the shared `BoxedHistoryCard` with the real HistoryEntry identity, saved
+  time, played fraction and existing long-press removal; live channels use a contained 16:9 logo
+  card with the real channel name and `بث مباشر`, and never a VOD duration/rating/resume footer.
+- One Home message zone directly below the hero presents the eligible renewal
+  (`GrowthPolicy.evaluateRenewalBanner`), the eligible Operations announcement and the current
+  OPTIONAL update decision. The existing automatic overlays and status banner stay unchanged
+  outside Home and before Home is ready; they are suppressed only while the active Home zone owns
+  the same message id/version, and an explicit card action opens that message's existing complete
+  detail. No second policy evaluator, queue, downloader or persistence owner is created.
+
+Implementation status: local Android candidate under owner visual review — **PENDING**. Model
+content, titles, ratings, badges, expiry and download values in the reference boards remain
+illustrative and were not copied into production data.
+
+### 12.1 Owner correction — Home hero details formatting (2026-10-10)
+
+The owner reviewed the R02 Android Home and corrected only the hero presentation; the rest of
+section 12 remains valid. The R02 eyebrow/facts/action presentation is superseded as follows:
+
+- The `مختار لك` eyebrow is removed from the Home hero on TV and phone (no replacement label and
+  no reserved empty line).
+- Home hero facts delegate to the accepted Details renderers
+  (`MovieDetailsHeroMetadataRow` / `SeriesDetailsHeroMetadataRow` and their shared
+  `DetailsHeroMetadataRow` entry formatting): MOVIE `year | genre | duration (clock) | quality |
+  rating (star)` and SERIES `genre | quality | season count | episode count | rating (star)`,
+  physical right-to-left, with the Details `|` separator, typography and quality chip. A scoped
+  `wrap = true` option lets Home flow complete field groups on narrow windows; the default
+  `wrap = false` keeps every existing Details caller's centered single-line appearance unchanged.
+  `detailsTvDuration` / `detailsTvRating` become `internal` for reuse; their output is unchanged.
+- Both Home hero actions use the accepted compact Details atoms: `compact = true`,
+  `scaleOnFocus = false`, 13sp bold caption, 17dp icon, 6dp gap, 12dp/9dp padding, shared 12dp
+  shape, outlined gold-heart favorite, measured captions with the existing
+  `movieActionHeightDp` floor (46dp TV/normal, 42dp compact-height non-TV) and the existing
+  measured narrow-layout stacked fallback. Primary remains physical right with PlayArrow at its
+  physical left; `قائمتي` / `في قائمتي` labels and callbacks are preserved.
+
+R03 Android review remains **PENDING**. This is a bounded Home hero correction; no accepted
+Details/player/section history is changed.
+
+### 12.2 Owner Model 1 hero + notification/message alignment (2026-10-10)
+
+Owner decision 2026-10-10 20:25 Asia/Riyadh («لا خلنا على 1 ممتاز...») selected the full-bleed
+Model 1 hero and authorized aligning the Notification Center and every Home-visible error,
+update, announcement and renewal surface to the shared dark/gold family. Recorded scope:
+
+- Hero Model 1: full-bleed backdrop, visual weight at physical LEFT, right-side dark
+  gradient/copy; the copy block rebalances to the physical-right half of the wide composition
+  (`Alignment.CenterStart`, 0.5 width) while phone/short windows keep the lower right-aligned
+  copy. Existing artwork/fallback/rotation and the R03 Details facts, `|` separators, quality
+  chip, icon-left placement, measured compact actions and stable focus size are retained.
+- Notification Center: the shared `NotificationActionButton` uses the accepted compact atoms
+  (13sp bold, 12dp/9dp padding, 12dp shape, in-bounds pale focus edge, `movieActionHeightDp`
+  floor) with the gold primary / dark outlined secondary roles; TV rows keep poster right,
+  text middle, compact action column left and the existing `NotificationTvFocusGraph`; the
+  empty state gains the small gold bell + ivory wording; a real notification-opening failure
+  renders as a scoped in-app notice instead of an unstyled Toast. Data, order, profile
+  isolation, callbacks, bring-into-view and acknowledgement semantics are unchanged.
+- Home messages: cards render the semantic gold icon physically LEFT of the compact wording on
+  the shared dark notice surface; announcement severity stays in the theme gold family (no
+  orange skins). GrowthQrDialog keeps its dark/gold surface, QR white quiet zone and compact
+  Back floor. Operations REQUIRED/Maintenance/Optional/announcement surfaces reuse the same
+  compact action atoms and honest update progress (unknown stays indeterminate), with the
+  shared danger role for failure text. All policy, gating, IDs/version suppression,
+  downloader/installer and renewal/acknowledgement ownership are preserved.
+- Home no-content/error: the generic pink `ErrorNotice` call is replaced by the accepted
+  `MoviesErrorNotice` / `MoviesOfflineEmptyState` family with real connectivity classification
+  and existing Home refresh.
+
+R04 Android acceptance remains **PENDING**; this record is a bounded Home/notification/message
+adoption, not a whole-app redesign.
+
+### 12.3 R05 owner hero correction — Model 1 composition rebuilt (2026-10-10)
+
+The owner rejected the R04 hero («الهيرو ماصار نفس الي صممناه ياخي») while keeping the Model 1
+direction. Section 12.2's hero-composition wording is superseded by this bounded correction;
+12.2's notification/message/error alignment remains recorded and R04-review PENDING.
+
+- Wide hero: rebuilt as one seamless cinematic band with the copy stack anchored in the lower
+  band of the hero (CTA end ~40dp above the hero bottom) growing upward on the physical right at
+  ~46% width; the fixed 410dp TV height is replaced by a viewport-derived height
+  (`screenHeightDp * 2/3` coerced to 350–420dp). The old three-entry horizontal brush is replaced
+  by an explicit physical left-to-right mask (0.08 at 0.00–0.30, 0.20 at 0.40, 0.65 at 0.48,
+  0.94 at 0.54, 1.00 from 0.68) plus the separate bottom fade; phone keeps a vertical mask and
+  its previous heights.
+- Artwork: the hero now uses ordered real candidates (owned metadata backdrop first, then the
+  item backdrop/poster fields) classified by decoded dimensions — only aspect >= 1.3 fills the
+  wide hero with Crop biased to the physical left; portrait/near-square sources fall back to a
+  Fit rendering bounded inside the left visual region, and an exhausted list keeps the original
+  brand mark. Nothing is painted wide before the dimensions are known.
+- Real plot/genre/backdrop reuse the existing bounded card-metadata payloads
+  (`get_vod_info`/`get_series_info`) through the owner-keyed store: the active hero may trigger
+  one marked presentation backfill with the existing cooldown/in-flight/owner protection, and the
+  hero hoists that single load for both artwork and the accepted R03 Detail facts/actions. Row
+  cards, completeness rules, policy/gating, navigation and all R04 notification/message/error
+  surfaces are unchanged.
+
+R05 Android visual acceptance remains **OWNER REVIEW PENDING**; this record does not label the
+technical layout a Model 1 visual PASS.
+
+### 12.4 R06 technical corrections — RTL artwork, retained fallback, fetch settling, uniform phone window (2026-10-10)
+
+The coordinator's independent R05 review found three source defects, and the owner supplied a
+phone-artwork sizing instruction. Section 12.3's artwork alignment/settling/phone-fallback
+wording is superseded by this bounded correction; the R05 TV Model 1 composition, real metadata
+parsing, R03 atoms and all R04 surfaces are preserved. R05/R06 Android acceptance remains
+**OWNER REVIEW PENDING**; nothing here is a Model 1 visual PASS.
+
+- Physical-left artwork alignment: hero artwork now uses
+  `heroArtworkPhysicalLeftAlignment = AbsoluteAlignment.CenterLeft` for the brand fallback, the
+  TV portrait/near-square Fit container and the wide Crop bias. Absolute alignment is
+  direction-independent, so the app's RTL layout can no longer mirror the artwork into the dark
+  copy region. RTL copy, physical-LTR mask and icon placement are unchanged.
+- Retained fallback: the hero artwork classifier is a pure reducer
+  (`HeroArtworkSelectionState`, `heroArtworkOnLoaded`, `heroArtworkOnFailed`). The first
+  successfully decoded portrait/near-square source is retained while later candidates are tried,
+  a successful landscape still wins, and the retained real image is rendered when later
+  candidates fail (the brand mark only when no real image decoded). The classification pass
+  reuses its successfully decoded painter for display (no second request, no separate render
+  failure path), ignores superseded callbacks and keeps hidden/safe classification.
+- Presentation settling: `MovieCardMetadataClient` / `SeriesCardMetadataClient` now report
+  `succeeded` for a valid parsed payload, and the stores settle presentation only through the
+  shared `presentationSettlesAfterFetch` policy (marker `presentation_settled_v2`). A failed,
+  canceled, challenged, malformed or oversized attempt keeps cached facts/art, stays
+  non-blocking and remains eligible for a later natural bounded retry after the existing
+  cooldown; a legacy R05 marker alone no longer settles, so the selected hero can revalidate a
+  genuinely absent presentation once. Technical completeness, cooldowns, series in-flight
+  sharing, owner keying and stale-owner rejection are unchanged.
+- Owner phone instruction (2026-10-10): «حتى الجوال الهيرو الخلفيه تظهر كبيره ومقربه مره وبعضها
+  تجي صغار خليها نفس المقاس». Portrait phones now render every successful artwork source into
+  one uniform 16:9 window (full Home-content width, height derived from that width, placed below
+  the measured header/safe top inset, aspect-preserving centered Crop, lower edge blended by the
+  existing vertical mask). The R05 0.56-width Fit side-poster phone presentation is removed;
+  loading, retained portrait, failure and brand all stay inside that reserved window. TV keeps
+  the physical-left bounded Fit portrait fallback. Other adaptive windows keep their content
+  fit; no zoom, scale, stretch, source-dependent sizing or tall TV container on phones.

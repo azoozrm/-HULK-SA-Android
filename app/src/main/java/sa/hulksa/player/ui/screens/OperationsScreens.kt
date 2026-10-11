@@ -47,6 +47,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -132,17 +133,28 @@ private fun OperationsActionButton(
     isTv: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
+    val configuration = LocalConfiguration.current
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(if (isTv) 14.dp else 12.dp)
-    val goldFocused = primary && focused
+    // Accepted compact Details action atoms: 13sp bold caption, 12dp/9dp inner padding, shared
+    // 12dp shape, in-bounds pale focus edge and the movieActionHeightDp floor (46dp TV/normal,
+    // 42dp accepted compact-height non-TV). Floors grow for complete captions, never ellipsis.
+    val shape = RoundedCornerShape(12.dp)
+    val actionFloorDp = movieActionHeightDp(
+        isTv = isTv,
+        compactHeight = detailsProMetrics(
+            screenWidthDp = configuration.screenWidthDp,
+            screenHeightDp = configuration.screenHeightDp,
+            isTv = isTv,
+        ).compactHeight,
+    )
     val background = when {
         !enabled -> colors.surfaceRaised.copy(alpha = .62f)
-        primary -> colors.gold.copy(alpha = .88f)
-        focused -> colors.gold.copy(alpha = .26f)
+        primary -> colors.gold
+        focused -> Color(0xFF2A281B)
         else -> Color(0xFF151711)
     }
     val borderColor = when {
-        goldFocused -> Color.Transparent
+        focused && primary -> Color.Transparent
         focused -> colors.goldBright
         primary -> colors.goldBright.copy(alpha = .42f)
         else -> colors.gold.copy(alpha = .42f)
@@ -150,33 +162,38 @@ private fun OperationsActionButton(
     val textColor = when {
         !enabled -> colors.textMuted
         primary -> Color.Black
-        focused -> colors.goldBright
         else -> colors.text
     }
 
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
+            .heightIn(min = actionFloorDp.dp)
             .clip(shape)
             .background(background)
-            .goldFocusEdge(shape = shape, visible = goldFocused)
-            .border(if (goldFocused) 0.dp else if (focused) 3.dp else 1.dp, borderColor, shape)
+            .goldFocusEdge(shape = shape, visible = focused && primary)
+            .border(
+                width = when {
+                    focused && primary -> 0.dp
+                    focused -> 2.dp
+                    else -> 1.dp
+                },
+                color = borderColor,
+                shape = shape,
+            )
             .semantics(mergeDescendants = true) { contentDescription = text }
             .onFocusChanged { focused = it.isFocused }
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(
-                horizontal = if (isTv) 24.dp else 20.dp,
-                vertical = if (isTv) 13.dp else 12.dp,
-            ),
+            .padding(horizontal = 12.dp, vertical = 9.dp),
     ) {
         Text(
             text = text,
             color = textColor,
-            fontSize = if (isTv) 16.sp else 15.sp,
-            fontWeight = FontWeight.Black,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            overflow = TextOverflow.Clip,
         )
     }
 }
@@ -243,7 +260,6 @@ private fun OperationsDownloadProgress(
 ) {
     val colors = LocalHulkColors.current
     val progress = operations.download.progressPercent?.coerceIn(0, 100)
-    val fraction = (progress ?: 0) / 100f
     val shape = RoundedCornerShape(if (isTv) 14.dp else 12.dp)
     val trackShape = RoundedCornerShape(50)
 
@@ -272,20 +288,24 @@ private fun OperationsDownloadProgress(
                 fontWeight = FontWeight.Black,
             )
         }
-        Spacer(Modifier.height(if (isTv) 10.dp else 8.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(if (isTv) 10.dp else 8.dp)
-                .clip(trackShape)
-                .background(Color.White.copy(alpha = .12f)),
-        ) {
+        // Known progress shows the real track; unknown progress stays indeterminate with no
+        // fabricated zero-width fill pretending to be 0%.
+        if (progress != null) {
+            Spacer(Modifier.height(if (isTv) 10.dp else 8.dp))
             Box(
                 modifier = Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(fraction)
-                    .background(colors.goldBright, trackShape),
-            )
+                    .fillMaxWidth()
+                    .height(if (isTv) 10.dp else 8.dp)
+                    .clip(trackShape)
+                    .background(Color.White.copy(alpha = .12f)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(progress / 100f)
+                        .background(colors.goldBright, trackShape),
+                )
+            }
         }
     }
 }
@@ -375,7 +395,7 @@ private fun OperationsBlockingCard(
                     Text(
                         statusMessage,
                         color = if (operations.download.status == OperationsDownloadStatus.FAILED) {
-                            Color(0xFFFF9A9A)
+                            colors.danger
                         } else {
                             colors.goldBright
                         },
@@ -407,7 +427,6 @@ private fun OperationsBlockingCard(
                                     Modifier.widthIn(min = if (isTv) 210.dp else 180.dp)
                                 },
                             )
-                            .heightIn(min = if (isTv) 56.dp else 50.dp)
                             .focusRequester(primaryRequester)
                             .then(
                                 if (isTv && settingsVisible) {
@@ -434,7 +453,6 @@ private fun OperationsBlockingCard(
                                         Modifier.widthIn(min = if (isTv) 220.dp else 190.dp)
                                     },
                                 )
-                                .heightIn(min = if (isTv) 56.dp else 50.dp)
                                 .focusRequester(settingsRequester)
                                 .then(
                                     if (isTv) {
@@ -557,7 +575,7 @@ fun OptionalUpdateOverlay(
                     Text(
                         statusMessage,
                         color = if (operations.download.status == OperationsDownloadStatus.FAILED) {
-                            Color(0xFFFF9A9A)
+                            colors.danger
                         } else {
                             colors.goldBright
                         },
@@ -583,7 +601,6 @@ fun OptionalUpdateOverlay(
                         isTv = isTv,
                         modifier = Modifier
                             .then(if (compact) Modifier.fillMaxWidth() else Modifier.widthIn(min = if (isTv) 180.dp else 150.dp))
-                            .heightIn(min = if (isTv) 54.dp else 50.dp)
                             .focusRequester(updateRequester)
                             .then(
                                 if (isTv) {
@@ -605,7 +622,6 @@ fun OptionalUpdateOverlay(
                         isTv = isTv,
                         modifier = Modifier
                             .then(if (compact) Modifier.fillMaxWidth() else Modifier.widthIn(min = if (isTv) 190.dp else 155.dp))
-                            .heightIn(min = if (isTv) 54.dp else 50.dp)
                             .focusRequester(settingsRequester)
                             .then(
                                 if (isTv) {
@@ -626,7 +642,6 @@ fun OptionalUpdateOverlay(
                     isTv = isTv,
                     modifier = Modifier
                         .then(if (compact) Modifier.fillMaxWidth() else Modifier.widthIn(min = if (isTv) 170.dp else 140.dp))
-                        .heightIn(min = if (isTv) 54.dp else 50.dp)
                         .focusRequester(laterRequester)
                         .then(
                             if (isTv && !downloading) {
@@ -664,10 +679,12 @@ fun OperationsAnnouncementOverlay(
         OperationsAnnouncementSeverity.WARNING -> "HULK SA • تنبيه"
         OperationsAnnouncementSeverity.IMPORTANT -> "HULK SA • رسالة مهمة"
     }
+    // Severity stays inside the shared gold family; the wording carries the severity.
     val accent = when (announcement.severity) {
         OperationsAnnouncementSeverity.INFO -> colors.goldBright
-        OperationsAnnouncementSeverity.WARNING -> Color(0xFFFFC857)
-        OperationsAnnouncementSeverity.IMPORTANT -> Color(0xFFFFB347)
+        OperationsAnnouncementSeverity.WARNING,
+        OperationsAnnouncementSeverity.IMPORTANT,
+        -> colors.gold
     }
 
     LaunchedEffect(announcement.id, isTv) {
@@ -739,7 +756,6 @@ fun OperationsAnnouncementOverlay(
                             Modifier.fillMaxWidth()
                         },
                     )
-                    .heightIn(min = if (isTv) 56.dp else 50.dp)
                     .focusRequester(confirmRequester),
             )
         }
@@ -751,8 +767,13 @@ fun OperationsStatusBanner(
     operations: OperationsUiState,
     isTv: Boolean,
     modifier: Modifier = Modifier,
+    suppressPersistentAnnouncement: Boolean = false,
 ) {
-    val announcement = operations.persistentAnnouncement
+    val announcement = if (suppressPersistentAnnouncement) {
+        null
+    } else {
+        operations.persistentAnnouncement
+    }
     val serviceDegraded = operations.service.status == sa.hulksa.player.data.OperationsServiceStatus.DEGRADED
     val serviceMessage = if (serviceDegraded) {
         operations.service.message?.takeIf(String::isNotBlank)

@@ -63,7 +63,14 @@ class SingleMobileNavigationOwnerContractTest(unittest.TestCase):
         self.assertIn(".padding(vertical = MOBILE_BOTTOM_NAVIGATION_VERTICAL_PADDING)", nav)
         self.assertRegex(shell, RESERVED_SPACER)
         self.assertRegex(search, RESERVED_SPACER)
-        self.assertEqual(2, shell.count("MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT"))
+        # Exactly one reserved clearance spacer/import in the shell; other semantic uses of the
+        # constant (for example lifting a transient in-app notice above the bar) are not a second
+        # navigation owner.
+        self.assertEqual(
+            1,
+            shell.count("import sa.hulksa.player.ui.MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT"),
+        )
+        self.assertEqual(1, shell.count(".height(MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT)"))
         self.assertEqual(1, search.count("MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT"))
 
     def test_ime_visibility_contract_remains_intentional_on_both_paths(self) -> None:

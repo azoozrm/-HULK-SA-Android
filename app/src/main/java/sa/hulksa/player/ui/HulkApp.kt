@@ -16,6 +16,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
@@ -25,6 +27,7 @@ import sa.hulksa.player.AccountDecisionChoice
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.MainDestination
+import sa.hulksa.player.data.OperationsAnnouncement
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.OfflineStatus
@@ -61,11 +64,16 @@ fun HulkApp(
     isTelevisionDevice: Boolean,
     navigationMemory: NavigationMemoryStore,
     catalogNavigationMemory: ProfileCatalogNavigationMemory,
+    homeMessagePresentation: HomeMessagePresentationState,
+    onOpenHomeAnnouncementDetail: (OperationsAnnouncement) -> Unit,
+    onOpenHomeUpdateDetail: () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
     // Preserves the Series details composition state (selected tab, season and scroll position)
     // across the playback round-trip for the exact series the user opened.
     val seriesDetailsStateHolder = rememberSaveableStateHolder()
+    // Scoped ephemeral presentation for a real notification-opening failure result.
+    var notificationOpenError by remember { mutableStateOf<String?>(null) }
     val (adaptiveUi, adaptiveInputController) = rememberAdaptiveUiState(isTelevisionDevice)
     val isTv = adaptiveUi.isTelevision
     val context = LocalContext.current
@@ -268,7 +276,13 @@ fun HulkApp(
                                     },
                                     onToggleFavorite = viewModel::toggleFavorite,
                                     onRefresh = viewModel::refresh,
-                                    onOpenNotifications = viewModel::openNotificationCenter,
+                                    onOpenNotifications = {
+                                        // Record the logical Home hero anchor so returning from the
+                                        // center restores one deterministic target through the
+                                        // existing NavigationMemory/hero restore owner.
+                                        navigationMemory.save(MainDestination.HOME, "", 0, "hero", 0)
+                                        viewModel.openNotificationCenter()
+                                    },
                                     onClearHistory = viewModel::clearHistory,
                                     onPlayDownload = viewModel::playDownload,
                                     onDeleteDownload = { item ->
@@ -286,6 +300,9 @@ fun HulkApp(
                                     onRefreshAccount = { viewModel.refreshAccount(notify) },
                                     onRunDiagnostics = viewModel::runDiagnostics,
                                     onLogout = viewModel::logout,
+                                    homeMessagePresentation = homeMessagePresentation,
+                                    onOpenAnnouncementDetail = onOpenHomeAnnouncementDetail,
+                                    onOpenUpdateDetail = onOpenHomeUpdateDetail,
                                 )
                             }
                         }
@@ -433,10 +450,14 @@ fun HulkApp(
                         notifications = state.localNotifications,
                         unreadCount = state.unreadNotificationCount,
                         isTv = isTv,
-                        onBack = viewModel::back,
+                        onBack = {
+                            notificationOpenError = null
+                            viewModel.back()
+                        },
                         onOpen = { notification ->
+                            notificationOpenError = null
                             viewModel.openNotification(notification.id) { message ->
-                                message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+                                notificationOpenError = message
                             }
                         },
                         onMarkRead = { notification -> viewModel.markNotificationRead(notification.id) },

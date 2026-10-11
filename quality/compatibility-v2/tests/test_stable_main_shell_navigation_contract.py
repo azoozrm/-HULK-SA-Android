@@ -242,7 +242,7 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
         home = self.section(
             source,
             "private fun CinemaHomeScreen(",
-            "private fun RenewalBanner(",
+            "private fun HomeMessageOwnership(",
         )
         live = self.section(
             source,

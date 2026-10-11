@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -190,6 +191,7 @@ internal fun GrowthQrDialog(
                     compact = true,
                     modifier = Modifier
                         .focusRequester(backRequester)
+                        .heightIn(min = movieActionHeightDp(isTv = true, compactHeight = false).dp)
                         .widthIn(min = 160.dp)
                         .padding(bottom = if (compactHeight) 2.dp else 4.dp),
                 )

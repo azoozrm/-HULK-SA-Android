@@ -67,7 +67,7 @@ class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
         home = self.section(
             source,
             "private fun CinemaHomeScreen(",
-            "private fun RenewalBanner(",
+            "private fun HomeMessageOwnership(",
         )
 
         self.assertIn("HomeContentModelInput(", shell)
@@ -117,7 +117,7 @@ class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
         home = self.section(
             source,
             "private fun CinemaHomeScreen(",
-            "private fun RenewalBanner(",
+            "private fun HomeMessageOwnership(",
         )
         derived_source = self.read(DERIVED_MODELS)
         initial = self.section(

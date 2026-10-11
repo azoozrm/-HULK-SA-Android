@@ -2083,9 +2083,12 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun confirmOperationsAnnouncement() {
+    fun confirmOperationsAnnouncement(expectedId: String? = null) {
         if (operationsAnnouncementConfirmationJob?.isActive == true) return
         val popup = mutableState.value.operations.announcementPopup ?: return
+        // A Home-owned detail must acknowledge exactly the message it presented; if the active
+        // announcement changed underneath it, the newer message keeps its own presentation path.
+        if (expectedId != null && popup.id != expectedId) return
         presentedOperationsMessageIds += popup.id
         operationsAnnouncementConfirmationJob = viewModelScope.launch {
             try {

@@ -1706,7 +1706,7 @@ private fun HistoryEntry.detailsTvWatchProgress(): Float? {
 private fun HistoryEntry.detailsTvCompleted(): Boolean =
     durationMs > 0L && positionMs.toDouble() / durationMs.toDouble() >= .95
 
-private fun detailsTvRating(raw: String?): String? {
+internal fun detailsTvRating(raw: String?): String? {
     val value = raw?.trim()?.toDoubleOrNull()?.takeIf { it > 0.0 } ?: return null
     return String.format(Locale.US, "%.1f", value)
 }
@@ -1731,7 +1731,7 @@ private fun detailsTvParseDurationMs(raw: String?): Long? {
     return seconds.takeIf { it > 0L }?.times(1000L)
 }
 
-private fun detailsTvDuration(durationMs: Long?): String? {
+internal fun detailsTvDuration(durationMs: Long?): String? {
     val total = durationMs?.takeIf { it > 0L }?.div(60_000L) ?: return null
     val hours = total / 60L
     val minutes = total % 60L

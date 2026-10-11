@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -354,15 +356,44 @@ internal data class DetailsHeroMetadataEntry(
  * Centered hero metadata line shared by Movies and Series. Warm-gold star/clock icons sit
  * physically LEFT of their ivory values, the known quality value keeps its small framed chip, and
  * only available fields render.
+ *
+ * [wrap] is a scoped Home option: complete field groups flow onto another line instead of
+ * clipping on narrow windows, each group keeping its separator attached so no orphan bar is
+ * emitted. The default (false) preserves the accepted Details centered single-line appearance.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun DetailsHeroMetadataRow(
     entries: List<DetailsHeroMetadataEntry>,
     isTv: Boolean,
     modifier: Modifier = Modifier,
+    wrap: Boolean = false,
 ) {
-    val colors = LocalHulkColors.current
     if (entries.isEmpty()) return
+    if (wrap) {
+        FlowRow(
+            modifier = modifier,
+            horizontalArrangement = Arrangement.Start,
+            verticalArrangement = Arrangement.spacedBy(if (isTv) 8.dp else 6.dp),
+        ) {
+            entries.forEachIndexed { index, entry ->
+                // RTL group order: the separator is the first child (physical right), so it sits
+                // between this complete group and the group to its right and wraps with it.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (index > 0) {
+                        Box(
+                            Modifier
+                                .width(1.dp)
+                                .height(if (isTv) 18.dp else 14.dp)
+                                .background(Color.White.copy(alpha = .22f)),
+                        )
+                    }
+                    DetailsHeroMetadataEntryContent(entry = entry, isTv = isTv)
+                }
+            }
+        }
+        return
+    }
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
@@ -377,89 +408,98 @@ internal fun DetailsHeroMetadataRow(
                         .background(Color.White.copy(alpha = .22f)),
                 )
             }
-            when {
-                entry.seasonCount != null -> Box(
-                    modifier = Modifier.padding(horizontal = if (isTv) 10.dp else 8.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (entry.seasonIcon) {
-                        SeriesSeasonCountInline(
-                            count = entry.seasonCount,
-                            iconSizeDp = if (isTv) 15 else 13,
-                            fontSizeSp = if (isTv) 14 else 12,
-                            lineHeightSp = if (isTv) 20 else 18,
-                            iconTint = colors.gold,
-                            textColor = colors.text,
-                        )
-                    } else {
-                        SeriesEpisodeCountInline(
-                            count = entry.seasonCount,
-                            word = "موسم",
-                            fontSizeSp = if (isTv) 14 else 12,
-                            lineHeightSp = if (isTv) 20 else 18,
-                            textColor = colors.text,
-                        )
-                    }
-                }
-                entry.episodeCount != null -> Box(
-                    modifier = Modifier.padding(horizontal = if (isTv) 10.dp else 8.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    SeriesEpisodeCountInline(
-                        count = entry.episodeCount,
-                        fontSizeSp = if (isTv) 14 else 12,
-                        lineHeightSp = if (isTv) 20 else 18,
-                        textColor = colors.text,
-                    )
-                }
-                entry.quality -> Box(
-                    modifier = Modifier
-                        .padding(horizontal = if (isTv) 10.dp else 8.dp)
-                        .heightIn(min = if (isTv) 24.dp else 20.dp)
-                        .clip(RoundedCornerShape(5.dp))
-                        .border(1.dp, colors.gold.copy(alpha = .80f), RoundedCornerShape(5.dp))
-                        .padding(horizontal = 7.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = entry.text,
-                        color = colors.gold,
-                        fontSize = if (isTv) 13.sp else 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                    )
-                }
-                entry.rating || entry.clock -> Row(
-                    modifier = Modifier.padding(horizontal = if (isTv) 10.dp else 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Text(
-                        text = entry.text,
-                        color = colors.text,
-                        fontSize = if (isTv) 14.sp else 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                    )
-                    // The icon is the last child, so in RTL it renders physically LEFT of the value.
-                    Icon(
-                        imageVector = if (entry.rating) Icons.Rounded.Star else Icons.Rounded.Schedule,
-                        contentDescription = null,
-                        tint = colors.gold,
-                        modifier = Modifier.size(if (isTv) 17.dp else 14.dp),
-                    )
-                }
-                else -> Text(
-                    text = entry.text,
-                    color = colors.text,
-                    fontSize = if (isTv) 14.sp else 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = if (isTv) 10.dp else 8.dp),
+            DetailsHeroMetadataEntryContent(entry = entry, isTv = isTv)
+        }
+    }
+}
+
+@Composable
+private fun DetailsHeroMetadataEntryContent(
+    entry: DetailsHeroMetadataEntry,
+    isTv: Boolean,
+) {
+    val colors = LocalHulkColors.current
+    when {
+        entry.seasonCount != null -> Box(
+            modifier = Modifier.padding(horizontal = if (isTv) 10.dp else 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (entry.seasonIcon) {
+                SeriesSeasonCountInline(
+                    count = entry.seasonCount,
+                    iconSizeDp = if (isTv) 15 else 13,
+                    fontSizeSp = if (isTv) 14 else 12,
+                    lineHeightSp = if (isTv) 20 else 18,
+                    iconTint = colors.gold,
+                    textColor = colors.text,
+                )
+            } else {
+                SeriesEpisodeCountInline(
+                    count = entry.seasonCount,
+                    word = "موسم",
+                    fontSizeSp = if (isTv) 14 else 12,
+                    lineHeightSp = if (isTv) 20 else 18,
+                    textColor = colors.text,
                 )
             }
         }
+        entry.episodeCount != null -> Box(
+            modifier = Modifier.padding(horizontal = if (isTv) 10.dp else 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            SeriesEpisodeCountInline(
+                count = entry.episodeCount,
+                fontSizeSp = if (isTv) 14 else 12,
+                lineHeightSp = if (isTv) 20 else 18,
+                textColor = colors.text,
+            )
+        }
+        entry.quality -> Box(
+            modifier = Modifier
+                .padding(horizontal = if (isTv) 10.dp else 8.dp)
+                .heightIn(min = if (isTv) 24.dp else 20.dp)
+                .clip(RoundedCornerShape(5.dp))
+                .border(1.dp, colors.gold.copy(alpha = .80f), RoundedCornerShape(5.dp))
+                .padding(horizontal = 7.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = entry.text,
+                color = colors.gold,
+                fontSize = if (isTv) 13.sp else 11.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+        }
+        entry.rating || entry.clock -> Row(
+            modifier = Modifier.padding(horizontal = if (isTv) 10.dp else 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Text(
+                text = entry.text,
+                color = colors.text,
+                fontSize = if (isTv) 14.sp else 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+            // The icon is the last child, so in RTL it renders physically LEFT of the value.
+            Icon(
+                imageVector = if (entry.rating) Icons.Rounded.Star else Icons.Rounded.Schedule,
+                contentDescription = null,
+                tint = colors.gold,
+                modifier = Modifier.size(if (isTv) 17.dp else 14.dp),
+            )
+        }
+        else -> Text(
+            text = entry.text,
+            color = colors.text,
+            fontSize = if (isTv) 14.sp else 12.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = if (isTv) 10.dp else 8.dp),
+        )
     }
 }
 
@@ -475,6 +515,7 @@ internal fun MovieDetailsHeroMetadataRow(
     ratingLabel: String?,
     isTv: Boolean,
     modifier: Modifier = Modifier,
+    wrap: Boolean = false,
 ) {
     val entries = listOfNotNull(
         item.year?.trim()?.takeIf(String::isNotBlank)?.let { DetailsHeroMetadataEntry(it) },
@@ -483,7 +524,7 @@ internal fun MovieDetailsHeroMetadataRow(
         qualityLabel?.trim()?.takeIf(String::isNotBlank)?.let { DetailsHeroMetadataEntry(it, quality = true) },
         ratingLabel?.trim()?.takeIf(String::isNotBlank)?.let { DetailsHeroMetadataEntry(it, rating = true) },
     )
-    DetailsHeroMetadataRow(entries = entries, isTv = isTv, modifier = modifier)
+    DetailsHeroMetadataRow(entries = entries, isTv = isTv, modifier = modifier, wrap = wrap)
 }
 
 /**

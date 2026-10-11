@@ -32,6 +32,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -61,6 +62,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -524,44 +526,46 @@ private fun NotificationActionButton(
     onFocused: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
+    val configuration = LocalConfiguration.current
     var focused by remember { mutableStateOf(false) }
     if (tvFocusHandle != null) {
         DisposableEffect(tvFocusHandle) {
             onDispose { tvFocusHandle.onDisposed() }
         }
     }
-    val shape = RoundedCornerShape(
-        when {
-            headerCompact -> 9.dp
-            isTv && tvCenterCompact -> 10.dp
-            isTv -> 13.dp
-            else -> 12.dp
-        },
+    // Accepted compact Details action atoms: 13sp bold caption, 12dp/9dp inner padding, shared
+    // 12dp shape, in-bounds pale focus edge and the movieActionHeightDp floor (46dp TV/normal,
+    // 42dp accepted compact-height non-TV). Callers keep the 48dp minimum non-TV touch bound.
+    val shape = RoundedCornerShape(12.dp)
+    val actionFloorDp = movieActionHeightDp(
+        isTv = isTv,
+        compactHeight = detailsProMetrics(
+            screenWidthDp = configuration.screenWidthDp,
+            screenHeightDp = configuration.screenHeightDp,
+            isTv = isTv,
+        ).compactHeight,
     )
-    val goldFocused = focused && primary && !isTv
     val background = when {
         !enabled -> colors.surfaceRaised.copy(alpha = .50f)
-        goldFocused -> colors.gold
-        focused -> colors.goldBright
-        primary && isTv -> colors.gold.copy(alpha = .14f)
         primary -> colors.gold
+        focused -> Color(0xFF2A281B)
         else -> Color(0xFF151711)
     }
     val borderColor = when {
         !enabled -> colors.line.copy(alpha = .36f)
-        focused -> Color.Transparent
-        primary -> colors.goldBright.copy(alpha = .62f)
-        else -> colors.gold.copy(alpha = .46f)
+        focused && primary -> Color.Transparent
+        focused -> colors.goldBright
+        primary -> colors.goldBright.copy(alpha = .42f)
+        else -> colors.gold.copy(alpha = .42f)
     }
     val textColor = when {
         !enabled -> colors.textMuted
-        focused -> Color.Black
-        primary && isTv -> colors.goldBright
         primary -> Color.Black
         else -> colors.text
     }
     Box(
         modifier = modifier
+            .heightIn(min = actionFloorDp.dp)
             .then(
                 if (tvFocusHandle != null) {
                     Modifier.focusRequester(tvFocusHandle.requester)
@@ -572,8 +576,16 @@ private fun NotificationActionButton(
             .then(if (tvFocusTag != null) Modifier.testTag(tvFocusTag) else Modifier)
             .clip(shape)
             .background(background)
-            .goldFocusEdge(shape = shape, visible = focused)
-            .border(if (focused) 0.dp else 1.dp, borderColor, shape)
+            .goldFocusEdge(shape = shape, visible = focused && primary)
+            .border(
+                width = when {
+                    focused && primary -> 0.dp
+                    focused -> 2.dp
+                    else -> 1.dp
+                },
+                color = borderColor,
+                shape = shape,
+            )
             .semantics(mergeDescendants = true) { contentDescription = text }
             .focusProperties {
                 canFocus = enabled
@@ -614,28 +626,16 @@ private fun NotificationActionButton(
                     Modifier
                 },
             )
-            .padding(
-                horizontal = when {
-                    headerCompact -> 12.dp
-                    isTv && tvCenterCompact -> 14.dp
-                    isTv -> 15.dp
-                    else -> 14.dp
-                },
-                vertical = when {
-                    headerCompact -> 6.dp
-                    isTv && tvCenterCompact -> 8.dp
-                    else -> 10.dp
-                },
-            ),
+            .padding(horizontal = 12.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
             color = textColor,
-            fontSize = if (headerCompact) 12.sp else if (isTv) 14.sp else 13.sp,
-            fontWeight = FontWeight.Black,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
             maxLines = 1,
-            overflow = if (isTv && tvCenterCompact) TextOverflow.Clip else TextOverflow.Ellipsis,
+            overflow = TextOverflow.Clip,
         )
     }
 }
@@ -651,6 +651,7 @@ fun LocalNotificationCenterScreen(
     onReadAll: () -> Unit,
     onDelete: (LocalNotificationItem) -> Unit,
     onClearAll: () -> Unit,
+    openErrorMessage: String? = null,
 ) {
     BackHandler(onBack = onBack)
     val colors = LocalHulkColors.current
@@ -712,6 +713,7 @@ fun LocalNotificationCenterScreen(
                             onReadAll = onReadAll,
                             onDelete = onDelete,
                             onClearAll = onClearAll,
+                            openErrorMessage = openErrorMessage,
                             modifier = Modifier.fillMaxSize(),
                         )
                     } else {
@@ -725,6 +727,7 @@ fun LocalNotificationCenterScreen(
                             onReadAll = onReadAll,
                             onDelete = onDelete,
                             onClearAll = onClearAll,
+                            openErrorMessage = openErrorMessage,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
@@ -745,6 +748,7 @@ internal fun TvLocalNotificationCenter(
     onReadAll: () -> Unit,
     onDelete: (LocalNotificationItem) -> Unit,
     onClearAll: () -> Unit,
+    openErrorMessage: String? = null,
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
     onFocusedTargetChanged: (NotificationTvFocusTarget) -> Unit = {},
@@ -1035,7 +1039,6 @@ internal fun TvLocalNotificationCenter(
                     onFocused = { recordFocusedTarget(backTarget) },
                     modifier = Modifier
                         .width(82.dp)
-                        .height(40.dp),
                 )
             },
             actions = { actionsModifier ->
@@ -1060,7 +1063,6 @@ internal fun TvLocalNotificationCenter(
                         onFocused = { recordFocusedTarget(clearAllTarget) },
                         modifier = Modifier
                             .width(96.dp)
-                            .height(40.dp),
                     )
                     val readAllTarget = NotificationTvFocusTarget.ReadAll
                     NotificationActionButton(
@@ -1079,13 +1081,16 @@ internal fun TvLocalNotificationCenter(
                         onFocused = { recordFocusedTarget(readAllTarget) },
                         modifier = Modifier
                             .width(164.dp)
-                            .height(40.dp),
                     )
                 }
             },
         )
 
         Spacer(Modifier.height(10.dp))
+        openErrorMessage?.let { message ->
+            NotificationOpenErrorNotice(message)
+            Spacer(Modifier.height(8.dp))
+        }
         if (notifications.isEmpty()) {
             NotificationCenterEmptyState(
                 isTv = true,
@@ -1220,6 +1225,7 @@ private fun MobileLocalNotificationCenter(
     onReadAll: () -> Unit,
     onDelete: (LocalNotificationItem) -> Unit,
     onClearAll: () -> Unit,
+    openErrorMessage: String? = null,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(
@@ -1313,6 +1319,10 @@ private fun MobileLocalNotificationCenter(
             )
 
             Spacer(Modifier.height(10.dp))
+            openErrorMessage?.let { message ->
+                NotificationOpenErrorNotice(message)
+                Spacer(Modifier.height(8.dp))
+            }
             if (notifications.isEmpty()) {
                 NotificationCenterEmptyState(
                     isTv = false,
@@ -1373,6 +1383,41 @@ private fun NotificationCenterTitle(
     }
 }
 
+/**
+ * Scoped in-app presentation for a real notification-opening failure result. Same dark/gold
+ * notice family as the Home message surfaces; it replaces the previous unstyled Android Toast
+ * without creating another business error owner.
+ */
+@Composable
+private fun NotificationOpenErrorNotice(message: String) {
+    val colors = LocalHulkColors.current
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Color(0xFF11120D))
+            .border(1.dp, colors.gold.copy(alpha = .35f), shape)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = message,
+            color = colors.text,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            imageVector = Icons.Outlined.ErrorOutline,
+            contentDescription = null,
+            tint = colors.gold,
+            modifier = Modifier.size(17.dp),
+        )
+    }
+}
+
 @Composable
 private fun NotificationCenterEmptyState(
     isTv: Boolean,
@@ -1388,12 +1433,21 @@ private fun NotificationCenterEmptyState(
             .border(1.dp, colors.line.copy(alpha = .34f), shape),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = "لا توجد اشعارات جديدة",
-            color = colors.textMuted,
-            fontSize = if (isTv) 16.sp else 15.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                imageVector = Icons.Rounded.Notifications,
+                contentDescription = null,
+                tint = colors.gold,
+                modifier = Modifier.size(if (isTv) 24.dp else 22.dp),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "لا توجد اشعارات جديدة",
+                color = colors.text,
+                fontSize = if (isTv) 15.sp else 14.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
 }
 
@@ -1533,7 +1587,6 @@ private fun TvLocalNotificationCard(
                 onFocused = { onFocused(openTarget) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(40.dp),
             )
             if (episode != null && !notification.read) {
                 NotificationActionButton(
@@ -1550,7 +1603,6 @@ private fun TvLocalNotificationCard(
                     onFocused = { onFocused(markReadTarget) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(40.dp),
                 )
             }
             NotificationActionButton(
@@ -1567,7 +1619,6 @@ private fun TvLocalNotificationCard(
                 onFocused = { onFocused(deleteTarget) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(40.dp),
             )
         }
     }
