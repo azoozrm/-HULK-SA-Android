@@ -44,7 +44,7 @@ fun DetailsNavigationDrawer(
         MainDestination.LIVE to "البث المباشر",
         MainDestination.MOVIES to "الافلام",
         MainDestination.SERIES to "المسلسلات",
-        MainDestination.FAVORITES to "قائمتي",
+        MainDestination.FAVORITES to "المفضلة",
         MainDestination.SEARCH to "البحث",
         MainDestination.DOWNLOADS to "التنزيلات",
         MainDestination.SETTINGS to "الاعدادات",

@@ -731,3 +731,72 @@ These R04 corrections are scoped to Login and supersede only the conflicting R03
   validation, access-code and credential failures keep their own copy, and raw exception/status
   classification is unchanged. The confirmed-offline icon mapping is used only for confirmed
   offline; other failures keep the general error icon.
+
+## 14. Favorites Model 01 adoption record (2026-10-11)
+
+On 2026-10-11 22:15:46 Asia/Riyadh the owner selected Model 01 — Unified Grid after receiving the
+three Favorites TV/phone model files (`نعم 1`). The accepted reference package is
+`HULK-FAVORITES-MODEL-01-20261011.zip` (SHA-256
+`89a267ac69d504e9faa5f0d0d09059ad074c3555ebed652b8aad1bd86d759a5f`). This record documents
+**design-reference acceptance**. The Android implementation
+(`favorites-ui-alignment-20261011`, LOCAL_ROUND R01) is under owner review — **PENDING**; no
+Favorites merge, signing, tag or release is authorized or implied.
+
+### 14.1 Adopted composition, naming supersession and reuse
+
+- One unified adaptive grid. Title `المفضلة`, subtitle `كل ما حفظته في مكان واحد`, and the real
+  current-projection count (`عنصر` for the mixed All projection, `فلم`/`مسلسل`/`قناة` for the real
+  type filters). The compact existing Refresh action stays at physical left; no stretched pills,
+  no focus scaling, no selection-driven size change.
+- Compact type filters in physical RTL order `الكل` / `الافلام` / `المسلسلات` / `القنوات`, using
+  the accepted Live fixed-category `FocusButton` anatomy and `rememberLiveCategoryStripMetrics`
+  height/text expressions; selection is the committed gold fill and focus remains a separate
+  in-bounds edge. Default is All; the selection and grid location persist through the existing
+  per-account/profile navigation owner (`NavigationMemoryStore`), not a new store.
+- Cards reuse `MoviesCatalogBoxedCard` / `SeriesCatalogBoxedCard` with their accepted square
+  artwork, two reserved title lines, reserved footer slots and passive saved-heart badge, and the
+  accepted Home live-channel variant (`LiveChannelHomeCard`) with contained 16:9 artwork, real
+  name and `بث مباشر`; channels gain no VOD rating/duration/season/progress. Missing metadata stays
+  absent in its reserved slot and no value is fabricated.
+- Whole-Favorites states: `جاري تجهيز المفضلة` (initial unresolved loading, never a false empty),
+  a compact observed refresh state over cached cards, `لم تضف اي محتوى الى المفضلة بعد`,
+  `لا توجد افلام في المفضلة` / type-specific filtered-empty wording,
+  `لا يوجد اتصال بالانترنت ، تحقق من اتصالك وحاول مرة اخرى` for confirmed offline, and
+  `تعذر تحميل المفضلة ، حاول مرة اخرى` for a service/catalog failure; cached cards stay usable
+  behind one bounded notice with the existing Retry owner. Connectivity classification uses the
+  existing authoritative usable-network binding; a failed request alone is never labeled offline.
+- Global app-authored naming supersession: every Favorites caption previously `قائمتي` is now
+  `المفضلة` and `في قائمتي` is now `في المفضلة` — TV rail/table, mobile bottom navigation,
+  smart-search destinations, the Details drawer, Home hero favorite action, Movie/Series/Kids
+  Details actions and Favorites-context loading/empty/refresh wording. This supersedes only the
+  literal caption strings quoted in section 12.1; the accepted Home hero geometry, measured width
+  reservation, icon placement, compact action atoms and callbacks remain authoritative and
+  unchanged. No server content name, enum/destination identity, persistence key/schema or stored
+  favorite is renamed.
+- Adaptive/input: actual usable constraints and the accepted catalog sizing expressions decide the
+  column count (the mockup count is illustrative); compact phone portrait uses two columns when
+  the accepted card geometry fits, otherwise one. One grid/scroll owner with stable `type:id`
+  keys preserves details-return filter, item and scroll location. Removal focuses the next
+  surviving stable key, then the previous, then the always-attached type selector; a removal
+  long-press release cannot open the replacement card. Captures remain OFF; automated visual
+  validation is NOT RUN — CAPTURE NOT AUTHORIZED until separately authorized.
+
+### 14.2 R02 owner correction — no routine Favorites Refresh control (2026-10-11)
+
+This supersedes only the conflicting Favorites wording in section 14.1 and the reference
+requirement to display a permanent Favorites Refresh action:
+
+- The Favorites page has NO routine Refresh control on TV or phone: the circular header Refresh
+  action and its reserved header space are removed, and the whole-list empty state has no ordinary
+  Refresh button. Other sections keep their existing controls.
+- Reactive updates remain unchanged: Favorites still repaints from the existing state/catalog/
+  favorite flows; no polling, timers, extra catalog requests or new state owner is introduced.
+- Error-only recovery is preserved: the confirmed-offline / failure states and the cached-content
+  error notice keep their existing Retry action, the only remaining refresh path on this page.
+- With an empty projection the selected type filter and the navigation stay reachable; the
+  last-removal focus fallback still returns focus to the always-attached type selector.
+
+The R01 Favorites candidate review is **PENDING** and the R02 candidate
+(`favorites-ui-alignment-20261011-r02`) supersedes it for all Favorites review scope. Captures
+remain OFF; automated visual validation is NOT RUN — CAPTURE NOT AUTHORIZED.
+

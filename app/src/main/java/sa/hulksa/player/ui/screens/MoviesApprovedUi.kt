@@ -1013,7 +1013,7 @@ internal fun MoviesOfflineEmptyState(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     title: String = "لا يوجد اتصال بالانترنت",
-    body: String = "تعذر تحميل المحتوى ، تحقق من الاتصال وحاول مرة اخرى",
+    body: String? = "تعذر تحميل المحتوى ، تحقق من الاتصال وحاول مرة اخرى",
     networkFailure: Boolean = true,
     retryRequester: FocusRequester? = null,
 ) {
@@ -1034,15 +1034,17 @@ internal fun MoviesOfflineEmptyState(
             color = colors.text,
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = body,
-            color = colors.textMuted,
-            fontSize = 12.sp,
             textAlign = TextAlign.Center,
         )
+        if (!body.isNullOrBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = body,
+                color = colors.textMuted,
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+            )
+        }
         Spacer(Modifier.height(14.dp))
         FocusButton(
             text = "اعادة المحاولة",

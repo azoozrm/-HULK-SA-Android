@@ -227,11 +227,10 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
         )
         settings = self.read(SETTINGS_SCREEN)
 
-        self.assertIn("if (isTv && content.isEmpty())", favorites)
-        self.assertIn("else if (content.isEmpty() && state.loadingTypes.isEmpty())", favorites)
-        self.assertIn("loading = state.loadingTypes.isNotEmpty()", favorites)
-        self.assertIn("FavoritesFocusFallback(", favorites)
-        self.assertIn('FocusButton("تحديث القائمة", onRefresh', favorites)
+        self.assertIn('label = "جاري تجهيز المفضلة"', favorites)
+        self.assertIn('FavoritesEmptyState("لم تضف اي محتوى الى المفضلة بعد")', favorites)
+        self.assertIn("FavoritesTypeFilterBar(", favorites)
+        self.assertIn("filterRequesters.getValue(activeFilter).requestFocus()", favorites)
         self.assertIn("if (downloads.isEmpty())", downloads)
         self.assertIn(".focusRequester(toolbarFocus.wifi)", downloads)
         self.assertIn("focus.refreshAccount.requestFocus()", settings)
@@ -263,7 +262,10 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
         self.assertIn("navigationMemory.position(MainDestination.HOME)", home)
         self.assertIn("navigationMemory.position(MainDestination.LIVE)", live)
         self.assertIn("channelRequester.requestFocus()", live)
-        self.assertIn("MainDestination.FAVORITES, navigationMemory", favorites)
+        self.assertIn(
+            "destination = MainDestination.FAVORITES, navigationMemory = navigationMemory",
+            " ".join(favorites.split()),
+        )
         self.assertIn("navigationMemory.position(MainDestination.DOWNLOADS)", downloads)
 
 

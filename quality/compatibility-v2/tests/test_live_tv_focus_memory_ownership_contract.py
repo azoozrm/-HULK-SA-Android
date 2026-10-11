@@ -68,8 +68,15 @@ class LiveTvFocusMemoryOwnershipContractTest(unittest.TestCase):
     def test_movies_and_series_grid_keep_their_single_focused_item_writer(self) -> None:
         grid = self.read(TV_GRID)
         self.assertNotIn("firstVisibleItemIndex", grid)
-        self.assertIn("navigationMemory.save(destination, contentKeys[nextIndex], nextIndex)", grid)
-        self.assertIn("navigationMemory.save(destination, key, index)", grid)
+        normalized_grid = " ".join(grid.split())
+        self.assertIn(
+            "navigationMemory.save( destination, contentKeys[nextIndex], nextIndex, rowKey = memoryRowKey, )",
+            normalized_grid,
+        )
+        self.assertIn(
+            "navigationMemory.save(destination, key, index, rowKey = memoryRowKey)",
+            normalized_grid,
+        )
 
 
 if __name__ == "__main__":

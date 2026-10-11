@@ -577,7 +577,7 @@ private fun SeriesHeroV2(
                     horizontalArrangement = Arrangement.spacedBy(9.dp),
                 ) {
                     FocusButton(
-                        text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
+                        text = if (isFavorite) "★ في المفضلة" else "+ المفضلة",
                         onClick = onToggleFavorite,
                         primary = false,
                         outlined = true,

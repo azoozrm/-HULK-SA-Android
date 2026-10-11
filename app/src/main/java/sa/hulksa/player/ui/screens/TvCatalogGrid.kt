@@ -21,6 +21,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -43,14 +44,24 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import sa.hulksa.player.MainDestination
 import sa.hulksa.player.model.ContentItem
+import sa.hulksa.player.model.ContentType
+import sa.hulksa.player.ui.adaptive.HulkWindowWidthClass
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
-import sa.hulksa.player.ui.components.CompactPosterCard
+import sa.hulksa.player.ui.components.LiveChannelHomeCard
 import sa.hulksa.player.ui.components.MoviesCatalogBoxedCard
 import sa.hulksa.player.ui.components.SeriesCatalogBoxedCard
 
 // Legibility floor for the Movie-only compact fallback on unusually short usable windows.
 internal const val MOVIE_COMPACT_ARTWORK_MIN_HEIGHT_DP = 96
+
+// Favorites compact-phone grid: the accepted mobile catalog expressions (full-bleed section with
+// its own content padding) capped at the accepted two-column Model 01 composition.
+private val FAVORITES_MOBILE_HORIZONTAL_PADDING = 5.dp
+private val FAVORITES_MOBILE_HORIZONTAL_SPACING = 9.dp
+private val FAVORITES_MOBILE_VERTICAL_SPACING = 10.dp
+private val FAVORITES_MOBILE_BOTTOM_PADDING = 28.dp
+private val FAVORITES_MOBILE_MIN_CELL_WIDTH = 105.dp
 
 internal data class TvCatalogMetrics(
     val minCellWidthDp: Float,
@@ -296,13 +307,20 @@ internal fun TvCatalogGrid(
     onToggleFavorite: (ContentItem) -> Unit,
     restoreFocusedCard: Boolean,
     onMoveToCategories: (() -> Boolean)? = null,
+    memoryRowKey: String = "",
 ) {
-    require(destination == MainDestination.MOVIES || destination == MainDestination.SERIES)
+    require(
+        destination == MainDestination.MOVIES ||
+            destination == MainDestination.SERIES ||
+            destination == MainDestination.FAVORITES,
+    )
     require(contentKeys.size == content.size)
 
     val adaptiveUi = LocalAdaptiveUi.current
+    val isTelevision = adaptiveUi.isTelevision
     val boxedCards = destination == MainDestination.MOVIES ||
-        destination == MainDestination.SERIES
+        destination == MainDestination.SERIES ||
+        destination == MainDestination.FAVORITES
     val metrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp, boxedCards) {
         tvCatalogMetrics(
             screenWidthDp = adaptiveUi.screenWidthDp,
@@ -337,6 +355,14 @@ internal fun TvCatalogGrid(
     val moviesBringIntoViewSpec = remember { moviesNoBringIntoViewSpec() }
     val gridBringIntoViewSpec = if (boxedCards) moviesBringIntoViewSpec else inheritedBringIntoViewSpec
     var focusedIndex by remember(contentKeys) { mutableIntStateOf(-1) }
+    // Favorites removal ownership: the last focused card key, the previous key/row state that
+    // identifies a removal, and the select-release guard. The guard is armed by the card
+    // long-press BEFORE the favorite is toggled, so it can never be skipped by a restoration
+    // overwriting the focused key. Other destinations keep the accepted behavior untouched.
+    var focusedKey by remember(destination) { mutableStateOf<String?>(null) }
+    var suppressSelectKeyUp by remember(destination) { mutableStateOf(false) }
+    val previousContentKeys = remember(destination) { mutableStateOf(contentKeys) }
+    val previousContentRowKey = remember(destination) { mutableStateOf(memoryRowKey) }
     DisposableEffect(focusMoveState) {
         onDispose { focusMoveState.job?.cancel() }
     }
@@ -397,9 +423,42 @@ internal fun TvCatalogGrid(
         runCatching { requester.requestFocus() }
     }
 
-    LaunchedEffect(contentKeys, remembered.itemKey, destination, restoreFocusedCard) {
+    LaunchedEffect(contentKeys, remembered.itemKey, destination, restoreFocusedCard, memoryRowKey) {
+        val previousKeys = previousContentKeys.value
+        previousContentKeys.value = contentKeys
+        val previousRowKey = previousContentRowKey.value
+        previousContentRowKey.value = memoryRowKey
+        val transition = favoritesGridFocusTransition(
+            destination = destination,
+            previousKeys = previousKeys,
+            currentKeys = contentKeys,
+            previousRowKey = previousRowKey,
+            currentRowKey = memoryRowKey,
+            focusedKey = focusedKey,
+        )
+        if (transition == FavoritesGridFocusTransition.REMOVAL) {
+            // Single Favorites removal owner: the release guard was armed by the card long-press
+            // before the toggle, so this path only moves focus/scroll. The next surviving stable
+            // key wins, then the previous item; an emptied projection stays with the page-level
+            // fallback that returns focus to the reachable type filter.
+            val removedKey = focusedKey ?: return@LaunchedEffect
+            val removedIndex = previousKeys.indexOf(removedKey)
+            val nextIndex = favoritesRemovalFocusIndex(removedIndex, contentKeys.size)
+                ?: return@LaunchedEffect
+            val nextKey = contentKeys[nextIndex]
+            // Real attachment from layout, not a frame: focus is granted only once the replacement
+            // card is actually composed.
+            snapshotFlow { gridState.layoutInfo.visibleItemsInfo.any { it.key == nextKey } }
+                .first { it }
+            // The viewport is preserved when the replacement already sits inside the usable bounds.
+            currentIndexCorrection(nextIndex)?.let { correction ->
+                if (correction != 0) gridState.scrollBy(correction.toFloat())
+            }
+            runCatching { focusRequesters[nextIndex].requestFocus() }
+            return@LaunchedEffect
+        }
         if (restoreFocusedCard && content.isNotEmpty() && targetKey != null) {
-            // One-time entry/return restoration only. After an ordinary focus change the saved
+            // Accepted entry/return restoration only. After an ordinary focus change the saved
             // memory updates and restarts this effect; the grid already owns that transaction, so
             // restoring the same item again would scroll it a second time (the reported shake).
             if (focusedIndex == targetIndex) {
@@ -417,14 +476,32 @@ internal fun TvCatalogGrid(
         val availableGridWidth = (
             maxWidth - horizontalContentPadding - focusSafeEndPadding
         ).coerceAtLeast(minCellWidth)
-        val columnCount = if (boxedCards) {
-            movieCatalogColumnCount(
+        val columnCount = when {
+            !isTelevision -> {
+                // Compact phone Favorites: two accepted card columns when both fit, otherwise
+                // one. Tablets/foldables and landscape windows use the accepted catalog sizing.
+                val availableMobileWidth = (
+                    maxWidth - FAVORITES_MOBILE_HORIZONTAL_PADDING * 2
+                ).coerceAtLeast(1.dp)
+                val compactWidth = adaptiveUi.windowWidthClass == HulkWindowWidthClass.COMPACT
+                val minCellDp = if (compactWidth) {
+                    FAVORITES_MOBILE_MIN_CELL_WIDTH.value
+                } else {
+                    movieCatalogMinCellWidthDp(adaptiveUi.screenWidthDp)
+                }
+                val rawColumns = movieCatalogColumnCount(
+                    availableWidthDp = availableMobileWidth.value,
+                    spacingDp = FAVORITES_MOBILE_HORIZONTAL_SPACING.value,
+                    minCellWidthDp = minCellDp,
+                )
+                if (compactWidth) rawColumns.coerceAtMost(2) else rawColumns
+            }
+            boxedCards -> movieCatalogColumnCount(
                 availableWidthDp = availableGridWidth.value,
                 spacingDp = horizontalSpacing.value,
                 minCellWidthDp = minCellWidth.value,
             )
-        } else {
-            (((availableGridWidth + horizontalSpacing).value) /
+            else -> (((availableGridWidth + horizontalSpacing).value) /
                 (minCellWidth + horizontalSpacing).value)
                 .toInt()
                 .coerceAtLeast(1)
@@ -437,7 +514,7 @@ internal fun TvCatalogGrid(
             (maxHeight - horizontalContentPadding - focusSafeBottomInset).coerceAtLeast(1.dp).roundToPx()
         }
         var boxedFooterHeightPx by remember(contentKeys) { mutableIntStateOf(0) }
-        val compactArtworkHeightPx = if (boxedCards && boxedFooterHeightPx > 0) {
+        val compactArtworkHeightPx = if (isTelevision && boxedCards && boxedFooterHeightPx > 0) {
             movieCompactArtworkHeightPx(
                 cellWidthPx = with(density) { cellWidth.roundToPx() },
                 footerHeightPx = boxedFooterHeightPx,
@@ -462,16 +539,66 @@ internal fun TvCatalogGrid(
         CompositionLocalProvider(LocalBringIntoViewSpec provides gridBringIntoViewSpec) {
         LazyVerticalGrid(
             state = gridState,
-            columns = if (boxedCards) GridCells.Fixed(columnCount) else GridCells.Adaptive(minCellWidth),
-            horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
-            verticalArrangement = Arrangement.spacedBy(verticalSpacing),
-            contentPadding = PaddingValues(
-                start = horizontalContentPadding,
-                top = horizontalContentPadding,
-                end = focusSafeEndPadding,
-                bottom = bottomContentPadding,
+            columns = if (isTelevision) {
+                if (boxedCards) GridCells.Fixed(columnCount) else GridCells.Adaptive(minCellWidth)
+            } else {
+                GridCells.Fixed(columnCount)
+            },
+            horizontalArrangement = Arrangement.spacedBy(
+                if (isTelevision) horizontalSpacing else FAVORITES_MOBILE_HORIZONTAL_SPACING,
             ),
-            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(
+                if (isTelevision) verticalSpacing else FAVORITES_MOBILE_VERTICAL_SPACING,
+            ),
+            contentPadding = if (isTelevision) {
+                PaddingValues(
+                    start = horizontalContentPadding,
+                    top = horizontalContentPadding,
+                    end = focusSafeEndPadding,
+                    bottom = bottomContentPadding,
+                )
+            } else {
+                PaddingValues(
+                    start = FAVORITES_MOBILE_HORIZONTAL_PADDING,
+                    top = 5.dp,
+                    end = FAVORITES_MOBILE_HORIZONTAL_PADDING,
+                    bottom = FAVORITES_MOBILE_BOTTOM_PADDING,
+                )
+            },
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    // Favorites-only: consume the stray select KeyUp of a removal long-press so
+                    // the replacement card cannot be opened by the same release.
+                    if (destination == MainDestination.FAVORITES) {
+                        Modifier.onPreviewKeyEvent { event ->
+                            val selectKey = event.key == Key.Enter ||
+                                event.key == Key.DirectionCenter ||
+                                event.key == Key.NumPadEnter ||
+                                event.key == Key.Spacebar
+                            when (
+                                favoritesSelectGuardDecision(
+                                    armed = suppressSelectKeyUp,
+                                    isSelectKey = selectKey,
+                                    isKeyUp = event.type == KeyEventType.KeyUp,
+                                    keyDownRepeatCount = event.nativeKeyEvent.repeatCount,
+                                )
+                            ) {
+                                FavoritesSelectGuardDecision.CONSUME_RELEASE -> {
+                                    suppressSelectKeyUp = false
+                                    true
+                                }
+                                FavoritesSelectGuardDecision.CLEAR_ARMED_ON_PRESS -> {
+                                    suppressSelectKeyUp = false
+                                    false
+                                }
+                                FavoritesSelectGuardDecision.PASS -> false
+                            }
+                        }
+                    } else {
+                        Modifier
+                    },
+                ),
         ) {
             itemsIndexed(content, key = { index, _ -> contentKeys[index] }) { index, item ->
                 val key = contentKeys[index]
@@ -533,7 +660,12 @@ internal fun TvCatalogGrid(
                         }
 
                         focusMoveState.begin(nextIndex)
-                        navigationMemory.save(destination, contentKeys[nextIndex], nextIndex)
+                        navigationMemory.save(
+                            destination,
+                            contentKeys[nextIndex],
+                            nextIndex,
+                            rowKey = memoryRowKey,
+                        )
 
                         focusMoveState.job?.cancel()
                         focusMoveState.job = null
@@ -559,29 +691,40 @@ internal fun TvCatalogGrid(
                 val onFocusedCard = {
                     focusMoveState.complete(index)
                     focusedIndex = index
-                    navigationMemory.save(destination, key, index)
+                    focusedKey = key
+                    navigationMemory.save(destination, key, index, rowKey = memoryRowKey)
+                }
+                val onCardLongClick = {
+                    // Arm the TV select-release guard BEFORE the toggle so a restoration pass can
+                    // never rewrite the focused key before removal detection and skip the guard.
+                    if (destination == MainDestination.FAVORITES && isTelevision) {
+                        suppressSelectKeyUp = true
+                    }
+                    onToggleFavorite(item)
                 }
 
-                if (destination == MainDestination.SERIES) {
+                val seriesCard = if (destination == MainDestination.FAVORITES) {
+                    item.type == ContentType.SERIES
+                } else {
+                    destination == MainDestination.SERIES
+                }
+                if (destination == MainDestination.FAVORITES && item.type == ContentType.LIVE) {
+                    LiveChannelHomeCard(
+                        name = item.name,
+                        artworkUrl = item.posterUrl,
+                        isFavorite = isFavorite(item),
+                        onClick = { onOpen(item) },
+                        modifier = cardModifier,
+                        onLongClick = onCardLongClick,
+                        onFocused = onFocusedCard,
+                    )
+                } else if (seriesCard) {
                     SeriesCatalogBoxedCard(
                         item = item,
                         isFavorite = isFavorite(item),
                         onClick = { onOpen(item) },
                         modifier = cardModifier,
-                        onLongClick = { onToggleFavorite(item) },
-                        onFocused = onFocusedCard,
-                        artworkHeightDp = compactArtworkHeightPx?.let { heightPx ->
-                            with(density) { heightPx.toDp() }
-                        },
-                        onFooterHeightMeasured = { boxedFooterHeightPx = it },
-                    )
-                } else if (destination == MainDestination.MOVIES) {
-                    MoviesCatalogBoxedCard(
-                        item = item,
-                        isFavorite = isFavorite(item),
-                        onClick = { onOpen(item) },
-                        modifier = cardModifier,
-                        onLongClick = { onToggleFavorite(item) },
+                        onLongClick = onCardLongClick,
                         onFocused = onFocusedCard,
                         artworkHeightDp = compactArtworkHeightPx?.let { heightPx ->
                             with(density) { heightPx.toDp() }
@@ -589,13 +732,17 @@ internal fun TvCatalogGrid(
                         onFooterHeightMeasured = { boxedFooterHeightPx = it },
                     )
                 } else {
-                    CompactPosterCard(
+                    MoviesCatalogBoxedCard(
                         item = item,
                         isFavorite = isFavorite(item),
                         onClick = { onOpen(item) },
                         modifier = cardModifier,
-                        onLongClick = { onToggleFavorite(item) },
+                        onLongClick = onCardLongClick,
                         onFocused = onFocusedCard,
+                        artworkHeightDp = compactArtworkHeightPx?.let { heightPx ->
+                            with(density) { heightPx.toDp() }
+                        },
+                        onFooterHeightMeasured = { boxedFooterHeightPx = it },
                     )
                 }
             }
