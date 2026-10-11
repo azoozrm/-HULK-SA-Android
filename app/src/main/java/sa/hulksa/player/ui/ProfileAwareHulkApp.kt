@@ -69,8 +69,8 @@ import sa.hulksa.player.data.ProfileStoreSnapshot
 import sa.hulksa.player.data.VerifiedKidsCatalogSnapshot
 import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
-import sa.hulksa.player.ui.components.ErrorNotice
-import sa.hulksa.player.ui.components.FocusButton
+import sa.hulksa.player.ui.components.EntryActionButton
+import sa.hulksa.player.ui.components.EntryNotice
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.screens.AdaptiveProfileManagementScreen
 import sa.hulksa.player.ui.screens.MaintenanceScreen
@@ -85,6 +85,7 @@ import sa.hulksa.player.ui.screens.ProfilePickerScreen
 import sa.hulksa.player.ui.screens.ProfilePinProtectionScreen
 import sa.hulksa.player.ui.screens.ProfilePinUnlockScreen
 import sa.hulksa.player.ui.screens.RequiredUpdateScreen
+import sa.hulksa.player.ui.screens.movieActionHeightDp
 import sa.hulksa.player.ui.screens.removeLiveCategoryVisibilityProfileState
 import sa.hulksa.player.ui.screens.removeMovieCategoryVisibilityProfileState
 import sa.hulksa.player.ui.screens.removeSeriesCategoryVisibilityProfileState
@@ -94,11 +95,11 @@ import sa.hulksa.player.ui.theme.LocalHulkColors
 internal val LocalProfileSwitchRequester = staticCompositionLocalOf<() -> Unit> { {} }
 
 private const val MISSING_PARENTAL_CODE_MESSAGE =
-    "يلزم رمز الوالدين للانتقال من ملف الأطفال. لا يوجد رمز والدين صالح."
+    "يلزم رمز الوالدين للانتقال من ملف الاطفال ، لا يوجد رمز والدين صالح"
 private const val PARENTAL_CODE_SETUP_REQUIRED_MESSAGE =
-    "يجب إنشاء رمز الوالدين قبل استخدام ملفات الأطفال."
+    "يجب انشاء رمز الوالدين قبل استخدام ملفات الاطفال"
 private const val PARENTAL_CODE_MIGRATION_FAILED_MESSAGE =
-    "تعذر تهيئة رمز الوالدين بأمان. أعد المحاولة بعد تسجيل الدخول."
+    "تعذر تهيئة رمز الوالدين بامان ، اعد المحاولة بعد تسجيل الدخول"
 
 private sealed interface ParentalCodeBootstrapAction {
     data class SwitchProfile(val targetProfileId: String) : ParentalCodeBootstrapAction
@@ -406,7 +407,7 @@ fun ProfileAwareHulkApp(
             kidsSnapshot = null
             kidsSourceLoading = false
             kidsSourceError = if (authenticated) {
-                "تعذر تثبيت مالك جلسة الأطفال. أعد تسجيل الدخول ثم حاول مرة أخرى."
+                "تعذر تثبيت مالك جلسة الاطفال ، اعد تسجيل الدخول ثم حاول مرة اخرى"
             } else {
                 null
             }
@@ -426,8 +427,8 @@ fun ProfileAwareHulkApp(
             kidsSourceError = when {
                 verified.isAvailable -> null
                 verified.blockedTypes.isNotEmpty() ->
-                    "لم يعتمد التطبيق مصدر الأطفال لأن فلترة السيرفر لم تُثبت بأمان."
-                else -> "لا توجد فئات أطفال صريحة متاحة لهذا الحساب."
+                    "لم يعتمد التطبيق مصدر الاطفال لان فلترة السيرفر لم تُثبت بامان"
+                else -> "لا توجد فئات اطفال صريحة متاحة لهذا الحساب"
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -437,7 +438,7 @@ fun ProfileAwareHulkApp(
                 accountScopeStore.activeAccountId() == accountKey
             ) {
                 kidsSnapshot = null
-                kidsSourceError = "تعذر التحقق من مصدر الأطفال. لم يتم عرض أي محتوى عام كبديل."
+                kidsSourceError = "تعذر التحقق من مصدر الاطفال ، لم يتم عرض اي محتوى عام كبديل"
             }
         } finally {
             if (
@@ -482,7 +483,7 @@ fun ProfileAwareHulkApp(
             return
         }
         val expectedAccountId = activeAccountId ?: run {
-            switchError = "تعذر تثبيت مالك الملف الشخصي. أعد تسجيل الدخول."
+            switchError = "تعذر تثبيت مالك الملف الشخصي ، اعد تسجيل الدخول"
             return
         }
 
@@ -523,7 +524,7 @@ fun ProfileAwareHulkApp(
             if (accountScopeStore.activeAccountId() != expectedAccountId) return@launch
             if (updatedSnapshot == null) {
                 switching = false
-                switchError = "تعذر اختيار الملف الشخصي. حاول مرة اخرى."
+                switchError = "تعذر اختيار الملف الشخصي ، حاول مرة اخرى"
                 return@launch
             }
 
@@ -715,7 +716,7 @@ fun ProfileAwareHulkApp(
             is ParentalCodeBootstrapAction.SwitchProfile -> {
                 val target = profiles.firstOrNull { it.id == action.targetProfileId }
                 if (target == null) {
-                    switchError = "تعذر العثور على الملف الشخصي المطلوب."
+                    switchError = "تعذر العثور على الملف الشخصي المطلوب"
                 } else {
                     // Creating and confirming the code authorizes this pending action once.
                     continueProfileSwitchAuthorization(
@@ -727,7 +728,7 @@ fun ProfileAwareHulkApp(
             is ParentalCodeBootstrapAction.CreateKids -> {
                 val expectedAccountId = activeAccountId
                 if (kidsSnapshot?.isAvailable != true || expectedAccountId == null) {
-                    switchError = "تعذر إنشاء ملف الأطفال. تحقق من مصدر الأطفال ثم حاول مرة أخرى."
+                    switchError = "تعذر انشاء ملف الاطفال ، تحقق من مصدر الاطفال ثم حاول مرة اخرى"
                     return
                 }
                 profileMutationInProgress = true
@@ -751,7 +752,7 @@ fun ProfileAwareHulkApp(
                             createProfileRequested = false
                         } else {
                             switchError =
-                                "تعذر إنشاء ملف الأطفال. تحقق من مصدر الأطفال ثم حاول مرة أخرى."
+                                "تعذر انشاء ملف الاطفال ، تحقق من مصدر الاطفال ثم حاول مرة اخرى"
                         }
                         managingProfiles = true
                     } finally {
@@ -796,7 +797,7 @@ fun ProfileAwareHulkApp(
             is ParentalCodeAuthorizationAction.SwitchProfile -> {
                 val target = profiles.firstOrNull { it.id == action.targetProfileId }
                 if (target == null) {
-                    switchError = "تعذر العثور على الملف الشخصي المطلوب."
+                    switchError = "تعذر العثور على الملف الشخصي المطلوب"
                 } else {
                     continueProfileSwitchAuthorization(
                         profile = target,
@@ -1032,10 +1033,12 @@ fun ProfileAwareHulkApp(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        ErrorNotice("تعذر تحميل الملفات الشخصية بأمان.")
-                        FocusButton(
-                            text = "إعادة المحاولة",
+                        EntryNotice("تعذر تحميل الملفات الشخصية بامان")
+                        EntryActionButton(
+                            text = "اعادة المحاولة",
                             onClick = { profileLoadRequest++ },
+                            outlined = true,
+                            minHeightDp = movieActionHeightDp(isTv = isTelevisionDevice, compactHeight = false),
                         )
                     }
                 } else {
@@ -1043,7 +1046,7 @@ fun ProfileAwareHulkApp(
                         label = if (profileSnapshot == null) {
                             "جار تحميل الملفات الشخصية…"
                         } else {
-                            "جار تهيئة إعدادات الملف الشخصي…"
+                            "جار تهيئة اعدادات الملف الشخصي…"
                         },
                     )
                 }

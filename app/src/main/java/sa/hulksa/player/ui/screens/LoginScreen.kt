@@ -6,10 +6,10 @@ import android.content.ContextWrapper
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -41,14 +40,14 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Login
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.QrCode2
-import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -65,12 +64,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -81,15 +78,15 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.disabled
-import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -101,15 +98,42 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import sa.hulksa.player.R
 import sa.hulksa.player.data.GrowthDestination
+import sa.hulksa.player.data.PortalException
 import sa.hulksa.player.data.OperationsGrowthLinkConfig
-import sa.hulksa.player.ui.components.BrandLogo
-import sa.hulksa.player.ui.components.ErrorNotice
+import sa.hulksa.player.ui.components.EntryActionButton
+import sa.hulksa.player.ui.components.EntryNotice
 import sa.hulksa.player.ui.components.LoadingRing
-import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 private const val HULK_WEBSITE = "https://hulksa.com/"
+
+internal const val LOGIN_OFFLINE_MESSAGE =
+    "لا يوجد اتصال بالانترنت ، تحقق من اتصالك وحاول مرة اخرى"
+
+internal data class LoginErrorPresentation(
+    val displayText: String?,
+    val confirmedOffline: Boolean,
+)
+
+/**
+ * Routes the raw Login failure to its display copy: a confirmed-offline transport failure uses the
+ * offline wording; a service failure with internet available keeps the app-authored service retry
+ * copy; validation/credential failures stay unchanged. Raw classification is untouched.
+ */
+internal fun loginErrorPresentation(
+    errorMessage: String?,
+    serviceUnavailableMessage: String,
+    confirmedOffline: Boolean,
+): LoginErrorPresentation = when {
+    errorMessage.isNullOrBlank() ->
+        LoginErrorPresentation(displayText = null, confirmedOffline = false)
+    errorMessage == serviceUnavailableMessage && confirmedOffline ->
+        LoginErrorPresentation(displayText = LOGIN_OFFLINE_MESSAGE, confirmedOffline = true)
+    else ->
+        LoginErrorPresentation(displayText = errorMessage, confirmedOffline = false)
+}
 
 internal class LoginCardFocusRequesterHolder(
     initialRequester: FocusRequester,
@@ -137,11 +161,6 @@ internal class LoginKeyboardFocusTransitionController {
     }
 }
 
-private enum class LoginComposition {
-    PREMIUM_SPLIT,
-    CENTERED,
-}
-
 private enum class LoginErrorTarget {
     ACCESS_CODE,
     USERNAME,
@@ -150,28 +169,19 @@ private enum class LoginErrorTarget {
 }
 
 private data class LoginLayoutPolicy(
-    val composition: LoginComposition,
     val horizontalSafeInset: Dp,
     val verticalSafeInset: Dp,
     val pageHorizontalPadding: Dp,
-    val splitGap: Dp,
     val cardMaxWidth: Dp,
-    val cardMaxHeight: Dp,
     val cardHorizontalPadding: Dp,
     val cardVerticalPadding: Dp,
     val cardRadius: Dp,
     val fieldHeight: Dp,
-    val primaryActionHeight: Dp,
-    val secondaryActionHeight: Dp,
     val optionHeight: Dp,
-    val logoSize: Dp,
-    val brandRegionHeight: Dp,
     val titleSizeSp: Int,
     val descriptionSizeSp: Int,
     val fieldTextSizeSp: Int,
     val optionTextSizeSp: Int,
-    val buttonTextSizeSp: Int,
-    val panelScrollable: Boolean,
     val compact: Boolean,
 )
 
@@ -179,29 +189,8 @@ private fun resolveLoginLayoutPolicy(
     isTv: Boolean,
     width: Dp,
     height: Dp,
-    fontScale: Float,
-    imeVisible: Boolean,
 ): LoginLayoutPolicy {
     val compactHeight = height < if (isTv) 620.dp else 560.dp
-    val aspectRatio = width.value / height.value.coerceAtLeast(1f)
-    val expandedLandscape =
-        !imeVisible &&
-            width >= 840.dp &&
-            height >= 480.dp &&
-            width > height
-    val roomyMediumLandscape =
-        !imeVisible &&
-            width >= 720.dp &&
-            width < 840.dp &&
-            height >= 480.dp &&
-            aspectRatio >= 1.45f
-    val composition =
-        if (isTv || expandedLandscape || roomyMediumLandscape) {
-            LoginComposition.PREMIUM_SPLIT
-        } else {
-            LoginComposition.CENTERED
-        }
-
     val horizontalSafeInset =
         if (isTv) {
             (width * .045f).coerceIn(32.dp, 64.dp)
@@ -222,36 +211,15 @@ private fun resolveLoginLayoutPolicy(
         }
     val cardMaxWidth = when {
         isTv -> (width * .41f).coerceIn(420.dp, 520.dp)
-        composition == LoginComposition.PREMIUM_SPLIT ->
-            (width * .44f).coerceIn(400.dp, 520.dp)
         width >= 600.dp -> 560.dp
         else -> 480.dp
     }
-    val logoSize = when {
-        isTv -> (minOf(width, height) * .38f).coerceIn(180.dp, 250.dp)
-        width >= 600.dp -> (minOf(width, height) * .25f).coerceIn(120.dp, 190.dp)
-        else -> (width * .20f).coerceIn(68.dp, 88.dp)
-    }
-    val brandRegionHeight = when {
-        composition == LoginComposition.PREMIUM_SPLIT -> height
-        width >= 600.dp -> logoSize + 44.dp
-        width < 360.dp -> 96.dp
-        else -> 116.dp
-    }
-    val cardMaxHeight = when {
-        isTv -> (height * .88f).coerceAtLeast(360.dp)
-        composition == LoginComposition.PREMIUM_SPLIT -> (height * .90f).coerceAtLeast(360.dp)
-        else -> height * .94f
-    }
 
     return LoginLayoutPolicy(
-        composition = composition,
         horizontalSafeInset = horizontalSafeInset,
         verticalSafeInset = verticalSafeInset,
         pageHorizontalPadding = pageHorizontalPadding,
-        splitGap = (width * .035f).coerceIn(24.dp, 52.dp),
         cardMaxWidth = cardMaxWidth,
-        cardMaxHeight = cardMaxHeight,
         cardHorizontalPadding = when {
             isTv -> (cardMaxWidth * .07f).coerceIn(28.dp, 40.dp)
             width >= 600.dp -> 26.dp
@@ -276,23 +244,11 @@ private fun resolveLoginLayoutPolicy(
             width >= 600.dp -> 52.dp
             else -> 50.dp
         },
-        primaryActionHeight = when {
-            isTv && compactHeight -> 52.dp
-            isTv -> 56.dp
-            else -> 52.dp
-        },
-        secondaryActionHeight = when {
-            isTv && compactHeight -> 50.dp
-            isTv -> 54.dp
-            else -> 50.dp
-        },
         optionHeight = when {
             isTv && compactHeight -> 30.dp
             isTv -> 32.dp
             else -> 40.dp
         },
-        logoSize = logoSize,
-        brandRegionHeight = brandRegionHeight,
         titleSizeSp = when {
             isTv && compactHeight -> 25
             isTv -> 31
@@ -305,11 +261,6 @@ private fun resolveLoginLayoutPolicy(
         },
         fieldTextSizeSp = if (isTv && !compactHeight) 17 else 15,
         optionTextSizeSp = if (isTv && !compactHeight) 15 else 14,
-        buttonTextSizeSp = if (isTv && !compactHeight) 17 else 15,
-        panelScrollable =
-            !isTv &&
-                composition == LoginComposition.PREMIUM_SPLIT &&
-                (compactHeight || fontScale >= 1.3f || imeVisible),
         compact = compactHeight,
     )
 }
@@ -326,7 +277,6 @@ fun LoginScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val view = LocalView.current
-    val density = LocalDensity.current
     val activity = remember(view.context) { view.context.findActivity() }
     val tvInitialFocusRequester = remember { FocusRequester() }
     val submitRequester = remember { FocusRequester() }
@@ -353,6 +303,7 @@ fun LoginScreen(
     val passwordState = remember { mutableStateOf("") }
     var showPassword by rememberSaveable { mutableStateOf(false) }
     var rememberAccount by rememberSaveable { mutableStateOf(true) }
+    var websiteOpenError by remember { mutableStateOf<String?>(null) }
 
     DisposableEffect(isTv, activity) {
         if (isTv && activity != null) {
@@ -406,6 +357,10 @@ fun LoginScreen(
     }
     val openWebsite = {
         runCatching { uriHandler.openUri(HULK_WEBSITE) }
+            .onSuccess { websiteOpenError = null }
+            .onFailure {
+                websiteOpenError = "تعذر فتح الموقع. تحقق من وجود متصفح او اتصال ثم حاول مرة اخرى"
+            }
         Unit
     }
 
@@ -436,22 +391,22 @@ fun LoginScreen(
                     detectTapGestures(onTap = { dismissKeyboard() })
                 },
         ) {
-            val imeVisible =
-                if (isTv) {
-                    false
-                } else {
-                    WindowInsets.ime.getBottom(density) > 0
-                }
             val policy = resolveLoginLayoutPolicy(
                 isTv = isTv,
                 width = maxWidth,
                 height = maxHeight,
-                fontScale = density.fontScale,
-                imeVisible = imeVisible,
             )
-            val secondaryInBrand = isTv || maxWidth >= 600.dp
+            val subscriptionUsesQr = isTv || maxWidth >= 600.dp
+            val useTvWall = isTv || maxWidth >= maxHeight
+            val safeWidth =
+                (maxWidth - if (isTv) policy.horizontalSafeInset * 2 else policy.pageHorizontalPadding * 2)
+                    .coerceAtLeast(0.dp)
+            val resolvedCardMaxWidth = policy.cardMaxWidth.coerceAtMost(safeWidth)
 
-            PremiumCinematicBackground(Modifier.fillMaxSize())
+            LoginPosterWallBackground(
+                useTvWall = useTvWall,
+                modifier = Modifier.fillMaxSize(),
+            )
 
             if (isStarting) {
                 LoadingRing(
@@ -460,6 +415,13 @@ fun LoginScreen(
                 )
                 return@BoxWithConstraints
             }
+
+            val usableNetwork by rememberUsableNetworkState()
+            val errorPresentation = loginErrorPresentation(
+                errorMessage = errorMessage,
+                serviceUnavailableMessage = PortalException.ServiceUnavailable.message.orEmpty(),
+                confirmedOffline = !usableNetwork,
+            )
 
             val panel: @Composable (Modifier) -> Unit = { modifier ->
                 LoginPanel(
@@ -473,13 +435,21 @@ fun LoginScreen(
                     isLoading = isLoading,
                     isTv = isTv,
                     errorMessage = errorMessage,
+                    displayedErrorMessage = errorPresentation.displayText,
+                    networkFailure = errorPresentation.confirmedOffline,
+                    websiteErrorMessage = websiteOpenError,
                     onSubmit = submit,
-                    onOpenWebsite = openWebsite,
+                    onOpenSubscription = {
+                        if (subscriptionUsesQr) {
+                            showSubscriptionQr = true
+                        } else {
+                            openWebsite()
+                        }
+                    },
                     onTextInputFocus = onTextInputFocus,
                     onNonTextFocus = onNonTextFocus,
                     onCardFocusChanged = lastCardFocusRequester::update,
                     initialFocusRequester = if (isTv) tvInitialFocusRequester else null,
-                    showSecondaryAction = !secondaryInBrand,
                     submitRequester = submitRequester,
                     subscribeRequester = subscribeRequester,
                     policy = policy,
@@ -487,115 +457,43 @@ fun LoginScreen(
                 )
             }
 
-            when (policy.composition) {
-                LoginComposition.PREMIUM_SPLIT -> {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .then(
-                                if (isTv) {
-                                    Modifier.padding(
-                                        horizontal = policy.horizontalSafeInset,
-                                        vertical = policy.verticalSafeInset,
-                                    )
-                                } else {
-                                    Modifier
-                                        .windowInsetsPadding(WindowInsets.safeDrawing)
-                                        .padding(
-                                            horizontal = policy.pageHorizontalPadding,
-                                            vertical = if (policy.compact) 8.dp else 12.dp,
-                                        )
-                                },
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (isTv) {
+                            Modifier.padding(
+                                horizontal = policy.horizontalSafeInset,
+                                vertical = policy.verticalSafeInset,
                             )
-                            .then(if (isTv) Modifier else Modifier.imePadding()),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1.08f)
-                                .fillMaxHeight(),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            panel(
-                                Modifier
-                                    .widthIn(max = policy.cardMaxWidth)
-                                    .fillMaxWidth(),
-                            )
-                        }
-
-                        Spacer(Modifier.width(policy.splitGap))
-
-                        Column(
-                            modifier = Modifier
-                                .weight(.92f)
-                                .fillMaxHeight(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                        ) {
-                            LoginBrandRegion(
-                                logoSize = policy.logoSize,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            if (secondaryInBrand) {
-                                Spacer(Modifier.height(if (policy.compact) 38.dp else 42.dp))
-                                LoginSubscriptionAction(
-                                    onClick = { showSubscriptionQr = true },
-                                    onNonTextFocus = onNonTextFocus,
-                                    returnRequester = lastCardFocusRequester::current,
-                                    subscribeRequester = subscribeRequester,
-                                    policy = policy,
-                                    modifier = Modifier.width((policy.logoSize + 44.dp) * .84f),
-                                )
-                            }
-                        }
-                    }
-                }
-
-                LoginComposition.CENTERED -> {
-                    val pageScrollState = rememberScrollState()
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .windowInsetsPadding(WindowInsets.safeDrawing)
-                            .imePadding()
-                            .verticalScroll(pageScrollState)
-                            .padding(
-                                horizontal = policy.pageHorizontalPadding,
-                                vertical = if (policy.compact) 8.dp else 12.dp,
-                            ),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        LoginBrandRegion(
-                            logoSize = policy.logoSize,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(policy.brandRegionHeight),
-                        )
-                        if (secondaryInBrand) {
-                            Spacer(Modifier.height(if (policy.compact) 30.dp else 34.dp))
-                            LoginSubscriptionAction(
-                                onClick = { showSubscriptionQr = true },
-                                onNonTextFocus = onNonTextFocus,
-                                returnRequester = lastCardFocusRequester::current,
-                                subscribeRequester = subscribeRequester,
-                                policy = policy,
-                                modifier = Modifier.width((policy.logoSize + 44.dp) * .84f),
-                            )
-                            Spacer(Modifier.height(10.dp))
                         } else {
-                            Spacer(Modifier.height(if (policy.compact) 4.dp else 10.dp))
-                        }
-                        panel(
                             Modifier
-                                .widthIn(max = policy.cardMaxWidth)
-                                .fillMaxWidth(),
-                        )
-                        Spacer(Modifier.height(16.dp))
-                    }
+                                .windowInsetsPadding(WindowInsets.safeDrawing)
+                                .padding(
+                                    horizontal = policy.pageHorizontalPadding,
+                                    vertical = if (policy.compact) 8.dp else 12.dp,
+                                )
+                                .imePadding()
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                val pageScrollState = rememberScrollState()
+                Column(
+                    modifier = Modifier
+                        .verticalScroll(pageScrollState)
+                        .padding(vertical = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    panel(
+                        Modifier
+                            .widthIn(max = resolvedCardMaxWidth)
+                            .fillMaxWidth(),
+                    )
                 }
             }
 
-            if (secondaryInBrand && showSubscriptionQr) {
+            if (showSubscriptionQr) {
                 GrowthQrDialog(
                     destination = GrowthDestination.RENEWAL,
                     link = loginRenewalLink,
@@ -607,204 +505,23 @@ fun LoginScreen(
 }
 
 @Composable
-private fun PremiumCinematicBackground(modifier: Modifier = Modifier) {
-    val colors = LocalHulkColors.current
-
-    Canvas(modifier = modifier.background(colors.background)) {
-        val wideScene = size.width >= size.height * 1.18f
-        val brandCenter = Offset(
-            size.width * if (wideScene) .28f else .50f,
-            size.height * if (wideScene) .49f else .18f,
-        )
-
-        drawRect(
-            brush =
-                if (wideScene) {
-                    Brush.horizontalGradient(
-                        colorStops = arrayOf(
-                            0f to Color(0xFF12120D),
-                            .28f to Color(0xFF0D0E0A),
-                            .55f to Color(0xFF080906),
-                            .76f to Color(0xFF050604),
-                            1f to Color(0xFF020302),
-                        ),
-                    )
-                } else {
-                    Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0f to Color(0xFF12120D),
-                            .24f to Color(0xFF0B0C08),
-                            .50f to Color(0xFF070805),
-                            1f to Color(0xFF020302),
-                        ),
-                    )
-                },
-        )
-
-        drawRect(
-            brush = Brush.radialGradient(
-                colorStops = arrayOf(
-                    0f to colors.goldDeep.copy(alpha = if (wideScene) .20f else .14f),
-                    .22f to colors.goldDeep.copy(alpha = .08f),
-                    .52f to Color(0xFF18150C).copy(alpha = .035f),
-                    1f to Color.Transparent,
-                ),
-                center = brandCenter,
-                radius = maxOf(size.width, size.height) * if (wideScene) .43f else .34f,
-            ),
-        )
-
-        drawRect(
-            brush = Brush.radialGradient(
-                colorStops = arrayOf(
-                    0f to Color.White.copy(alpha = .055f),
-                    .20f to colors.goldBright.copy(alpha = .028f),
-                    .58f to Color.Transparent,
-                    1f to Color.Transparent,
-                ),
-                center = Offset(
-                    size.width * if (wideScene) .18f else .50f,
-                    size.height * if (wideScene) .08f else 0f,
-                ),
-                radius = maxOf(size.width, size.height) * .48f,
-            ),
-        )
-
-        drawRect(
-            brush = Brush.radialGradient(
-                colorStops = arrayOf(
-                    0f to colors.goldDeep.copy(alpha = .065f),
-                    .26f to colors.goldDeep.copy(alpha = .025f),
-                    .68f to Color.Transparent,
-                    1f to Color.Transparent,
-                ),
-                center = Offset(
-                    size.width * if (wideScene) .27f else .50f,
-                    size.height * if (wideScene) .93f else .36f,
-                ),
-                radius = maxOf(size.width, size.height) * .52f,
-            ),
-        )
-
-        drawRect(
-            brush =
-                if (wideScene) {
-                    Brush.horizontalGradient(
-                        colorStops = arrayOf(
-                            0f to Color.Transparent,
-                            .32f to Color.Transparent,
-                            .56f to colors.background.copy(alpha = .34f),
-                            .72f to colors.background.copy(alpha = .70f),
-                            1f to colors.background.copy(alpha = .94f),
-                        ),
-                    )
-                } else {
-                    Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0f to Color.Transparent,
-                            .23f to Color.Transparent,
-                            .45f to colors.background.copy(alpha = .20f),
-                            .70f to colors.background.copy(alpha = .58f),
-                            1f to colors.background.copy(alpha = .82f),
-                        ),
-                    )
-                },
-        )
-
-        drawRect(
-            brush = Brush.verticalGradient(
-                colorStops = arrayOf(
-                    0f to colors.background.copy(alpha = .46f),
-                    .17f to Color.Transparent,
-                    .67f to Color.Transparent,
-                    1f to colors.background.copy(alpha = .76f),
-                ),
-            ),
-        )
-
-        drawRect(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    Color.Transparent,
-                    colors.background.copy(alpha = .62f),
-                ),
-                center = brandCenter,
-                radius = maxOf(size.width, size.height) * .90f,
-            ),
-        )
-    }
-}
-
-@Composable
-private fun LoginBrandRegion(
-    logoSize: Dp,
+private fun LoginPosterWallBackground(
+    useTvWall: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val colors = LocalHulkColors.current
-    val frameShape = RoundedCornerShape(28.dp)
-
-    Box(
-        modifier = modifier,
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(logoSize + 44.dp)
-                .shadow(
-                    elevation = 10.dp,
-                    shape = frameShape,
-                    clip = false,
-                )
-                .clip(frameShape)
-                .background(Color.Black)
-                .border(
-                    width = 1.5.dp,
-                    color = colors.gold.copy(alpha = .72f),
-                    shape = frameShape,
-                )
-                .padding(8.dp)
-                .clearAndSetSemantics { },
-            contentAlignment = Alignment.Center,
-        ) {
-            BrandLogo(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .alpha(.98f)
-                    .clearAndSetSemantics { },
-                contentScale = ContentScale.Fit,
-            )
-        }
-    }
-}
-
-@Composable
-private fun LoginSubscriptionAction(
-    onClick: () -> Unit,
-    onNonTextFocus: () -> Unit,
-    returnRequester: () -> FocusRequester,
-    subscribeRequester: FocusRequester,
-    policy: LoginLayoutPolicy,
-    modifier: Modifier = Modifier,
-) {
-    LoginActionButton(
-        text = "اشتراك جديد",
-        onClick = onClick,
-        enabled = true,
-        loading = false,
-        primary = false,
-        featuredSecondary = true,
-        leadingIcon = Icons.Rounded.QrCode2,
-        minHeight = policy.secondaryActionHeight,
-        textSizeSp = policy.buttonTextSizeSp,
-        onFocused = onNonTextFocus,
-        modifier = modifier
-            .focusRequester(subscribeRequester)
-            .focusProperties {
-                up = FocusRequester.Cancel
-                down = FocusRequester.Cancel
-                left = FocusRequester.Cancel
-                right = returnRequester()
+    Image(
+        painter = painterResource(
+            if (useTvWall) {
+                R.drawable.login_poster_wall_tv
+            } else {
+                R.drawable.login_poster_wall_phone
             },
+        ),
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = modifier
+            .fillMaxSize()
+            .clearAndSetSemantics { },
     )
 }
 
@@ -820,13 +537,15 @@ private fun LoginPanel(
     isLoading: Boolean,
     isTv: Boolean,
     errorMessage: String?,
+    displayedErrorMessage: String?,
+    networkFailure: Boolean,
+    websiteErrorMessage: String?,
     onSubmit: () -> Unit,
-    onOpenWebsite: () -> Unit,
+    onOpenSubscription: () -> Unit,
     onTextInputFocus: () -> Unit,
     onNonTextFocus: () -> Unit,
     onCardFocusChanged: (FocusRequester) -> Unit,
     initialFocusRequester: FocusRequester?,
-    showSecondaryAction: Boolean,
     submitRequester: FocusRequester,
     subscribeRequester: FocusRequester,
     policy: LoginLayoutPolicy,
@@ -838,10 +557,10 @@ private fun LoginPanel(
     val passwordRequester = remember { FocusRequester() }
     val rememberRequester = remember { FocusRequester() }
     val showPasswordRequester = remember { FocusRequester() }
-    val panelScrollState = rememberScrollState()
     val panelShape = RoundedCornerShape(policy.cardRadius)
-    val displayedError = errorMessage?.withoutArabicHamzas()
-    val secondaryOutsidePanel = !showSecondaryAction
+    val displayedError = displayedErrorMessage
+    val actionFloorDp = movieActionHeightDp(isTv = isTv, compactHeight = !isTv && policy.compact)
+    val actionCaptionGap = rememberActionCaptionSpace()
 
     LaunchedEffect(isLoading, errorMessage) {
         if (!isLoading && !errorMessage.isNullOrBlank()) {
@@ -856,35 +575,16 @@ private fun LoginPanel(
 
     Column(
         modifier = modifier
-            .then(
-                if (policy.composition == LoginComposition.PREMIUM_SPLIT) {
-                    Modifier.heightIn(max = policy.cardMaxHeight)
-                } else {
-                    Modifier
-                },
-            )
-            .shadow(
-                elevation = if (isTv) 18.dp else 12.dp,
-                shape = panelShape,
-                clip = false,
-            )
             .clip(panelShape)
             .background(
                 Brush.verticalGradient(
                     listOf(
-                        Color(0xF5151713),
-                        Color(0xF20A0C09),
+                        Color(0xFF151713),
+                        Color(0xFF0A0C09),
                     ),
                 ),
             )
             .border(1.dp, Color.White.copy(alpha = .09f), panelShape)
-            .then(
-                if (policy.panelScrollable) {
-                    Modifier.verticalScroll(panelScrollState)
-                } else {
-                    Modifier
-                },
-            )
             .padding(
                 horizontal = policy.cardHorizontalPadding,
                 vertical = policy.cardVerticalPadding,
@@ -892,7 +592,7 @@ private fun LoginPanel(
         horizontalAlignment = Alignment.End,
     ) {
         Text(
-            text = "اهلا بك",
+            text = "تسجيل الدخول",
             color = colors.text,
             fontSize = policy.titleSizeSp.sp,
             lineHeight = (policy.titleSizeSp + if (policy.compact) 5 else 7).sp,
@@ -915,6 +615,7 @@ private fun LoginPanel(
             state = accessCodeState,
             label = "كود الدخول",
             icon = Icons.Rounded.Key,
+            iconBase = colors.text,
             textSizeSp = policy.fieldTextSizeSp,
             bringIntoViewOnFocus = !isTv,
             onFocused = {
@@ -926,7 +627,7 @@ private fun LoginPanel(
                 .focusProperties {
                     up = FocusRequester.Cancel
                     down = usernameRequester
-                    left = if (secondaryOutsidePanel) subscribeRequester else FocusRequester.Cancel
+                    left = FocusRequester.Cancel
                     right = FocusRequester.Cancel
                 }
                 .fillMaxWidth()
@@ -945,6 +646,7 @@ private fun LoginPanel(
             state = usernameState,
             label = "اسم المستخدم",
             icon = Icons.Rounded.Person,
+            iconBase = colors.text,
             textSizeSp = policy.fieldTextSizeSp,
             bringIntoViewOnFocus = !isTv,
             onFocused = {
@@ -956,7 +658,7 @@ private fun LoginPanel(
                 .focusProperties {
                     up = accessRequester
                     down = passwordRequester
-                    left = if (secondaryOutsidePanel) subscribeRequester else FocusRequester.Cancel
+                    left = FocusRequester.Cancel
                     right = FocusRequester.Cancel
                 }
                 .fillMaxWidth()
@@ -975,6 +677,7 @@ private fun LoginPanel(
             state = passwordState,
             label = "كلمة المرور",
             icon = Icons.Rounded.Lock,
+            iconBase = colors.text,
             textSizeSp = policy.fieldTextSizeSp,
             bringIntoViewOnFocus = !isTv,
             onFocused = {
@@ -985,8 +688,8 @@ private fun LoginPanel(
                 .focusRequester(passwordRequester)
                 .focusProperties {
                     up = usernameRequester
-                    down = rememberRequester
-                    left = if (secondaryOutsidePanel) subscribeRequester else FocusRequester.Cancel
+                    down = showPasswordRequester
+                    left = FocusRequester.Cancel
                     right = FocusRequester.Cancel
                 }
                 .fillMaxWidth()
@@ -1014,133 +717,57 @@ private fun LoginPanel(
             ),
         )
 
-        Column(
-            modifier = Modifier
-                .align(Alignment.Start)
-                .then(
-                    if (isTv) {
-                        Modifier.widthIn(min = 220.dp, max = 320.dp)
-                    } else {
-                        Modifier.fillMaxWidth()
-                    },
-                ),
-            verticalArrangement = Arrangement.spacedBy(1.dp),
-        ) {
-            LoginOption(
-                text = "تذكر الحساب",
-                checked = rememberAccount,
-                onClick = onRememberChange,
-                onFocused = {
-                    onNonTextFocus()
-                    onCardFocusChanged(rememberRequester)
-                },
-                minHeight = policy.optionHeight,
-                textSizeSp = policy.optionTextSizeSp,
-                animateFocus = !isTv,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(rememberRequester)
-                    .focusProperties {
-                        up = passwordRequester
-                        down = showPasswordRequester
-                        left = if (secondaryOutsidePanel) subscribeRequester else FocusRequester.Cancel
-                        right = FocusRequester.Cancel
-                    },
-            )
-            LoginOption(
-                text = "اظهر كلمة المرور",
-                checked = showPassword,
-                onClick = onShowPasswordChange,
-                onFocused = {
-                    onNonTextFocus()
-                    onCardFocusChanged(showPasswordRequester)
-                },
-                minHeight = policy.optionHeight,
-                textSizeSp = policy.optionTextSizeSp,
-                animateFocus = !isTv,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(showPasswordRequester)
-                    .focusProperties {
-                        up = rememberRequester
-                        down = submitRequester
-                        left = if (secondaryOutsidePanel) subscribeRequester else FocusRequester.Cancel
-                        right = FocusRequester.Cancel
-                    },
+        LoginOptionGroups(
+            isTv = isTv,
+            showPassword = showPassword,
+            onShowPasswordChange = onShowPasswordChange,
+            rememberAccount = rememberAccount,
+            onRememberChange = onRememberChange,
+            onNonTextFocus = onNonTextFocus,
+            onCardFocusChanged = onCardFocusChanged,
+            passwordRequester = passwordRequester,
+            submitRequester = submitRequester,
+            showPasswordRequester = showPasswordRequester,
+            rememberRequester = rememberRequester,
+            policy = policy,
+        )
+
+        if (displayedError != null) {
+            Spacer(Modifier.height(if (isTv) 6.dp else 10.dp))
+            EntryNotice(
+                message = displayedError,
+                networkFailure = networkFailure,
+                compact = policy.compact,
             )
         }
 
-        if (isTv && displayedError != null) {
-            Spacer(Modifier.height(6.dp))
-            val errorShape = RoundedCornerShape(10.dp)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(if (policy.compact) 38.dp else 40.dp)
-                    .clip(errorShape)
-                    .background(Color(0xFF240D0F).copy(alpha = .98f))
-                    .border(
-                        width = 1.dp,
-                        color = Color(0xFFA44D56).copy(alpha = .72f),
-                        shape = errorShape,
-                    )
-                    .padding(horizontal = 12.dp)
-                    .semantics {
-                        liveRegion = LiveRegionMode.Polite
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.WarningAmber,
-                        contentDescription = null,
-                        tint = Color(0xFFF0A2A2),
-                        modifier = Modifier.size(if (policy.compact) 18.dp else 20.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = displayedError,
-                        color = Color(0xFFFFE0DC),
-                        fontSize = if (policy.compact) 12.sp else 13.sp,
-                        lineHeight = if (policy.compact) 15.sp else 17.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        textAlign = TextAlign.Right,
-                        maxLines = 2,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-        } else if (!isTv && displayedError != null) {
-            Spacer(Modifier.height(10.dp))
-            Box(
-                modifier = Modifier.semantics {
-                    liveRegion = LiveRegionMode.Polite
-                },
-            ) {
-                ErrorNotice(displayedError)
-            }
+        if (websiteErrorMessage != null) {
+            Spacer(Modifier.height(if (isTv) 6.dp else 10.dp))
+            EntryNotice(
+                message = websiteErrorMessage,
+                compact = policy.compact,
+                liveRegionPolite = false,
+            )
         }
 
         Spacer(
             Modifier.height(
                 if (isTv) {
-                    if (displayedError != null) 6.dp else 10.dp
+                    if (displayedError != null || websiteErrorMessage != null) 6.dp else 10.dp
                 } else {
                     if (policy.compact) 0.dp else 8.dp
                 },
             ),
         )
-        LoginActionButton(
-            text = "دخول الى HULK",
+        EntryActionButton(
+            text = "تسجيل الدخول",
             onClick = onSubmit,
             enabled = !isLoading,
             loading = isLoading,
             primary = true,
-            minHeight = policy.primaryActionHeight,
-            textSizeSp = policy.buttonTextSizeSp,
+            glyph = Icons.AutoMirrored.Rounded.Login,
+            minHeightDp = actionFloorDp,
+            captionGlyphGap = actionCaptionGap,
             onFocused = {
                 onNonTextFocus()
                 onCardFocusChanged(submitRequester)
@@ -1149,46 +776,34 @@ private fun LoginPanel(
                 .focusRequester(submitRequester)
                 .focusProperties {
                     up = showPasswordRequester
-                    down = if (showSecondaryAction) subscribeRequester else FocusRequester.Cancel
-                    left = if (secondaryOutsidePanel) subscribeRequester else FocusRequester.Cancel
+                    down = subscribeRequester
+                    left = FocusRequester.Cancel
                     right = FocusRequester.Cancel
                 }
                 .fillMaxWidth(),
         )
-        if (showSecondaryAction) {
-            Spacer(Modifier.height(if (policy.compact) 4.dp else 9.dp))
-            LoginActionButton(
-                text = "اشتراك جديد",
-                onClick = onOpenWebsite,
-                enabled = true,
-                loading = false,
-                primary = false,
-                minHeight = policy.secondaryActionHeight,
-                textSizeSp = policy.buttonTextSizeSp,
-                onFocused = {
-                    onNonTextFocus()
-                    onCardFocusChanged(subscribeRequester)
-                },
-                modifier = Modifier
-                    .focusRequester(subscribeRequester)
-                    .focusProperties {
-                        up = submitRequester
-                        down = FocusRequester.Cancel
-                        left = FocusRequester.Cancel
-                        right = FocusRequester.Cancel
-                    }
-                    .fillMaxWidth(),
-            )
-            Spacer(Modifier.height(if (policy.compact) 2.dp else 8.dp))
-            Text(
-                text = "hulksa.com",
-                color = colors.textMuted.copy(alpha = .78f),
-                fontSize = if (policy.compact) 11.sp else 12.sp,
-                fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
+        Spacer(Modifier.height(if (policy.compact) 4.dp else 9.dp))
+        EntryActionButton(
+            text = "اشتراك جديد",
+            onClick = onOpenSubscription,
+            outlined = true,
+            glyph = Icons.Rounded.QrCode2,
+            minHeightDp = actionFloorDp,
+            captionGlyphGap = actionCaptionGap,
+            onFocused = {
+                onNonTextFocus()
+                onCardFocusChanged(subscribeRequester)
+            },
+            modifier = Modifier
+                .focusRequester(subscribeRequester)
+                .focusProperties {
+                    up = submitRequester
+                    down = FocusRequester.Cancel
+                    left = FocusRequester.Cancel
+                    right = FocusRequester.Cancel
+                }
+                .fillMaxWidth(),
+        )
     }
 }
 
@@ -1197,6 +812,7 @@ private fun LoginCredentialTextField(
     state: MutableState<String>,
     label: String,
     icon: ImageVector,
+    iconBase: Color,
     textSizeSp: Int,
     bringIntoViewOnFocus: Boolean = true,
     onFocused: () -> Unit = {},
@@ -1210,6 +826,7 @@ private fun LoginCredentialTextField(
         onValueChange = { state.value = it },
         label = label,
         icon = icon,
+        iconBase = iconBase,
         textSizeSp = textSizeSp,
         bringIntoViewOnFocus = bringIntoViewOnFocus,
         onFocused = onFocused,
@@ -1226,6 +843,7 @@ private fun LoginTextField(
     onValueChange: (String) -> Unit,
     label: String,
     icon: ImageVector,
+    iconBase: Color,
     textSizeSp: Int,
     bringIntoViewOnFocus: Boolean = true,
     onFocused: () -> Unit = {},
@@ -1252,7 +870,7 @@ private fun LoginTextField(
         label = "loginFieldBorder",
     )
     val iconTint by animateColorAsState(
-        targetValue = if (focused) colors.goldBright else colors.textMuted,
+        targetValue = if (focused) colors.goldBright else iconBase,
         label = "loginFieldIcon",
     )
 
@@ -1298,6 +916,7 @@ private fun LoginTextField(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // First child in RTL: the adornment sits physically RIGHT of the wording.
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
@@ -1330,6 +949,169 @@ private fun LoginTextField(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun rememberActionCaptionSpace(): Dp {
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val actionFontFamily = LocalTextStyle.current.fontFamily
+    return remember(density, textMeasurer, actionFontFamily) {
+        with(density) {
+            textMeasurer.measure(
+                text = AnnotatedString(" "),
+                style = TextStyle(
+                    fontFamily = actionFontFamily,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+                maxLines = 1,
+            ).size.width.toDp()
+        }
+    }
+}
+
+@Composable
+private fun LoginOptionGroups(
+    isTv: Boolean,
+    showPassword: Boolean,
+    onShowPasswordChange: () -> Unit,
+    rememberAccount: Boolean,
+    onRememberChange: () -> Unit,
+    onNonTextFocus: () -> Unit,
+    onCardFocusChanged: (FocusRequester) -> Unit,
+    passwordRequester: FocusRequester,
+    submitRequester: FocusRequester,
+    showPasswordRequester: FocusRequester,
+    rememberRequester: FocusRequester,
+    policy: LoginLayoutPolicy,
+) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val density = LocalDensity.current
+        val textMeasurer = rememberTextMeasurer()
+        val captionStyle = TextStyle(
+            fontSize = policy.optionTextSizeSp.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        val boxPx = with(density) { 21.dp.roundToPx() }
+        val innerGapPx = with(density) { 10.dp.roundToPx() }
+        val groupPaddingPx = with(density) { 18.dp.roundToPx() }
+        val minOuterGapPx = with(density) { 6.dp.roundToPx() }
+        val rememberWidthPx =
+            textMeasurer.measure(AnnotatedString("تذكر الحساب"), captionStyle).size.width
+        val showWidthPx =
+            textMeasurer.measure(AnnotatedString("اظهار كلمة المرور"), captionStyle).size.width
+        val requiredPx = rememberWidthPx + showWidthPx +
+            boxPx * 2 + innerGapPx * 2 + groupPaddingPx * 2 + minOuterGapPx
+        val fitsSingleRow = with(density) { maxWidth.roundToPx() } >= requiredPx
+
+        if (fitsSingleRow) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // First RTL child anchors to the physical RIGHT edge (show-password group).
+                LoginOption(
+                    text = "اظهار كلمة المرور",
+                    checked = showPassword,
+                    onClick = onShowPasswordChange,
+                    onFocused = {
+                        onNonTextFocus()
+                        onCardFocusChanged(showPasswordRequester)
+                    },
+                    minHeight = policy.optionHeight,
+                    textSizeSp = policy.optionTextSizeSp,
+                    animateFocus = !isTv,
+                    modifier = Modifier
+                        .focusRequester(showPasswordRequester)
+                        .focusProperties {
+                            up = passwordRequester
+                            down = submitRequester
+                            left = rememberRequester
+                            right = FocusRequester.Cancel
+                        },
+                )
+                // Last RTL child anchors to the physical LEFT edge (remember group).
+                LoginOption(
+                    text = "تذكر الحساب",
+                    checked = rememberAccount,
+                    onClick = onRememberChange,
+                    onFocused = {
+                        onNonTextFocus()
+                        onCardFocusChanged(rememberRequester)
+                    },
+                    minHeight = policy.optionHeight,
+                    textSizeSp = policy.optionTextSizeSp,
+                    animateFocus = !isTv,
+                    modifier = Modifier
+                        .focusRequester(rememberRequester)
+                        .focusProperties {
+                            up = passwordRequester
+                            down = submitRequester
+                            left = FocusRequester.Cancel
+                            right = showPasswordRequester
+                        },
+                )
+            }
+        } else {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Start,
+                ) {
+                    LoginOption(
+                        text = "اظهار كلمة المرور",
+                        checked = showPassword,
+                        onClick = onShowPasswordChange,
+                        onFocused = {
+                            onNonTextFocus()
+                            onCardFocusChanged(showPasswordRequester)
+                        },
+                        minHeight = policy.optionHeight,
+                        textSizeSp = policy.optionTextSizeSp,
+                        animateFocus = !isTv,
+                        modifier = Modifier
+                            .focusRequester(showPasswordRequester)
+                            .focusProperties {
+                                up = passwordRequester
+                                down = rememberRequester
+                                left = FocusRequester.Cancel
+                                right = FocusRequester.Cancel
+                            },
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    LoginOption(
+                        text = "تذكر الحساب",
+                        checked = rememberAccount,
+                        onClick = onRememberChange,
+                        onFocused = {
+                            onNonTextFocus()
+                            onCardFocusChanged(rememberRequester)
+                        },
+                        minHeight = policy.optionHeight,
+                        textSizeSp = policy.optionTextSizeSp,
+                        animateFocus = !isTv,
+                        modifier = Modifier
+                            .focusRequester(rememberRequester)
+                            .focusProperties {
+                                up = showPasswordRequester
+                                down = submitRequester
+                                left = FocusRequester.Cancel
+                                right = FocusRequester.Cancel
+                            },
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1424,113 +1206,6 @@ private fun LoginOption(
     }
 }
 
-@Composable
-private fun LoginActionButton(
-    text: String,
-    onClick: () -> Unit,
-    enabled: Boolean,
-    loading: Boolean,
-    primary: Boolean,
-    minHeight: Dp,
-    textSizeSp: Int,
-    onFocused: () -> Unit,
-    modifier: Modifier = Modifier,
-    featuredSecondary: Boolean = false,
-    leadingIcon: ImageVector? = null,
-) {
-    val colors = LocalHulkColors.current
-    var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(if (featuredSecondary) 11.dp else 13.dp)
-    val goldFocused = primary && focused
-    val background by animateColorAsState(
-        targetValue = when {
-            !enabled && primary -> colors.gold.copy(alpha = .58f)
-            primary -> colors.gold
-            featuredSecondary && focused -> Color(0xFF1E2019)
-            featuredSecondary -> Color(0xFF151710)
-            focused -> Color(0xFF24251D)
-            else -> Color(0xFF12140F)
-        },
-        label = "loginButtonBackground",
-    )
-    val outline by animateColorAsState(
-        targetValue = when {
-            featuredSecondary && focused -> colors.goldBright
-            featuredSecondary -> Color.White.copy(alpha = .12f)
-            focused -> colors.goldBright
-            primary -> colors.gold.copy(alpha = .64f)
-            else -> colors.gold.copy(alpha = .44f)
-        },
-        label = "loginButtonOutline",
-    )
-    val textColor = if (primary) Color(0xFF111006) else colors.goldBright
-    val displayText = if (loading) "جاري الدخول..." else text
-    val outlineWidth = when {
-        goldFocused -> 0.dp
-        focused -> 2.dp
-        else -> 1.dp
-    }
-
-    Box(
-        modifier = modifier
-            .heightIn(min = minHeight)
-            .then(
-                if (featuredSecondary && focused) {
-                    Modifier.shadow(4.dp, shape = shape, clip = false)
-                } else {
-                    Modifier
-                },
-            )
-            .clip(shape)
-            .background(background)
-            .goldFocusEdge(shape = shape, visible = goldFocused)
-            .border(outlineWidth, outline, shape)
-            .semantics(mergeDescendants = true) {
-                contentDescription = displayText
-                if (!enabled) disabled()
-            }
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onFocused()
-            }
-            .clickable(
-                enabled = true,
-                role = Role.Button,
-                onClick = { if (enabled) onClick() },
-            )
-            .padding(horizontal = 18.dp, vertical = 11.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (loading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(19.dp),
-                    color = textColor,
-                    strokeWidth = 2.dp,
-                )
-            } else if (leadingIcon != null) {
-                Icon(
-                    imageVector = leadingIcon,
-                    contentDescription = null,
-                    tint = textColor,
-                    modifier = Modifier.size(if (featuredSecondary) 19.dp else 20.dp),
-                )
-            }
-            Text(
-                text = displayText,
-                color = textColor,
-                fontSize = textSizeSp.sp,
-                lineHeight = (textSizeSp + 5).sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-            )
-        }
-    }
-}
 
 private fun resolveLoginErrorTarget(
     errorMessage: String,

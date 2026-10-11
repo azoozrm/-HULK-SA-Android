@@ -605,3 +605,129 @@ parsing, R03 atoms and all R04 surfaces are preserved. R05/R06 Android acceptanc
   loading, retained portrait, failure and brand all stay inside that reserved window. TV keeps
   the physical-left bounded Fit portrait fallback. Other adaptive windows keep their content
   fit; no zoom, scale, stretch, source-dependent sizing or tall TV container on phones.
+
+## 13. Login / Who's Watching / entry-subflows adoption record (2026-10-11)
+
+The owner accepted the R03 Login model (`HULK-SA-LOGIN-PROFILES-DESIGN-R03.zip`, SHA-256
+`0fba8e5f03289759338ac5f4fbf2694035a185b489f3aa2664682926c9c36bca`) and directed its Android
+implementation (`login-profiles-ui-alignment-20261011`, LOCAL_ROUND R03). This record adds the
+section's adopted variant to the shared contract; it does not close or rewrite the accepted
+Movies/Series/Live/Home records, and it grants no merge, signing, tag, release or capture
+authority.
+
+### 13.1 Login — adopted centered composition
+
+- Login uses ONE bounded credential form centered horizontally and vertically in the safe
+  viewport on TV, phone portrait/landscape, tablet and foldable. `resolveLoginLayoutPolicy`'s
+  former TV/roomy `PREMIUM_SPLIT` brand column, logo node and reserved split/logo space are
+  superseded for Login only; the original HS logo assets stay unchanged for their other callers.
+- The form max width is the source expression `(width * .41f).coerceIn(420.dp, 520.dp)` on TV,
+  `560.dp` for non-TV width at least 600dp, `480.dp` otherwise, always clamped to the real safe
+  available width after the existing page/safe insets and applied as max-width before
+  `fillMaxWidth` in a loose bounded parent. One bounded scroll owner keeps fields, checks, status
+  and actions reachable under IME/short height/large text.
+- The form surface is matte near-black with a restrained shape and NO external elevation or
+  drop shadow. Decorative background: the bundled original poster walls
+  `login_poster_wall_tv.webp` (1920x1080, sha `bbe95ec6…`) for landscape/TV and
+  `login_poster_wall_phone.webp` (1080x2400, sha `1acedbde…`) for portrait, drawn static, local,
+  non-focusable, aspect-preserving `Crop` with no semantics, no repeats, no added shadow/glow and
+  no network load. Earlier Login backdrops (gold glow, geometry/neon, single city image,
+  illustrated collages, sports imagery, split brand panel) are superseded.
+- Exact copy: `تسجيل الدخول`, `ادخل بيانات اشتراكك للمتابعة`, `كود الدخول`, `اسم المستخدم`,
+  `كلمة المرور`, `تذكر الحساب`, `اظهار كلمة المرور`, `اشتراك جديد`. Field order keeps the auth
+  contract (access code, username, password).
+- Scoped Login physical placement (this section only): each field's single existing key/person/lock
+  glyph sits physically RIGHT, before the Arabic wording (key warm gold; person/lock source ivory).
+  Each checkbox square sits physically RIGHT of its own caption; the remember group is at physical
+  LEFT and the show-password group at physical RIGHT when both fit, wrapping whole groups when they
+  do not. These are Login exceptions to the shared icon-left action rule, not global reversals.
+- Actions fill only the bounded form content width: primary gold Login above secondary dark
+  `اشتراك جديد`, complete captions, one existing glyph physically LEFT, compact shared heights with
+  the movieActionHeightDp floor, in-bounds `goldFocusEdge`. TV/wide keeps the real Growth QR/URL
+  routing and narrow keeps the real website callback; auth, focus, keyboard/IME and
+  remember-account/password policies are unchanged.
+
+### 13.2 Who's Watching / management / entry options
+
+- Picker keeps the small original HS header mark above `من يشاهد الان ؟`, the real stable-ID TV
+  card row with the existing `profilePickerTvMetrics` family (card 154/176/190dp, avatar
+  82/96/106dp, gaps 14/20/24dp), truthful current/Kids/protected indications and MAX_PROFILES Add
+  availability; phone keeps two complete columns only when the measured footprints fit, otherwise
+  one, with one scroll owner. Original avatar family only; no seeded names/profiles.
+- Management/editor and entry options reuse the accepted AccountIdentityDecisionDialog bound: max
+  560dp expanded (TV or width at least 720dp) / 440dp compact, clamped to safe width, applied as
+  max-width before fill. Option controls, type choices and Back actions keep natural compact
+  widths; fields and real lists may fill the bounded parent. The older subordinate board's
+  stretched switch rows and full-width Back are superseded.
+- All subordinate Login/Picker/management/PIN/parental/QR/account-choice loading, empty,
+  validation, error, lockout and confirmation states keep the shared dark/gold/ivory bounded
+  notice/action family, existing once-only callbacks, truthful connectivity classification and
+  first-press Back/focus return.
+
+Implementation status: owner instructed review-and-merge for this section on 2026-10-11
+(«راجع وادمج»); the section publishes as one PR from `ui/login-profiles-ui-alignment-20261011`
+(candidate `login-profiles-ui-alignment-20261011-r07`). Reference acceptance does not extend to
+individually unexercised subordinate states, and optical/runtime limits remain as recorded in the
+task's round RUNTIME-EVIDENCE files.
+
+### 13.3 R04 owner corrections — scoped Login rules (2026-10-11)
+
+These R04 corrections are scoped to Login and supersede only the conflicting R03 wording:
+
+- Access-code glyph: the `كود الدخول` key uses exactly the same resolved neutral ivory icon-tint
+  mapping as the `اسم المستخدم` person and `كلمة المرور` lock glyphs for normal/focus/disabled
+  states. The R03 gold-key direction is superseded; no gold/goldBright/access-code-only override.
+  Vector identity, 22dp size, physical RIGHT-before-wording placement and the field's own focus
+  edge/cursor are unchanged. Person/lock colors are not altered to match the key.
+- Caption-to-glyph gap: simple actions keep exactly ONE caption-to-glyph spacing owner
+  (`EntryActionButton`'s single `Row(horizontalArrangement = Arrangement.spacedBy(6.dp))` with one
+  17dp glyph/spinner slot). No duplicate Spacer, wrapper padding or second reserved slot; the
+  loading replacement reuses that same single slot and adds no second gap or glyph.
+- Busy primary rendering: while authentication is genuinely pending, the primary action keeps the
+  theme gold fill at full opacity with the full-opacity `onPrimary` dark caption and spinner. The
+  loading state is applied BEFORE the ordinary disabled treatment; only genuinely disabled
+  non-loading actions use the existing dimmed surface. Eligibility/semantics/callback guards and
+  the once-only submit remain unchanged, and completion/failure/cancellation restore the normal
+  state through the real request lifecycle.
+- Form surface: the Login form uses the opaque near-black matte gradient (alpha FF, same source
+  hues) with no external elevation/drop shadow and no gold presentation frame.
+
+### 13.4 R05 owner corrections — option anchoring, error copy, exact gap (2026-10-11)
+
+- Login option row anchoring: when both full option groups fit one bounded form-content row, the
+  complete `تذكر الحساب` group is anchored at the physical LEFT edge and the complete
+  show-password group at the physical RIGHT edge (outer `Arrangement.SpaceBetween` over the full
+  bounded width, or equivalent explicit physical slots). R05 supersedes any centered/relative-left
+  interpretation. Inside each group the checkbox stays physically RIGHT of its own caption with the
+  existing internal gap; checked state and callbacks are unchanged. When full captions do not fit
+  (large font/IME/narrow), complete groups stack: show-password right-anchored in its own row,
+  remember left-anchored in its own row, with reachable full captions and the stable focus graph.
+- Error copy: app-authored error/validation text carries no terminal full stop or ellipsis. The
+  scoped shared display formatter (`entryErrorDisplayText`) removes only trailing `.`/`…`/U+06D4
+  sequences and trailing whitespace/directional marks for dynamic/server-provided error text;
+  interior punctuation, decimals, domains, URLs and meaningful content stay unchanged, raw error
+  identity/classification stays authoritative, and a punctuation-only result falls back to the
+  existing truthful generic error wording. This supersedes the earlier "server text unchanged"
+  wording only for trailing decoration of displayed error copy.
+- Caption-to-glyph gap: simple actions use exactly ONE 6dp spacing owner (a single
+  `Arrangement.spacedBy(6.dp)` or a single `Spacer(width = 6.dp)`, never both) with no second
+  spacer, reserved leading-icon slot or icon-wrapper padding; the loading spinner reuses the same
+  single slot. This concretizes the R04 open-ended "match New Subscription" wording for the Login
+  action.
+
+### 13.5 R06 owner corrections — one-space action gap, connection copy (2026-10-11)
+
+- Login action gap: the visible caption-to-icon separation in `تسجيل الدخول` and `اشتراك جديد`
+  is ONE ordinary U+0020 space, resolved from the live action caption font/style (13sp bold, theme
+  IBM Plex Sans Arabic, current density/font scale) through the existing text measurement and used
+  as the single spacing owner (`captionGlyphGap`). R06 supersedes R05's fixed 6dp for these two
+  actions only; every other `EntryActionButton` caller keeps its default. No second spacer, literal
+  edge space, reserved slot or wrapper padding; the loading spinner keeps the same single gap.
+- Login connection copy: confirmed no-internet shows
+  `لا يوجد اتصال بالانترنت ، تحقق من اتصالك وحاول مرة اخرى`; a service failure while availability
+  is not disproved shows `تعذر الاتصال بخدمة HULK ، حاول مرة اخرى` (no period after HULK and no
+  terminal punctuation). Confirmed offline is resolved from the existing authoritative
+  `rememberUsableNetworkState` binding and applies only to the raw service-unavailable failure;
+  validation, access-code and credential failures keep their own copy, and raw exception/status
+  classification is unchanged. The confirmed-offline icon mapping is used only for confirmed
+  offline; other failures keep the general error icon.

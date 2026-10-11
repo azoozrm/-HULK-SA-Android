@@ -456,12 +456,12 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         if (logoutJob?.isActive == true || authenticationAttemptGate.isActive()) return
         val normalizedAccessCode = normalizeResellerAccessCode(accessCode)
         if (normalizedAccessCode == null) {
-            mutableState.update { it.copy(errorMessage = "ادخل كود دخول صحيح.") }
+            mutableState.update { it.copy(errorMessage = "ادخل كود دخول صحيح") }
             return
         }
         val cleanUsername = username.trim()
         if (cleanUsername.isEmpty() || password.isEmpty()) {
-            mutableState.update { it.copy(errorMessage = "ادخل اسم المستخدم وكلمة المرور.") }
+            mutableState.update { it.copy(errorMessage = "ادخل اسم المستخدم وكلمة المرور") }
             return
         }
         authenticate(
@@ -482,7 +482,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             tvDeepLinkEpisodeJob?.cancel()
             tvDeepLinkEpisodeJob = null
             if (!rawUri.isNullOrBlank()) {
-                mutableState.update { it.copy(errorMessage = "تعذر فتح هذا الرابط.") }
+                mutableState.update { it.copy(errorMessage = "تعذر فتح هذا الرابط") }
             }
             return
         }
@@ -605,7 +605,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                             favorites = emptySet(),
                             history = emptyList(),
                             isProfileLibraryReady = true,
-                            errorMessage = "تعذر تهيئة مكتبة هذا الملف الشخصي بأمان.",
+                            errorMessage = "تعذر تهيئة مكتبة هذا الملف الشخصي بأمان",
                         )
                     }
                 }
@@ -993,7 +993,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                         mutableState.update {
                             it.copy(
                                 isLoading = false,
-                                errorMessage = "هذا المحتوى لم يعد متاحًا.",
+                                errorMessage = "هذا المحتوى لم يعد متاحًا",
                             )
                         }
                     } else {
@@ -1016,8 +1016,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                         episodes = bundle.episodes,
                         isLoading = false,
                         errorMessage = when {
-                            bundle.episodes.isEmpty() -> "لم نجد حلقات لهذا المسلسل."
-                            !targetAvailable -> "هذه الحلقة لم تعد متاحة، وتم فتح المسلسل بدلًا منها."
+                            bundle.episodes.isEmpty() -> "لم نجد حلقات لهذا المسلسل"
+                            !targetAvailable -> "هذه الحلقة لم تعد متاحة، وتم فتح المسلسل بدلًا منها"
                             else -> null
                         },
                     )
@@ -1072,17 +1072,17 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun downloadSelectedMovie(onResult: (String) -> Unit) {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            onResult("التنزيلات متوقفة مؤقتًا.")
+            onResult("التنزيلات متوقفة مؤقتًا")
             return
         }
         val activeSession = session
         if (activeSession == null) {
-            onResult("سجل الدخول اولا لبدء التحميل.")
+            onResult("سجل الدخول اولا لبدء التحميل")
             return
         }
         val movie = mutableState.value.selectedItem?.takeIf { it.type == ContentType.MOVIE }
         if (movie == null) {
-            onResult("تعذر تحديد الفيلم.")
+            onResult("تعذر تحديد الفيلم")
             return
         }
         enqueueDownload(
@@ -1094,17 +1094,17 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun downloadEpisode(episode: Episode, onResult: (String) -> Unit) {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            onResult("التنزيلات متوقفة مؤقتًا.")
+            onResult("التنزيلات متوقفة مؤقتًا")
             return
         }
         val activeSession = session
         if (activeSession == null) {
-            onResult("سجل الدخول اولا لبدء التحميل.")
+            onResult("سجل الدخول اولا لبدء التحميل")
             return
         }
         val series = mutableState.value.selectedSeries
         if (series == null) {
-            onResult("تعذر تحديد المسلسل.")
+            onResult("تعذر تحديد المسلسل")
             return
         }
         enqueueDownload(
@@ -1161,27 +1161,27 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleWifiOnly(): String {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            return "التنزيلات متوقفة مؤقتًا."
+            return "التنزيلات متوقفة مؤقتًا"
         }
         val next = mutableState.value.downloadSettings.copy(
             wifiOnly = !mutableState.value.downloadSettings.wifiOnly,
         )
         if (!submitDownloadSettingsMutation(next) { expectedAccountId, expectedProfileId ->
             downloadRepository.setSettings(next, expectedAccountId, expectedProfileId)
-        }) return "تغير المستخدم قبل حفظ اعداد التنزيلات."
+        }) return "تغير المستخدم قبل حفظ اعداد التنزيلات"
         return if (next.wifiOnly) "تم تفعيل التحميل عبر واي فاي فقط." else "تم السماح بالتحميل عبر جميع الشبكات."
     }
 
     fun toggleDownloadSchedule(): String {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            return "التنزيلات متوقفة مؤقتًا."
+            return "التنزيلات متوقفة مؤقتًا"
         }
         val current = mutableState.value.downloadSettings
         val next = if (current.scheduleMode == DownloadScheduleMode.NOW) DownloadScheduleMode.NIGHT else DownloadScheduleMode.NOW
         val nextSettings = current.copy(scheduleMode = next)
         if (!submitDownloadSettingsMutation(nextSettings) { expectedAccountId, expectedProfileId ->
             downloadRepository.setSettings(nextSettings, expectedAccountId, expectedProfileId)
-        }) return "تغير المستخدم قبل حفظ اعداد التنزيلات."
+        }) return "تغير المستخدم قبل حفظ اعداد التنزيلات"
         return if (next == DownloadScheduleMode.NIGHT) {
             "تمت جدولة التحميلات الجديدة والقائمة للساعة 2 ليلا."
         } else {
@@ -1191,24 +1191,24 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun cycleConcurrentDownloads(): String {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            return "التنزيلات متوقفة مؤقتًا."
+            return "التنزيلات متوقفة مؤقتًا"
         }
         val current = mutableState.value.downloadSettings
         val next = if (current.concurrentDownloads >= 3) 1 else current.concurrentDownloads + 1
         val nextSettings = current.copy(concurrentDownloads = next)
         if (!submitDownloadSettingsMutation(nextSettings) { expectedAccountId, expectedProfileId ->
             downloadRepository.setSettings(nextSettings, expectedAccountId, expectedProfileId)
-        }) return "تغير المستخدم قبل حفظ اعداد التنزيلات."
+        }) return "تغير المستخدم قبل حفظ اعداد التنزيلات"
         return "عدد التحميلات المتزامنة الان $next."
     }
 
     fun cycleDownloadPriority(item: OfflineDownload): String {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            return "التنزيلات متوقفة مؤقتًا."
+            return "التنزيلات متوقفة مؤقتًا"
         }
         if (!submitDownloadPriorityMutation(item.downloadId) { expectedAccountId, expectedProfileId ->
             downloadRepository.cyclePriority(item.downloadId, expectedAccountId, expectedProfileId)
-        }) return "تغير المستخدم قبل حفظ اعداد التنزيلات."
+        }) return "تغير المستخدم قبل حفظ اعداد التنزيلات"
         return when (item.priority) {
             1 -> "تم خفض اولوية التحميل."
             -1 -> "تم ضبط اولوية التحميل على عادية."
@@ -1288,7 +1288,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun retryDownload(item: OfflineDownload, onResult: (String) -> Unit = {}) {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            onResult("التنزيلات متوقفة مؤقتًا.")
+            onResult("التنزيلات متوقفة مؤقتًا")
             return
         }
         when (item.status) {
@@ -1300,7 +1300,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 val expectedAccountId = downloadRepository.activeAccountIdForCleanup()
                 val expectedProfileId = profileStore.activeProfileId()
                 if (expectedAccountId.isNullOrBlank() || expectedProfileId.isBlank()) {
-                    onResult("تغير المستخدم قبل إيقاف التحميل.")
+                    onResult("تغير المستخدم قبل إيقاف التحميل")
                     return
                 }
                 viewModelScope.launch {
@@ -1325,7 +1325,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                         mutableState.update { it.copy(downloads = outcome.downloads) }
                         onResult("تم ايقاف التحميل مؤقتا.")
                     } else {
-                        onResult("تعذر حفظ إيقاف التحميل. حاول مرة أخرى.")
+                        onResult("تعذر حفظ إيقاف التحميل. حاول مرة أخرى")
                     }
                 }
             }
@@ -1385,7 +1385,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun rebuildDownload(item: OfflineDownload): String {
-        val activeSession = session ?: return "سجل الدخول اولا لاعادة التحميل."
+        val activeSession = session ?: return "سجل الدخول اولا لاعادة التحميل"
         val request = repository.playback(
             activeSession,
             HistoryEntry(
@@ -1488,21 +1488,21 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         onResult: (String) -> Unit,
     ) {
         if (!mutableState.value.operations.features.episodeNotificationsEnabled) {
-            onResult("تنبيهات الحلقات متوقفة مؤقتًا.")
+            onResult("تنبيهات الحلقات متوقفة مؤقتًا")
             return
         }
         if (series.type != ContentType.SERIES || series.id <= 0) {
-            onResult("تعذر تفعيل تنبيهات هذا المسلسل.")
+            onResult("تعذر تفعيل تنبيهات هذا المسلسل")
             return
         }
         val profile = profileStore.activeProfile()
         val accountId = localEpisodeNotificationStore.activeAccountId()
         if (accountId == null) {
-            onResult("سجل الدخول أولًا.")
+            onResult("سجل الدخول أولًا")
             return
         }
         if (!canUseSeriesNotifications(profile.kind, series.id)) {
-            onResult("لا يمكن تفعيل التنبيه لأن المسلسل غير موثّق ضمن محتوى الأطفال.")
+            onResult("لا يمكن تفعيل التنبيه لأن المسلسل غير موثّق ضمن محتوى الأطفال")
             return
         }
         val authenticatedOwner = AuthenticatedSessionRegistry.currentOwner()
@@ -1518,7 +1518,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             detailsRequest.key.accountId != accountId ||
             detailsRequest.key.profileId != profile.id
         ) {
-            onResult("تغيّر سياق المسلسل. أعد فتحه ثم حاول مرة أخرى.")
+            onResult("تغيّر سياق المسلسل. أعد فتحه ثم حاول مرة أخرى")
             return
         }
         val toggleOwner = SeriesNotificationToggleOwner(
@@ -1539,7 +1539,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     (currentState.episodes.isEmpty() && currentState.errorMessage != null)
                 )
         ) {
-            onResult("انتظر حتى يكتمل تحميل الحلقات ثم حاول مرة أخرى.")
+            onResult("انتظر حتى يكتمل تحميل الحلقات ثم حاول مرة أخرى")
             return
         }
 
@@ -1564,7 +1564,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     throw error
                 } catch (_: Exception) {
                     if (isCurrentSeriesNotificationToggle(toggleOwner)) {
-                        onResult("تعذر جلب الحلقات الحالية. لم يتم تفعيل التنبيهات.")
+                        onResult("تعذر جلب الحلقات الحالية. لم يتم تفعيل التنبيهات")
                     }
                     return@launch
                 }
@@ -1573,7 +1573,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 val freshKeys = reliableEpisodeKeys(episodes)
                 if (displayedKeys.isNotEmpty() && !freshKeys.containsAll(displayedKeys)) {
                     if (isCurrentSeriesNotificationToggle(toggleOwner)) {
-                        onResult("وصلت بيانات حلقات غير مكتملة. لم يتم تفعيل التنبيهات.")
+                        onResult("وصلت بيانات حلقات غير مكتملة. لم يتم تفعيل التنبيهات")
                     }
                     return@launch
                 }
@@ -1616,9 +1616,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                         "تم تفعيل التنبيهات. ستصلك الحلقات الجديدة فقط."
                     }
                     EpisodeNotificationStoreResult.INVALID_EPISODES ->
-                        "تعذر إنشاء خط أساس موثوق للحلقات. حاول لاحقًا."
-                    EpisodeNotificationStoreResult.MISSING_ACCOUNT -> "سجل الدخول أولًا."
-                    else -> "تعذر حفظ إعداد التنبيهات. حاول مرة أخرى."
+                        "تعذر إنشاء خط أساس موثوق للحلقات. حاول لاحقًا"
+                    EpisodeNotificationStoreResult.MISSING_ACCOUNT -> "سجل الدخول أولًا"
+                    else -> "تعذر حفظ إعداد التنبيهات. حاول مرة أخرى"
                 },
             )
         }
@@ -1653,7 +1653,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleEpisodeNotificationMaster(onResult: (String) -> Unit) {
         if (!mutableState.value.operations.features.episodeNotificationsEnabled) {
-            onResult("تنبيهات الحلقات متوقفة مؤقتًا.")
+            onResult("تنبيهات الحلقات متوقفة مؤقتًا")
             return
         }
         val profileId = profileStore.activeProfileId()
@@ -1681,7 +1681,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             }
             onResult(
                 if (result != EpisodeNotificationStoreResult.SUCCESS) {
-                    "تعذر تحديث إعداد التنبيهات."
+                    "تعذر تحديث إعداد التنبيهات"
                 } else if (enable) {
                     "تم التشغيل. سيُحدّث خط الأساس بأمان قبل استئناف التنبيهات."
                 } else {
@@ -1799,7 +1799,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val profileId = profileStore.activeProfileId()
         val accountId = localEpisodeNotificationStore.activeAccountId()
         if (accountId == null) {
-            onResult("سجل الدخول لفتح هذا المحتوى.")
+            onResult("سجل الدخول لفتح هذا المحتوى")
             return
         }
         viewModelScope.launch {
@@ -1808,7 +1808,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     .notifications
                     .firstOrNull { it.id == notificationId }
             if (notification == null) {
-                onResult("هذا الإشعار لم يعد متاحًا.")
+                onResult("هذا الإشعار لم يعد متاحًا")
                 return@launch
             }
             val targetError = openNotificationTarget(notification)
@@ -2078,7 +2078,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             if (operationsInstaller.openUnknownSourcesSettings()) {
                 "فعّل السماح بالتثبيت ثم ارجع واضغط تحديث التطبيق."
             } else {
-                "تعذر فتح إعدادات التثبيت على هذا الجهاز. افتح إعدادات الأمان يدويًا."
+                "تعذر فتح إعدادات التثبيت على هذا الجهاز. افتح إعدادات الأمان يدويًا"
             },
         )
     }
@@ -2368,14 +2368,14 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun openNotificationTarget(notification: LocalEpisodeNotification): String? {
-        val activeSession = session ?: return "سجل الدخول لفتح هذا المحتوى."
+        val activeSession = session ?: return "سجل الدخول لفتح هذا المحتوى"
         val profile = profileStore.activeProfile()
         if (notification.accountId != localEpisodeNotificationStore.activeAccountId()) {
-            return "هذا الإشعار يخص حسابًا آخر."
+            return "هذا الإشعار يخص حسابًا آخر"
         }
-        if (notification.profileId != profile.id) return "هذا الإشعار يخص ملفًا شخصيًا آخر."
+        if (notification.profileId != profile.id) return "هذا الإشعار يخص ملفًا شخصيًا آخر"
         if (!canUseSeriesNotifications(profile.kind, notification.seriesId)) {
-            return "هذا المحتوى غير متاح في ملف الأطفال."
+            return "هذا المحتوى غير متاح في ملف الأطفال"
         }
         val series = resolveLocalNotificationSeriesTarget(
             profileKind = profile.kind,
@@ -2627,7 +2627,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshAccount(onResult: (String) -> Unit) {
         val activeSession = session ?: run {
-            onResult("سجل الدخول اولا لتحديث بيانات الاشتراك.")
+            onResult("سجل الدخول اولا لتحديث بيانات الاشتراك")
             return
         }
         val attemptGeneration = accountRefreshCoordinator.tryStart() ?: run {
@@ -2672,9 +2672,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     onResult(
                         if (invalidSession) {
-                            "تعذر تحديث الاشتراك. اعد تسجيل الدخول."
+                            "تعذر تحديث الاشتراك. اعد تسجيل الدخول"
                         } else {
-                            error.message ?: "تعذر تحديث بيانات الاشتراك."
+                            error.message ?: "تعذر تحديث بيانات الاشتراك"
                         },
                     )
                 }
@@ -2685,7 +2685,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     fun runDiagnostics() {
         val activeSession = session ?: run {
             mutableState.update {
-                it.copy(diagnostics = it.diagnostics.copy(errorMessage = "سجل الدخول اولا لتشغيل الفحص."))
+                it.copy(diagnostics = it.diagnostics.copy(errorMessage = "سجل الدخول اولا لتشغيل الفحص"))
             }
             return
         }
@@ -2748,7 +2748,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                                 isRunning = false,
                                 stage = "تعذر اكمال الفحص",
                                 errorMessage = outcome.error.message
-                                    ?: "حدث خطا غير متوقع اثناء الفحص.",
+                                    ?: "حدث خطا غير متوقع اثناء الفحص",
                             ),
                         )
                     }
@@ -3254,7 +3254,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
         val activeSession = session ?: return
         val activeProfileScopeId = tvPlatformIntegration.get().activeProfileScope()?.providerScopeId
-            ?: return failPendingTvDeepLink("تعذر تحديد الملف الشخصي النشط.")
+            ?: return failPendingTvDeepLink("تعذر تحديد الملف الشخصي النشط")
         when (
             val resolution = resolveTvDeepLink(
                 target = target,
@@ -3316,13 +3316,13 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             TvDeepLinkResolution.MissingContent -> failPendingTvDeepLink(
-                "هذا المحتوى لم يعد متاحًا.",
+                "هذا المحتوى لم يعد متاحًا",
             )
             TvDeepLinkResolution.BlockedForKids -> failPendingTvDeepLink(
-                "هذا المحتوى غير متاح في ملف الأطفال.",
+                "هذا المحتوى غير متاح في ملف الأطفال",
             )
             TvDeepLinkResolution.StaleProfile -> failPendingTvDeepLink(
-                "هذا العنصر يخص ملفًا شخصيًا آخر.",
+                "هذا العنصر يخص ملفًا شخصيًا آخر",
             )
         }
     }
@@ -3356,20 +3356,20 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     activeProfileScopeId = expectedProfileScopeId,
                 )
                 if (rechecked == TvDeepLinkResolution.BlockedForKids) {
-                    failPendingTvDeepLink("هذا المحتوى غير متاح في ملف الأطفال.")
+                    failPendingTvDeepLink("هذا المحتوى غير متاح في ملف الأطفال")
                     return@launch
                 }
                 if (rechecked == TvDeepLinkResolution.StaleProfile) {
-                    failPendingTvDeepLink("هذا العنصر يخص ملفًا شخصيًا آخر.")
+                    failPendingTvDeepLink("هذا العنصر يخص ملفًا شخصيًا آخر")
                     return@launch
                 }
                 if (rechecked !is TvDeepLinkResolution.OpenEpisode) {
-                    failPendingTvDeepLink("هذا المحتوى لم يعد متاحًا.")
+                    failPendingTvDeepLink("هذا المحتوى لم يعد متاحًا")
                     return@launch
                 }
                 val episode = findTvDeepLinkEpisode(bundle.episodes, resolution.episodeId)
                     ?: run {
-                        failPendingTvDeepLink("هذا المحتوى لم يعد متاحًا.")
+                        failPendingTvDeepLink("هذا المحتوى لم يعد متاحًا")
                         return@launch
                     }
                 pendingTvDeepLink = null
@@ -3379,7 +3379,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 throw cancelled
             } catch (_: Exception) {
                 if (pendingTvDeepLink == target) {
-                    failPendingTvDeepLink("تعذر فتح هذا المحتوى الآن.")
+                    failPendingTvDeepLink("تعذر فتح هذا المحتوى الآن")
                 }
             }
         }
@@ -3559,7 +3559,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val expectedProfileId = profileStore.activeProfileId()
         if (expectedAccountId.isNullOrBlank() || expectedProfileId.isBlank()) {
             pendingDownloadEnqueues.remove(request.historyKey)
-            onResult("تعذر تثبيت مالك التحميل.")
+            onResult("تعذر تثبيت مالك التحميل")
             return
         }
 
@@ -3618,7 +3618,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                         activeProfileId = profileStore.activeProfileId(),
                     )
                 ) {
-                    onResult("تعذر بدء التحميل. حاول مرة اخرى.")
+                    onResult("تعذر بدء التحميل. حاول مرة اخرى")
                 }
             } finally {
                 pendingDownloadEnqueues.remove(request.historyKey)
@@ -3632,7 +3632,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             error is PortalException.InvalidAccessCode ||
             error is PortalException.ResellerInactive
         if (invalidSession) {
-            beginLogout(error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى.")
+            beginLogout(error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى")
             return
         }
         mutableState.update {
@@ -3641,7 +3641,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 isStarting = false,
                 isLoading = false,
                 isAccountRefreshing = false,
-                errorMessage = error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى.",
+                errorMessage = error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى",
                 accountDecision = null,
             )
         }

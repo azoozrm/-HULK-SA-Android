@@ -189,6 +189,7 @@ internal fun GrowthQrDialog(
                     onClick = onDismiss,
                     primary = false,
                     compact = true,
+                    scaleOnFocus = false,
                     modifier = Modifier
                         .focusRequester(backRequester)
                         .heightIn(min = movieActionHeightDp(isTv = true, compactHeight = false).dp)

@@ -99,8 +99,8 @@ internal fun AccountIdentityDecisionDialog(
                 modifier = Modifier
                     .widthIn(max = if (expanded) 560.dp else 440.dp)
                     .fillMaxWidth()
-                    .background(Color(0xFF13140F), shape)
-                    .border(1.dp, colors.gold.copy(alpha = .38f), shape)
+                    .background(colors.surface.copy(alpha = .97f), shape)
+                    .border(1.dp, colors.gold.copy(alpha = .30f), shape)
                     .verticalScroll(rememberScrollState())
                     .padding(
                         horizontal = if (expanded) 28.dp else 20.dp,
@@ -109,7 +109,7 @@ internal fun AccountIdentityDecisionDialog(
                 verticalArrangement = Arrangement.spacedBy(if (expanded) 16.dp else 12.dp),
             ) {
                 Text(
-                    text = "تأكيد حساب الاشتراك",
+                    text = "تاكيد حساب الاشتراك",
                     color = colors.text,
                     fontSize = if (expanded) 23.sp else 19.sp,
                     fontWeight = FontWeight.Black,
@@ -120,7 +120,7 @@ internal fun AccountIdentityDecisionDialog(
                             "المرتبط بـ ${options.single().label}؟"
                     } else {
                         "سجلت الدخول باسم «$username» من هوست جديد. اختر الحساب الذي " +
-                            "يتبع له هذا الاشتراك، أو تابع كاشتراك مختلف."
+                            "يتبع له هذا الاشتراك، او تابع كاشتراك مختلف"
                     },
                     color = colors.textMuted,
                     fontSize = if (expanded) 15.sp else 14.sp,
@@ -148,32 +148,40 @@ internal fun AccountIdentityDecisionDialog(
                         onClick = { onSelectExisting(option.key) },
                     )
                 }
-                AccountDecisionAction(
-                    label = "اشتراك مختلف",
-                    supporting = null,
-                    primary = false,
-                    expanded = expanded,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag(ACCOUNT_DECISION_DIFFERENT_TAG),
-                    focusRequester = differentRequester,
-                    upRequester = requesters[options.lastIndex],
-                    downRequester = cancelRequester,
-                    onClick = onDifferentSubscription,
-                )
-                AccountDecisionAction(
-                    label = "إلغاء",
-                    supporting = null,
-                    primary = false,
-                    expanded = expanded,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag(ACCOUNT_DECISION_CANCEL_TAG),
-                    focusRequester = cancelRequester,
-                    upRequester = differentRequester,
-                    downRequester = null,
-                    onClick = onCancel,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AccountDecisionAction(
+                        label = "اشتراك مختلف",
+                        supporting = null,
+                        primary = false,
+                        expanded = expanded,
+                        compactFooter = true,
+                        modifier = Modifier.testTag(ACCOUNT_DECISION_DIFFERENT_TAG),
+                        focusRequester = differentRequester,
+                        upRequester = requesters[options.lastIndex],
+                        downRequester = cancelRequester,
+                        leftRequester = cancelRequester,
+                        rightRequester = null,
+                        onClick = onDifferentSubscription,
+                    )
+                    AccountDecisionAction(
+                        label = "الغاء",
+                        supporting = null,
+                        primary = false,
+                        expanded = expanded,
+                        compactFooter = true,
+                        modifier = Modifier.testTag(ACCOUNT_DECISION_CANCEL_TAG),
+                        focusRequester = cancelRequester,
+                        upRequester = differentRequester,
+                        downRequester = null,
+                        leftRequester = null,
+                        rightRequester = differentRequester,
+                        onClick = onCancel,
+                    )
+                }
             }
         }
     }
@@ -186,37 +194,48 @@ private fun AccountDecisionAction(
     primary: Boolean,
     expanded: Boolean,
     modifier: Modifier = Modifier,
+    compactFooter: Boolean = false,
     focusRequester: FocusRequester? = null,
     upRequester: FocusRequester? = null,
     downRequester: FocusRequester? = null,
+    leftRequester: FocusRequester? = null,
+    rightRequester: FocusRequester? = null,
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(if (expanded) 13.dp else 11.dp)
+    val shape = RoundedCornerShape(12.dp)
 
     Row(
         modifier = modifier
-            .heightIn(min = if (expanded) 56.dp else 50.dp)
+            .heightIn(
+                min = when {
+                    compactFooter -> if (expanded) 46.dp else 42.dp
+                    expanded -> 52.dp
+                    else -> 46.dp
+                },
+            )
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .focusProperties {
                 up = upRequester ?: FocusRequester.Cancel
                 down = downRequester ?: FocusRequester.Cancel
+                left = leftRequester ?: FocusRequester.Cancel
+                right = rightRequester ?: FocusRequester.Cancel
             }
             .background(
                 when {
-                    focused -> colors.gold.copy(alpha = .18f)
+                    focused -> colors.gold.copy(alpha = .14f)
                     primary -> colors.gold.copy(alpha = .10f)
-                    else -> Color.White.copy(alpha = .04f)
+                    else -> Color(0xFF151711)
                 },
                 shape,
             )
             .border(
-                width = 1.dp,
+                width = if (focused) 2.dp else 1.dp,
                 color = when {
-                    focused -> colors.goldBright.copy(alpha = .90f)
+                    focused -> colors.goldBright
                     primary -> colors.gold.copy(alpha = .28f)
-                    else -> Color.White.copy(alpha = .07f)
+                    else -> colors.gold.copy(alpha = .22f)
                 },
                 shape = shape,
             )
@@ -225,7 +244,10 @@ private fun AccountDecisionAction(
             }
             .onFocusChanged { focused = it.isFocused }
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = if (expanded) 14.dp else 12.dp),
+            .padding(
+                horizontal = if (compactFooter) 12.dp else 14.dp,
+                vertical = if (compactFooter) 9.dp else 10.dp,
+            ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -233,14 +255,14 @@ private fun AccountDecisionAction(
             Text(
                 text = label,
                 color = if (primary) colors.goldBright else colors.text,
-                fontSize = if (expanded) 16.sp else 15.sp,
+                fontSize = if (expanded) 14.sp else 13.sp,
                 fontWeight = FontWeight.Bold,
             )
             if (!supporting.isNullOrBlank()) {
                 Text(
                     text = supporting,
                     color = colors.textMuted,
-                    fontSize = if (expanded) 14.sp else 13.sp,
+                    fontSize = if (expanded) 12.sp else 11.sp,
                     fontWeight = FontWeight.Medium,
                 )
             }
