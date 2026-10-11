@@ -153,7 +153,7 @@ private val smartSearchDestinations = listOf(
     SmartSearchDestination(MainDestination.LIVE, Icons.Rounded.LiveTv, "البث المباشر"),
     SmartSearchDestination(MainDestination.MOVIES, Icons.Rounded.Movie, "الافلام"),
     SmartSearchDestination(MainDestination.SERIES, Icons.Rounded.Tv, "المسلسلات"),
-    SmartSearchDestination(MainDestination.FAVORITES, Icons.Rounded.Favorite, "قائمتي"),
+    SmartSearchDestination(MainDestination.FAVORITES, Icons.Rounded.Favorite, "المفضلة"),
     SmartSearchDestination(MainDestination.SEARCH, Icons.Rounded.Search, "البحث"),
     SmartSearchDestination(MainDestination.DOWNLOADS, Icons.Rounded.Download, "التنزيلات"),
     SmartSearchDestination(MainDestination.SETTINGS, Icons.Rounded.Settings, "الاعدادات"),

@@ -196,6 +196,7 @@ import sa.hulksa.player.data.link
 import sa.hulksa.player.data.resolveGrowthAction
 import sa.hulksa.player.model.CapabilityFinding
 import sa.hulksa.player.model.CapabilityStatus
+import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.Category
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
@@ -2737,8 +2738,8 @@ private fun HomeHeroActions(
     ) + bufferPx
     val primaryRequiredPx = requiredWidthPx(primaryCaption)
     // Reserve the longest real favorite wording so selecting/unselecting never reflows the group.
-    val favoriteCaption = if (isFavorite) "في قائمتي" else "قائمتي"
-    val favoriteRequiredPx = maxOf(requiredWidthPx("قائمتي"), requiredWidthPx("في قائمتي"))
+    val favoriteCaption = if (isFavorite) "في المفضلة" else "المفضلة"
+    val favoriteRequiredPx = maxOf(requiredWidthPx("المفضلة"), requiredWidthPx("في المفضلة"))
     val rowGapPx = with(density) { 9.dp.roundToPx() }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val availableWidthPx = with(density) { maxWidth.roundToPx() }
@@ -4008,6 +4009,125 @@ private fun LiveStage(
     }
 }
 
+/**
+ * Owner-selected Favorites Model 01 type filter. The stable memory key is the only persisted
+ * identity; it is stored through the existing per-profile navigation owner (never a new store).
+ */
+internal enum class FavoritesTypeFilter(
+    val memoryKey: String,
+    val label: String,
+    val contentType: ContentType?,
+) {
+    ALL("favorites:all", "الكل", null),
+    MOVIES("favorites:movies", "الافلام", ContentType.MOVIE),
+    SERIES("favorites:series", "المسلسلات", ContentType.SERIES),
+    CHANNELS("favorites:channels", "القنوات", ContentType.LIVE),
+}
+
+internal fun favoritesTypeFilterFromMemoryKey(key: String?): FavoritesTypeFilter =
+    FavoritesTypeFilter.entries.firstOrNull { it.memoryKey == key } ?: FavoritesTypeFilter.ALL
+
+/**
+ * Current Favorites projection: real catalogs filtered by the observed favorite owner with stable
+ * `type:id` identity and the existing catalog order preserved. Unresolved saved IDs are simply not
+ * part of the projection; they are never deleted from storage.
+ */
+internal fun favoriteCatalogProjection(
+    catalogs: Collection<Catalog>,
+    isFavorite: (ContentItem) -> Boolean,
+): List<ContentItem> = catalogs.asSequence()
+    .flatMap { it.items.asSequence() }
+    .filter(isFavorite)
+    .distinctBy { "${it.type}:${it.id}" }
+    .toList()
+
+/** Model 01 type filter over the projection; the real order is never re-sorted. */
+internal fun filterFavoritesByType(
+    items: List<ContentItem>,
+    filter: FavoritesTypeFilter,
+): List<ContentItem> = filter.contentType
+    ?.let { type -> items.filter { it.type == type } }
+    ?: items
+
+/** Mixed Favorites keeps the existing item wording; each real type keeps its own catalog unit. */
+internal fun favoritesCountUnit(filter: FavoritesTypeFilter): String = when (filter) {
+    FavoritesTypeFilter.ALL -> "عنصر"
+    FavoritesTypeFilter.CHANNELS -> "قناة"
+    FavoritesTypeFilter.MOVIES -> catalogCountUnit(ContentType.MOVIE)
+    FavoritesTypeFilter.SERIES -> catalogCountUnit(ContentType.SERIES)
+}
+
+private fun favoritesTypeEmptyMessage(filter: FavoritesTypeFilter): String = when (filter) {
+    FavoritesTypeFilter.ALL -> "لم تضف اي محتوى الى المفضلة بعد"
+    FavoritesTypeFilter.MOVIES -> "لا توجد افلام في المفضلة"
+    FavoritesTypeFilter.SERIES -> "لا توجد مسلسلات في المفضلة"
+    FavoritesTypeFilter.CHANNELS -> "لا توجد قنوات في المفضلة"
+}
+
+private const val FAVORITES_TITLE = "المفضلة"
+private const val FAVORITES_SUBTITLE = "كل ما حفظته في مكان واحد"
+
+/** Compact type selector: the accepted Live fixed-category FocusButton anatomy, no resize on state. */
+@Composable
+private fun FavoritesTypeFilterBar(
+    selected: FavoritesTypeFilter,
+    onSelect: (FavoritesTypeFilter) -> Unit,
+    isTv: Boolean,
+    filterRequesters: Map<FavoritesTypeFilter, FocusRequester>,
+) {
+    val itemMetrics = rememberLiveCategoryStripMetrics()
+    val sidebarUnderlap = rememberCategorySidebarUnderlap(isTv, 8.dp)
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .extendCategoryViewportTowardStart(sidebarUnderlap.viewportExtraDp.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        contentPadding = PaddingValues(
+            start = sidebarUnderlap.startContentPaddingDp.dp,
+            top = 8.dp,
+            end = 8.dp,
+            bottom = 8.dp,
+        ),
+    ) {
+        items(FavoritesTypeFilter.entries, key = FavoritesTypeFilter::memoryKey) { filter ->
+            FocusButton(
+                text = filter.label,
+                onClick = { onSelect(filter) },
+                primary = selected == filter,
+                compact = true,
+                scaleOnFocus = false,
+                textSizeSp = itemMetrics.textSizeSp,
+                textLineHeightSp = 15,
+                modifier = Modifier
+                    .focusRequester(filterRequesters.getValue(filter))
+                    .then(itemMetrics.compactHeightModifier),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FavoritesEmptyState(message: String) {
+    val colors = LocalHulkColors.current
+    Column(
+        modifier = Modifier.fillMaxSize().padding(vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        BrandLogo(Modifier.size(70.dp).graphicsLayer { alpha = .65f })
+        Spacer(Modifier.height(10.dp))
+        Text(message, color = colors.textMuted, fontSize = 13.sp, textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+private fun FavoritesFilteredEmptyState(message: String) {
+    val colors = LocalHulkColors.current
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text(message, color = colors.textMuted, fontSize = 13.sp, textAlign = TextAlign.Center)
+    }
+}
+
 @Composable
 private fun FavoritesScreen(
     state: HulkUiState,
@@ -4019,15 +4139,56 @@ private fun FavoritesScreen(
     onRefresh: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
-    val content = remember(state.catalogs, state.favorites) {
-        state.catalogs.values.flatMap { it.items }.filter(isFavorite).distinctBy { "${it.type}:${it.id}" }
-    }
     val adaptiveUi = LocalAdaptiveUi.current
     val tvSafeInsets = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
         tvPageSafeInsets(
             screenWidthDp = adaptiveUi.screenWidthDp,
             screenHeightDp = adaptiveUi.screenHeightDp,
         )
+    }
+    // The active filter and the grid location live in the existing per-account/profile navigation
+    // owner; no new global preferences/cache owner is introduced for these selectors.
+    val remembered = navigationMemory.position(MainDestination.FAVORITES)
+    var activeFilter by remember(navigationMemory) {
+        mutableStateOf(favoritesTypeFilterFromMemoryKey(remembered.rowKey))
+    }
+    val allContent = remember(state.catalogs, state.favorites) {
+        favoriteCatalogProjection(state.catalogs.values, isFavorite)
+    }
+    val content = remember(allContent, activeFilter) {
+        filterFavoritesByType(allContent, activeFilter)
+    }
+    val contentKeys = remember(content) { content.map { "${it.type}:${it.id}" } }
+    val contentKeyIndex = remember(contentKeys) { indexContentKeys(contentKeys) }
+    val filterRequesters = remember(navigationMemory) {
+        FavoritesTypeFilter.entries.associateWith { FocusRequester() }
+    }
+    val networkUsable by rememberUsableNetworkState()
+    val errorMessage = state.errorMessage
+    val offline = errorMessage != null && !networkUsable
+    val resolving = state.loadingTypes.isNotEmpty()
+    val errorCopy = if (offline) {
+        MoviesErrorCopy(
+            title = "لا يوجد اتصال بالانترنت",
+            body = "تحقق من اتصالك وحاول مرة اخرى",
+        )
+    } else {
+        MoviesErrorCopy(
+            title = "تعذر تحميل المفضلة",
+            body = "حاول مرة اخرى",
+        )
+    }
+    // When the whole projection disappears (for example the last removal), the grid owns no
+    // surviving card: focus returns to the always-attached type selector, which stays composed
+    // through the content change (no readiness guess is needed for a control that never detaches).
+    var previouslyHadContent by remember(navigationMemory) { mutableStateOf(content.isNotEmpty()) }
+    LaunchedEffect(content.isNotEmpty(), activeFilter) {
+        val hasContent = content.isNotEmpty()
+        if (previouslyHadContent && !hasContent) {
+            withFrameNanos { }
+            runCatching { filterRequesters.getValue(activeFilter).requestFocus() }
+        }
+        previouslyHadContent = hasContent
     }
     Column(
         Modifier
@@ -4045,47 +4206,96 @@ private fun FavoritesScreen(
                 .fillMaxWidth()
                 .then(
                     if (isTv) {
-                        Modifier.padding(horizontal = 14.dp, top = tvSafeInsets.verticalDp.dp)
+                        Modifier.padding(
+                            start = TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP.dp,
+                            top = tvSafeInsets.verticalDp.dp,
+                        )
                     } else {
                         Modifier
                     },
                 ),
         ) {
-            PageTitle("قائمتي", "كل ما حفظته في مكان واحد", content.size, Icons.Rounded.Star, isTv)
-            Spacer(Modifier.height(18.dp))
-        }
-        if (isTv && content.isEmpty()) {
-            FavoritesFocusFallback(
-                loading = state.loadingTypes.isNotEmpty(),
-                onRefresh = onRefresh,
+            Column {
+                Text(
+                    FAVORITES_TITLE,
+                    color = colors.text,
+                    fontSize = if (isTv) 27.sp else MOBILE_SECTION_TITLE_SIZE,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    FAVORITES_SUBTITLE,
+                    color = colors.textMuted,
+                    fontSize = if (isTv) 11.sp else MOBILE_SECTION_COUNT_SIZE,
+                )
+                Text(
+                    "${content.size} ${favoritesCountUnit(activeFilter)}",
+                    color = colors.textMuted,
+                    fontSize = if (isTv) 11.sp else MOBILE_SECTION_COUNT_SIZE,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            FavoritesTypeFilterBar(
+                selected = activeFilter,
+                onSelect = { filter ->
+                    if (filter != activeFilter) {
+                        activeFilter = filter
+                        navigationMemory.save(
+                            MainDestination.FAVORITES,
+                            itemKey = "",
+                            itemIndex = 0,
+                            rowKey = filter.memoryKey,
+                        )
+                    }
+                },
+                isTv = isTv,
+                filterRequesters = filterRequesters,
             )
-        } else if (content.isEmpty() && state.loadingTypes.isEmpty()) {
-            EmptyState("لم تضف اي محتوى الى قائمتك بعد")
-        } else {
-            ContentGrid(content, isTv, MainDestination.FAVORITES, navigationMemory, isFavorite, onOpen, onToggleFavorite)
         }
-    }
-}
-
-@Composable
-private fun FavoritesFocusFallback(
-    loading: Boolean,
-    onRefresh: () -> Unit,
-) {
-    val colors = LocalHulkColors.current
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        if (loading) {
-            LoadingRing(label = "جاري تجهيز قائمتك…")
-        } else {
-            BrandLogo(Modifier.size(70.dp).graphicsLayer { alpha = .65f })
-            Spacer(Modifier.height(10.dp))
-            Text("لم تضف اي محتوى الى قائمتك بعد", color = colors.textMuted, fontSize = 13.sp)
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                content.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
+                    // Cached cards stay usable on a recoverable failure; one bounded notice only.
+                    if (errorMessage != null) {
+                        MoviesErrorNotice(
+                            title = errorCopy.title,
+                            body = errorCopy.body,
+                            onRetry = onRefresh,
+                            isTv = isTv,
+                            networkFailure = offline,
+                        )
+                    }
+                    TvCatalogGrid(
+                        content = content,
+                        contentKeys = contentKeys,
+                        contentKeyIndex = contentKeyIndex,
+                        destination = MainDestination.FAVORITES,
+                        navigationMemory = navigationMemory,
+                        isFavorite = isFavorite,
+                        onOpen = onOpen,
+                        onToggleFavorite = onToggleFavorite,
+                        restoreFocusedCard = true,
+                        memoryRowKey = activeFilter.memoryKey,
+                    )
+                }
+                resolving -> LoadingRing(
+                    label = "جاري تجهيز المفضلة",
+                    modifier = Modifier.align(Alignment.Center),
+                )
+                errorMessage != null -> MoviesOfflineEmptyState(
+                    onRetry = onRefresh,
+                    modifier = Modifier.align(Alignment.Center),
+                    title = if (offline) {
+                        "لا يوجد اتصال بالانترنت ، تحقق من اتصالك وحاول مرة اخرى"
+                    } else {
+                        "تعذر تحميل المفضلة ، حاول مرة اخرى"
+                    },
+                    body = null,
+                    networkFailure = offline,
+                )
+                allContent.isEmpty() -> FavoritesEmptyState("لم تضف اي محتوى الى المفضلة بعد")
+                else -> FavoritesFilteredEmptyState(favoritesTypeEmptyMessage(activeFilter))
+            }
         }
-        Spacer(Modifier.height(14.dp))
-        FocusButton("تحديث القائمة", onRefresh, compact = true)
     }
 }
 
@@ -7496,7 +7706,7 @@ private val destinations = listOf(
     DestinationEntry(MainDestination.LIVE, Icons.Rounded.LiveTv, "البث المباشر"),
     DestinationEntry(MainDestination.MOVIES, Icons.Rounded.Movie, "الافلام"),
     DestinationEntry(MainDestination.SERIES, Icons.Rounded.Tv, "المسلسلات"),
-    DestinationEntry(MainDestination.FAVORITES, Icons.Rounded.Favorite, "قائمتي"),
+    DestinationEntry(MainDestination.FAVORITES, Icons.Rounded.Favorite, "المفضلة"),
     DestinationEntry(MainDestination.SEARCH, Icons.Rounded.Search, "البحث"),
     DestinationEntry(MainDestination.DOWNLOADS, Icons.Rounded.Download, "التنزيلات"),
     DestinationEntry(MainDestination.SETTINGS, Icons.Rounded.Settings, "الاعدادات"),

@@ -252,7 +252,7 @@ fun MovieDetailsScreen(
                                         .focusRequester(playFocusRequester),
                                 )
                                 FocusButton(
-                                    text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
+                                    text = if (isFavorite) "★ في المفضلة" else "+ المفضلة",
                                     onClick = onToggleFavorite,
                                     primary = false,
                                     modifier = Modifier.weight(1f),
@@ -284,7 +284,7 @@ fun MovieDetailsScreen(
                                         .focusRequester(playFocusRequester),
                                 )
                                 FocusButton(
-                                    text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
+                                    text = if (isFavorite) "★ في المفضلة" else "+ المفضلة",
                                     onClick = onToggleFavorite,
                                     primary = false,
                                     compact = true,

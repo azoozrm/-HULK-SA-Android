@@ -373,7 +373,7 @@ private fun SeriesHero(
                         enabled = heroEpisode != null,
                         compact = true,
                     )
-                    FocusButton(if (isFavorite) "★ في قائمتي" else "+ قائمتي", onToggleFavorite, primary = false, compact = true)
+                    FocusButton(if (isFavorite) "★ في المفضلة" else "+ المفضلة", onToggleFavorite, primary = false, compact = true)
                 }
             }
 

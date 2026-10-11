@@ -124,10 +124,17 @@ class TvRememberedContentHandoffOwnershipContractTest(unittest.TestCase):
             "val targetIndex = (if (rememberedKeyIndex >= 0) rememberedKeyIndex else remembered.itemIndex)",
             grid,
         )
-        restore_start = grid.index(
-            "LaunchedEffect(contentKeys, remembered.itemKey, destination, restoreFocusedCard)"
+        owner_start = grid.index(
+            "LaunchedEffect(contentKeys, remembered.itemKey, destination, restoreFocusedCard, memoryRowKey)"
         )
-        restore = grid[restore_start : grid.index("BoxWithConstraints", restore_start)]
+        transition = grid[owner_start : grid.index("BoxWithConstraints", owner_start)]
+        # The single Favorites transition owner handles removal first; the accepted entry/return
+        # restoration below it keeps identity -> visibility -> reveal -> focus without timing.
+        restore = transition[
+            transition.index(
+                "if (restoreFocusedCard && content.isNotEmpty() && targetKey != null)"
+            ) :
+        ]
         scroll = restore.index("gridState.scrollToItem(targetIndex)")
         visible = restore.index(
             "snapshotFlow { gridState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex } }",
@@ -151,8 +158,15 @@ class TvRememberedContentHandoffOwnershipContractTest(unittest.TestCase):
 
     def test_grid_restoration_and_live_s3_memory_ownership_remain_untouched(self) -> None:
         grid = TV_GRID.read_text(encoding="utf-8")
-        self.assertIn("navigationMemory.save(destination, contentKeys[nextIndex], nextIndex)", grid)
-        self.assertIn("navigationMemory.save(destination, key, index)", grid)
+        normalized_grid = " ".join(grid.split())
+        self.assertIn(
+            "navigationMemory.save( destination, contentKeys[nextIndex], nextIndex, rowKey = memoryRowKey, )",
+            normalized_grid,
+        )
+        self.assertIn(
+            "navigationMemory.save(destination, key, index, rowKey = memoryRowKey)",
+            normalized_grid,
+        )
         self.assertNotIn("firstVisibleItemIndex", grid)
         live = self.section(
             "private fun LiveCatalogScreen(",

@@ -20,7 +20,7 @@ class LiveTvBottomActionSafeAreaContractTest(unittest.TestCase):
     def live_stage() -> str:
         text = MAIN_SHELL.read_text(encoding="utf-8")
         start = text.index("private fun LiveStage(")
-        end = text.index("@Composable\nprivate fun FavoritesScreen(", start)
+        end = text.index("internal enum class FavoritesTypeFilter(", start)
         return text[start:end]
 
     @staticmethod

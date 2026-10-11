@@ -66,7 +66,7 @@ private val stableMobileEntries = listOf(
     StableMobileEntry(MainDestination.LIVE, Icons.Rounded.LiveTv, "البث المباشر"),
     StableMobileEntry(MainDestination.MOVIES, Icons.Rounded.Movie, "الافلام"),
     StableMobileEntry(MainDestination.SERIES, Icons.Rounded.Tv, "المسلسلات"),
-    StableMobileEntry(MainDestination.FAVORITES, Icons.Rounded.Favorite, "قائمتي"),
+    StableMobileEntry(MainDestination.FAVORITES, Icons.Rounded.Favorite, "المفضلة"),
     StableMobileEntry(MainDestination.SEARCH, Icons.Rounded.Search, "البحث"),
     StableMobileEntry(MainDestination.DOWNLOADS, Icons.Rounded.Download, "التنزيلات"),
     StableMobileEntry(null, Icons.Rounded.Person, "تغيير المستخدم", switchesProfile = true),

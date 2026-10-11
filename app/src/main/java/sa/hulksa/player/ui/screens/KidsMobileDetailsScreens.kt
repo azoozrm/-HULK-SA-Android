@@ -142,7 +142,7 @@ fun KidsMobileMovieDetailsScreen(
                             modifier = Modifier.weight(1f),
                         )
                         FocusButton(
-                            text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
+                            text = if (isFavorite) "★ في المفضلة" else "+ المفضلة",
                             onClick = onToggleFavorite,
                             primary = false,
                             compact = true,
@@ -427,7 +427,7 @@ fun KidsMobileSeriesDetailsScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         FocusButton(
-                            text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
+                            text = if (isFavorite) "★ في المفضلة" else "+ المفضلة",
                             onClick = onToggleFavorite,
                             primary = false,
                             outlined = true,
