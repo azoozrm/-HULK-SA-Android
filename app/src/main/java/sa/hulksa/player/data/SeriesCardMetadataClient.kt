@@ -20,6 +20,11 @@ data class SeriesCardTechnicalMetadata(
     val quality: String? = null,
     val seasonCount: Int? = null,
     val episodeCount: Int? = null,
+    val plot: String? = null,
+    val genre: String? = null,
+    val artworkUrl: String? = null,
+    /** True only for a successfully parsed valid provider payload. */
+    val succeeded: Boolean = false,
 )
 
 class SeriesCardMetadataClient {
@@ -78,7 +83,7 @@ class SeriesCardMetadataClient {
             null
         } catch (_: Exception) {
             null
-        } ?: return@withContext SeriesCardTechnicalMetadata()
+        } ?: return@withContext SeriesCardTechnicalMetadata(succeeded = false)
 
         val episodeObjects = try {
             root.boundedSeriesEpisodeObjects()
@@ -99,7 +104,7 @@ class SeriesCardMetadataClient {
 
         val seasonsArray = root.optJSONArray("seasons") ?: root.nestedArray("seasons")
         if (seasonsArray != null && seasonsArray.length() > XtreamJsonLimits.MAX_SERIES_SEASONS) {
-            return@withContext SeriesCardTechnicalMetadata()
+            return@withContext SeriesCardTechnicalMetadata(succeeded = false)
         }
         val seasonNumbersFromArray = buildSet {
             if (seasonsArray != null) {
@@ -147,10 +152,20 @@ class SeriesCardMetadataClient {
             .mapNotNull(::qualityLabel)
             .firstOrNull()
 
+        // Presentation fields ride the same already-loaded payload; no extra request is made.
+        val presentation = cardPresentationMetadataFrom(
+            sources = listOf(rootInfo, root),
+            portalBaseUrl = portal.baseUrl,
+        )
+
         SeriesCardTechnicalMetadata(
             quality = predominantQuality(qualityLabels) ?: fallbackQuality,
             seasonCount = seasonCount,
             episodeCount = episodeCount,
+            plot = presentation.plot,
+            genre = presentation.genre,
+            artworkUrl = presentation.artworkUrl,
+            succeeded = true,
         )
     }
 

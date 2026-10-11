@@ -5,8 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.StatFs
 import android.view.KeyEvent as AndroidKeyEvent
-import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,11 +21,13 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -62,6 +64,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.StarBorder
@@ -73,6 +76,7 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Downloading
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Movie
@@ -84,9 +88,11 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VideoLibrary
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -100,6 +106,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -109,7 +116,9 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -128,6 +137,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.ContentScale
@@ -143,8 +153,11 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -169,6 +182,13 @@ import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.MainDestination
 import sa.hulksa.player.data.AccountProfileStateScope
 import sa.hulksa.player.data.GrowthAction
+import sa.hulksa.player.data.HomeHeroMetadataStore
+import sa.hulksa.player.data.OperationsAnnouncement
+import sa.hulksa.player.data.OperationsAnnouncementSeverity
+import sa.hulksa.player.data.OperationsDownloadStatus
+import sa.hulksa.player.data.OperationsDownloadUiState
+import sa.hulksa.player.data.OperationsUpdateConfig
+import sa.hulksa.player.data.OperationsUpdateDecision
 import sa.hulksa.player.data.GrowthDestination
 import sa.hulksa.player.data.RenewalBannerContent
 import sa.hulksa.player.data.evaluateRenewalBanner
@@ -189,6 +209,7 @@ import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.model.ServerDiagnosticsReport
+import sa.hulksa.player.ui.HomeMessagePresentationState
 import sa.hulksa.player.ui.MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT
 import sa.hulksa.player.ui.adaptive.HulkNavigationType
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
@@ -203,12 +224,10 @@ import sa.hulksa.player.ui.components.MoviesCatalogBoxedCard
 import sa.hulksa.player.ui.components.SeriesCatalogBoxedCard
 import sa.hulksa.player.ui.components.BoxedHistoryCard
 import sa.hulksa.player.ui.components.seriesHistoryIdentityText
-import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.goldFocusEdge
-import sa.hulksa.player.ui.components.HistoryCard
 import sa.hulksa.player.ui.components.HulkTextField
-import sa.hulksa.player.ui.components.InfoPill
+import sa.hulksa.player.ui.components.LiveChannelHomeCard
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.text.SimpleDateFormat
@@ -1026,6 +1045,9 @@ fun MainShellScreen(
     onRefreshAccount: () -> Unit,
     onRunDiagnostics: () -> Unit,
     onLogout: () -> Unit,
+    homeMessagePresentation: HomeMessagePresentationState,
+    onOpenAnnouncementDetail: (OperationsAnnouncement) -> Unit,
+    onOpenUpdateDetail: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val context = LocalContext.current
@@ -1074,19 +1096,22 @@ fun MainShellScreen(
             )
         }
     }
-    val homeModel = if (state.destination == MainDestination.HOME) {
-        rememberHomeModelForPresentation(
-            navigationMemory = navigationMemory,
-            input = HomeContentModelInput(
-                movieCatalog = state.catalogs[ContentType.MOVIE],
-                seriesCatalog = state.catalogs[ContentType.SERIES],
-                liveCatalog = state.catalogs[ContentType.LIVE],
-                history = state.history,
-                favorites = state.favorites,
-            ),
+    val homeModelInput = if (state.destination == MainDestination.HOME) {
+        HomeContentModelInput(
+            movieCatalog = state.catalogs[ContentType.MOVIE],
+            seriesCatalog = state.catalogs[ContentType.SERIES],
+            liveCatalog = state.catalogs[ContentType.LIVE],
+            history = state.history,
+            favorites = state.favorites,
         )
     } else {
         null
+    }
+    val homeModel = homeModelInput?.let { input ->
+        rememberHomeModelForPresentation(
+            navigationMemory = navigationMemory,
+            input = input,
+        )
     }
     if (state.destination == MainDestination.HOME && homeModel == null) {
         Box(
@@ -1098,6 +1123,7 @@ fun MainShellScreen(
         return
     }
     val homeContent = homeModel?.model
+    val homeModelSettled = homeModel?.isFirstFrameFallback != true
     val downloadsEnabled = state.operations.features.downloadsEnabled
     val navigationEntries = remember(downloadsEnabled) {
         destinations.filterNot { entry ->
@@ -1121,13 +1147,26 @@ fun MainShellScreen(
         favoriteOverrides[key] ?: isFavorite(item)
     }
     var growthQrDestination by remember { mutableStateOf<GrowthDestination?>(null) }
+    // Scoped dark/gold notice for real Home-owned action feedback; it replaces the previous
+    // unstyled Toasts and carries the actual result without creating another state owner.
+    var homeActionNotice by remember { mutableStateOf<HomeActionNotice?>(null) }
+    LaunchedEffect(homeActionNotice) {
+        val notice = homeActionNotice ?: return@LaunchedEffect
+        delay(5_000L)
+        if (homeActionNotice == notice) homeActionNotice = null
+    }
+    // A transient notice never outlives its owning destination.
+    LaunchedEffect(state.destination) { homeActionNotice = null }
     val openGrowthDestination: (GrowthDestination) -> Unit = { destination ->
         when (resolveGrowthAction(state.operations.growth, destination, isTv)) {
             GrowthAction.OPEN_QR -> growthQrDestination = destination
             GrowthAction.OPEN_URL -> {
                 val url = state.operations.growth.link(destination).url.orEmpty()
                 if (!launchGrowthUrl(context, url)) {
-                    Toast.makeText(context, "تعذر فتح الرابط على هذا الجهاز", Toast.LENGTH_SHORT).show()
+                    homeActionNotice = HomeActionNotice(
+                        message = "تعذر فتح الرابط على هذا الجهاز",
+                        icon = Icons.Outlined.ErrorOutline,
+                    )
                 }
             }
             GrowthAction.NO_ACTION -> Unit
@@ -1148,11 +1187,14 @@ fun MainShellScreen(
             val optimisticValue = !wasFavorite
             favoriteOverrides[pressedKey] = optimisticValue
             onToggleFavorite(pressedItem)
-            Toast.makeText(
-                context,
-                if (wasFavorite) "تمت ازالة $pressedTitle من المفضلة" else "تمت اضافة $pressedTitle الى المفضلة",
-                Toast.LENGTH_SHORT,
-            ).show()
+            homeActionNotice = HomeActionNotice(
+                message = if (wasFavorite) {
+                    "تمت ازالة $pressedTitle من المفضلة"
+                } else {
+                    "تمت اضافة $pressedTitle الى المفضلة"
+                },
+                icon = if (wasFavorite) Icons.Outlined.FavoriteBorder else Icons.Rounded.Favorite,
+            )
             favoriteScope.launch {
                 delay(1_600L)
                 favoriteActionLocked = false
@@ -1213,6 +1255,7 @@ fun MainShellScreen(
                         isTv = isTv,
                         navigationMemory = navigationMemory,
                         homeContent = homeContent,
+                        homeModelSettled = homeModelSettled,
                         favoriteSnapshot = favoriteSnapshot,
                         isFavorite = resolvedIsFavorite,
                         onSelectCategory = onSelectCategory,
@@ -1236,6 +1279,9 @@ fun MainShellScreen(
                         onRefreshAccount = onRefreshAccount,
                         onRunDiagnostics = onRunDiagnostics,
                         onLogout = onLogout,
+                        homeMessagePresentation = homeMessagePresentation,
+                        onOpenAnnouncementDetail = onOpenAnnouncementDetail,
+                        onOpenUpdateDetail = onOpenUpdateDetail,
                         initialAllFocusRequester = tvCatalogAllFocusRequesters[state.destination],
                         initialAllFocusPending = currentTvCatalogInitialFocusPending,
                         downloadsExitFocusRequester = tvRailFocusRequesters[MainDestination.DOWNLOADS],
@@ -1260,6 +1306,7 @@ fun MainShellScreen(
                         isTv = false,
                         navigationMemory = navigationMemory,
                         homeContent = homeContent,
+                        homeModelSettled = homeModelSettled,
                         favoriteSnapshot = favoriteSnapshot,
                         isFavorite = resolvedIsFavorite,
                         onSelectCategory = onSelectCategory,
@@ -1283,6 +1330,9 @@ fun MainShellScreen(
                         onRefreshAccount = onRefreshAccount,
                         onRunDiagnostics = onRunDiagnostics,
                         onLogout = onLogout,
+                        homeMessagePresentation = homeMessagePresentation,
+                        onOpenAnnouncementDetail = onOpenAnnouncementDetail,
+                        onOpenUpdateDetail = onOpenUpdateDetail,
                     )
                 }
                 Spacer(
@@ -1302,6 +1352,62 @@ fun MainShellScreen(
                 )
             }
         }
+        homeActionNotice?.let { notice ->
+            ScopedHomeActionNotice(
+                notice = notice,
+                isTv = isTv,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(
+                        bottom = if (isTv) {
+                            28.dp
+                        } else {
+                            MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT + 12.dp
+                        },
+                    ),
+            )
+        }
+    }
+}
+
+/** Scoped Home action feedback with its semantic glyph (default failure uses the error icon). */
+private data class HomeActionNotice(
+    val message: String,
+    val icon: ImageVector,
+)
+
+/** Compact dark/gold notice family used for real Home-visible action feedback. */
+@Composable
+private fun ScopedHomeActionNotice(
+    notice: HomeActionNotice,
+    isTv: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        modifier = modifier
+            .widthIn(max = if (isTv) 560.dp else 340.dp)
+            .clip(shape)
+            .background(Color(0xF211120D))
+            .border(1.dp, colors.gold.copy(alpha = .45f), shape)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = notice.message,
+            color = colors.text,
+            fontSize = 12.sp,
+            lineHeight = 17.sp,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            imageVector = notice.icon,
+            contentDescription = null,
+            tint = colors.gold,
+            modifier = Modifier.size(17.dp),
+        )
     }
 }
 
@@ -1398,6 +1504,7 @@ private fun DestinationContent(
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
     homeContent: HomeContentSnapshot?,
+    homeModelSettled: Boolean,
     favoriteSnapshot: CatalogFavoriteSnapshot,
     isFavorite: (ContentItem) -> Boolean,
     onSelectCategory: (String?) -> Unit,
@@ -1421,6 +1528,9 @@ private fun DestinationContent(
     onRefreshAccount: () -> Unit,
     onRunDiagnostics: () -> Unit,
     onLogout: () -> Unit,
+    homeMessagePresentation: HomeMessagePresentationState,
+    onOpenAnnouncementDetail: (OperationsAnnouncement) -> Unit,
+    onOpenUpdateDetail: () -> Unit,
     initialAllFocusRequester: FocusRequester? = null,
     initialAllFocusPending: Boolean = false,
     downloadsExitFocusRequester: FocusRequester? = null,
@@ -1431,6 +1541,7 @@ private fun DestinationContent(
             isTv = isTv,
             navigationMemory = navigationMemory,
             homeContent = requireNotNull(homeContent),
+            homeModelSettled = homeModelSettled,
             isFavorite = isFavorite,
             onOpen = onOpen,
             onOpenHistory = onOpenHistory,
@@ -1440,6 +1551,9 @@ private fun DestinationContent(
             onGrowthAction = onGrowthAction,
             onOpenDownloads = { onSelectDestination(MainDestination.DOWNLOADS) },
             onSelectDestination = onSelectDestination,
+            homeMessagePresentation = homeMessagePresentation,
+            onOpenAnnouncementDetail = onOpenAnnouncementDetail,
+            onOpenUpdateDetail = onOpenUpdateDetail,
         )
         MainDestination.LIVE -> LiveCatalogScreen(
             state = state,
@@ -1543,6 +1657,7 @@ private fun CinemaHomeScreen(
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
     homeContent: HomeContentSnapshot,
+    homeModelSettled: Boolean,
     isFavorite: (ContentItem) -> Boolean,
     onOpen: (ContentItem) -> Unit,
     onOpenHistory: (HistoryEntry) -> Unit,
@@ -1552,6 +1667,9 @@ private fun CinemaHomeScreen(
     onGrowthAction: (GrowthDestination) -> Unit,
     onOpenDownloads: () -> Unit,
     onSelectDestination: (MainDestination) -> Unit,
+    homeMessagePresentation: HomeMessagePresentationState,
+    onOpenAnnouncementDetail: (OperationsAnnouncement) -> Unit,
+    onOpenUpdateDetail: () -> Unit,
 ) {
     val movies = homeContent.movies
     val series = homeContent.series
@@ -1620,14 +1738,36 @@ private fun CinemaHomeScreen(
             .toList()
     }
     val loading = ContentType.MOVIE in state.loadingTypes || ContentType.SERIES in state.loadingTypes
+    // Truthful Home error classification reuses the accepted Movies connectivity owner: only a
+    // confirmed offline state gets the WifiOff wording; other failures keep the real message.
+    val homeNetworkUsable by rememberUsableNetworkState()
+    val homeErrorCopy = state.errorMessage?.let { message ->
+        moviesCatalogErrorCopy(offline = !homeNetworkUsable, serverMessage = message)
+    }
     val remembered = navigationMemory.position(MainDestination.HOME)
+    // One Home message zone owns the non-blocking renewal, announcement and optional-update
+    // presentation. GrowthPolicy, the eligible Operations announcement and the current OPTIONAL
+    // update decision remain the only policy owners; the zone only renders their real output.
     val renewalBanner = evaluateRenewalBanner(
         growth = state.operations.growth,
         expiresAtEpochSeconds = state.account?.expiresAtEpochSeconds,
     )
+    val announcementMessage = state.operations.announcementPopup
+    val optionalUpdate = state.operations.update.takeIf {
+        state.operations.updateDecision == OperationsUpdateDecision.OPTIONAL
+    }
+    val hasHomeMessages = renewalBanner != null ||
+        announcementMessage != null ||
+        optionalUpdate != null
+    HomeMessageOwnership(
+        presentation = homeMessagePresentation,
+        announcement = announcementMessage,
+        optionalUpdate = optionalUpdate,
+        persistentAnnouncement = state.operations.persistentAnnouncement,
+    )
 
     var rowCursor = homeRowCursorStart(isTv)
-    val renewalBannerRow = if (renewalBanner != null) rowCursor++ else -1
+    val messageRow = if (hasHomeMessages) rowCursor++ else -1
     if (state.errorMessage != null) rowCursor++
     val continueRow = if (continueWatching.isNotEmpty()) rowCursor++ else -1
     val downloadsRow = if (activeDownloads.isNotEmpty()) rowCursor++ else -1
@@ -1640,12 +1780,30 @@ private fun CinemaHomeScreen(
     val lastLiveRow = if (lastLive != null) rowCursor++ else -1
     val popularLiveRow = if (suggestedLive.isNotEmpty()) rowCursor++ else -1
     val rowIndexByKey = mapOf(
-        "renewal-banner" to renewalBannerRow, "continue" to continueRow, "downloads" to downloadsRow, "because-watched" to becauseRow,
+        "home-messages" to messageRow, "continue" to continueRow, "downloads" to downloadsRow, "because-watched" to becauseRow,
         "recommended" to recommendedRow, "recent-movies" to moviesRow, "recent-series" to seriesRow, "top-movies" to topMoviesRow,
         "top-series" to topSeriesRow, "last-live" to lastLiveRow, "popular-live" to popularLiveRow,
     )
     val initialRow = rowIndexByKey[remembered.rowKey]?.takeIf { it >= 0 } ?: 0
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialRow)
+    val homeHeroFocusRequester = remember { FocusRequester() }
+    // A player round-trip changes the history input, so Home first presents its cheap
+    // no-history fallback and the remembered row is temporarily absent. Once the exact model
+    // settles, re-apply the remembered row position (or the hero as the nearest valid target)
+    // instead of anchoring the restored screen on the top of the list.
+    val settleRestoreArmed = remember { !homeModelSettled }
+    LaunchedEffect(homeModelSettled) {
+        if (!settleRestoreArmed || !homeModelSettled || remembered.rowKey.isBlank()) {
+            return@LaunchedEffect
+        }
+        val row = rowIndexByKey[remembered.rowKey] ?: -1
+        if (row >= 0) {
+            listState.scrollToItem(row)
+        } else {
+            withFrameNanos { }
+            runCatching { homeHeroFocusRequester.requestFocus() }
+        }
+    }
 
     LazyColumn(
         state = listState,
@@ -1653,18 +1811,19 @@ private fun CinemaHomeScreen(
         contentPadding = PaddingValues(bottom = if (isTv) 32.dp else 48.dp),
         verticalArrangement = Arrangement.spacedBy(if (isTv) 24.dp else 17.dp),
     ) {
-        item {
+        item(key = "hero") {
             if (featured != null) {
-                val heroRequester = remember { FocusRequester() }
                 LaunchedEffect(Unit) {
-                    if (remembered.rowKey == "hero") { runCatching { heroRequester.requestFocus() } }
+                    if (remembered.rowKey == "hero") {
+                        runCatching { homeHeroFocusRequester.requestFocus() }
+                    }
                 }
                 CinemaHero(
                     featured, isTv, isFavorite(featured), { onOpen(featured) },
                     { onToggleFavorite(featured) }, onRefresh, loading,
                     unreadNotificationCount = state.unreadNotificationCount,
                     onOpenNotifications = onOpenNotifications,
-                    watchModifier = Modifier.restoreFocus(remembered.rowKey == "hero", heroRequester),
+                    watchModifier = Modifier.focusRequester(homeHeroFocusRequester),
                     onFocused = { navigationMemory.save(MainDestination.HOME, "${featured.type}:${featured.id}", 0, "hero", 0) },
                 )
             } else {
@@ -1674,76 +1833,247 @@ private fun CinemaHomeScreen(
                     isTv = isTv,
                     unreadNotificationCount = state.unreadNotificationCount,
                     onOpenNotifications = onOpenNotifications,
+                    errorTitle = homeErrorCopy?.title,
+                    errorBody = homeErrorCopy?.body,
+                    networkFailure = !homeNetworkUsable,
+                    refreshModifier = Modifier.focusRequester(homeHeroFocusRequester),
                 )
             }
         }
-        if (renewalBanner != null) {
-            item {
-                val bannerRequester = remember { FocusRequester() }
-                LaunchedEffect(remembered.rowKey, renewalBanner) {
-                    if (remembered.rowKey == "renewal-banner") {
-                        runCatching { bannerRequester.requestFocus() }
-                    }
-                }
+        if (hasHomeMessages) {
+            item(key = "home-messages") {
                 HomeSectionPadding(isTv) {
-                    RenewalBanner(
-                        content = renewalBanner,
+                    HomeMessagesZone(
+                        renewal = renewalBanner,
+                        announcement = announcementMessage,
+                        optionalUpdate = optionalUpdate,
+                        download = state.operations.download,
                         isTv = isTv,
-                        onClick = { onGrowthAction(GrowthDestination.RENEWAL) },
-                        modifier = Modifier.restoreFocus(
-                            remembered.rowKey == "renewal-banner",
-                            bannerRequester,
-                        ),
-                        onFocused = {
-                            navigationMemory.save(
-                                MainDestination.HOME,
-                                "renewal-banner",
-                                0,
-                                "renewal-banner",
-                                0,
-                            )
-                        },
+                        rowIndex = messageRow,
+                        remembered = remembered,
+                        navigationMemory = navigationMemory,
+                        onRenewal = { onGrowthAction(GrowthDestination.RENEWAL) },
+                        onOpenAnnouncementDetail = onOpenAnnouncementDetail,
+                        onOpenUpdateDetail = onOpenUpdateDetail,
                     )
                 }
             }
         }
-        if (state.errorMessage != null) {
-            item { ErrorNotice(state.errorMessage, Modifier.padding(horizontal = if (isTv) 25.dp else 14.dp)) }
+        if (homeErrorCopy != null) {
+            item(key = "error-notice") {
+                HomeSectionPadding(isTv) {
+                    MoviesErrorNotice(
+                        title = homeErrorCopy.title,
+                        body = homeErrorCopy.body,
+                        onRetry = onRefresh,
+                        isTv = isTv,
+                        networkFailure = !homeNetworkUsable,
+                        modifier = Modifier.padding(
+                            horizontal = if (isTv) 0.dp else 14.dp,
+                            vertical = if (isTv) 4.dp else 6.dp,
+                        ),
+                    )
+                }
+            }
         }
         if (continueWatching.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { HistorySection("متابعة المشاهدة", "continue", continueRow, continueWatching, isTv, navigationMemory, onOpenHistory) } }
+            item(key = "continue") { HomeSectionPadding(isTv) { HomeContinueWatchingSection("متابعة المشاهدة", "continue", continueRow, continueWatching, isTv, navigationMemory, onOpenHistory) } }
         }
-        if (activeDownloads.isNotEmpty()) item { HomeSectionPadding(isTv) { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads) } }
+        if (activeDownloads.isNotEmpty()) item(key = "downloads") { HomeSectionPadding(isTv) { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads) } }
         if (becauseYouWatched.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item(key = "because-watched") { HomeSectionPadding(isTv) { HomeBoxedSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (suggested.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item(key = "recommended") { HomeSectionPadding(isTv) { HomeBoxedSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (homeMovies.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item(key = "recent-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (homeSeries.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item(key = "recent-series") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (popularMovies.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item(key = "top-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (popularSeries.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item(key = "top-series") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (lastLive != null) {
-            item { HomeSectionPadding(isTv) { HistorySection("اخر قناة شاهدتها", "last-live", lastLiveRow, listOf(lastLive), isTv, navigationMemory, onOpenHistory) } }
+            item(key = "last-live") { HomeSectionPadding(isTv) { HomeLastChannelSection("last-live", lastLiveRow, lastLive, isTv, navigationMemory, onOpenHistory) } }
         }
         if (suggestedLive.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item(key = "popular-live") { HomeSectionPadding(isTv) { HomeBoxedSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+        }
+    }
+}
+
+/**
+ * Publishes the exact non-blocking messages the active Home zone presents, so overlapping
+ * automatic presentation can be suppressed for the same identity only. Runs as a post-apply side
+ * effect (no composition-time state write) and clears ownership when Home leaves composition.
+ */
+@Composable
+private fun HomeMessageOwnership(
+    presentation: HomeMessagePresentationState,
+    announcement: OperationsAnnouncement?,
+    optionalUpdate: OperationsUpdateConfig?,
+    persistentAnnouncement: OperationsAnnouncement?,
+) {
+    val ownedPersistentAnnouncementId = persistentAnnouncement
+        ?.id
+        ?.takeIf { it == announcement?.id }
+    SideEffect {
+        presentation.publish(
+            announcementId = announcement?.id,
+            optionalUpdateVersionCode = optionalUpdate?.latestVersionCode,
+            persistentAnnouncementId = ownedPersistentAnnouncementId,
+        )
+    }
+    DisposableEffect(presentation) {
+        onDispose { presentation.clear() }
+    }
+}
+
+private data class HomeMessageCardData(
+    val itemKey: String,
+    val icon: ImageVector,
+    val accent: Color,
+    val title: String,
+    val body: String,
+    val cta: String,
+    val onClick: () -> Unit,
+)
+
+/**
+ * One Home message zone directly under the hero. TV shows the eligible cards in one row, physical
+ * right-to-left renewal / announcement / optional update; phone stacks that exact order. The zone
+ * collapses to nothing when no message is eligible, so there is no empty reserved block and no
+ * duplicate renewal banner. Cards reuse the accepted renewal-banner anatomy and focus treatment.
+ */
+@Composable
+private fun HomeMessagesZone(
+    renewal: RenewalBannerContent?,
+    announcement: OperationsAnnouncement?,
+    optionalUpdate: OperationsUpdateConfig?,
+    download: OperationsDownloadUiState,
+    isTv: Boolean,
+    rowIndex: Int,
+    remembered: NavigationPosition,
+    navigationMemory: NavigationMemoryStore,
+    onRenewal: () -> Unit,
+    onOpenAnnouncementDetail: (OperationsAnnouncement) -> Unit,
+    onOpenUpdateDetail: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    val items = buildList {
+        renewal?.let { content ->
+            add(
+                HomeMessageCardData(
+                    itemKey = "renewal",
+                    icon = Icons.Rounded.Language,
+                    accent = colors.goldBright,
+                    title = content.title,
+                    body = content.subtitle,
+                    cta = "تجديد الاشتراك",
+                    onClick = onRenewal,
+                ),
+            )
+        }
+        announcement?.let { message ->
+            add(
+                HomeMessageCardData(
+                    itemKey = "announcement:${message.id}",
+                    icon = homeAnnouncementIcon(message.severity),
+                    accent = homeAnnouncementAccent(message.severity, colors),
+                    title = message.title,
+                    body = message.message,
+                    cta = "عرض الرسالة",
+                    onClick = { onOpenAnnouncementDetail(message) },
+                ),
+            )
+        }
+        optionalUpdate?.let { update ->
+            add(
+                HomeMessageCardData(
+                    itemKey = "update:${update.latestVersionCode}",
+                    icon = Icons.Rounded.SystemUpdate,
+                    accent = colors.goldBright,
+                    title = "يتوفر تحديث جديد",
+                    body = homeUpdateCardBody(update, download),
+                    cta = "عرض التحديث",
+                    onClick = onOpenUpdateDetail,
+                ),
+            )
+        }
+    }
+    if (items.isEmpty()) return
+
+    val targetRequester = remember { FocusRequester() }
+    val targetItemKey = remembered.itemKey
+    val targetIndex = items.indexOfFirst { it.itemKey == targetItemKey }
+    // When the exact message leaves the zone (for example an acknowledged announcement), the
+    // nearest remaining card takes the restore instead of leaving focus unowned.
+    val restoreIndex = when {
+        remembered.rowKey != "home-messages" -> -1
+        targetIndex >= 0 -> targetIndex
+        else -> 0
+    }
+    LaunchedEffect(remembered.rowKey, targetItemKey, items.size) {
+        if (restoreIndex >= 0) {
+            withFrameNanos { }
+            runCatching { targetRequester.requestFocus() }
+        }
+    }
+    val cardModifier: (Int) -> Modifier = { index ->
+        Modifier.restoreFocus(index == restoreIndex, targetRequester)
+    }
+    val focusSave: (Int) -> () -> Unit = { index ->
+        {
+            navigationMemory.save(
+                MainDestination.HOME,
+                items[index].itemKey,
+                index,
+                "home-messages",
+                rowIndex,
+            )
+        }
+    }
+    if (isTv) {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items.forEachIndexed { index, item ->
+                HomeMessageCard(
+                    data = item,
+                    isTv = true,
+                    onClick = item.onClick,
+                    modifier = cardModifier(index).weight(1f).fillMaxHeight(),
+                    onFocused = focusSave(index),
+                )
+            }
+        }
+    } else {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+            items.forEachIndexed { index, item ->
+                HomeMessageCard(
+                    data = item,
+                    isTv = false,
+                    onClick = item.onClick,
+                    modifier = cardModifier(index).fillMaxWidth(),
+                    onFocused = focusSave(index),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun RenewalBanner(
-    content: RenewalBannerContent,
+private fun HomeMessageCard(
+    data: HomeMessageCardData,
     isTv: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1755,7 +2085,6 @@ private fun RenewalBanner(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .then(if (isTv) Modifier else Modifier.padding(horizontal = 14.dp))
             .heightIn(min = if (isTv) 88.dp else 76.dp)
             .clip(shape)
             .background(
@@ -1771,58 +2100,89 @@ private fun RenewalBanner(
                 if (focusState.isFocused) onFocused()
             }
             .clickable(role = Role.Button, onClick = onClick)
-            .focusable()
             .padding(
-                horizontal = if (isTv) 22.dp else 16.dp,
-                vertical = if (isTv) 15.dp else 12.dp,
+                horizontal = if (isTv) 18.dp else 15.dp,
+                vertical = if (isTv) 14.dp else 12.dp,
             ),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (isTv) 16.dp else 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 12.dp),
     ) {
-        Box(
-            modifier = Modifier
-                .size(if (isTv) 48.dp else 42.dp)
-                .clip(CircleShape)
-                .background(colors.gold.copy(alpha = if (focused) .22f else .12f))
-                .border(1.dp, colors.gold.copy(alpha = .38f), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.Language,
-                contentDescription = null,
-                tint = colors.goldBright,
-                modifier = Modifier.size(if (isTv) 25.dp else 22.dp),
-            )
-        }
         Column(Modifier.weight(1f)) {
-            Text(
-                text = content.title,
-                color = colors.text,
-                fontSize = if (isTv) 19.sp else 16.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = data.title,
+                    color = colors.text,
+                    fontSize = if (isTv) 18.sp else 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // The icon is the last child, so in RTL it renders physically LEFT of the wording.
+                Icon(
+                    imageVector = data.icon,
+                    contentDescription = null,
+                    tint = data.accent,
+                    modifier = Modifier.size(17.dp),
+                )
+            }
             Spacer(Modifier.height(4.dp))
             Text(
-                text = content.subtitle,
+                text = data.body,
                 color = colors.textMuted,
                 fontSize = if (isTv) 13.sp else 12.sp,
-                maxLines = 1,
+                lineHeight = if (isTv) 18.sp else 17.sp,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
         Text(
-            text = if (isTv) "اضغط OK" else "فتح",
+            text = data.cta,
             color = colors.goldBright,
             fontSize = if (isTv) 12.sp else 11.sp,
             fontWeight = FontWeight.Bold,
+            maxLines = 1,
             modifier = Modifier
                 .clip(RoundedCornerShape(99.dp))
                 .background(colors.gold.copy(alpha = .12f))
                 .padding(horizontal = 11.dp, vertical = 7.dp),
         )
     }
+}
+
+private fun homeAnnouncementIcon(severity: OperationsAnnouncementSeverity): ImageVector =
+    when (severity) {
+        OperationsAnnouncementSeverity.INFO -> Icons.Rounded.Info
+        OperationsAnnouncementSeverity.WARNING,
+        OperationsAnnouncementSeverity.IMPORTANT,
+        -> Icons.Rounded.Warning
+    }
+
+private fun homeAnnouncementAccent(
+    severity: OperationsAnnouncementSeverity,
+    colors: sa.hulksa.player.ui.theme.HulkColors,
+): Color = when (severity) {
+    // Severity stays inside the shared gold family; the wording carries the severity.
+    OperationsAnnouncementSeverity.INFO -> colors.goldBright
+    OperationsAnnouncementSeverity.WARNING,
+    OperationsAnnouncementSeverity.IMPORTANT,
+    -> colors.gold
+}
+
+/** Real optional-update state for the Home card; the complete actions stay in the existing detail. */
+private fun homeUpdateCardBody(
+    update: OperationsUpdateConfig,
+    download: OperationsDownloadUiState,
+): String = when (download.status) {
+    OperationsDownloadStatus.DOWNLOADING ->
+        download.progressPercent?.let { "جارٍ التنزيل $it%" } ?: "جارٍ التنزيل…"
+
+    OperationsDownloadStatus.INSTALLER_OPENED -> "اكمل التثبيت من مثبت Android"
+    OperationsDownloadStatus.UNKNOWN_SOURCES_BLOCKED -> "اسمح بالتثبيت من هذا المصدر ثم اعد المحاولة"
+    OperationsDownloadStatus.FAILED -> download.message ?: "تعذر تنزيل التحديث"
+    OperationsDownloadStatus.IDLE -> "الإصدار ${update.latestVersionName}"
 }
 
 @Composable
@@ -1834,9 +2194,10 @@ private fun ActiveDownloadsSection(
     val colors = LocalHulkColors.current
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.Download, contentDescription = null, tint = colors.goldBright, modifier = Modifier.size(21.dp))
-            Spacer(Modifier.width(8.dp))
+            // Caption physically RIGHT with its simple glyph physically LEFT in RTL.
             Text("التنزيلات الجارية", color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(8.dp))
+            Icon(Icons.Rounded.Download, contentDescription = null, tint = colors.goldBright, modifier = Modifier.size(21.dp))
         }
         Spacer(Modifier.height(10.dp))
         LazyRow(
@@ -1845,37 +2206,113 @@ private fun ActiveDownloadsSection(
         ) {
             items(downloads, key = OfflineDownload::downloadId) { item ->
                 var focused by remember(item.downloadId) { mutableStateOf(false) }
-                val shape = RoundedCornerShape(15.dp)
+                val shape = RoundedCornerShape(if (isTv) 15.dp else 14.dp)
                 Column(
                     modifier = Modifier
-                        .width(if (isTv) 270.dp else 220.dp)
+                        .width(if (isTv) 270.dp else 300.dp)
                         .clip(shape)
-                        .background(if (focused) colors.gold.copy(alpha = .12f) else colors.surface)
-                        .border(if (focused) 2.dp else 1.dp, if (focused) colors.goldBright else colors.line.copy(alpha = .45f), shape)
+                        .background(if (focused) colors.gold.copy(alpha = .12f) else Color(0xFF15160F))
+                        .border(
+                            if (focused) 2.dp else 1.dp,
+                            if (focused) colors.goldBright else colors.line.copy(alpha = .45f),
+                            shape,
+                        )
                         .onFocusChanged { focused = it.isFocused }
                         .clickable(role = Role.Button, onClick = onOpenDownloads)
                         .padding(13.dp),
                 ) {
-                    Text(item.title, color = colors.text, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(9.dp),
+                    ) {
+                        // Title physically RIGHT with its glyph physically LEFT in RTL.
+                        Text(
+                            text = item.title,
+                            color = colors.text,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(
+                            Icons.Rounded.Download,
+                            contentDescription = null,
+                            tint = colors.goldBright,
+                            modifier = Modifier.size(17.dp),
+                        )
+                    }
+                    // A known real total shows the real track; unknown progress stays
+                    // indeterminate with no invented percentage or empty fake track.
+                    val knownProgress = downloadKnownProgress(item)
+                    if (knownProgress != null) {
+                        Spacer(Modifier.height(9.dp))
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(5.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(Color.White.copy(alpha = .12f)),
+                        ) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(knownProgress)
+                                    .fillMaxHeight()
+                                    .background(colors.goldBright),
+                            )
+                        }
+                    }
                     Spacer(Modifier.height(8.dp))
-                    Box(Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(9.dp)).background(Color.White.copy(alpha = .12f))) {
-                        Box(Modifier.fillMaxWidth(item.progress.coerceIn(0f, 1f)).fillMaxHeight().background(colors.goldBright))
-                    }
-                    Spacer(Modifier.height(7.dp))
-                    val status = when (item.status) {
-                        OfflineStatus.DOWNLOADING -> "${(item.progress * 100).toInt()}%  •  ${formatTransferRate(item.bytesPerSecond)}"
-                        OfflineStatus.PAUSED -> "متوقف مؤقتا"
-                        OfflineStatus.WAITING_NETWORK -> "بانتظار الشبكة"
-                        OfflineStatus.WAITING_SCHEDULE -> "مجدول"
-                        OfflineStatus.WAITING_STORAGE -> "بانتظار مساحة"
-                        OfflineStatus.CHECKING -> "جاري الفحص"
-                        else -> "في قائمة الانتظار"
-                    }
-                    Text(status, color = if (focused) colors.goldBright else colors.textMuted, fontSize = 10.sp, maxLines = 1)
+                    Text(
+                        text = downloadStatusLine(item),
+                        color = if (focused) colors.goldBright else colors.textMuted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = downloadStateCaption(item.status),
+                        color = colors.textMuted,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                    )
                 }
             }
         }
     }
+}
+
+private fun downloadKnownProgress(item: OfflineDownload): Float? =
+    if (item.totalBytes > 0L &&
+        (item.status == OfflineStatus.DOWNLOADING || item.status == OfflineStatus.PAUSED)
+    ) {
+        item.progress.coerceIn(0f, 1f)
+    } else {
+        null
+    }
+
+/**
+ * Truthful textual telemetry: the same known-total policy as the progress track. An unknown
+ * total never produces an invented percentage; the real transfer rate stays when it is known.
+ */
+internal fun downloadStatusLine(item: OfflineDownload): String = when (item.status) {
+    OfflineStatus.DOWNLOADING -> {
+        val rate = formatTransferRate(item.bytesPerSecond)
+        if (item.totalBytes > 0L) "${(item.progress * 100).toInt()}%  •  $rate" else rate
+    }
+    OfflineStatus.PAUSED -> if (item.totalBytes > 0L) "${(item.progress * 100).toInt()}%" else ""
+    OfflineStatus.CHECKING -> "جاري الفحص"
+    OfflineStatus.WAITING_NETWORK -> "بانتظار الشبكة"
+    OfflineStatus.WAITING_SCHEDULE -> "مجدول"
+    OfflineStatus.WAITING_STORAGE -> "بانتظار مساحة"
+    else -> "في قائمة الانتظار"
+}
+
+private fun downloadStateCaption(status: OfflineStatus): String = when (status) {
+    OfflineStatus.DOWNLOADING -> "جاري التحميل"
+    OfflineStatus.PAUSED -> "متوقف مؤقتا"
+    else -> "التفاصيل في التنزيلات"
 }
 
 @Composable
@@ -1886,7 +2323,6 @@ private fun HomeSectionPadding(isTv: Boolean, content: @Composable () -> Unit) {
 /** First list index that holds a Home content row: only the Hero/placeholder occupies index 0. */
 internal fun homeRowCursorStart(isTv: Boolean): Int = 1
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CinemaHero(
     item: ContentItem,
@@ -1903,45 +2339,89 @@ private fun CinemaHero(
 ) {
     val colors = LocalHulkColors.current
     val configuration = LocalConfiguration.current
+    val context = LocalContext.current
     val isPortraitPhone = !isTv && configuration.screenWidthDp < 600 && configuration.screenHeightDp > configuration.screenWidthDp
+    // Model 1 derives the wide hero from the actual viewport (about two thirds, bounded) instead
+    // of the old fixed 410dp; phone/short windows keep their accepted adaptive heights.
     val heroHeight = when {
-        isTv -> 410.dp
+        isTv -> (configuration.screenHeightDp * 2f / 3f).coerceIn(350f, 420f).dp
         isPortraitPhone -> (configuration.screenHeightDp * .58f).coerceIn(420f, 520f).dp
         else -> 288.dp
     }
-    val image = item.backdropUrl ?: item.posterUrl
+    // One selected-hero load: technical facts plus the bounded presentation backfill, shared with
+    // the facts row so artwork and copy never start competing requests.
+    val metadataStore = remember(context) { HomeHeroMetadataStore.get(context) }
+    val metadataOwner = metadataStore.currentOwner()
+    var heroMetadata by remember(item.type, item.id, metadataOwner) {
+        mutableStateOf(metadataStore.cached(metadataOwner, item))
+    }
+    LaunchedEffect(item.type, item.id, metadataOwner) {
+        val owner = metadataOwner ?: return@LaunchedEffect
+        val loaded = metadataStore.metadata(owner, item, requirePresentation = true)
+        metadataStore.publishIfCurrent(owner) { heroMetadata = loaded }
+    }
+    val artworkCandidates = remember(heroMetadata.artworkUrl, item.backdropUrl, item.posterUrl) {
+        homeHeroArtworkCandidates(
+            metadataArtwork = heroMetadata.artworkUrl,
+            itemBackdrop = item.backdropUrl,
+            itemPoster = item.posterUrl,
+        )
+    }
+    val heroPlot = (heroMetadata.plot ?: item.plot)
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(heroHeight)
             .background(Color(0xFF0A0B08)),
     ) {
-        if (!image.isNullOrBlank()) {
-            AsyncImage(
-                model = image,
-                contentDescription = item.name,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
+        HeroArtwork(
+            candidates = artworkCandidates,
+            contentDescription = item.name,
+            phonePortrait = isPortraitPhone,
+            phoneWindowHeightDp = (configuration.screenWidthDp * 9f / 16f).dp,
+        )
+        if (isTv) {
+            Box(
+                Modifier.fillMaxSize().background(
+                    Brush.verticalGradient(
+                        0f to Color.Black.copy(alpha = .18f),
+                        .55f to Color.Transparent,
+                        1f to colors.background,
+                    ),
+                ),
+            )
+            Box(
+                Modifier.fillMaxSize().background(
+                    // Physical left-to-right readability mask: the artwork keeps its detail on
+                    // the left while the copy envelope at x >= 0.54 is fully protected.
+                    Brush.horizontalGradient(
+                        0.00f to colors.background.copy(alpha = .08f),
+                        0.30f to colors.background.copy(alpha = .08f),
+                        0.40f to colors.background.copy(alpha = .20f),
+                        0.48f to colors.background.copy(alpha = .65f),
+                        0.54f to colors.background.copy(alpha = .94f),
+                        0.68f to colors.background.copy(alpha = 1f),
+                        1.00f to colors.background.copy(alpha = 1f),
+                    ),
+                ),
             )
         } else {
-            BrandLogo(Modifier.align(Alignment.Center).size(190.dp).graphicsLayer { alpha = .38f })
+            Box(
+                Modifier.fillMaxSize().background(
+                    // Phone/short windows protect the lower copy with a vertical mask instead
+                    // of reusing the wide horizontal split.
+                    Brush.verticalGradient(
+                        0f to Color.Black.copy(alpha = .18f),
+                        .42f to Color.Transparent,
+                        .60f to colors.background.copy(alpha = .55f),
+                        .78f to colors.background.copy(alpha = .92f),
+                        1f to colors.background,
+                    ),
+                ),
+            )
         }
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(
-                    0f to Color.Black.copy(alpha = .18f),
-                    .55f to Color.Transparent,
-                    1f to colors.background,
-                ),
-            ),
-        )
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.horizontalGradient(
-                    listOf(Color.Transparent, Color.Black.copy(alpha = .18f), colors.background.copy(alpha = .94f)),
-                ),
-            ),
-        )
 
         Row(
             modifier = Modifier
@@ -1971,16 +2451,16 @@ private fun CinemaHero(
 
         Column(
             modifier = Modifier
+                // Model 1: the copy stack is anchored in the lower band of the hero and grows
+                // upward, on the physical right for wide layouts.
                 .align(Alignment.BottomStart)
-                .fillMaxWidth(if (isTv) .64f else 1f)
+                .fillMaxWidth(if (isTv) HERO_WIDE_COPY_WIDTH_FRACTION else 1f)
                 .padding(
                     start = if (isTv) 27.dp else 18.dp,
                     end = if (isTv) 27.dp else 18.dp,
-                    bottom = if (isTv) 28.dp else 24.dp,
+                    bottom = if (isTv) 40.dp else 24.dp,
                 ),
         ) {
-            Text("مختار لك", color = colors.goldBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(5.dp))
             Text(
                 item.name,
                 color = Color.White,
@@ -1991,33 +2471,369 @@ private fun CinemaHero(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(if (isTv) 8.dp else 9.dp))
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                maxItemsInEachRow = if (isTv) 5 else 3,
-            ) {
-                item.rating?.let { InfoPill("★ $it") }
-                item.genre?.takeIf(String::isNotBlank)?.let { InfoPill(it.take(27)) }
-                HomeHeroTechnicalPills(item, isTv = true)
-            }
-            item.plot?.takeIf(String::isNotBlank)?.let {
+            HomeHeroFacts(item, isTv = isTv, metadata = heroMetadata, modifier = Modifier.fillMaxWidth())
+            heroPlot?.let {
                 Spacer(Modifier.height(if (isTv) 8.dp else 10.dp))
                 Text(it, color = Color(0xFFD4D0C5), fontSize = 12.sp, lineHeight = if (isTv) 17.sp else 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.height(if (isTv) 12.dp else 15.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                FocusButton(
-                    if (item.type == ContentType.SERIES) "عرض الحلقات" else "شاهد الان",
-                    onOpen,
-                    modifier = watchModifier,
-                    compact = true,
-                    onFocused = onFocused,
+            HomeHeroActions(
+                primaryCaption = if (item.type == ContentType.SERIES) "عرض الحلقات" else "شاهد الان",
+                isFavorite = isFavorite,
+                isTv = isTv,
+                onOpen = onOpen,
+                onToggleFavorite = onToggleFavorite,
+                watchModifier = watchModifier,
+                onFocused = onFocused,
+            )
+        }
+    }
+}
+
+private const val HERO_WIDE_COPY_WIDTH_FRACTION = .46f
+private const val HERO_PORTRAIT_TV_ARTWORK_WIDTH_FRACTION = .56f
+private const val HERO_PHONE_HEADER_OFFSET_DP = 64
+
+/**
+ * Physical-left alignment for hero artwork. Absolute (not start/end relative), so the app's RTL
+ * layout never mirrors the artwork into the dark copy region. `AbsoluteAlignment.CenterLeft`
+ * resolves to the physical left edge under both layout directions.
+ */
+internal val heroArtworkPhysicalLeftAlignment: Alignment = AbsoluteAlignment.CenterLeft
+
+/**
+ * Real artwork orientation rule: only a genuinely wide decoded source may fill the wide hero.
+ * Provider backdrop fields or poster URLs alone never establish orientation.
+ */
+internal fun homeHeroArtworkIsLandscape(width: Float, height: Float): Boolean =
+    width > 0f && height > 0f && width.isFinite() && height.isFinite() &&
+        width / height >= 1.3f
+
+/**
+ * Ordered real artwork candidates for the hero: the owned metadata backdrop candidate first,
+ * then the item backdrop/poster fields; blanks and duplicates are removed.
+ */
+internal fun homeHeroArtworkCandidates(
+    metadataArtwork: String?,
+    itemBackdrop: String?,
+    itemPoster: String?,
+): List<String> = listOfNotNull(metadataArtwork, itemBackdrop, itemPoster)
+    .map(String::trim)
+    .filter(String::isNotBlank)
+    .distinct()
+
+/**
+ * Pure selection state for the hero artwork candidates. A successfully decoded landscape wins
+ * immediately; the first successfully decoded portrait/near-square source is retained while the
+ * later candidates are tried, and it is still rendered when every later candidate fails. The
+ * brand mark is used only when no usable real image was obtained.
+ */
+internal data class HeroArtworkSelectionState(
+    val candidateIndex: Int = 0,
+    val retainedPortraitIndex: Int? = null,
+    val landscapeIndex: Int? = null,
+    val exhausted: Boolean = false,
+) {
+    val settled: Boolean get() = landscapeIndex != null || exhausted
+    val displayIndex: Int? get() = landscapeIndex ?: retainedPortraitIndex
+}
+
+/** A successful decode at the current candidate index; stale/superseded callbacks are ignored. */
+internal fun heroArtworkOnLoaded(
+    state: HeroArtworkSelectionState,
+    index: Int,
+    isLandscape: Boolean,
+    candidateCount: Int,
+): HeroArtworkSelectionState {
+    if (state.settled || index != state.candidateIndex) return state
+    val isLast = index >= candidateCount - 1
+    return when {
+        isLandscape -> state.copy(landscapeIndex = index)
+        state.retainedPortraitIndex == null -> state.copy(
+            retainedPortraitIndex = index,
+            candidateIndex = if (isLast) index else index + 1,
+            exhausted = isLast,
+        )
+        isLast -> state.copy(exhausted = true)
+        else -> state.copy(candidateIndex = index + 1)
+    }
+}
+
+/** A failed decode at the current candidate index; the retained portrait survives the failure. */
+internal fun heroArtworkOnFailed(
+    state: HeroArtworkSelectionState,
+    index: Int,
+    candidateCount: Int,
+): HeroArtworkSelectionState {
+    if (state.settled || index != state.candidateIndex) return state
+    return if (index >= candidateCount - 1) {
+        state.copy(exhausted = true)
+    } else {
+        state.copy(candidateIndex = index + 1)
+    }
+}
+
+/**
+ * Model 1 artwork stage. Candidates are classified one at a time by their decoded dimensions:
+ * a landscape source fills the wide hero (physical-left biased), a portrait/near-square source
+ * is retained and, when no landscape is found, is bounded inside the physical-left visual
+ * region with Fit on TV. Nothing is painted wide before the dimensions are known, each candidate
+ * is attempted at most once, and the successfully decoded painter is reused for display (no
+ * second request and no separate render failure path). On portrait phones every successful
+ * source renders into one uniform 16:9 artwork window instead.
+ */
+@Composable
+private fun BoxScope.HeroArtwork(
+    candidates: List<String>,
+    contentDescription: String,
+    phonePortrait: Boolean,
+    phoneWindowHeightDp: Dp,
+) {
+    var selection by remember(candidates) { mutableStateOf(HeroArtworkSelectionState()) }
+    val painters = remember(candidates) { mutableStateMapOf<Int, Painter>() }
+
+    val currentIndex = selection.candidateIndex
+    val currentUrl = if (selection.settled) null else candidates.getOrNull(currentIndex)
+    if (currentUrl != null) {
+        // Hidden classification pass; only the decoded size is used from this load, and the
+        // loaded painter is retained for the display branch so no second request is made.
+        AsyncImage(
+            model = currentUrl,
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            onSuccess = { state ->
+                val size = state.painter.intrinsicSize
+                painters[currentIndex] = state.painter
+                selection = heroArtworkOnLoaded(
+                    state = selection,
+                    index = currentIndex,
+                    isLandscape = homeHeroArtworkIsLandscape(size.width, size.height),
+                    candidateCount = candidates.size,
                 )
-                FocusButton(if (isFavorite) "★ في قائمتي" else "+ قائمتي", onToggleFavorite, primary = false, compact = true)
+            },
+            onError = {
+                selection = heroArtworkOnFailed(
+                    state = selection,
+                    index = currentIndex,
+                    candidateCount = candidates.size,
+                )
+            },
+            modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 0f },
+        )
+    }
+
+    val painter = selection.displayIndex?.let(painters::get)
+    if (painter == null) {
+        if (phonePortrait) {
+            // Phone: the brand fallback stays inside the same reserved 16:9 window.
+            Box(
+                modifier = heroPhoneArtworkWindow(phoneWindowHeightDp),
+                contentAlignment = Alignment.Center,
+            ) {
+                BrandLogo(Modifier.size(120.dp).graphicsLayer { alpha = .40f })
+            }
+        } else {
+            BrandLogo(
+                Modifier
+                    .align(heroArtworkPhysicalLeftAlignment)
+                    .size(190.dp)
+                    .graphicsLayer { alpha = .38f },
+            )
+        }
+        return
+    }
+
+    if (phonePortrait) {
+        // One uniform phone artwork window for every successful source: full Home-content width,
+        // 16:9 height derived from the window width, aspect-preserving centered Crop. Differing
+        // source ratios crop inside this window; the window bounds never change.
+        Image(
+            painter = painter,
+            contentDescription = contentDescription,
+            contentScale = ContentScale.Crop,
+            alignment = Alignment.Center,
+            modifier = heroPhoneArtworkWindow(phoneWindowHeightDp),
+        )
+        return
+    }
+
+    if (selection.landscapeIndex != null) {
+        // Wide artwork fills the hero with its visual weight on the physical left.
+        Image(
+            painter = painter,
+            contentDescription = contentDescription,
+            contentScale = ContentScale.Crop,
+            alignment = heroArtworkPhysicalLeftAlignment,
+            modifier = Modifier.fillMaxSize(),
+        )
+    } else {
+        // TV/short-window portrait fallback: bounded physical-left Fit, never blown up wide.
+        Image(
+            painter = painter,
+            contentDescription = contentDescription,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .align(heroArtworkPhysicalLeftAlignment)
+                .fillMaxHeight()
+                .fillMaxWidth(HERO_PORTRAIT_TV_ARTWORK_WIDTH_FRACTION),
+        )
+    }
+}
+
+/** Reserved phone artwork window: below the measured header/safe inset, full content width. */
+private fun BoxScope.heroPhoneArtworkWindow(height: Dp): Modifier = Modifier
+    .align(Alignment.TopCenter)
+    .statusBarsPadding()
+    .padding(top = HERO_PHONE_HEADER_OFFSET_DP.dp)
+    .fillMaxWidth()
+    .height(height)
+
+/**
+ * Home hero actions on the accepted compact Details atoms: 13sp bold caption, 17dp icon, 6dp
+ * caption/icon gap, 12dp horizontal / 9dp vertical inner padding, shared 12dp shape and stable
+ * geometry (`scaleOnFocus = false`), with the [movieActionHeightDp] floor (46dp TV/normal,
+ * 42dp accepted compact-height non-TV). The gold primary action stays physical RIGHT with its
+ * PlayArrow physically LEFT of the caption; the outlined gold-heart favorite is immediately to its
+ * left. Both captions are measured at the current font scale; when the pair cannot fit side by
+ * side the existing Details narrow-layout fallback stacks the full-caption controls instead of
+ * ellipsizing or shrinking them.
+ */
+@Composable
+private fun HomeHeroActions(
+    primaryCaption: String,
+    isFavorite: Boolean,
+    isTv: Boolean,
+    onOpen: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    watchModifier: Modifier,
+    onFocused: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val actionMinHeightDp = movieActionHeightDp(
+        isTv = isTv,
+        compactHeight = detailsProMetrics(
+            screenWidthDp = adaptiveUi.screenWidthDp,
+            screenHeightDp = adaptiveUi.screenHeightDp,
+            isTv = isTv,
+        ).compactHeight,
+    )
+    val captionStyle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    val iconPx = with(density) { 17.dp.roundToPx() }
+    val horizontalPaddingPx = with(density) { 12.dp.roundToPx() }
+    val iconGapPx = with(density) { 6.dp.roundToPx() }
+    val bufferPx = with(density) { 6.dp.roundToPx() }
+    fun requiredWidthPx(caption: String): Int = movieActionRequiredWidthPx(
+        captionWidthPx = textMeasurer.measure(
+            text = AnnotatedString(caption),
+            style = captionStyle,
+            maxLines = 1,
+        ).size.width,
+        iconSizePx = iconPx,
+        horizontalPaddingPx = horizontalPaddingPx,
+        gapPx = iconGapPx,
+    ) + bufferPx
+    val primaryRequiredPx = requiredWidthPx(primaryCaption)
+    // Reserve the longest real favorite wording so selecting/unselecting never reflows the group.
+    val favoriteCaption = if (isFavorite) "في قائمتي" else "قائمتي"
+    val favoriteRequiredPx = maxOf(requiredWidthPx("قائمتي"), requiredWidthPx("في قائمتي"))
+    val rowGapPx = with(density) { 9.dp.roundToPx() }
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val availableWidthPx = with(density) { maxWidth.roundToPx() }
+        val fitsRow = primaryRequiredPx + favoriteRequiredPx + rowGapPx <= availableWidthPx
+        if (fitsRow) {
+            Row(
+                modifier = Modifier.height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                HomeHeroPrimaryAction(
+                    caption = primaryCaption,
+                    minHeightDp = actionMinHeightDp,
+                    onClick = onOpen,
+                    onFocused = onFocused,
+                    modifier = watchModifier.fillMaxHeight(),
+                )
+                HomeHeroFavoriteAction(
+                    caption = favoriteCaption,
+                    isFavorite = isFavorite,
+                    minHeightDp = actionMinHeightDp,
+                    minWidthDp = with(density) { favoriteRequiredPx.toDp() },
+                    onClick = onToggleFavorite,
+                    trailingIconTint = colors.gold,
+                    modifier = Modifier.fillMaxHeight(),
+                )
+            }
+        } else {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                HomeHeroPrimaryAction(
+                    caption = primaryCaption,
+                    minHeightDp = actionMinHeightDp,
+                    onClick = onOpen,
+                    onFocused = onFocused,
+                    modifier = watchModifier.fillMaxWidth(),
+                )
+                HomeHeroFavoriteAction(
+                    caption = favoriteCaption,
+                    isFavorite = isFavorite,
+                    minHeightDp = actionMinHeightDp,
+                    minWidthDp = 0.dp,
+                    onClick = onToggleFavorite,
+                    trailingIconTint = colors.gold,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
+}
+
+@Composable
+private fun HomeHeroPrimaryAction(
+    caption: String,
+    minHeightDp: Int,
+    onClick: () -> Unit,
+    onFocused: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FocusButton(
+        text = caption,
+        onClick = onClick,
+        modifier = modifier.heightIn(min = minHeightDp.dp),
+        compact = true,
+        scaleOnFocus = false,
+        trailingIcon = Icons.Rounded.PlayArrow,
+        textMaxLines = 1,
+        onFocused = onFocused,
+    )
+}
+
+@Composable
+private fun HomeHeroFavoriteAction(
+    caption: String,
+    isFavorite: Boolean,
+    minHeightDp: Int,
+    minWidthDp: Dp,
+    onClick: () -> Unit,
+    trailingIconTint: Color,
+    modifier: Modifier = Modifier,
+) {
+    FocusButton(
+        text = caption,
+        onClick = onClick,
+        modifier = modifier.heightIn(min = minHeightDp.dp).widthIn(min = minWidthDp),
+        compact = true,
+        primary = false,
+        outlined = true,
+        scaleOnFocus = false,
+        trailingIcon = if (isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
+        trailingIconTint = trailingIconTint,
+        textMaxLines = 1,
+    )
 }
 
 @Composable
@@ -2027,6 +2843,10 @@ private fun HomePlaceholder(
     isTv: Boolean,
     unreadNotificationCount: Int,
     onOpenNotifications: () -> Unit,
+    errorTitle: String? = null,
+    errorBody: String? = null,
+    networkFailure: Boolean = true,
+    refreshModifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
     Box(
@@ -2045,17 +2865,35 @@ private fun HomePlaceholder(
                     vertical = if (isTv) 18.dp else 10.dp,
                 ),
         )
-        if (loading) LoadingRing(label = "نجهز احدث الاضافات…")
-        else Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("سيظهر احدث المحتوى هنا", color = colors.textMuted)
-            Spacer(Modifier.height(12.dp))
-            FocusButton("تحديث", onRefresh, compact = true)
+        when {
+            // One honest error/empty presentation without content; the artwork fallback above the
+            // hero owns its own safe logo, never a fake movie or endless spinner.
+            errorTitle != null && errorBody != null -> MoviesOfflineEmptyState(
+                onRetry = onRefresh,
+                title = errorTitle,
+                body = errorBody,
+                networkFailure = networkFailure,
+                modifier = Modifier.padding(horizontal = if (isTv) 16.dp else 14.dp),
+            )
+
+            loading -> LoadingRing(label = "نجهز احدث الاضافات…")
+
+            else -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("سيظهر احدث المحتوى هنا", color = colors.textMuted)
+                Spacer(Modifier.height(12.dp))
+                FocusButton("تحديث", onRefresh, modifier = refreshModifier, compact = true)
+            }
         }
     }
 }
 
+/**
+ * Home catalog row on the accepted boxed card family. Movies and Series keep their own truthful
+ * footers; live entries use the contained-logo Home live card. Row key, item keys, order, caps,
+ * favorite long-press and focus restoration semantics stay identical to the previous Home row.
+ */
 @Composable
-private fun PosterSection(
+private fun HomeBoxedSection(
     title: String,
     rowKey: String,
     rowIndex: Int,
@@ -2067,6 +2905,13 @@ private fun PosterSection(
     onToggleFavorite: (ContentItem) -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val boxedCardWidth = remember(isTv, adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
+        homeBoxedCardWidth(isTv, adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
+    }
+    val liveCardWidth = remember(isTv, adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
+        homeLiveCardWidth(isTv, adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
+    }
     val remembered = navigationMemory.position(MainDestination.HOME)
     val targetIndex = if (remembered.rowKey == rowKey) remembered.itemIndex.coerceIn(0, content.lastIndex.coerceAtLeast(0)) else 0
     val rowState = rememberLazyListState(initialFirstVisibleItemIndex = targetIndex)
@@ -2089,21 +2934,52 @@ private fun PosterSection(
                 val itemKey = "${item.type}:${item.id}"
                 val restore = remembered.rowKey == rowKey &&
                     (remembered.itemKey == itemKey || (remembered.itemKey.isBlank() && index == targetIndex))
-                UniversalPosterCard(
-                    item = item,
-                    isFavorite = isFavorite(item),
-                    onClick = { onOpen(item) },
-                    modifier = Modifier.width(if (isTv) 136.dp else 111.dp).restoreFocus(restore, targetRequester),
-                    onLongClick = { onToggleFavorite(item) },
-                    onFocused = { navigationMemory.save(MainDestination.HOME, itemKey, index, rowKey, rowIndex) },
-                )
+                val itemModifier = Modifier.restoreFocus(restore, targetRequester)
+                val saveFocus = {
+                    navigationMemory.save(MainDestination.HOME, itemKey, index, rowKey, rowIndex)
+                }
+                when (item.type) {
+                    ContentType.MOVIE -> MoviesCatalogBoxedCard(
+                        item = item,
+                        isFavorite = isFavorite(item),
+                        onClick = { onOpen(item) },
+                        modifier = itemModifier.width(boxedCardWidth),
+                        onLongClick = { onToggleFavorite(item) },
+                        onFocused = saveFocus,
+                    )
+
+                    ContentType.SERIES -> SeriesCatalogBoxedCard(
+                        item = item,
+                        isFavorite = isFavorite(item),
+                        onClick = { onOpen(item) },
+                        modifier = itemModifier.width(boxedCardWidth),
+                        onLongClick = { onToggleFavorite(item) },
+                        onFocused = saveFocus,
+                    )
+
+                    ContentType.LIVE -> LiveChannelHomeCard(
+                        name = item.name,
+                        artworkUrl = item.posterUrl,
+                        isFavorite = isFavorite(item),
+                        onClick = { onOpen(item) },
+                        modifier = itemModifier.width(liveCardWidth),
+                        onLongClick = { onToggleFavorite(item) },
+                        onFocused = saveFocus,
+                    )
+                }
             }
         }
     }
 }
 
+/**
+ * Continue Watching keeps the real HistoryEntry identity, saved time, played fraction, open
+ * callback and long-press removal, presented with the accepted boxed Recent card. The Series
+ * season/episode line uses the existing shared identity helper; the reserved slot keeps mixed
+ * movie/series cards the same height.
+ */
 @Composable
-private fun HistorySection(
+private fun HomeContinueWatchingSection(
     title: String,
     rowKey: String,
     rowIndex: Int,
@@ -2113,6 +2989,10 @@ private fun HistorySection(
     onOpen: (HistoryEntry) -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val cardWidth = remember(isTv, adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
+        homeBoxedCardWidth(isTv, adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
+    }
     val remembered = navigationMemory.position(MainDestination.HOME)
     val targetIndex = if (remembered.rowKey == rowKey) remembered.itemIndex.coerceIn(0, entries.lastIndex.coerceAtLeast(0)) else 0
     val rowState = rememberLazyListState(initialFirstVisibleItemIndex = targetIndex)
@@ -2123,32 +3003,90 @@ private fun HistorySection(
             runCatching { targetRequester.requestFocus() }
         }
     }
-    val polishContinueWatching = isTv && rowKey == "continue"
     Column {
         Text(title, color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(if (polishContinueWatching) 11.dp else 10.dp))
+        Spacer(Modifier.height(10.dp))
         LazyRow(
             state = rowState,
-            contentPadding = PaddingValues(
-                horizontal = if (polishContinueWatching) 8.dp else 5.dp,
-                vertical = if (polishContinueWatching) 10.dp else 7.dp,
-            ),
-            horizontalArrangement = Arrangement.spacedBy(if (polishContinueWatching) 16.dp else 14.dp),
+            contentPadding = PaddingValues(horizontal = 5.dp, vertical = 7.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
         ) {
             itemsIndexed(entries, key = { _, entry -> entry.key }) { index, entry ->
                 val restore = remembered.rowKey == rowKey &&
                     (remembered.itemKey == entry.key || (remembered.itemKey.isBlank() && index == targetIndex))
-                HistoryCard(
-                    entry,
-                    { onOpen(entry) },
-                    Modifier
-                        .width(if (polishContinueWatching) 226.dp else if (isTv) 214.dp else 190.dp)
-                        .restoreFocus(restore, targetRequester),
+                BoxedHistoryCard(
+                    entry = entry,
+                    onClick = { onOpen(entry) },
+                    modifier = Modifier.width(cardWidth).restoreFocus(restore, targetRequester),
+                    identityText = seriesHistoryIdentityText(entry),
+                    reserveIdentitySlot = true,
                     onFocused = { navigationMemory.save(MainDestination.HOME, entry.key, index, rowKey, rowIndex) },
                 )
             }
         }
     }
+}
+
+/** Last watched live channel: the same contained-logo live card without VOD metadata or controls. */
+@Composable
+private fun HomeLastChannelSection(
+    rowKey: String,
+    rowIndex: Int,
+    entry: HistoryEntry,
+    isTv: Boolean,
+    navigationMemory: NavigationMemoryStore,
+    onOpen: (HistoryEntry) -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val cardWidth = remember(isTv, adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
+        homeLiveCardWidth(isTv, adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
+    }
+    val remembered = navigationMemory.position(MainDestination.HOME)
+    val targetRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        if (remembered.rowKey == rowKey) {
+            runCatching { targetRequester.requestFocus() }
+        }
+    }
+    Column {
+        Text("اخر قناة شاهدتها", color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(10.dp))
+        Box(Modifier.padding(horizontal = 5.dp, vertical = 7.dp)) {
+            LiveChannelHomeCard(
+                name = entry.title,
+                artworkUrl = entry.posterUrl,
+                isFavorite = false,
+                onClick = { onOpen(entry) },
+                modifier = Modifier
+                    .width(cardWidth)
+                    .restoreFocus(remembered.rowKey == rowKey, targetRequester),
+                onFocused = { navigationMemory.save(MainDestination.HOME, entry.key, 0, rowKey, rowIndex) },
+            )
+        }
+    }
+}
+
+private const val HOME_MOBILE_BOXED_CARD_WIDTH_DP = 105f
+private const val HOME_MOBILE_LIVE_CARD_WIDTH_DP = 160f
+
+/** Home card width follows the accepted catalog cell so Home rows share the catalog geometry. */
+internal fun homeBoxedCardWidth(isTv: Boolean, screenWidthDp: Int, screenHeightDp: Int): Dp {
+    if (!isTv) return HOME_MOBILE_BOXED_CARD_WIDTH_DP.dp
+    val metrics = tvCatalogMetrics(screenWidthDp, screenHeightDp, boxedCards = true)
+    val available = (screenWidthDp - metrics.horizontalContentPaddingDp - metrics.endContentPaddingDp)
+        .coerceAtLeast(1f)
+    val columns = movieCatalogColumnCount(available, metrics.horizontalSpacingDp, metrics.minCellWidthDp)
+    val width = (available - metrics.horizontalSpacingDp * (columns - 1)) / columns
+    return width.coerceAtLeast(1f).dp
+}
+
+/** Live channel cards keep a wider 16:9 area: the boxed catalog cell scaled for contained logos. */
+internal fun homeLiveCardWidth(isTv: Boolean, screenWidthDp: Int, screenHeightDp: Int): Dp {
+    if (!isTv) return HOME_MOBILE_LIVE_CARD_WIDTH_DP.dp
+    return (homeBoxedCardWidth(true, screenWidthDp, screenHeightDp).value * 1.35f)
+        .coerceIn(140f, 240f)
+        .dp
 }
 
 @Composable

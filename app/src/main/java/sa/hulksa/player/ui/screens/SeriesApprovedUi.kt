@@ -329,6 +329,7 @@ internal fun SeriesDetailsHeroMetadataRow(
     seasonCount: Int?,
     isTv: Boolean,
     modifier: Modifier = Modifier,
+    wrap: Boolean = false,
 ) {
     // Physical RIGHT-to-LEFT: Classification, Quality, Season count, Episode count, Rating. The
     // count groups are explicit icon-less ordered elements (number first) so bidi cannot reverse
@@ -340,7 +341,7 @@ internal fun SeriesDetailsHeroMetadataRow(
         episodeCount?.takeIf { it > 0 }?.let { DetailsHeroMetadataEntry(episodeCount = it) },
         ratingLabel?.trim()?.takeIf(String::isNotBlank)?.let { DetailsHeroMetadataEntry(it, rating = true) },
     )
-    DetailsHeroMetadataRow(entries = entries, isTv = isTv, modifier = modifier)
+    DetailsHeroMetadataRow(entries = entries, isTv = isTv, modifier = modifier, wrap = wrap)
 }
 
 /**

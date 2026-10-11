@@ -422,38 +422,12 @@ class XtreamClient {
         cast = info.optNullableString("cast") ?: info.optNullableString("actors"),
         releaseDate = info.optNullableString("releasedate")
             ?: info.optNullableString("release_date"),
-        backdropUrl = normalizeArtworkUrl(
-            info.firstImageUrl("backdrop_path") ?: info.optNullableString("movie_image"),
-            portalBaseUrl,
-        ),
+        backdropUrl = info.xtreamPresentationArtworkUrl(portalBaseUrl),
     )
 
-    private fun JSONObject.optNullableString(key: String): String? {
-        if (!has(key) || isNull(key)) return null
-        return optString(key).trim().takeUnless { it.isEmpty() || it.equals("null", true) }
-    }
+    private fun JSONObject.optNullableString(key: String): String? = xtreamNullableString(key)
 
-    private fun JSONObject.firstImageUrl(key: String): String? {
-        if (!has(key) || isNull(key)) return null
-        val value = opt(key)
-        return when (value) {
-            is JSONArray -> (0 until value.length())
-                .asSequence()
-                .mapNotNull { value.optString(it).trim().takeUnless(String::isBlank) }
-                .firstOrNull()
-            is String -> {
-                val clean = value.trim()
-                if (clean.startsWith("[")) {
-                    runCatching {
-                        XtreamJsonParser.parseArray(clean).optString(0).trim().takeUnless(String::isBlank)
-                    }.getOrNull()
-                } else {
-                    clean.takeUnless { it.isBlank() || it.equals("null", true) }
-                }
-            }
-            else -> null
-        }
-    }
+    private fun JSONObject.firstImageUrl(key: String): String? = xtreamFirstImageUrl(key)
 
     private fun String.looksLikeChallenge(): Boolean {
         val prefix = trimStart().take(512).lowercase()
@@ -463,6 +437,45 @@ class XtreamClient {
 
     private companion object {
         val JSON = "application/json".toMediaType()
+    }
+}
+
+/**
+ * Shared Xtream presentation parsing used by the Details owner and the bounded card-metadata
+ * clients so artwork/plot/genre keep one normalization and null policy. The provider artwork
+ * candidate may itself be a portrait poster; callers classify real dimensions before choosing a
+ * wide presentation.
+ */
+internal fun JSONObject.xtreamPresentationArtworkUrl(portalBaseUrl: String): String? =
+    normalizeArtworkUrl(
+        xtreamFirstImageUrl("backdrop_path") ?: xtreamNullableString("movie_image"),
+        portalBaseUrl,
+    )
+
+internal fun JSONObject.xtreamNullableString(key: String): String? {
+    if (!has(key) || isNull(key)) return null
+    return optString(key).trim().takeUnless { it.isEmpty() || it.equals("null", true) }
+}
+
+internal fun JSONObject.xtreamFirstImageUrl(key: String): String? {
+    if (!has(key) || isNull(key)) return null
+    val value = opt(key)
+    return when (value) {
+        is JSONArray -> (0 until value.length())
+            .asSequence()
+            .mapNotNull { value.optString(it).trim().takeUnless(String::isBlank) }
+            .firstOrNull()
+        is String -> {
+            val clean = value.trim()
+            if (clean.startsWith("[")) {
+                runCatching {
+                    XtreamJsonParser.parseArray(clean).optString(0).trim().takeUnless(String::isBlank)
+                }.getOrNull()
+            } else {
+                clean.takeUnless { it.isBlank() || it.equals("null", true) }
+            }
+        }
+        else -> null
     }
 }
 

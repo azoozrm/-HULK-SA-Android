@@ -16,6 +16,11 @@ import java.util.concurrent.TimeUnit
 data class MovieCardTechnicalMetadata(
     val quality: String? = null,
     val durationMs: Long? = null,
+    val plot: String? = null,
+    val genre: String? = null,
+    val artworkUrl: String? = null,
+    /** True only for a successfully parsed valid provider payload. */
+    val succeeded: Boolean = false,
 )
 
 class MovieCardMetadataClient {
@@ -68,7 +73,7 @@ class MovieCardMetadataClient {
             null
         } catch (_: Exception) {
             null
-        } ?: return@withContext MovieCardTechnicalMetadata()
+        } ?: return@withContext MovieCardTechnicalMetadata(succeeded = false)
 
         val info = root.optJSONObject("info")
         val movieData = root.optJSONObject("movie_data")
@@ -93,9 +98,19 @@ class MovieCardMetadataClient {
             .mapNotNull(::videoHeightFrom)
             .firstOrNull()
 
+        // Presentation fields ride the same already-loaded payload; no extra request is made.
+        val presentation = cardPresentationMetadataFrom(
+            sources = listOf(info, movieData, root),
+            portalBaseUrl = session.portal.baseUrl,
+        )
+
         MovieCardTechnicalMetadata(
             quality = qualityLabel(height),
             durationMs = durationMs,
+            plot = presentation.plot,
+            genre = presentation.genre,
+            artworkUrl = presentation.artworkUrl,
+            succeeded = true,
         )
     }
 

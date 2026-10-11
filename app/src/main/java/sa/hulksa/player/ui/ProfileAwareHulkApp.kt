@@ -1,14 +1,25 @@
 package sa.hulksa.player.ui
 
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -23,11 +34,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -41,6 +57,7 @@ import sa.hulksa.player.data.AuthenticatedSessionRegistry
 import sa.hulksa.player.data.HulkRepository
 import sa.hulksa.player.data.LegacyParentalCodeMigrationResult
 import sa.hulksa.player.data.OperationsServiceStatus
+import sa.hulksa.player.data.OperationsAnnouncement
 import sa.hulksa.player.data.OperationsUpdateDecision
 import sa.hulksa.player.data.ParentalCodeCredentialStore
 import sa.hulksa.player.data.ProfilePinCredentialStore
@@ -72,6 +89,7 @@ import sa.hulksa.player.ui.screens.removeLiveCategoryVisibilityProfileState
 import sa.hulksa.player.ui.screens.removeMovieCategoryVisibilityProfileState
 import sa.hulksa.player.ui.screens.removeSeriesCategoryVisibilityProfileState
 import sa.hulksa.player.ui.screens.removeLiveTvProProfileState
+import sa.hulksa.player.ui.theme.LocalHulkColors
 
 internal val LocalProfileSwitchRequester = staticCompositionLocalOf<() -> Unit> { {} }
 
@@ -172,6 +190,21 @@ fun ProfileAwareHulkApp(
 
     val profiles = profileSnapshot?.profiles.orEmpty()
     val activeProfileId = profileSnapshot?.activeProfileId.orEmpty()
+    // Home message coordination is scoped to the active profile; a profile change clears both
+    // published ownership and any explicit card-opened detail.
+    val homeMessagePresentation = remember(activeProfileId) { HomeMessagePresentationState() }
+    var homeAnnouncementDetail by remember(activeProfileId) {
+        mutableStateOf<OperationsAnnouncement?>(null)
+    }
+    var homeUpdateDetailVersionCode by remember(activeProfileId) { mutableStateOf<Int?>(null) }
+    // Scoped dark/gold notice for update/notification action results; it replaces the default
+    // Android Toasts on these Home-visible surfaces without creating another state owner.
+    var appActionNotice by remember(activeProfileId) { mutableStateOf<AppScopedNotice?>(null) }
+    LaunchedEffect(appActionNotice) {
+        val notice = appActionNotice ?: return@LaunchedEffect
+        delay(6_000L)
+        if (appActionNotice == notice) appActionNotice = null
+    }
     val activeProfile = remember(profiles, activeProfileId) {
         profiles.firstOrNull { it.id == activeProfileId }
             ?: profiles.firstOrNull()
@@ -924,6 +957,42 @@ fun ProfileAwareHulkApp(
         state.operations.updateDecision == OperationsUpdateDecision.REQUIRED ||
             state.operations.service.status == OperationsServiceStatus.MAINTENANCE
     val operationsAnnouncement = state.operations.announcementPopup
+    val optionalUpdateVersionCode = state.operations.update.latestVersionCode
+    val homeOwnsAnnouncement = homeMessagePresentation.ownedAnnouncementId != null &&
+        homeMessagePresentation.ownedAnnouncementId == operationsAnnouncement?.id
+    val homeOwnsOptionalUpdate =
+        state.operations.updateDecision == OperationsUpdateDecision.OPTIONAL &&
+            homeMessagePresentation.ownedOptionalUpdateVersionCode == optionalUpdateVersionCode
+    val homeOwnsPersistentAnnouncement = homeMessagePresentation.ownedPersistentAnnouncementId != null &&
+        homeMessagePresentation.ownedPersistentAnnouncementId == state.operations.persistentAnnouncement?.id
+    // Automatic presentation latches only while Home does not own the same message. An overlay
+    // already presented is never retracted when Home later claims the identical message, so focus
+    // and visibility stay deterministic; the Home card is the presentation once it owns it.
+    var autoAnnouncementId by remember(activeProfileId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(operationsAnnouncement?.id, homeOwnsAnnouncement) {
+        autoAnnouncementId = nextAutoAnnouncementId(
+            currentAutoId = autoAnnouncementId,
+            eligibleAnnouncementId = operationsAnnouncement?.id,
+            homeOwnsAnnouncement = homeOwnsAnnouncement,
+        )
+    }
+    var autoUpdateVersionCode by remember(activeProfileId) { mutableStateOf<Int?>(null) }
+    LaunchedEffect(state.operations.updateDecision, optionalUpdateVersionCode, homeOwnsOptionalUpdate) {
+        autoUpdateVersionCode = nextAutoUpdateVersionCode(
+            currentAutoVersionCode = autoUpdateVersionCode,
+            updateDecision = state.operations.updateDecision,
+            optionalVersionCode = optionalUpdateVersionCode,
+            homeOwnsOptionalUpdate = homeOwnsOptionalUpdate,
+        )
+    }
+    val autoAnnouncement = operationsAnnouncement?.takeIf { it.id == autoAnnouncementId }
+    val autoOptionalUpdate =
+        state.operations.updateDecision == OperationsUpdateDecision.OPTIONAL &&
+            autoUpdateVersionCode == optionalUpdateVersionCode
+    val explicitAnnouncementDetail = homeAnnouncementDetail
+    val explicitOptionalUpdateDetail =
+        state.operations.updateDecision == OperationsUpdateDecision.OPTIONAL &&
+            homeUpdateDetailVersionCode == optionalUpdateVersionCode
 
     Box(Modifier.fillMaxSize()) {
         Box(
@@ -940,7 +1009,7 @@ fun ProfileAwareHulkApp(
                 onUpdate = viewModel::startOperationsUpdate,
                 onOpenUnknownSourcesSettings = {
                     viewModel.openOperationsInstallSettings { message ->
-                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                        appActionNotice = AppScopedNotice(message, Icons.Rounded.Settings)
                     }
                 },
             )
@@ -1223,6 +1292,13 @@ fun ProfileAwareHulkApp(
                     isTelevisionDevice = isTelevisionDevice,
                     navigationMemory = activeNavigationMemory,
                     catalogNavigationMemory = activeCatalogNavigationMemory,
+                    homeMessagePresentation = homeMessagePresentation,
+                    onOpenHomeAnnouncementDetail = { announcement ->
+                        homeAnnouncementDetail = announcement
+                    },
+                    onOpenHomeUpdateDetail = {
+                        homeUpdateDetailVersionCode = state.operations.update.latestVersionCode
+                    },
                 )
             }
             }
@@ -1233,42 +1309,75 @@ fun ProfileAwareHulkApp(
                 operations = state.operations,
                 isTv = isTelevisionDevice,
                 modifier = Modifier.align(Alignment.TopCenter),
+                suppressPersistentAnnouncement = homeOwnsPersistentAnnouncement,
             )
 
+            val restoreAppContentFocus: () -> Unit = {
+                if (isTelevisionDevice) {
+                    notificationFocusScope.launch {
+                        delay(90L)
+                        runCatching { appContentFocusRequester.requestFocus() }
+                    }
+                }
+            }
+
             when {
-                state.operations.updateDecision == OperationsUpdateDecision.OPTIONAL ->
+                // An explicit Home card action opens the existing complete message detail even
+                // while the Home card owns that message.
+                explicitAnnouncementDetail != null -> {
+                    OperationsAnnouncementOverlay(
+                        announcement = explicitAnnouncementDetail,
+                        isTv = isTelevisionDevice,
+                        onConfirm = {
+                            homeAnnouncementDetail = null
+                            viewModel.confirmOperationsAnnouncement(explicitAnnouncementDetail.id)
+                            restoreAppContentFocus()
+                        },
+                    )
+                }
+
+                explicitOptionalUpdateDetail ->
+                    OptionalUpdateOverlay(
+                        operations = state.operations,
+                        isTv = isTelevisionDevice,
+                        onUpdate = viewModel::startOperationsUpdate,
+                        onLater = {
+                            homeUpdateDetailVersionCode = null
+                            viewModel.dismissOptionalOperationsUpdate()
+                            restoreAppContentFocus()
+                        },
+                        onOpenUnknownSourcesSettings = {
+                            viewModel.openOperationsInstallSettings { message ->
+                                appActionNotice = AppScopedNotice(message, Icons.Rounded.Settings)
+                            }
+                        },
+                    )
+
+                // Automatic presentation stays exactly as before for every destination that does
+                // not own the message; a latched overlay is never retracted by Home ownership.
+                autoOptionalUpdate ->
                     OptionalUpdateOverlay(
                         operations = state.operations,
                         isTv = isTelevisionDevice,
                         onUpdate = viewModel::startOperationsUpdate,
                         onLater = {
                             viewModel.dismissOptionalOperationsUpdate()
-                            if (isTelevisionDevice) {
-                                notificationFocusScope.launch {
-                                    delay(90L)
-                                    runCatching { appContentFocusRequester.requestFocus() }
-                                }
-                            }
+                            restoreAppContentFocus()
                         },
                         onOpenUnknownSourcesSettings = {
                             viewModel.openOperationsInstallSettings { message ->
-                                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                appActionNotice = AppScopedNotice(message, Icons.Rounded.Settings)
                             }
                         },
                     )
 
-                operationsAnnouncement != null -> {
+                autoAnnouncement != null -> {
                     OperationsAnnouncementOverlay(
-                        announcement = operationsAnnouncement,
+                        announcement = autoAnnouncement,
                         isTv = isTelevisionDevice,
                         onConfirm = {
-                            viewModel.confirmOperationsAnnouncement()
-                            if (isTelevisionDevice) {
-                                notificationFocusScope.launch {
-                                    delay(90L)
-                                    runCatching { appContentFocusRequester.requestFocus() }
-                                }
-                            }
+                            viewModel.confirmOperationsAnnouncement(autoAnnouncement.id)
+                            restoreAppContentFocus()
                         },
                     )
                 }
@@ -1281,7 +1390,9 @@ fun ProfileAwareHulkApp(
                         onPresented = viewModel::confirmNotificationPopupPresented,
                         onPrimary = {
                             viewModel.activateNotificationPopup { message ->
-                                message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+                                message?.let {
+                                    appActionNotice = AppScopedNotice(it, Icons.Outlined.ErrorOutline)
+                                }
                             }
                         },
                         onLater = {
@@ -1297,5 +1408,55 @@ fun ProfileAwareHulkApp(
                 }
             }
         }
+        appActionNotice?.let { notice ->
+            AppScopedNoticeCard(
+                notice = notice,
+                isTv = isTelevisionDevice,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = if (isTelevisionDevice) 28.dp else 24.dp),
+            )
+        }
+    }
+}
+
+/** Transient app-level action feedback with the dark/gold notice family. */
+private data class AppScopedNotice(
+    val message: String,
+    val icon: ImageVector,
+)
+
+@Composable
+private fun AppScopedNoticeCard(
+    notice: AppScopedNotice,
+    isTv: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        modifier = modifier
+            .widthIn(max = if (isTv) 560.dp else 340.dp)
+            .clip(shape)
+            .background(Color(0xF211120D))
+            .border(1.dp, colors.gold.copy(alpha = .45f), shape)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = notice.message,
+            color = colors.text,
+            fontSize = 12.sp,
+            lineHeight = 17.sp,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(2.dp))
+        Icon(
+            imageVector = notice.icon,
+            contentDescription = null,
+            tint = colors.gold,
+            modifier = Modifier.size(17.dp),
+        )
     }
 }

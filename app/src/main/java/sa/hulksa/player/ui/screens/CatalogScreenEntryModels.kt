@@ -103,6 +103,12 @@ internal class HomeContentModelInput(
 internal data class KeyedHomeContentModel(
     val input: HomeContentModelInput,
     val model: HomeContentSnapshot,
+    /**
+     * True only for the cheap first-frame presentation that excludes history, favorites and
+     * every personalized/recommendation row. Consumers use it to re-apply a remembered row
+     * position/focus once the exact model settles instead of anchoring on missing rows.
+     */
+    val isFirstFrameFallback: Boolean = false,
 )
 
 /**
@@ -237,6 +243,7 @@ internal class CatalogScreenEntryModelStore(
             ?: KeyedHomeContentModel(
                 input = input,
                 model = initialHomePresentation(input),
+                isFirstFrameFallback = true,
             ).also { homePresentationFallback = it }
     }
 

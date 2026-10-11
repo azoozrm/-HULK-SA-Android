@@ -12,6 +12,10 @@ internal data class HomeHeroTechnicalMetadata(
     val durationMs: Long? = null,
     val seasonCount: Int? = null,
     val episodeCount: Int? = null,
+    val plot: String? = null,
+    val genre: String? = null,
+    val artworkUrl: String? = null,
+    val presentationChecked: Boolean = false,
 )
 
 internal data class HomeHeroMetadataToken(
@@ -97,15 +101,17 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
     suspend fun metadata(
         owner: AuthenticatedSessionOwner,
         item: ContentItem,
-    ): HomeHeroTechnicalMetadata = metadata(owner, item.type, item.id)
+        requirePresentation: Boolean = false,
+    ): HomeHeroTechnicalMetadata = metadata(owner, item.type, item.id, requirePresentation)
 
     suspend fun metadata(
         owner: AuthenticatedSessionOwner,
         type: ContentType,
         contentId: Int,
+        requirePresentation: Boolean = false,
     ): HomeHeroTechnicalMetadata = when (type) {
-        ContentType.MOVIE -> movieMetadata(owner, contentId)
-        ContentType.SERIES -> seriesMetadata(owner, contentId)
+        ContentType.MOVIE -> movieMetadata(owner, contentId, requirePresentation)
+        ContentType.SERIES -> seriesMetadata(owner, contentId, requirePresentation)
         ContentType.LIVE -> HomeHeroTechnicalMetadata()
     }
 
@@ -114,8 +120,17 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
         movieId: Int,
         quality: String? = null,
         durationMs: Long? = null,
+        plot: String? = null,
+        genre: String? = null,
+        artworkUrl: String? = null,
+        presentationSettled: Boolean = false,
     ): Boolean {
-        if (quality == null && durationMs == null) return false
+        if (
+            quality == null && durationMs == null && plot == null && genre == null &&
+            artworkUrl == null && !presentationSettled
+        ) {
+            return false
+        }
         return AuthenticatedSessionRegistry.withCurrentOwner(owner) {
             moviePreferences(owner).edit().apply {
                 quality?.trim()?.takeIf(String::isNotBlank)?.let {
@@ -123,6 +138,18 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
                 }
                 durationMs?.takeIf { it > 0L }?.let {
                     putLong("movie:$movieId:duration_ms", it)
+                }
+                plot?.trim()?.takeIf(String::isNotBlank)?.let {
+                    putString("movie:$movieId:plot", it)
+                }
+                genre?.trim()?.takeIf(String::isNotBlank)?.let {
+                    putString("movie:$movieId:genre", it)
+                }
+                artworkUrl?.trim()?.takeIf(String::isNotBlank)?.let {
+                    putString("movie:$movieId:artwork", it)
+                }
+                if (presentationSettled) {
+                    putBoolean("movie:$movieId:presentation_settled_v2", true)
                 }
             }.apply()
             true
@@ -132,10 +159,18 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
     private suspend fun movieMetadata(
         owner: AuthenticatedSessionOwner,
         movieId: Int,
+        requirePresentation: Boolean = false,
     ): HomeHeroTechnicalMetadata {
         if (!isCurrent(owner)) return HomeHeroTechnicalMetadata()
         val cached = readMovieCached(owner, movieId)
-        if (cached.quality != null && (cached.durationMs ?: 0L) > 0L) {
+        val technicalComplete = cached.quality != null && (cached.durationMs ?: 0L) > 0L
+        val runPresentationBackfill = presentationBackfillShouldRun(
+            technicalComplete = technicalComplete,
+            requirePresentation = requirePresentation,
+            hasPresentation = cached.hasPresentationRequired(),
+            presentationSettled = cached.presentationChecked,
+        )
+        if (technicalComplete && !runPresentationBackfill) {
             return cached.takeIf { isCurrent(owner) } ?: HomeHeroTechnicalMetadata()
         }
 
@@ -159,17 +194,26 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
         } catch (_: Exception) {
             MovieCardTechnicalMetadata()
         }
+        val fetchedSettlesPresentation = presentationSettlesAfterFetch(fetched.succeeded)
         val merged = HomeHeroTechnicalMetadata(
             quality = fetched.quality ?: cached.quality,
             durationMs = fetched.durationMs ?: cached.durationMs,
+            plot = fetched.plot ?: cached.plot,
+            genre = fetched.genre ?: cached.genre,
+            artworkUrl = fetched.artworkUrl ?: cached.artworkUrl,
+            presentationChecked = fetchedSettlesPresentation,
         )
         if (!isCurrent(owner)) return HomeHeroTechnicalMetadata()
-        if (merged.quality != null || merged.durationMs != null) {
+        if (merged.quality != null || merged.durationMs != null || merged.hasPresentationRequired()) {
             val cachedForOwner = cacheMovieMetadata(
                 owner = owner,
                 movieId = movieId,
                 quality = merged.quality,
                 durationMs = merged.durationMs,
+                plot = merged.plot,
+                genre = merged.genre,
+                artworkUrl = merged.artworkUrl,
+                presentationSettled = fetchedSettlesPresentation,
             )
             if (!cachedForOwner) return HomeHeroTechnicalMetadata()
         }
@@ -179,47 +223,83 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
     private suspend fun seriesMetadata(
         owner: AuthenticatedSessionOwner,
         seriesId: Int,
+        requirePresentation: Boolean = false,
     ): HomeHeroTechnicalMetadata {
         if (!isCurrent(owner)) return HomeHeroTechnicalMetadata()
-        val metadata = seriesStore.metadata(owner, seriesId)
+        val metadata = seriesStore.metadata(owner, seriesId, requirePresentation)
         if (!isCurrent(owner)) return HomeHeroTechnicalMetadata()
         return HomeHeroTechnicalMetadata(
             quality = metadata.quality,
             seasonCount = metadata.seasonCount,
             episodeCount = metadata.episodeCount,
+            plot = metadata.plot,
+            genre = metadata.genre,
+            artworkUrl = metadata.artworkUrl,
         )
     }
 
     private fun readMovieCached(
         owner: AuthenticatedSessionOwner,
         movieId: Int,
-    ): HomeHeroTechnicalMetadata =
-        HomeHeroTechnicalMetadata(
-            quality = moviePreferences(owner)
+    ): HomeHeroTechnicalMetadata {
+        val preferences = moviePreferences(owner)
+        return HomeHeroTechnicalMetadata(
+            quality = preferences
                 .getString("movie:$movieId:quality", null)
                 ?.trim()
                 ?.takeIf(String::isNotBlank),
-            durationMs = moviePreferences(owner)
+            durationMs = preferences
                 .getLong("movie:$movieId:duration_ms", 0L)
                 .takeIf { it > 0L },
+            plot = preferences
+                .getString("movie:$movieId:plot", null)
+                ?.trim()
+                ?.takeIf(String::isNotBlank),
+            genre = preferences
+                .getString("movie:$movieId:genre", null)
+                ?.trim()
+                ?.takeIf(String::isNotBlank),
+            artworkUrl = preferences
+                .getString("movie:$movieId:artwork", null)
+                ?.trim()
+                ?.takeIf(String::isNotBlank),
+            presentationChecked = preferences
+                .getBoolean("movie:$movieId:presentation_settled_v2", false),
         )
+    }
 
     private fun readSeriesCached(
         owner: AuthenticatedSessionOwner,
         seriesId: Int,
-    ): HomeHeroTechnicalMetadata =
-        HomeHeroTechnicalMetadata(
-            quality = seriesPreferences(owner)
+    ): HomeHeroTechnicalMetadata {
+        val preferences = seriesPreferences(owner)
+        return HomeHeroTechnicalMetadata(
+            quality = preferences
                 .getString("series:$seriesId:quality", null)
                 ?.trim()
                 ?.takeIf(String::isNotBlank),
-            seasonCount = seriesPreferences(owner)
+            seasonCount = preferences
                 .getInt("series:$seriesId:season_count", 0)
                 .takeIf { it > 0 },
-            episodeCount = seriesPreferences(owner)
+            episodeCount = preferences
                 .getInt("series:$seriesId:episode_count", 0)
                 .takeIf { it > 0 },
+            plot = preferences
+                .getString("series:$seriesId:plot", null)
+                ?.trim()
+                ?.takeIf(String::isNotBlank),
+            genre = preferences
+                .getString("series:$seriesId:genre", null)
+                ?.trim()
+                ?.takeIf(String::isNotBlank),
+            artworkUrl = preferences
+                .getString("series:$seriesId:artwork", null)
+                ?.trim()
+                ?.takeIf(String::isNotBlank),
+            presentationChecked = preferences
+                .getBoolean("series:$seriesId:presentation_settled_v2", false),
         )
+    }
 
     private fun moviePreferences(owner: AuthenticatedSessionOwner) = appContext.getSharedPreferences(
         authenticatedOwnerPreferencesName(MOVIE_PREFERENCES, owner),
@@ -230,6 +310,9 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
         authenticatedOwnerPreferencesName(SERIES_PREFERENCES, owner),
         Context.MODE_PRIVATE,
     )
+
+    private fun HomeHeroTechnicalMetadata.hasPresentationRequired(): Boolean =
+        !plot.isNullOrBlank() && !artworkUrl.isNullOrBlank()
 
     companion object {
         private const val MOVIE_PREFERENCES = "movie_card_verified_metadata"
