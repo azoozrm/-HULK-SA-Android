@@ -72,9 +72,9 @@ class ParentalCodeArchitectureContractTest(unittest.TestCase):
     def test_legacy_profile_pin_is_one_time_proof_only_before_explicit_setup(self):
         self.assertIn("ProfilePinCredentialStore(context)", self.parent_ui)
         self.assertIn("profilePinCredentialStore.verifyPin", self.parent_ui)
-        self.assertIn('"تحقق ولي الأمر"', self.parent_ui)
-        self.assertIn('"إنشاء رمز الوالدين"', self.parent_ui)
-        self.assertIn('"تأكيد رمز الوالدين"', self.parent_ui)
+        self.assertIn('"تحقق ولي الامر"', self.parent_ui)
+        self.assertIn('"انشاء رمز الوالدين"', self.parent_ui)
+        self.assertIn('"تاكيد رمز الوالدين"', self.parent_ui)
         self.assertIn("LegacyParentProofDecision.REQUIRE_PRIMARY_ADULT_PROFILE_PIN", self.parent_ui)
         self.assertIn("LegacyParentProofDecision.DENY_FAIL_CLOSED", self.parent_ui)
         self.assertNotIn("profilePinCredentialStore.setPin", self.parent_ui)

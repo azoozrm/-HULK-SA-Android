@@ -1,7 +1,6 @@
 package sa.hulksa.player.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,6 +9,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,11 +18,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,7 +42,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -56,8 +58,10 @@ import kotlinx.coroutines.launch
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
+import sa.hulksa.player.ui.components.EntryActionButton
+import sa.hulksa.player.ui.components.EntryNotice
 import sa.hulksa.player.ui.components.HulkTextField
-import sa.hulksa.player.ui.components.goldFocusEdge
+import sa.hulksa.player.ui.components.entryPanelMaxWidthDp
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 @Composable
@@ -154,6 +158,7 @@ fun AdaptiveProfileManagementScreen(
                 isTv = isTv,
                 kidsSourceAvailable = kidsSourceAvailable,
                 kidsSourceLoading = kidsSourceLoading,
+                kidsSourceMessage = kidsSourceMessage,
                 error = error,
                 onNameChange = { name = it.take(ProfileStore.MAX_DISPLAY_NAME_LENGTH) },
                 onAvatarChange = { avatarKey = it },
@@ -182,15 +187,15 @@ fun AdaptiveProfileManagementScreen(
                                     error = if (
                                         profileKind == ProfileKind.KIDS && !kidsSourceAvailable
                                     ) {
-                                        "وضع الأطفال غير متاح حاليًا. حاول مرة أخرى بعد قليل."
+                                        "وضع الاطفال غير متاح حاليًا ، حاول مرة اخرى بعد قليل"
                                     } else {
-                                        "تعذر الحفظ. تأكد من الاسم وعدد الملفات الشخصية."
+                                        "تعذر الحفظ ، تاكد من الاسم وعدد الملفات الشخصية"
                                     }
                                 }
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
                             } catch (_: Exception) {
-                                error = "تعذر الحفظ. حاول مرة أخرى."
+                                error = "تعذر الحفظ ، حاول مرة اخرى"
                             } finally {
                                 operationInProgress = false
                             }
@@ -214,7 +219,6 @@ fun AdaptiveProfileManagementScreen(
                 .safeDrawingPadding(),
         ) {
             val phone = !isTv && maxWidth < 600.dp
-            val tablet = !isTv && maxWidth >= 600.dp
             val horizontal = when {
                 isTv -> 48.dp
                 phone -> 14.dp
@@ -225,11 +229,8 @@ fun AdaptiveProfileManagementScreen(
                 phone -> 16.dp
                 else -> 22.dp
             }
-            val maxContentWidth = when {
-                isTv -> 1060.dp
-                tablet -> 900.dp
-                else -> 760.dp
-            }
+            val expandedContent = isTv || maxWidth >= 720.dp
+            val maxContentWidth = entryPanelMaxWidthDp(expandedContent).dp
 
             Column(
                 Modifier
@@ -238,15 +239,15 @@ fun AdaptiveProfileManagementScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 if (phone) {
-                    Column(Modifier.fillMaxWidth().widthIn(max = maxContentWidth)) {
+                    Column(Modifier.widthIn(max = maxContentWidth).fillMaxWidth()) {
                         ManagementHeading(isTv = false)
                         Spacer(Modifier.height(13.dp))
                         Row(
                             Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.Start),
                         ) {
                             if (profiles.size < ProfileStore.MAX_PROFILES) {
-                                ManagementAction("+ إضافة ملف", false) {
+                                ManagementAction("+ اضافة ملف", false) {
                                     if (!operationInProgress) openCreate()
                                 }
                             }
@@ -257,14 +258,14 @@ fun AdaptiveProfileManagementScreen(
                     }
                 } else {
                     Row(
-                        Modifier.fillMaxWidth().widthIn(max = maxContentWidth),
+                        Modifier.widthIn(max = maxContentWidth).fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         ManagementHeading(isTv = isTv)
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             if (profiles.size < ProfileStore.MAX_PROFILES) {
-                                ManagementAction("+ إضافة ملف", isTv) {
+                                ManagementAction("+ اضافة ملف", isTv) {
                                     if (!operationInProgress) openCreate()
                                 }
                             }
@@ -284,6 +285,7 @@ fun AdaptiveProfileManagementScreen(
                     KidsStatusNotice(
                         isTv = isTv,
                         loading = kidsSourceLoading,
+                        message = kidsSourceMessage,
                         onRetry = onRetryKidsSource,
                     )
                     Spacer(Modifier.height(if (isTv) 12.dp else 9.dp))
@@ -291,7 +293,7 @@ fun AdaptiveProfileManagementScreen(
 
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxWidth().widthIn(max = maxContentWidth),
+                    modifier = Modifier.widthIn(max = maxContentWidth).fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(if (isTv) 13.dp else 10.dp),
                 ) {
                     items(profiles, key = UserProfile::id) { profile ->
@@ -311,12 +313,12 @@ fun AdaptiveProfileManagementScreen(
                                     operationScope.launch {
                                         try {
                                             if (!onDelete(profile.id)) {
-                                                error = "تعذر حذف الملف الشخصي."
+                                                error = "تعذر حذف الملف الشخصي"
                                             }
                                         } catch (cancelled: CancellationException) {
                                             throw cancelled
                                         } catch (_: Exception) {
-                                            error = "تعذر حذف الملف الشخصي."
+                                            error = "تعذر حذف الملف الشخصي"
                                         } finally {
                                             operationInProgress = false
                                         }
@@ -343,7 +345,7 @@ private fun ManagementHeading(isTv: Boolean) {
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "أنشئ ملفًا مناسبًا لكل فرد من العائلة",
+            "انشئ ملفًا مناسبًا لكل فرد من العائلة",
             color = colors.textMuted,
             fontSize = if (isTv) 14.sp else 12.sp,
         )
@@ -354,34 +356,30 @@ private fun ManagementHeading(isTv: Boolean) {
 private fun KidsStatusNotice(
     isTv: Boolean,
     loading: Boolean,
+    message: String?,
     onRetry: () -> Unit,
 ) {
-    val colors = LocalHulkColors.current
-    val shape = RoundedCornerShape(if (isTv) 15.dp else 13.dp)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(colors.surfaceRaised.copy(alpha = .88f))
-            .border(1.dp, Color.White.copy(alpha = .08f), shape)
-            .padding(horizontal = if (isTv) 17.dp else 13.dp, vertical = if (isTv) 12.dp else 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(
-            if (loading) "جار تجهيز وضع الأطفال…" else "وضع الأطفال غير متاح حاليًا",
-            modifier = Modifier.weight(1f),
-            color = colors.textMuted,
-            fontSize = if (isTv) 13.sp else 11.sp,
-            fontWeight = FontWeight.Medium,
-        )
-        if (!loading) {
-            Spacer(Modifier.width(10.dp))
-            ManagementAction("إعادة المحاولة", isTv, secondary = true, compact = true, onClick = onRetry)
-        }
-    }
+    EntryNotice(
+        message = message?.takeIf { it.isNotBlank() }
+            ?: if (loading) "جار تجهيز وضع الاطفال…" else "وضع الاطفال غير متاح حاليًا",
+        compact = !isTv,
+        liveRegionPolite = !loading,
+        action = if (loading) {
+            null
+        } else {
+            {
+                EntryActionButton(
+                    text = "اعادة المحاولة",
+                    onClick = onRetry,
+                    outlined = true,
+                    minHeightDp = movieActionHeightDp(isTv = isTv, compactHeight = false),
+                )
+            }
+        },
+    )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AdaptiveProfileEditor(
     creating: Boolean,
@@ -392,6 +390,7 @@ private fun AdaptiveProfileEditor(
     isTv: Boolean,
     kidsSourceAvailable: Boolean,
     kidsSourceLoading: Boolean,
+    kidsSourceMessage: String?,
     error: String?,
     onNameChange: (String) -> Unit,
     onAvatarChange: (String) -> Unit,
@@ -417,17 +416,13 @@ private fun AdaptiveProfileEditor(
         contentAlignment = Alignment.Center,
     ) {
         val phoneLandscape = !isTv && maxWidth > maxHeight && maxHeight < 520.dp
-        val compactPhone = !isTv && maxWidth < 600.dp
-        val cardMax = when {
-            isTv -> 720.dp
-            compactPhone -> 620.dp
-            else -> 700.dp
-        }
+        val expandedContent = isTv || maxWidth >= 720.dp
+        val cardMax = entryPanelMaxWidthDp(expandedContent).dp
 
         LazyColumn(
             modifier = Modifier
-                .fillMaxWidth()
                 .widthIn(max = cardMax)
+                .fillMaxWidth()
                 .clip(RoundedCornerShape(if (isTv) 24.dp else 20.dp))
                 .background(colors.surface.copy(alpha = .98f))
                 .border(1.dp, colors.gold.copy(alpha = .26f), RoundedCornerShape(if (isTv) 24.dp else 20.dp))
@@ -439,7 +434,7 @@ private fun AdaptiveProfileEditor(
         ) {
             item {
                 Text(
-                    if (creating) "إضافة ملف شخصي" else "تعديل الملف الشخصي",
+                    if (creating) "اضافة ملف شخصي" else "تعديل الملف الشخصي",
                     color = colors.text,
                     fontSize = if (isTv) 29.sp else 23.sp,
                     fontWeight = FontWeight.Black,
@@ -455,12 +450,12 @@ private fun AdaptiveProfileEditor(
                 Spacer(Modifier.height(if (phoneLandscape) 10.dp else 17.dp))
 
                 if (creating) {
-                    Row(
+                    FlowRow(
                         Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         ProfileKindChoice(
-                            modifier = Modifier.weight(1f),
                             title = "عادي",
                             subtitle = "التجربة الكاملة",
                             selected = selectedKind == ProfileKind.STANDARD,
@@ -469,11 +464,10 @@ private fun AdaptiveProfileEditor(
                             onClick = { onKindChange(ProfileKind.STANDARD) },
                         )
                         ProfileKindChoice(
-                            modifier = Modifier.weight(1f),
-                            title = "أطفال",
+                            title = "اطفال",
                             subtitle = when {
                                 kidsSourceLoading -> "جار التجهيز…"
-                                kidsSourceAvailable -> "واجهة مخصصة للأطفال"
+                                kidsSourceAvailable -> "واجهة مخصصة للاطفال"
                                 else -> "غير متاح حاليًا"
                             },
                             selected = selectedKind == ProfileKind.KIDS,
@@ -484,22 +478,28 @@ private fun AdaptiveProfileEditor(
                     }
                     if (!kidsSourceAvailable) {
                         Spacer(Modifier.height(8.dp))
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Text(
-                                if (kidsSourceLoading) "جار تجهيز وضع الأطفال…" else "وضع الأطفال غير متاح حاليًا.",
-                                modifier = Modifier.weight(1f),
-                                color = colors.textMuted,
-                                fontSize = if (isTv) 12.sp else 10.sp,
-                            )
-                            if (!kidsSourceLoading) {
-                                Spacer(Modifier.width(8.dp))
-                                ManagementAction("إعادة المحاولة", isTv, secondary = true, compact = true, onClick = onRetryKidsSource)
-                            }
-                        }
+                        EntryNotice(
+                            message = kidsSourceMessage?.takeIf { it.isNotBlank() }
+                                ?: if (kidsSourceLoading) {
+                                    "جار تجهيز وضع الاطفال…"
+                                } else {
+                                    "وضع الاطفال غير متاح حاليًا"
+                                },
+                            compact = !isTv,
+                            liveRegionPolite = !kidsSourceLoading,
+                            action = if (kidsSourceLoading) {
+                                null
+                            } else {
+                                {
+                                    EntryActionButton(
+                                        text = "اعادة المحاولة",
+                                        onClick = onRetryKidsSource,
+                                        outlined = true,
+                                        minHeightDp = movieActionHeightDp(isTv = isTv, compactHeight = false),
+                                    )
+                                }
+                            },
+                        )
                     }
                 } else {
                     val kind = editingKind ?: ProfileKind.STANDARD
@@ -515,7 +515,7 @@ private fun AdaptiveProfileEditor(
                             .padding(horizontal = 14.dp, vertical = 7.dp),
                     ) {
                         Text(
-                            if (kind == ProfileKind.KIDS) "ملف أطفال" else "ملف عادي",
+                            if (kind == ProfileKind.KIDS) "ملف اطفال" else "ملف عادي",
                             color = if (kind == ProfileKind.KIDS) colors.goldBright else colors.textMuted,
                             fontSize = if (isTv) 13.sp else 11.sp,
                             fontWeight = FontWeight.Bold,
@@ -538,9 +538,13 @@ private fun AdaptiveProfileEditor(
                     fontWeight = FontWeight.Bold,
                 )
                 Spacer(Modifier.height(10.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(if (isTv) 13.dp else 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(
+                        space = if (isTv) 13.dp else 8.dp,
+                        alignment = Alignment.CenterHorizontally,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    itemVerticalAlignment = Alignment.CenterVertically,
                 ) {
                     PROFILE_AVATARS.forEach { key ->
                         ManagementAvatarChoice(
@@ -555,18 +559,16 @@ private fun AdaptiveProfileEditor(
 
                 if (!error.isNullOrBlank()) {
                     Spacer(Modifier.height(10.dp))
-                    Text(
-                        error,
-                        color = colors.danger,
-                        fontSize = if (isTv) 13.sp else 11.sp,
-                        textAlign = TextAlign.Center,
+                    EntryNotice(
+                        message = error,
+                        compact = !isTv,
                     )
                 }
 
                 Spacer(Modifier.height(if (phoneLandscape) 12.dp else if (isTv) 20.dp else 18.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     ManagementAction("حفظ", isTv, onClick = onSave)
-                    ManagementAction("إلغاء", isTv, secondary = true, onClick = onCancel)
+                    ManagementAction("الغاء", isTv, secondary = true, onClick = onCancel)
                 }
             }
         }
@@ -575,7 +577,6 @@ private fun AdaptiveProfileEditor(
 
 @Composable
 private fun ProfileKindChoice(
-    modifier: Modifier,
     title: String,
     subtitle: String,
     selected: Boolean,
@@ -585,11 +586,10 @@ private fun ProfileKindChoice(
 ) {
     val colors = LocalHulkColors.current
     var focused by remember(title) { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused && isTv) 1.025f else 1f, label = "kindScale")
     val shape = RoundedCornerShape(if (isTv) 16.dp else 13.dp)
     Column(
-        modifier
-            .graphicsLayer { scaleX = scale; scaleY = scale }
+        modifier = Modifier
+            .widthIn(min = if (isTv) 180.dp else 150.dp, max = 260.dp)
             .clip(shape)
             .background(if (selected) colors.gold.copy(alpha = .14f) else colors.surfaceRaised)
             .border(
@@ -654,21 +654,53 @@ private fun ManagementProfileCard(
             Column(card) {
                 ManagementIdentity(profile, active, protected, false)
                 Spacer(Modifier.height(12.dp))
-                Row(
+                Column(
                     Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    if (!active) ManagementAction("اختيار", false, secondary = true, compact = true, onClick = onSelect)
-                    ManagementAction(
-                        if (protected) "PIN مفعّل" else "حماية",
-                        false,
-                        secondary = true,
-                        compact = true,
-                        focusRequester = focusRequester,
-                        onClick = onPin,
-                    )
-                    ManagementAction("تعديل", false, secondary = true, compact = true, onClick = onEdit)
-                    if (canDelete) ManagementAction("حذف", false, danger = true, compact = true, onClick = onDelete)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (!active) {
+                            ManagementAction(
+                                "اختيار",
+                                false,
+                                secondary = true,
+                                modifier = Modifier.weight(1f),
+                                onClick = onSelect,
+                            )
+                        }
+                        ManagementAction(
+                            if (protected) "PIN مفعل" else "حماية",
+                            false,
+                            secondary = true,
+                            focusRequester = focusRequester,
+                            modifier = Modifier.weight(1f),
+                            onClick = onPin,
+                        )
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        ManagementAction(
+                            "تعديل",
+                            false,
+                            secondary = true,
+                            modifier = Modifier.weight(1f),
+                            onClick = onEdit,
+                        )
+                        if (canDelete) {
+                            ManagementAction(
+                                "حذف",
+                                false,
+                                danger = true,
+                                modifier = Modifier.weight(1f),
+                                onClick = onDelete,
+                            )
+                        }
+                    }
                 }
             }
         } else {
@@ -677,7 +709,7 @@ private fun ManagementProfileCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (!active) ManagementAction("اختيار", isTv, secondary = true, onClick = onSelect)
                     ManagementAction(
-                        if (protected) "PIN مفعّل" else "حماية",
+                        if (protected) "PIN مفعل" else "حماية",
                         isTv,
                         secondary = true,
                         focusRequester = focusRequester,
@@ -715,7 +747,7 @@ private fun ManagementIdentity(
                     color = colors.text,
                     fontSize = if (isTv) 17.sp else 15.sp,
                     fontWeight = FontWeight.Black,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (profile.kind == ProfileKind.KIDS) {
@@ -727,7 +759,7 @@ private fun ManagementIdentity(
                             .padding(horizontal = 8.dp, vertical = 2.dp),
                     ) {
                         Text(
-                            "أطفال",
+                            "اطفال",
                             color = colors.goldBright,
                             fontSize = if (isTv) 10.sp else 9.sp,
                             fontWeight = FontWeight.Bold,
@@ -739,9 +771,9 @@ private fun ManagementIdentity(
             val status = buildString {
                 append(
                     when {
-                        active -> "الملف المستخدم الآن"
-                        profile.isPrimary -> "الملف الأساسي"
-                        profile.kind == ProfileKind.KIDS -> "ملف أطفال"
+                        active -> "الملف المستخدم الان"
+                        profile.isPrimary -> "الملف الاساسي"
+                        profile.kind == ProfileKind.KIDS -> "ملف اطفال"
                         else -> "ملف شخصي مستقل"
                     },
                 )
@@ -767,8 +799,8 @@ private fun ManagementAvatarChoice(
     compact: Boolean,
     onClick: () -> Unit,
 ) {
+    val colors = LocalHulkColors.current
     var focused by remember(key) { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused && isTv) 1.08f else 1f, label = "managementAvatarScale")
     val size = when {
         compact -> 44.dp
         isTv -> 68.dp
@@ -776,7 +808,13 @@ private fun ManagementAvatarChoice(
     }
     Box(
         Modifier
-            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .size(size)
+            .clip(CircleShape)
+            .border(
+                if (focused || selected) 2.dp else 0.dp,
+                if (focused || selected) colors.goldBright else Color.Transparent,
+                CircleShape,
+            )
             .onFocusChanged { focused = it.isFocused }
             .onPreviewKeyEvent { event ->
                 val select = event.key == Key.Enter || event.key == Key.DirectionCenter
@@ -800,67 +838,21 @@ private fun ManagementAction(
     isTv: Boolean,
     secondary: Boolean = false,
     danger: Boolean = false,
-    compact: Boolean = false,
     focusRequester: FocusRequester? = null,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val colors = LocalHulkColors.current
-    var focused by remember(text) { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused && isTv) 1.03f else 1f, label = "managementActionScale")
-    val shape = RoundedCornerShape(if (isTv) 13.dp else 11.dp)
-    val goldFocused = !danger && !secondary && focused
-    val background = when {
-        danger -> colors.danger.copy(alpha = if (focused) .24f else .14f)
-        secondary && focused -> colors.gold.copy(alpha = .16f)
-        secondary -> colors.surfaceRaised
-        else -> colors.gold
-    }
-    val foreground = when {
-        danger -> colors.danger
-        secondary -> colors.text
-        else -> Color.Black
-    }
-    Box(
-        Modifier
-            .graphicsLayer { scaleX = scale; scaleY = scale }
-            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-            .clip(shape)
-            .background(background)
-            .goldFocusEdge(shape = shape, visible = goldFocused)
-            .border(
-                if (goldFocused) 0.dp else if (focused) 2.dp else 1.dp,
-                when {
-                    goldFocused -> Color.Transparent
-                    focused -> colors.goldBright
-                    danger -> colors.danger.copy(alpha = .42f)
-                    secondary -> Color.White.copy(alpha = .08f)
-                    else -> colors.gold.copy(alpha = .35f)
-                },
-                shape,
-            )
-            .onFocusChanged { focused = it.isFocused }
-            .onPreviewKeyEvent { event ->
-                val select = event.key == Key.Enter || event.key == Key.DirectionCenter
-                if (!isTv || !select) false else when (event.type) {
-                    KeyEventType.KeyDown -> true
-                    KeyEventType.KeyUp -> { onClick(); true }
-                    else -> false
-                }
-            }
-            .clickable(onClick = onClick)
-            .focusable()
-            .padding(
-                horizontal = when { compact -> 9.dp; isTv -> 16.dp; else -> 14.dp },
-                vertical = when { compact -> 8.dp; isTv -> 10.dp; else -> 9.dp },
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text,
-            color = foreground,
-            fontWeight = FontWeight.Bold,
-            fontSize = when { compact -> 10.sp; isTv -> 13.sp; else -> 12.sp },
-            maxLines = 1,
-        )
-    }
+    EntryActionButton(
+        text = text,
+        onClick = onClick,
+        primary = !secondary && !danger,
+        outlined = secondary,
+        danger = danger,
+        minHeightDp = movieActionHeightDp(isTv = isTv, compactHeight = false),
+        modifier = if (focusRequester != null) {
+            modifier.focusRequester(focusRequester)
+        } else {
+            modifier
+        },
+    )
 }

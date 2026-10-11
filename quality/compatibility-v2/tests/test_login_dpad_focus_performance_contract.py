@@ -12,6 +12,17 @@ COMPATIBILITY_INSTRUMENTATION = (
 
 
 class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
+    # R03 adopted one centered Login composition; the split brand region and its
+    # PremiumCinematicBackground were superseded by the static poster-wall background.
+    SCREEN_START = "fun LoginScreen("
+    SCREEN_END = "private fun LoginPosterWallBackground("
+    PANEL_START = "private fun LoginPanel("
+    PANEL_END = "private fun LoginCredentialTextField("
+    GROUPS_START = "private fun LoginOptionGroups("
+    GROUPS_END = "private fun LoginOption("
+    CONTROLLER_START = "internal class LoginKeyboardFocusTransitionController"
+    CONTROLLER_END = "private enum class LoginErrorTarget"
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.source = LOGIN_SCREEN.read_text(encoding="utf-8")
@@ -22,17 +33,22 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         start_index = source.index(start)
         return source[start_index : source.index(end, start_index)]
 
+    def screen_section(self) -> str:
+        return self.section(self.source, self.SCREEN_START, self.SCREEN_END)
+
+    def panel_section(self) -> str:
+        return self.section(self.source, self.PANEL_START, self.PANEL_END)
+
+    def groups_section(self) -> str:
+        return self.section(self.source, self.GROUPS_START, self.GROUPS_END)
+
     def test_last_card_requester_holder_is_not_compose_snapshot_state(self) -> None:
         holder = self.section(
             self.source,
             "internal class LoginCardFocusRequesterHolder(",
-            "internal class LoginKeyboardFocusTransitionController",
+            self.CONTROLLER_START,
         )
-        screen = self.section(
-            self.source,
-            "fun LoginScreen(",
-            "private fun PremiumCinematicBackground(",
-        )
+        screen = self.screen_section()
 
         self.assertIn("private var currentRequester = initialRequester", holder)
         self.assertIn("fun update(requester: FocusRequester)", holder)
@@ -51,61 +67,58 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         )
         self.assertNotIn("{ lastCardFocusRequester = it }", screen)
 
-    def test_subscription_resolves_latest_requester_when_focus_returns(self) -> None:
-        screen = self.section(
-            self.source,
-            "fun LoginScreen(",
-            "private fun PremiumCinematicBackground(",
-        )
-        subscription = self.section(
-            self.source,
-            "private fun LoginSubscriptionAction(",
-            "private fun LoginPanel(",
-        )
+    def test_subscription_uses_one_stable_requester_owner(self) -> None:
+        screen = self.screen_section()
+        panel = self.panel_section()
+        subscription = panel[panel.index('text = "اشتراك جديد"') :]
 
-        self.assertEqual(
-            2,
-            screen.count("returnRequester = lastCardFocusRequester::current"),
-        )
-        self.assertIn("returnRequester: () -> FocusRequester", subscription)
-        self.assertIn("right = returnRequester()", subscription)
-        self.assertNotIn("returnRequester: FocusRequester", subscription)
+        self.assertIn("onOpenSubscription = {", screen)
+        self.assertIn("subscribeRequester = subscribeRequester", screen)
+        self.assertIn(".focusRequester(subscribeRequester)", subscription)
+        self.assertIn("up = submitRequester", subscription)
+        self.assertNotIn("returnRequester", self.source)
 
     def test_login_panel_focus_graph_remains_unchanged(self) -> None:
-        panel = self.section(
-            self.source,
-            "private fun LoginPanel(",
-            "private fun LoginCredentialTextField(",
-        )
+        panel = self.panel_section()
+        groups = self.groups_section()
 
-        expected_edges = (
+        expected_panel_edges = (
             "down = usernameRequester",
             "up = accessRequester",
             "down = passwordRequester",
             "up = usernameRequester",
-            "down = rememberRequester",
-            "up = passwordRequester",
             "down = showPasswordRequester",
-            "up = rememberRequester",
-            "down = submitRequester",
             "up = showPasswordRequester",
-            "down = if (showSecondaryAction) subscribeRequester else FocusRequester.Cancel",
+            "down = subscribeRequester",
             "up = submitRequester",
         )
-        for edge in expected_edges:
+        for edge in expected_panel_edges:
             self.assertIn(edge, panel)
 
-        labels = (
-            'label = "كود الدخول"',
-            'label = "اسم المستخدم"',
-            'label = "كلمة المرور"',
-            'text = "تذكر الحساب"',
-            'text = "اظهر كلمة المرور"',
-            'text = "دخول الى HULK"',
-            'text = "اشتراك جديد"',
+        expected_group_edges = (
+            "up = passwordRequester",
+            "down = submitRequester",
+            "left = rememberRequester",
+            "right = showPasswordRequester",
         )
-        positions = [panel.index(label) for label in labels]
-        self.assertEqual(sorted(positions), positions)
+        for edge in expected_group_edges:
+            self.assertIn(edge, groups)
+
+        field_labels = ('كود الدخول', 'اسم المستخدم', 'كلمة المرور')
+        field_positions = [panel.index(f'label = "{label}"') for label in field_labels]
+        self.assertEqual(sorted(field_positions), field_positions)
+        # "تسجيل الدخول" is also the heading text, so compare the last (action)
+        # occurrence against the subscription action caption.
+        primary_action = panel.rindex('text = "تسجيل الدخول"')
+        subscription_action = panel.index('text = "اشتراك جديد"')
+        self.assertLess(primary_action, subscription_action)
+
+        # Adopted R05 anchoring: show-password is defined before remember in the
+        # shared option-group owner; the physical edges are asserted there.
+        self.assertLess(
+            groups.index('text = "اظهار كلمة المرور"'),
+            groups.index('text = "تذكر الحساب"'),
+        )
 
     def test_compatibility_subscription_selectors_match_product_label(self) -> None:
         portrait = self.section(
@@ -158,18 +171,17 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
             self.assertIn(selector, reachability)
 
     def test_ime_subscription_reachability_uses_one_adaptive_semantic_scroll(self) -> None:
-        screen = self.section(
-            self.source,
-            "fun LoginScreen(",
-            "private fun PremiumCinematicBackground(",
-        )
+        screen = self.screen_section()
         portrait = self.section(
             self.instrumentation_source,
             "fun phonePortraitLoginFieldsAcceptTypingWithoutCrash()",
             "fun loginFieldsRemainReachableAcrossScrollableLayouts()",
         )
 
-        self.assertIn("val secondaryInBrand = isTv || maxWidth >= 600.dp", screen)
+        # R03 moved the subscription action into the bounded centered form on every
+        # window; the QR/website routing key is the remaining width switch.
+        self.assertIn("val subscriptionUsesQr = isTv || maxWidth >= 600.dp", screen)
+        self.assertEqual(1, screen.count("rememberScrollState()"))
         self.assertIn(
             "targetContext.resources.configuration.screenWidthDp >= 600",
             portrait,
@@ -196,30 +208,18 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertNotIn("must appear before", reachability)
 
     def test_tv_login_does_not_observe_ime_inset_state(self) -> None:
-        screen = self.section(
-            self.source,
-            "fun LoginScreen(",
-            "private fun PremiumCinematicBackground(",
-        )
-        ime_read = "WindowInsets.ime.getBottom(density) > 0"
-        self.assertEqual(1, screen.count(ime_read))
-        ime_index = screen.index(ime_read)
-        guard = screen[screen.rfind("val imeVisible", 0, ime_index) : ime_index]
-        self.assertIn("if (isTv)", guard)
-        self.assertIn("false", guard)
-        self.assertIn("} else {", guard)
+        screen = self.screen_section()
+
+        # R03 removed the IME inset read entirely; the phone IME padding stays in
+        # the non-TV branch only, so TV cannot observe inset-state changes.
+        self.assertEqual(0, screen.count("WindowInsets.ime.getBottom"))
+        self.assertNotIn("val imeVisible", screen)
+        self.assertIn("if (isTv)", screen)
+        self.assertIn(".imePadding()", screen)
 
     def test_character_input_state_is_read_only_in_editable_subtree_or_submit(self) -> None:
-        screen = self.section(
-            self.source,
-            "fun LoginScreen(",
-            "private fun PremiumCinematicBackground(",
-        )
-        panel = self.section(
-            self.source,
-            "private fun LoginPanel(",
-            "private fun LoginCredentialTextField(",
-        )
+        screen = self.screen_section()
+        panel = self.panel_section()
         credential_field = self.section(
             self.source,
             "private fun LoginCredentialTextField(",
@@ -239,35 +239,24 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
     def test_static_cinematic_visuals_do_not_depend_on_credential_values(self) -> None:
         background = self.section(
             self.source,
-            "private fun PremiumCinematicBackground(",
-            "private fun LoginBrandRegion(",
+            "private fun LoginPosterWallBackground(",
+            "private fun LoginPanel(",
         )
-        brand = self.section(
-            self.source,
-            "private fun LoginBrandRegion(",
-            "private fun LoginSubscriptionAction(",
-        )
-        for section in (background, brand):
-            self.assertNotIn("accessCode", section)
-            self.assertNotIn("username", section)
-            self.assertNotIn("password", section)
+        self.assertNotIn("accessCode", background)
+        self.assertNotIn("username", background)
+        self.assertNotIn("password", background)
+        self.assertIn("R.drawable.login_poster_wall_tv", background)
+        self.assertIn("R.drawable.login_poster_wall_phone", background)
 
     def test_tv_non_text_focus_uses_edge_triggered_keyboard_transition(self) -> None:
         controller = self.section(
             self.source,
-            "internal class LoginKeyboardFocusTransitionController",
-            "private enum class LoginComposition",
+            self.CONTROLLER_START,
+            self.CONTROLLER_END,
         )
-        screen = self.section(
-            self.source,
-            "fun LoginScreen(",
-            "private fun PremiumCinematicBackground(",
-        )
-        panel = self.section(
-            self.source,
-            "private fun LoginPanel(",
-            "private fun LoginCredentialTextField(",
-        )
+        screen = self.screen_section()
+        panel = self.panel_section()
+        groups = self.groups_section()
 
         self.assertIn("private var textInputFocused = false", controller)
         self.assertIn("fun onTextInputFocused()", controller)
@@ -277,14 +266,13 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertNotIn("mutableStateOf", controller)
         self.assertIn("keyboardFocusTransitionController.onNonTextFocused(hideKeyboard)", screen)
         self.assertGreaterEqual(panel.count("onTextInputFocus()"), 3)
-        self.assertGreaterEqual(panel.count("onNonTextFocus()"), 3)
+        self.assertGreaterEqual(
+            panel.count("onNonTextFocus()") + groups.count("onNonTextFocus()"),
+            5,
+        )
 
     def test_keyboard_hide_uses_one_mechanism_per_request(self) -> None:
-        screen = self.section(
-            self.source,
-            "fun LoginScreen(",
-            "private fun PremiumCinematicBackground(",
-        )
+        screen = self.screen_section()
         hide = self.section(screen, "val hideKeyboard: () -> Unit = {", "val dismissKeyboard")
 
         self.assertIn("if (keyboardController != null)", hide)
@@ -294,29 +282,23 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertNotIn("keyboardController?.hide()", hide)
 
     def test_tv_login_options_skip_focus_color_animation_hot_path(self) -> None:
-        panel = self.section(
-            self.source,
-            "private fun LoginPanel(",
-            "private fun LoginCredentialTextField(",
-        )
+        groups = self.groups_section()
         option = self.section(
             self.source,
             "private fun LoginOption(",
-            "private fun LoginActionButton(",
+            "private fun resolveLoginErrorTarget(",
         )
 
-        self.assertEqual(2, panel.count("animateFocus = !isTv"))
+        # R05 moved the option call sites into the shared group owner; both the
+        # fitting row and the stacked fallback must still skip TV focus animation.
+        self.assertGreaterEqual(groups.count("animateFocus = !isTv"), 2)
         self.assertIn("animateFocus: Boolean = true", option)
         self.assertIn("val targetBackground", option)
         self.assertIn("val targetOutline", option)
         self.assertIn("if (animateFocus)", option)
 
     def test_submit_preserves_authentication_values_and_remember_account(self) -> None:
-        screen = self.section(
-            self.source,
-            "fun LoginScreen(",
-            "private fun PremiumCinematicBackground(",
-        )
+        screen = self.screen_section()
         submit = self.section(screen, "val submit = {", "val openWebsite = {")
 
         self.assertIn("accessCodeState.value", submit)
@@ -326,16 +308,8 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertEqual(1, submit.count("onLogin("))
 
     def test_show_password_remember_initial_focus_and_error_routing_are_preserved(self) -> None:
-        screen = self.section(
-            self.source,
-            "fun LoginScreen(",
-            "private fun PremiumCinematicBackground(",
-        )
-        panel = self.section(
-            self.source,
-            "private fun LoginPanel(",
-            "private fun LoginCredentialTextField(",
-        )
+        screen = self.screen_section()
+        panel = self.panel_section()
 
         self.assertIn("var showPassword by rememberSaveable", screen)
         self.assertIn("var rememberAccount by rememberSaveable", screen)
@@ -349,25 +323,19 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertIn("passwordRequester.requestFocus()", panel)
 
     def test_mobile_ime_behavior_remains_enabled(self) -> None:
-        screen = self.section(
-            self.source,
-            "fun LoginScreen(",
-            "private fun PremiumCinematicBackground(",
-        )
-        self.assertIn(".then(if (isTv) Modifier else Modifier.imePadding())", screen)
-        self.assertGreaterEqual(screen.count(".imePadding()"), 2)
+        screen = self.screen_section()
+
+        # R03 keeps ONE centered layout: the non-TV branch owns safe drawing and
+        # IME padding; the TV branch keeps its own insets without IME padding.
+        self.assertEqual(1, screen.count(".imePadding()"))
         self.assertIn(".windowInsetsPadding(WindowInsets.safeDrawing)", screen)
 
     def test_no_polling_delay_or_debounce_workaround_was_added(self) -> None:
-        screen = self.section(
-            self.source,
-            "fun LoginScreen(",
-            "private fun PremiumCinematicBackground(",
-        )
+        screen = self.screen_section()
         controller = self.section(
             self.source,
-            "internal class LoginKeyboardFocusTransitionController",
-            "private enum class LoginComposition",
+            self.CONTROLLER_START,
+            self.CONTROLLER_END,
         )
         combined = (screen + controller).lower()
         self.assertNotIn("delay(", combined)
@@ -376,11 +344,7 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertNotIn("timer", combined)
 
     def test_login_does_not_add_new_disk_or_network_work_to_input_hot_path(self) -> None:
-        screen = self.section(
-            self.source,
-            "fun LoginScreen(",
-            "private fun PremiumCinematicBackground(",
-        )
+        screen = self.screen_section()
         credential_field = self.section(
             self.source,
             "private fun LoginCredentialTextField(",

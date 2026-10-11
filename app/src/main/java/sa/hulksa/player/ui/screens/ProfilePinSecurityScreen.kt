@@ -1,10 +1,11 @@
 package sa.hulksa.player.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,7 +40,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -46,7 +47,9 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CancellationException
@@ -58,19 +61,20 @@ import sa.hulksa.player.data.FOUR_DIGIT_CREDENTIAL_LENGTH
 import sa.hulksa.player.data.FourDigitCredentialLockedException
 import sa.hulksa.player.data.FourDigitCredentialProtectionUnavailableException
 import sa.hulksa.player.model.UserProfile
-import sa.hulksa.player.ui.components.goldFocusEdge
+import sa.hulksa.player.ui.components.EntryActionButton
+import sa.hulksa.player.ui.components.EntryNotice
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 internal const val CREDENTIAL_PROTECTION_UNAVAILABLE_MESSAGE =
-    "تعذر قراءة حالة الحماية بأمان."
+    "تعذر قراءة حالة الحماية بامان"
 
 internal fun credentialLockoutMessage(retryAfterMs: Long): String {
     val seconds = ((retryAfterMs.coerceAtLeast(1L) + 999L) / 1_000L).coerceAtLeast(1L)
     return if (seconds < 60L) {
-        "محاولات كثيرة. انتظر $seconds ث."
+        "محاولات كثيرة ، انتظر $seconds ث"
     } else {
         val minutes = (seconds + 59L) / 60L
-        "محاولات كثيرة. انتظر $minutes د."
+        "محاولات كثيرة ، انتظر $minutes د"
     }
 }
 
@@ -111,8 +115,8 @@ fun ProfilePinUnlockScreen(
     ProfilePinEntryScaffold(
         profile = profile,
         isTv = isTv,
-        title = "أدخل رمز PIN",
-        subtitle = "أدخل رمز PIN المكوّن من 4 أرقام للمتابعة",
+        title = "ادخل رمز PIN",
+        subtitle = "ادخل رمز PIN المكوّن من 4 ارقام للمتابعة",
         errorMessage = error,
         resetToken = resetToken,
         inputEnabled = !operationInProgress,
@@ -148,7 +152,7 @@ fun ProfilePinUnlockScreen(
                         }
                     } catch (_: Exception) {
                         if (operationGuard.isCurrent(token)) {
-                            error = "تعذر التحقق من رمز PIN. حاول مرة أخرى."
+                            error = "تعذر التحقق من رمز PIN ، حاول مرة اخرى"
                             resetToken++
                         }
                     } finally {
@@ -217,7 +221,7 @@ fun ProfilePinProtectionScreen(
                 }
             } catch (_: Exception) {
                 if (operationGuard.isCurrent(token)) {
-                    error = "تعذر إتمام العملية. حاول مرة أخرى."
+                    error = "تعذر اتمام العملية ، حاول مرة اخرى"
                     resetToken++
                 }
             } finally {
@@ -283,20 +287,20 @@ fun ProfilePinProtectionScreen(
 
     val title = when (step) {
         PinProtectionStep.VERIFY_CHANGE -> "تحقق من رمز PIN الحالي"
-        PinProtectionStep.VERIFY_REMOVE -> "تأكيد إلغاء الحماية"
+        PinProtectionStep.VERIFY_REMOVE -> "تاكيد الغاء الحماية"
         PinProtectionStep.NEW_PIN -> if (isProtected) "رمز PIN جديد" else "حماية الملف برمز PIN"
-        PinProtectionStep.CONFIRM_PIN -> "تأكيد رمز PIN"
+        PinProtectionStep.CONFIRM_PIN -> "تاكيد رمز PIN"
         PinProtectionStep.OVERVIEW -> ""
     }
     val subtitle = when (step) {
         PinProtectionStep.VERIFY_CHANGE ->
-            "أدخل الرمز الحالي قبل تغييره."
+            "ادخل الرمز الحالي قبل تغييره"
         PinProtectionStep.VERIFY_REMOVE ->
-            "أدخل الرمز الحالي لإلغاء حماية هذا الملف."
+            "ادخل الرمز الحالي لالغاء حماية هذا الملف"
         PinProtectionStep.NEW_PIN ->
-            "اختر 4 أرقام يسهل عليك تذكرها ويصعب على الآخرين تخمينها."
+            "اختر 4 ارقام يسهل عليك تذكرها ويصعب على الاخرين تخمينها"
         PinProtectionStep.CONFIRM_PIN ->
-            "أعد إدخال الرمز نفسه للتأكد."
+            "اعد ادخال الرمز نفسه للتاكد"
         PinProtectionStep.OVERVIEW -> ""
     }
 
@@ -344,7 +348,7 @@ fun ProfilePinProtectionScreen(
                                         error = null
                                         onClose()
                                     } else {
-                                        error = "تعذر إلغاء الحماية. حاول مرة أخرى."
+                                        error = "تعذر الغاء الحماية ، حاول مرة اخرى"
                                         resetToken++
                                     }
                                 }
@@ -365,7 +369,7 @@ fun ProfilePinProtectionScreen(
                 PinProtectionStep.CONFIRM_PIN -> {
                     val expected = firstPin
                     if (expected == null || pin != expected) {
-                        error = "الرمزان غير متطابقين. أعد التأكيد."
+                        error = "الرمزان غير متطابقين ، اعد التاكيد"
                         resetToken++
                     } else {
                         launchPinOperation { token ->
@@ -376,7 +380,7 @@ fun ProfilePinProtectionScreen(
                                     error = null
                                     onClose()
                                 } else {
-                                    error = "تعذر حفظ رمز PIN. حاول مرة أخرى."
+                                    error = "تعذر حفظ رمز PIN ، حاول مرة اخرى"
                                     resetToken++
                                 }
                             }
@@ -437,7 +441,7 @@ private fun ProfilePinOverview(
                     )
                     SecurityActionPanel(
                         title = "حماية الملف مفعّلة",
-                        subtitle = "يمكنك تغيير رمز PIN أو إلغاء الحماية بعد التحقق من الرمز الحالي.",
+                        subtitle = "يمكنك تغيير رمز PIN او الغاء الحماية بعد التحقق من الرمز الحالي",
                         isTv = isTv,
                         shortLandscape = shortLandscape,
                         compactHeight = compactHeight,
@@ -466,7 +470,7 @@ private fun ProfilePinOverview(
                 Spacer(Modifier.height(if (isTv) 20.dp else if (compactHeight) 10.dp else 16.dp))
                 SecurityActionPanel(
                     title = "حماية الملف مفعّلة",
-                    subtitle = "يمكنك تغيير رمز PIN أو إلغاء الحماية بعد التحقق من الرمز الحالي.",
+                    subtitle = "يمكنك تغيير رمز PIN او الغاء الحماية بعد التحقق من الرمز الحالي",
                     isTv = isTv,
                     shortLandscape = false,
                     compactHeight = compactHeight,
@@ -547,7 +551,7 @@ private fun SecurityActionPanel(
         )
         Spacer(Modifier.height(10.dp))
         SecurityButton(
-            text = "إلغاء الحماية",
+            text = "الغاء الحماية",
             isTv = isTv,
             danger = true,
             onClick = onRemovePin,
@@ -591,9 +595,16 @@ private fun ProfilePinEntryScaffold(
                 Column(
                     modifier = Modifier
                         .widthIn(max = compositionWidth)
-                        .fillMaxWidth(),
+                        .fillMaxWidth()
+                        .then(
+                            if (compactTv) {
+                                Modifier.verticalScroll(rememberScrollState())
+                            } else {
+                                Modifier
+                            },
+                        ),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
+                    verticalArrangement = if (compactTv) Arrangement.Top else Arrangement.Center,
                 ) {
                     ProfileSecurityIdentity(
                         profile = profile,
@@ -635,8 +646,15 @@ private fun ProfilePinEntryScaffold(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center,
+                        .padding(padding)
+                        .then(
+                            if (shortLandscape) {
+                                Modifier.verticalScroll(rememberScrollState())
+                            } else {
+                                Modifier
+                            },
+                        ),
+                    contentAlignment = if (shortLandscape) Alignment.TopCenter else Alignment.Center,
                 ) {
                     Row(
                         modifier = Modifier
@@ -671,9 +689,16 @@ private fun ProfilePinEntryScaffold(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding),
+                        .padding(padding)
+                        .then(
+                            if (shortLandscape) {
+                                Modifier.verticalScroll(rememberScrollState())
+                            } else {
+                                Modifier
+                            },
+                        ),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
+                    verticalArrangement = if (shortLandscape) Arrangement.Top else Arrangement.Center,
                 ) {
                     ProfileSecurityIdentity(
                         profile = profile,
@@ -913,22 +938,13 @@ internal fun PinPanel(
         }
 
         Spacer(Modifier.height(if (shortLandscape || compactHeight || tvCompact) 3.dp else 4.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(if (isTv) 18.dp else 17.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (!errorMessage.isNullOrBlank()) {
-                Text(
-                    text = errorMessage,
-                    color = colors.danger,
-                    fontSize = if (isTv) 11.sp else 10.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                )
-            }
+
+        if (!errorMessage.isNullOrBlank()) {
+            EntryNotice(
+                message = errorMessage,
+                compact = true,
+            )
+            Spacer(Modifier.height(if (shortLandscape || compactHeight || tvCompact) 3.dp else 4.dp))
         }
 
         Spacer(Modifier.height(if (shortLandscape || compactHeight || tvCompact) 3.dp else 5.dp))
@@ -951,7 +967,6 @@ internal fun PinPanel(
             text = "رجوع",
             isTv = isTv,
             secondary = true,
-            compact = true,
             focusRequester = cancelFocusRequester,
             onClick = onCancel,
             modifier = if (isTv) {
@@ -980,66 +995,68 @@ private fun NumberPad(
 
     fun requester(index: Int): FocusRequester = requesters[index]
 
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(keySpacing),
-    ) {
-        repeat(3) { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(keySpacing)) {
-                repeat(3) { column ->
-                    val index = row * 3 + column
-                    val digit = (index + 1).toString()
-                    val self = requester(index)
-                    val left = if (column < 2) requester(index + 1) else self
-                    val right = if (column > 0) requester(index - 1) else self
-                    val up = if (row > 0) requester(index - 3) else self
-                    val down = when {
-                        row < 2 -> requester(index + 3)
-                        column == 0 -> self
-                        column == 1 -> requester(9)
-                        backspaceEnabled -> requester(10)
-                        else -> self
+    // PIN digits stay in their stable physical LTR order; layout and D-pad wiring share it.
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(keySpacing),
+        ) {
+            repeat(3) { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(keySpacing)) {
+                    repeat(3) { column ->
+                        val index = row * 3 + column
+                        val digit = (index + 1).toString()
+                        val self = requester(index)
+                        val left = if (column > 0) requester(index - 1) else self
+                        val right = if (column < 2) requester(index + 1) else self
+                        val up = if (row > 0) requester(index - 3) else self
+                        val down = when {
+                            row < 2 -> requester(index + 3)
+                            column == 0 -> if (backspaceEnabled) requester(10) else self
+                            column == 1 -> requester(9)
+                            else -> self
+                        }
+                        PinKey(
+                            text = digit,
+                            isTv = isTv,
+                            keySize = keySize,
+                            focusRequester = self,
+                            leftRequester = left,
+                            rightRequester = right,
+                            upRequester = up,
+                            downRequester = down,
+                            onClick = { onDigit(digit) },
+                        )
                     }
-                    PinKey(
-                        text = digit,
-                        isTv = isTv,
-                        keySize = keySize,
-                        focusRequester = self,
-                        leftRequester = left,
-                        rightRequester = right,
-                        upRequester = up,
-                        downRequester = down,
-                        onClick = { onDigit(digit) },
-                    )
                 }
             }
-        }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(keySpacing)) {
-            Spacer(Modifier.size(keySize))
-            PinKey(
-                text = "0",
-                isTv = isTv,
-                keySize = keySize,
-                focusRequester = requester(9),
-                leftRequester = if (backspaceEnabled) requester(10) else requester(9),
-                rightRequester = requester(9),
-                upRequester = requester(7),
-                downRequester = requester(9),
-                onClick = { onDigit("0") },
-            )
-            PinKey(
-                text = "⌫",
-                isTv = isTv,
-                keySize = keySize,
-                enabled = backspaceEnabled,
-                focusRequester = requester(10),
-                leftRequester = requester(10),
-                rightRequester = requester(9),
-                upRequester = requester(8),
-                downRequester = requester(10),
-                onClick = onBackspace,
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(keySpacing)) {
+                PinKey(
+                    text = "⌫",
+                    isTv = isTv,
+                    keySize = keySize,
+                    enabled = backspaceEnabled,
+                    focusRequester = requester(10),
+                    leftRequester = requester(10),
+                    rightRequester = requester(9),
+                    upRequester = requester(6),
+                    downRequester = requester(10),
+                    onClick = onBackspace,
+                )
+                PinKey(
+                    text = "0",
+                    isTv = isTv,
+                    keySize = keySize,
+                    focusRequester = requester(9),
+                    leftRequester = if (backspaceEnabled) requester(10) else requester(9),
+                    rightRequester = requester(9),
+                    upRequester = requester(7),
+                    downRequester = requester(9),
+                    onClick = { onDigit("0") },
+                )
+                Spacer(Modifier.size(keySize))
+            }
         }
     }
 }
@@ -1059,20 +1076,11 @@ private fun PinKey(
 ) {
     val colors = LocalHulkColors.current
     var focused by remember(text) { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (focused && isTv) 1.07f else 1f,
-        label = "profilePinKeyScale",
-    )
     val shape = RoundedCornerShape(if (isTv) 14.dp else 15.dp)
 
     Box(
         modifier = Modifier
             .size(keySize)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                shadowElevation = if (focused && isTv) 12.dp.toPx() else 0f
-            }
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .clip(shape)
             .background(
@@ -1141,87 +1149,21 @@ private fun SecurityButton(
     isTv: Boolean,
     secondary: Boolean = false,
     danger: Boolean = false,
-    compact: Boolean = false,
     focusRequester: FocusRequester? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val colors = LocalHulkColors.current
-    var focused by remember(text) { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (focused && isTv) 1.035f else 1f,
-        label = "profileSecurityActionScale",
+    EntryActionButton(
+        text = text,
+        onClick = onClick,
+        primary = !secondary && !danger,
+        outlined = secondary,
+        danger = danger,
+        minHeightDp = movieActionHeightDp(isTv = isTv, compactHeight = false),
+        modifier = if (focusRequester != null) {
+            modifier.focusRequester(focusRequester)
+        } else {
+            modifier
+        },
     )
-    val shape = RoundedCornerShape(if (isTv) 13.dp else 13.dp)
-    val goldFocused = !danger && !secondary && focused
-    val background = when {
-        danger -> colors.danger.copy(alpha = if (focused) .24f else .14f)
-        secondary -> colors.surfaceRaised
-        else -> colors.gold
-    }
-    val foreground = when {
-        danger -> colors.danger
-        secondary -> if (focused) colors.goldBright else colors.text
-        else -> Color.Black
-    }
-
-    Box(
-        modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .then(
-                if (focusRequester != null) Modifier.focusRequester(focusRequester)
-                else Modifier,
-            )
-            .clip(shape)
-            .background(background)
-            .goldFocusEdge(shape = shape, visible = goldFocused)
-            .border(
-                if (goldFocused) 0.dp else if (focused) 2.dp else 1.dp,
-                when {
-                    goldFocused -> Color.Transparent
-                    focused -> colors.goldBright
-                    danger -> colors.danger.copy(alpha = .45f)
-                    secondary -> Color.White.copy(alpha = .10f)
-                    else -> colors.gold.copy(alpha = .40f)
-                },
-                shape,
-            )
-            .onFocusChanged { focused = it.isFocused }
-            .onPreviewKeyEvent { event ->
-                val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
-                if (!isTv || !remoteSelect) {
-                    false
-                } else {
-                    when (event.type) {
-                        KeyEventType.KeyDown -> true
-                        KeyEventType.KeyUp -> {
-                            onClick()
-                            true
-                        }
-                        else -> false
-                    }
-                }
-            }
-            .clickable(onClick = onClick)
-            .padding(
-                horizontal = if (isTv) 16.dp else 15.dp,
-                vertical = when {
-                    compact -> 8.dp
-                    isTv -> 11.dp
-                    else -> 10.dp
-                },
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = text,
-            color = foreground,
-            fontSize = if (isTv) 14.sp else 13.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-        )
-    }
 }

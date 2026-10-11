@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -31,7 +33,7 @@ import sa.hulksa.player.ui.LegacyParentProofDecision
 import sa.hulksa.player.ui.legacyParentProofDecision
 
 private const val LEGACY_PARENT_PROOF_UNAVAILABLE_MESSAGE =
-    "لا يوجد رمز PIN صالح للملف البالغ الرئيسي لإثبات ولي الأمر. لا يمكن إنشاء رمز الوالدين من وضع الأطفال."
+    "لا يوجد رمز PIN صالح للملف البالغ الرئيسي لاثبات ولي الامر ، لا يمكن انشاء رمز الوالدين من وضع الاطفال"
 
 @Composable
 fun ParentalCodeBootstrapScreen(
@@ -116,23 +118,23 @@ fun ParentalCodeBootstrapScreen(
     BackHandler(onBack = ::cancelOrReturnToCreate)
 
     val title = when (step) {
-        ParentalCodeSetupStep.LEGACY_PARENT_PROOF -> "تحقق ولي الأمر"
-        ParentalCodeSetupStep.CREATE -> "إنشاء رمز الوالدين"
-        ParentalCodeSetupStep.CONFIRM -> "تأكيد رمز الوالدين"
+        ParentalCodeSetupStep.LEGACY_PARENT_PROOF -> "تحقق ولي الامر"
+        ParentalCodeSetupStep.CREATE -> "انشاء رمز الوالدين"
+        ParentalCodeSetupStep.CONFIRM -> "تاكيد رمز الوالدين"
     }
     val subtitle = when (step) {
         ParentalCodeSetupStep.LEGACY_PARENT_PROOF -> when (legacyProofDecision) {
             LegacyParentProofDecision.REQUIRE_PRIMARY_ADULT_PROFILE_PIN ->
-                "أدخل رمز PIN للملف البالغ الرئيسي مرة واحدة، ثم أنشئ رمز والدين مستقلًا."
+                "ادخل رمز PIN للملف البالغ الرئيسي مرة واحدة ، ثم انشئ رمز والدين مستقلًا"
             LegacyParentProofDecision.DENY_FAIL_CLOSED ->
-                "يلزم إثبات ولي أمر صالح قبل إنشاء رمز الوالدين من وضع الأطفال."
+                "يلزم اثبات ولي امر صالح قبل انشاء رمز الوالدين من وضع الاطفال"
             LegacyParentProofDecision.NOT_REQUIRED ->
-                "أنشئ رمز والدين مستقلًا لإدارة ملفات الأطفال."
+                "انشئ رمز والدين مستقلًا لادارة ملفات الاطفال"
         }
         ParentalCodeSetupStep.CREATE ->
-            "سيُستخدم رمز الوالدين للخروج من وضع الأطفال وإدارة الملفات الشخصية."
+            "سيُستخدم رمز الوالدين للخروج من وضع الاطفال وادارة الملفات الشخصية"
         ParentalCodeSetupStep.CONFIRM ->
-            "أعد إدخال رمز الوالدين نفسه للتأكد."
+            "اعد ادخال رمز الوالدين نفسه للتاكد"
     }
     val displayedError = error ?: if (
         step == ParentalCodeSetupStep.LEGACY_PARENT_PROOF &&
@@ -203,7 +205,7 @@ fun ParentalCodeBootstrapScreen(
                                     }
                                 } catch (_: Exception) {
                                     if (operationGuard.isCurrent(token)) {
-                                        error = "تعذر التحقق من رمز PIN للملف البالغ. حاول مرة أخرى."
+                                        error = "تعذر التحقق من رمز PIN للملف البالغ ، حاول مرة اخرى"
                                         resetToken++
                                     }
                                 } finally {
@@ -228,7 +230,7 @@ fun ParentalCodeBootstrapScreen(
                 ParentalCodeSetupStep.CONFIRM -> {
                     val expected = firstCode
                     if (expected == null || code != expected) {
-                        error = "رمزا الوالدين غير متطابقين. أعد التأكيد."
+                        error = "رمزا الوالدين غير متطابقين ، اعد التاكيد"
                         resetToken++
                     } else {
                         val token = operationGuard.begin()
@@ -244,7 +246,7 @@ fun ParentalCodeBootstrapScreen(
                                             firstCode = null
                                             onCompleted()
                                         } else {
-                                            error = "تعذر حفظ رمز الوالدين. حاول مرة أخرى."
+                                            error = "تعذر حفظ رمز الوالدين ، حاول مرة اخرى"
                                             resetToken++
                                         }
                                     }
@@ -252,7 +254,7 @@ fun ParentalCodeBootstrapScreen(
                                     throw cancelled
                                 } catch (_: Exception) {
                                     if (operationGuard.isCurrent(token)) {
-                                        error = "تعذر حفظ رمز الوالدين. حاول مرة أخرى."
+                                        error = "تعذر حفظ رمز الوالدين ، حاول مرة اخرى"
                                         resetToken++
                                     }
                                 } finally {
@@ -312,7 +314,7 @@ fun ParentalCodeUnlockScreen(
         credentialScopeKey = credentialScopeKey,
         isTv = isTv,
         title = "رمز الوالدين",
-        subtitle = "أدخل رمز الوالدين للخروج من وضع الأطفال أو إدارة الملفات الشخصية.",
+        subtitle = "ادخل رمز الوالدين للخروج من وضع الاطفال او ادارة الملفات الشخصية",
         errorMessage = error,
         resetToken = resetToken,
         inputEnabled = !operationInProgress,
@@ -347,7 +349,7 @@ fun ParentalCodeUnlockScreen(
                         }
                     } catch (_: Exception) {
                         if (operationGuard.isCurrent(token)) {
-                            error = "تعذر التحقق من رمز الوالدين. حاول مرة أخرى."
+                            error = "تعذر التحقق من رمز الوالدين ، حاول مرة اخرى"
                             resetToken++
                         }
                     } finally {
@@ -389,8 +391,15 @@ private fun ParentalCodeEntryScaffold(
                 .padding(
                     horizontal = if (isTv) 32.dp else if (shortLandscape) 8.dp else 16.dp,
                     vertical = if (isTv) 24.dp else if (shortLandscape) 8.dp else 16.dp,
+                )
+                .then(
+                    if (!isTv && shortLandscape) {
+                        Modifier.verticalScroll(rememberScrollState())
+                    } else {
+                        Modifier
+                    },
                 ),
-            contentAlignment = Alignment.Center,
+            contentAlignment = if (!isTv && shortLandscape) Alignment.TopCenter else Alignment.Center,
         ) {
             val compactTv = isTv && (maxHeight < 620.dp || maxWidth < 900.dp)
             PinPanel(
