@@ -70,8 +70,11 @@ fun HulkApp(
 ) {
     val state by viewModel.state.collectAsState()
     // Preserves the Series details composition state (selected tab, season and scroll position)
-    // across the playback round-trip for the exact series the user opened.
+    // across the playback round-trip for the exact series the owner opened.
     val seriesDetailsStateHolder = rememberSaveableStateHolder()
+    // One-time TV Search entry focus per profile; hoisted above the destination layer so a
+    // Details round-trip cannot re-grab the field over the restored card.
+    var searchInitialFocusAcquired by remember(navigationMemory) { mutableStateOf(false) }
     // Scoped ephemeral presentation for a real notification-opening failure result.
     var notificationOpenError by remember { mutableStateOf<String?>(null) }
     val (adaptiveUi, adaptiveInputController) = rememberAdaptiveUiState(isTelevisionDevice)
@@ -224,12 +227,20 @@ fun HulkApp(
 
                     HulkScreen.MAIN -> {
                         if (state.destination == MainDestination.SEARCH) {
+                            // The one-time TV entry focus belongs above the destination layer so a
+                            // details round-trip cannot re-grab the field over the restored card.
                             ProfileSmartSearchLayer(
                                 state = state,
                                 isTv = isTv,
                                 isFavorite = viewModel::isFavorite,
+                                navigationMemory = navigationMemory,
+                                initialFocusAcquired = searchInitialFocusAcquired,
+                                onInitialFocusAcquired = {
+                                    searchInitialFocusAcquired = true
+                                },
                                 onSelectDestination = selectDestinationWithProfileContext,
                                 onSearch = viewModel::updateSearch,
+                                onRefresh = viewModel::refresh,
                                 onOpen = openWithLiveContext,
                                 onToggleFavorite = { item ->
                                     val wasFavorite = viewModel.isFavorite(item)

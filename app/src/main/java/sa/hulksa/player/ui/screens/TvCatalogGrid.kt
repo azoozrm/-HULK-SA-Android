@@ -57,11 +57,11 @@ internal const val MOVIE_COMPACT_ARTWORK_MIN_HEIGHT_DP = 96
 
 // Favorites compact-phone grid: the accepted mobile catalog expressions (full-bleed section with
 // its own content padding) capped at the accepted two-column Model 01 composition.
-private val FAVORITES_MOBILE_HORIZONTAL_PADDING = 5.dp
-private val FAVORITES_MOBILE_HORIZONTAL_SPACING = 9.dp
-private val FAVORITES_MOBILE_VERTICAL_SPACING = 10.dp
-private val FAVORITES_MOBILE_BOTTOM_PADDING = 28.dp
-private val FAVORITES_MOBILE_MIN_CELL_WIDTH = 105.dp
+internal val FAVORITES_MOBILE_HORIZONTAL_PADDING = 5.dp
+internal val FAVORITES_MOBILE_HORIZONTAL_SPACING = 9.dp
+internal val FAVORITES_MOBILE_VERTICAL_SPACING = 10.dp
+internal val FAVORITES_MOBILE_BOTTOM_PADDING = 28.dp
+internal val FAVORITES_MOBILE_MIN_CELL_WIDTH = 105.dp
 
 internal data class TvCatalogMetrics(
     val minCellWidthDp: Float,

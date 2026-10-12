@@ -450,6 +450,7 @@ fun HulkTextField(
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     leadingIcon: ImageVector? = null,
     leadingIconTint: Color? = null,
+    endActionSpace: Dp = 0.dp,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -489,6 +490,9 @@ fun HulkTextField(
                         tint = leadingIconTint ?: colors.textMuted,
                         modifier = Modifier.size(18.dp),
                     )
+                }
+                if (endActionSpace > 0.dp) {
+                    Spacer(Modifier.width(endActionSpace))
                 }
             }
         },
@@ -917,6 +921,7 @@ internal fun BoxedCatalogCard(
     footerSecondary: String?,
     footerSecondaryIcon: ImageVector,
     footerSeasonCount: Int? = null,
+    footerAction: (@Composable () -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -1123,6 +1128,10 @@ internal fun BoxedCatalogCard(
                     }
                 }
             }
+            if (footerAction != null) {
+                Spacer(Modifier.height(4.dp))
+                footerAction()
+            }
         }
     }
 
@@ -1146,6 +1155,7 @@ fun MoviesCatalogBoxedCard(
     onFocused: (() -> Unit)? = null,
     artworkHeightDp: Dp? = null,
     onFooterHeightMeasured: ((Int) -> Unit)? = null,
+    footerAction: (@Composable () -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val metadataStore = remember(context) { HomeHeroMetadataStore.get(context) }
@@ -1185,6 +1195,7 @@ fun MoviesCatalogBoxedCard(
         footerPrimary = compactMovieRating(item.rating),
         footerSecondary = compactMovieDuration(verifiedMovieMetadata.durationMs),
         footerSecondaryIcon = Icons.Rounded.Schedule,
+        footerAction = footerAction,
     )
 }
 
@@ -1202,6 +1213,7 @@ fun SeriesCatalogBoxedCard(
     onFocused: (() -> Unit)? = null,
     artworkHeightDp: Dp? = null,
     onFooterHeightMeasured: ((Int) -> Unit)? = null,
+    footerAction: (@Composable () -> Unit)? = null,
 ) {
     require(item.type == ContentType.SERIES)
     val context = LocalContext.current
@@ -1229,6 +1241,7 @@ fun SeriesCatalogBoxedCard(
         footerSecondary = null,
         footerSecondaryIcon = Icons.Rounded.Layers,
         footerSeasonCount = seasonCount,
+        footerAction = footerAction,
     )
 }
 
@@ -1769,6 +1782,7 @@ fun LiveChannelHomeCard(
     modifier: Modifier = Modifier,
     onLongClick: (() -> Unit)? = null,
     onFocused: (() -> Unit)? = null,
+    footerAction: (@Composable () -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -1900,6 +1914,10 @@ fun LiveChannelHomeCard(
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
             )
+            if (footerAction != null) {
+                Spacer(Modifier.height(4.dp))
+                footerAction()
+            }
         }
     }
 }
