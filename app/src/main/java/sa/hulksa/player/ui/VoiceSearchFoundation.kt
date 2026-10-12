@@ -406,6 +406,7 @@ internal fun InlineVoiceSearchAction(
                     when (event.key) {
                         Key.Enter, Key.DirectionCenter -> {
                             launchVoiceSearch(query)
+                            runCatching { searchFieldRequester.requestFocus() }
                             true
                         }
                         Key.DirectionRight -> {
@@ -440,7 +441,10 @@ internal fun InlineVoiceSearchAction(
                 shape = CircleShape,
             )
             .semantics { contentDescription = "بحث صوتي" }
-            .clickable(role = Role.Button) { launchVoiceSearch(query) },
+            .clickable(role = Role.Button) {
+                launchVoiceSearch(query)
+                if (isTv) runCatching { searchFieldRequester.requestFocus() }
+            },
         contentAlignment = Alignment.Center,
     ) {
         Icon(

@@ -2,10 +2,13 @@ package sa.hulksa.player.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
@@ -22,15 +25,14 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -45,8 +47,11 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -54,7 +59,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,24 +78,28 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.MainDestination
 import sa.hulksa.player.data.ProfileContentSearchHistoryEntry
@@ -96,14 +108,52 @@ import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.ui.adaptive.HulkNavigationType
+import sa.hulksa.player.ui.adaptive.HulkWindowWidthClass
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.HulkTextField
+import sa.hulksa.player.ui.components.LiveChannelHomeCard
 import sa.hulksa.player.ui.components.LoadingRing
+import sa.hulksa.player.ui.components.MoviesCatalogBoxedCard
+import sa.hulksa.player.ui.components.SeriesCatalogBoxedCard
 import sa.hulksa.player.ui.components.TvRailDestinationItem
 import sa.hulksa.player.ui.components.TvRailSurface
-import sa.hulksa.player.ui.components.UniversalPosterCard
+import sa.hulksa.player.ui.screens.FAVORITES_MOBILE_BOTTOM_PADDING
+import sa.hulksa.player.ui.screens.FAVORITES_MOBILE_HORIZONTAL_PADDING
+import sa.hulksa.player.ui.screens.FAVORITES_MOBILE_HORIZONTAL_SPACING
+import sa.hulksa.player.ui.screens.FAVORITES_MOBILE_MIN_CELL_WIDTH
+import sa.hulksa.player.ui.screens.FAVORITES_MOBILE_VERTICAL_SPACING
+import sa.hulksa.player.ui.screens.FavoritesSelectGuardDecision
+import sa.hulksa.player.ui.screens.MOBILE_SECTION_COUNT_SIZE
+import sa.hulksa.player.ui.screens.MOBILE_SECTION_HORIZONTAL_PADDING
+import sa.hulksa.player.ui.screens.MOBILE_SECTION_TITLE_SIZE
+import sa.hulksa.player.ui.screens.MOVIE_COMPACT_ARTWORK_MIN_HEIGHT_DP
+import sa.hulksa.player.ui.screens.MoviesErrorNotice
+import sa.hulksa.player.ui.screens.MoviesOfflineEmptyState
+import sa.hulksa.player.ui.screens.NavigationMemoryStore
+import sa.hulksa.player.ui.screens.TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP
+import sa.hulksa.player.ui.screens.TV_PAGE_GUTTER
+import sa.hulksa.player.ui.screens.TvCatalogFocusMoveState
+import sa.hulksa.player.ui.screens.TvCatalogFocusPath
+import sa.hulksa.player.ui.screens.TvGridFocusMove
+import sa.hulksa.player.ui.screens.extendCategoryViewportTowardStart
+import sa.hulksa.player.ui.screens.favoritesRemovalFocusIndex
+import sa.hulksa.player.ui.screens.favoritesSelectGuardDecision
+import sa.hulksa.player.ui.screens.focusedCardScrollCorrection
+import sa.hulksa.player.ui.screens.homeHeaderActionTouchSizeDp
+import sa.hulksa.player.ui.screens.movieCatalogColumnCount
+import sa.hulksa.player.ui.screens.movieCatalogMinCellWidthDp
+import sa.hulksa.player.ui.screens.movieCompactArtworkHeightPx
+import sa.hulksa.player.ui.screens.moviesNoBringIntoViewSpec
+import sa.hulksa.player.ui.screens.nextTvGridFocusIndex
+import sa.hulksa.player.ui.screens.rememberCategorySidebarUnderlap
+import sa.hulksa.player.ui.screens.rememberLiveCategoryStripMetrics
+import sa.hulksa.player.ui.screens.rememberUsableNetworkState
+import sa.hulksa.player.ui.screens.revealFocusedGridItem
+import sa.hulksa.player.ui.screens.tvCatalogFocusPath
+import sa.hulksa.player.ui.screens.tvCatalogMetrics
+import sa.hulksa.player.ui.screens.tvPageSafeInsets
 import sa.hulksa.player.ui.screens.tvRailMetrics
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
@@ -118,9 +168,9 @@ private enum class SmartSearchFilter(
     val label: String,
 ) {
     ALL(null, "الكل"),
-    LIVE(ContentType.LIVE, "القنوات"),
-    MOVIES(ContentType.MOVIE, "الأفلام"),
+    MOVIES(ContentType.MOVIE, "الافلام"),
     SERIES(ContentType.SERIES, "المسلسلات"),
+    LIVE(ContentType.LIVE, "القنوات"),
     ;
 
     fun accepts(type: ContentType): Boolean = contentType == null || contentType == type
@@ -165,8 +215,12 @@ internal fun ProfileSmartSearchLayer(
     state: HulkUiState,
     isTv: Boolean,
     isFavorite: (ContentItem) -> Boolean,
+    navigationMemory: NavigationMemoryStore,
+    initialFocusAcquired: Boolean,
+    onInitialFocusAcquired: () -> Unit,
     onSelectDestination: (MainDestination) -> Unit,
     onSearch: (String) -> Unit,
+    onRefresh: () -> Unit,
     onOpen: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onSwitchProfile: () -> Unit,
@@ -179,10 +233,30 @@ internal fun ProfileSmartSearchLayer(
     val profileStore = remember(context) { ProfileStore(context) }
     val activeProfileId = profileStore.activeProfileId()
     var historyRevision by remember(activeProfileId) { mutableIntStateOf(0) }
-    var selectedFilter by remember(activeProfileId) { mutableStateOf(SmartSearchFilter.ALL) }
+    // The existing per-profile navigation owner remembers the selected type filter, the focused
+    // card and its location so details return restores the same surviving context.
+    var selectedFilter by remember(activeProfileId, navigationMemory) {
+        mutableStateOf(
+            smartSearchFilterFromMemoryKey(navigationMemory.position(MainDestination.SEARCH).rowKey),
+        )
+    }
     val recentEntries = remember(activeProfileId, historyRevision) { historyStore.recent() }
     val visibleRecentEntries = remember(recentEntries, selectedFilter) {
         recentEntries.filter { selectedFilter.accepts(it.contentType) }
+    }
+    var lastSearchQuery by remember(activeProfileId, navigationMemory) {
+        mutableStateOf(state.searchQuery)
+    }
+    LaunchedEffect(state.searchQuery, activeProfileId, navigationMemory) {
+        if (state.searchQuery != lastSearchQuery) {
+            lastSearchQuery = state.searchQuery
+            navigationMemory.save(
+                destination = MainDestination.SEARCH,
+                itemKey = "",
+                itemIndex = 0,
+                rowKey = selectedFilter.name,
+            )
+        }
     }
 
     val searchIndex by produceState<SmartSearchIndex?>(
@@ -254,16 +328,14 @@ internal fun ProfileSmartSearchLayer(
     val filterRequesters = remember {
         SmartSearchFilter.entries.associateWith { FocusRequester() }
     }
-    var initialSearchFocusAcquired by remember(activeProfileId) { mutableStateOf(false) }
     var railReturnRequester by remember(activeProfileId) { mutableStateOf<FocusRequester?>(null) }
 
-    LaunchedEffect(isTv, activeProfileId) {
-        if (isTv) {
-            repeat(TV_INITIAL_SEARCH_FOCUS_ATTEMPTS) { attempt ->
-                delay(if (attempt == 0) TV_INITIAL_SEARCH_FOCUS_DELAY_MS else TV_INITIAL_SEARCH_FOCUS_RETRY_MS)
-                if (!initialSearchFocusAcquired) {
-                    runCatching { searchFieldRequester.requestFocus() }
-                }
+    LaunchedEffect(isTv, activeProfileId, initialFocusAcquired) {
+        if (!isTv || initialFocusAcquired) return@LaunchedEffect
+        repeat(TV_INITIAL_SEARCH_FOCUS_ATTEMPTS) { attempt ->
+            delay(if (attempt == 0) TV_INITIAL_SEARCH_FOCUS_DELAY_MS else TV_INITIAL_SEARCH_FOCUS_RETRY_MS)
+            if (!initialFocusAcquired) {
+                runCatching { searchFieldRequester.requestFocus() }
             }
         }
     }
@@ -306,7 +378,7 @@ internal fun ProfileSmartSearchLayer(
                     searchFieldRequester = searchFieldRequester,
                     searchRailRequester = railSearchRequester,
                     contentReturnRequester = railReturnRequester ?: searchFieldRequester,
-                    preferSearchFieldOnEnter = isTv && !initialSearchFocusAcquired,
+                    preferSearchFieldOnEnter = isTv && !initialFocusAcquired,
                     onSelectDestination = onSelectDestination,
                     onSwitchProfile = onSwitchProfile,
                 )
@@ -321,6 +393,8 @@ internal fun ProfileSmartSearchLayer(
                     searchPending = searchPending,
                     loadingCatalogs = loadingCatalogs,
                     imeVisible = imeVisible,
+                    onRefresh = onRefresh,
+                    navigationMemory = navigationMemory,
                     searchFieldRequester = searchFieldRequester,
                     firstResultRequester = firstResultRequester,
                     firstRecentRequester = firstRecentRequester,
@@ -329,14 +403,22 @@ internal fun ProfileSmartSearchLayer(
                     onSearch = onSearch,
                     onSearchFieldFocusChanged = { focused ->
                         if (focused) {
-                            initialSearchFocusAcquired = true
+                            onInitialFocusAcquired()
                             railReturnRequester = searchFieldRequester
                         }
                     },
                     onContentFocusTargetChanged = { requester ->
                         railReturnRequester = requester
                     },
-                    onFilterSelected = { selectedFilter = it },
+                    onFilterSelected = { filter ->
+                        selectedFilter = filter
+                        navigationMemory.save(
+                            destination = MainDestination.SEARCH,
+                            itemKey = "",
+                            itemIndex = 0,
+                            rowKey = filter.name,
+                        )
+                    },
                     onOpenResult = recordAndOpen,
                     onOpenRecent = openRecent,
                     onRemoveRecent = { entry ->
@@ -348,7 +430,6 @@ internal fun ProfileSmartSearchLayer(
                         historyRevision++
                     },
                     onToggleFavorite = onToggleFavorite,
-                    onSwitchProfile = onSwitchProfile,
                 )
             }
         } else {
@@ -364,6 +445,8 @@ internal fun ProfileSmartSearchLayer(
                     searchPending = searchPending,
                     loadingCatalogs = loadingCatalogs,
                     imeVisible = imeVisible,
+                    onRefresh = onRefresh,
+                    navigationMemory = navigationMemory,
                     searchFieldRequester = searchFieldRequester,
                     firstResultRequester = firstResultRequester,
                     firstRecentRequester = firstRecentRequester,
@@ -371,10 +454,18 @@ internal fun ProfileSmartSearchLayer(
                     isFavorite = isFavorite,
                     onSearch = onSearch,
                     onSearchFieldFocusChanged = { focused ->
-                        if (focused) initialSearchFocusAcquired = true
+                        if (focused) onInitialFocusAcquired()
                     },
                     onContentFocusTargetChanged = {},
-                    onFilterSelected = { selectedFilter = it },
+                    onFilterSelected = { filter ->
+                        selectedFilter = filter
+                        navigationMemory.save(
+                            destination = MainDestination.SEARCH,
+                            itemKey = "",
+                            itemIndex = 0,
+                            rowKey = filter.name,
+                        )
+                    },
                     onOpenResult = recordAndOpen,
                     onOpenRecent = openRecent,
                     onRemoveRecent = { entry ->
@@ -386,7 +477,6 @@ internal fun ProfileSmartSearchLayer(
                         historyRevision++
                     },
                     onToggleFavorite = onToggleFavorite,
-                    onSwitchProfile = onSwitchProfile,
                 )
                 if (!imeVisible) {
                     Spacer(
@@ -412,6 +502,8 @@ private fun SmartSearchContent(
     searchPending: Boolean,
     loadingCatalogs: Boolean,
     imeVisible: Boolean,
+    onRefresh: () -> Unit,
+    navigationMemory: NavigationMemoryStore,
     searchFieldRequester: FocusRequester,
     firstResultRequester: FocusRequester,
     firstRecentRequester: FocusRequester,
@@ -426,28 +518,72 @@ private fun SmartSearchContent(
     onRemoveRecent: (ProfileContentSearchHistoryEntry) -> Unit,
     onClearRecent: () -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
-    onSwitchProfile: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     val screenWidth = adaptiveUi.screenWidthDp
     val screenHeight = adaptiveUi.screenHeightDp
     val compactHeight = !isTv && screenHeight < 600
-    val horizontalPadding = if (isTv) {
-        (screenWidth / 46f).coerceIn(18f, 34f).dp
-    } else {
-        0.dp
-    }
-    val verticalPadding = when {
-        isTv -> (screenHeight / 42f).coerceIn(14f, 24f).dp
-        compactHeight -> 8.dp
-        else -> 14.dp
+    val compactContent = compactHeight || imeVisible
+    val tvSafeInsets = remember(screenWidth, screenHeight) {
+        tvPageSafeInsets(
+            screenWidthDp = screenWidth,
+            screenHeightDp = screenHeight,
+        )
     }
     val selectedFilterRequester = filterRequesters.getValue(selectedFilter)
+    val networkUsable by rememberUsableNetworkState()
+    val errorMessage = state.errorMessage
+    val offline = errorMessage != null && !networkUsable
+    val retryRequester = remember { FocusRequester() }
+    val query = state.searchQuery
+    val queryEligible = query.trim().length >= SMART_SEARCH_MIN_QUERY_LENGTH
+    val gridRows = remember(queryEligible, results, recentEntries, state.catalogs) {
+        if (queryEligible) {
+            results.map { SmartSearchGridRow.Result(it) }
+        } else {
+            recentEntries.map { entry ->
+                SmartSearchGridRow.History(
+                    entry = entry,
+                    resolved = state.catalogs[entry.contentType]
+                        ?.items
+                        ?.firstOrNull { it.id == entry.contentId },
+                )
+            }
+        }
+    }
+    val count = if (queryEligible) results.size else recentEntries.size
+    val countUnit = if (queryEligible) "نتيجة" else "عنصر"
+    val firstGridRequester = if (queryEligible) firstResultRequester else firstRecentRequester
     val firstContentRequester = when {
-        results.isNotEmpty() -> firstResultRequester
-        state.searchQuery.isBlank() && recentEntries.isNotEmpty() -> firstRecentRequester
+        gridRows.isNotEmpty() -> firstGridRequester
+        errorMessage != null -> retryRequester
         else -> null
+    }
+    val hasRemovableHistory = recentEntries.isNotEmpty()
+    // Restore the remembered card only while it still belongs to the current projection.
+    val rememberedItemKey = navigationMemory.position(MainDestination.SEARCH).itemKey
+    val restoreKey = remember(rememberedItemKey, gridRows) {
+        rememberedItemKey.takeIf { key -> key.isNotBlank() && gridRows.any { it.key == key } }
+    }
+    // The one TV editing owner for the query field. While it is active, projection changes are
+    // editing input, not content navigation: they must not move focus to filters, cards or a
+    // restored row. Only the explicit IME Search/Done action, Back, intentional navigation or
+    // the existing lifecycle exit ends editing.
+    var tvEditing by remember { mutableStateOf(false) }
+    // When the whole projection disappears (for example the last history deletion), focus returns
+    // to the always-attached selected filter, which stays composed through the content change.
+    var previouslyHadRows by remember { mutableStateOf(gridRows.isNotEmpty()) }
+    val tvEditingNow = rememberUpdatedState(tvEditing)
+    LaunchedEffect(gridRows.isNotEmpty(), selectedFilter, errorMessage) {
+        val hasRows = gridRows.isNotEmpty()
+        if (previouslyHadRows && !hasRows && isTv) {
+            withFrameNanos { }
+            // Recheck input ownership after the frame suspension: an active editing session owns
+            // the focus and keeps it even while the projection is temporarily empty.
+            if (!tvEditingNow.value) moveFocusTo(selectedFilterRequester)
+        }
+        previouslyHadRows = hasRows
     }
 
     Column(
@@ -457,104 +593,259 @@ private fun SmartSearchContent(
                     listOf(colors.background, colors.surface.copy(alpha = .96f), colors.background),
                 ),
             )
-            .padding(horizontal = horizontalPadding, vertical = verticalPadding),
+            .then(
+                if (isTv) {
+                    Modifier
+                } else {
+                    Modifier.padding(horizontal = MOBILE_SECTION_HORIZONTAL_PADDING)
+                },
+            ),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (isTv) {
+                        Modifier.padding(
+                            start = TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP.dp,
+                            top = tvSafeInsets.verticalDp.dp,
+                        )
+                    } else {
+                        Modifier
+                    },
+                ),
         ) {
-            Box(
-                modifier = Modifier
-                    .size(if (isTv) 52.dp else 42.dp)
-                    .clip(CircleShape)
-                    .background(colors.gold.copy(alpha = .14f))
-                    .border(1.dp, colors.gold.copy(alpha = .34f), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Search,
-                    contentDescription = null,
-                    tint = colors.goldBright,
-                    modifier = Modifier.size(if (isTv) 27.dp else 22.dp),
-                )
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val stackToolbar = !isTv && maxWidth < SEARCH_TOOLBAR_STACK_WIDTH_DP.dp
+                if (isTv) {
+                    // Exact accepted Series field allocation: the field keeps the width its
+                    // CatalogHeader slot receives beside the title, management action, refresh
+                    // action and their accepted spacers. The action space toward physical LEFT
+                    // stays unused and no weight/fill may expand the field into it.
+                    val textMeasurer = rememberTextMeasurer()
+                    val baseTextStyle = LocalTextStyle.current
+                    val density = LocalDensity.current
+                    val manageActionWidth = remember(textMeasurer, baseTextStyle, density) {
+                        val captionWidth = textMeasurer.measure(
+                            text = AnnotatedString("ادارة الفئات"),
+                            style = baseTextStyle.copy(
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                            ),
+                            maxLines = 1,
+                        ).size.width
+                        with(density) { captionWidth.toDp() } + 6.dp + 17.dp + 24.dp
+                    }
+                    val rowContentWidth = (maxWidth - TV_PAGE_GUTTER).coerceAtLeast(1.dp)
+                    val fieldWidth = (
+                        rowContentWidth - SEARCH_TITLE_SLOT_WIDTH_DP.dp -
+                            (SEARCH_HEADER_GAP_DP.dp - TV_PAGE_GUTTER) - manageActionWidth -
+                            SEARCH_HEADER_GAP_DP.dp - homeHeaderActionTouchSizeDp().dp -
+                            SEARCH_HEADER_GAP_DP.dp - TV_PAGE_GUTTER
+                        ).coerceAtLeast(120.dp).coerceAtMost(630.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(end = TV_PAGE_GUTTER),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Start,
+                    ) {
+                        SmartSearchToolbarTitle(
+                            title = "البحث",
+                            count = count,
+                            countUnit = countUnit,
+                            isTv = isTv,
+                        )
+                        Spacer(Modifier.width(SEARCH_HEADER_GAP_DP.dp - TV_PAGE_GUTTER))
+                        SmartSearchInput(
+                            value = query,
+                            onValueChange = onSearch,
+                            isTv = isTv,
+                            editing = isTv && tvEditing,
+                            onEditingChange = { tvEditing = it },
+                            hasResults = results.isNotEmpty(),
+                            hasRecent = query.isBlank() && recentEntries.isNotEmpty(),
+                            searchFieldRequester = searchFieldRequester,
+                            firstFilterRequester = selectedFilterRequester,
+                            firstResultRequester = firstResultRequester,
+                            firstRecentRequester = firstRecentRequester,
+                            railSearchRequester = railSearchRequester,
+                            onFocusStateChanged = onSearchFieldFocusChanged,
+                            modifier = Modifier.width(fieldWidth),
+                        )
+                    }
+                } else if (stackToolbar) {
+                    Column(Modifier.fillMaxWidth()) {
+                        SmartSearchToolbarTitle(
+                            title = "البحث",
+                            count = count,
+                            countUnit = countUnit,
+                            isTv = isTv,
+                        )
+                        Spacer(Modifier.height(if (compactContent) 6.dp else 8.dp))
+                        SmartSearchInput(
+                            value = query,
+                            onValueChange = onSearch,
+                            isTv = isTv,
+                            editing = false,
+                            onEditingChange = { tvEditing = it },
+                            hasResults = results.isNotEmpty(),
+                            hasRecent = query.isBlank() && recentEntries.isNotEmpty(),
+                            searchFieldRequester = searchFieldRequester,
+                            firstFilterRequester = null,
+                            firstResultRequester = firstResultRequester,
+                            firstRecentRequester = firstRecentRequester,
+                            railSearchRequester = railSearchRequester,
+                            onFocusStateChanged = onSearchFieldFocusChanged,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(11.dp),
+                    ) {
+                        SmartSearchToolbarTitle(
+                            title = "البحث",
+                            count = count,
+                            countUnit = countUnit,
+                            isTv = isTv,
+                        )
+                        SmartSearchInput(
+                            value = query,
+                            onValueChange = onSearch,
+                            isTv = isTv,
+                            editing = false,
+                            onEditingChange = { tvEditing = it },
+                            hasResults = results.isNotEmpty(),
+                            hasRecent = query.isBlank() && recentEntries.isNotEmpty(),
+                            searchFieldRequester = searchFieldRequester,
+                            firstFilterRequester = null,
+                            firstResultRequester = firstResultRequester,
+                            firstRecentRequester = firstRecentRequester,
+                            railSearchRequester = railSearchRequester,
+                            onFocusStateChanged = onSearchFieldFocusChanged,
+                            modifier = Modifier.weight(1f).widthIn(max = 630.dp),
+                        )
+                    }
+                }
             }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = "البحث",
-                    color = colors.text,
-                    fontSize = if (isTv) 30.sp else 23.sp,
-                    fontWeight = FontWeight.Black,
-                )
-                if (!compactHeight && !imeVisible) {
-                    Text(
-                        text = "بحث سريع في القنوات والأفلام والمسلسلات",
-                        color = colors.textMuted,
-                        fontSize = if (isTv) 13.sp else 11.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+            Spacer(Modifier.height(if (compactContent) 6.dp else 8.dp))
+            val clearAllRequester = remember { FocusRequester() }
+            val lastFilterRequester = filterRequesters.getValue(SmartSearchFilter.entries.last())
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (isTv) {
+                            Modifier.padding(end = tvSafeInsets.horizontalDp.dp)
+                        } else {
+                            Modifier
+                        },
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.weight(1f)) {
+                    SmartSearchFilterBar(
+                        selected = selectedFilter,
+                        isTv = isTv,
+                        requesters = filterRequesters,
+                        searchFieldRequester = searchFieldRequester,
+                        downRequester = firstContentRequester,
+                        railSearchRequester = railSearchRequester,
+                        leftEdgeRequester = if (hasRemovableHistory) clearAllRequester else null,
+                        onContentFocusTargetChanged = onContentFocusTargetChanged,
+                        onSelect = onFilterSelected,
+                    )
+                }
+                if (hasRemovableHistory) {
+                    Spacer(Modifier.width(8.dp))
+                    FocusButton(
+                        text = "مسح الكل",
+                        onClick = onClearRecent,
+                        modifier = Modifier
+                            .focusRequester(clearAllRequester)
+                            .onFocusChanged { focusState ->
+                                if (isTv && focusState.isFocused) {
+                                    onContentFocusTargetChanged(clearAllRequester)
+                                }
+                            }
+                            .focusProperties {
+                                if (isTv) {
+                                    up = selectedFilterRequester
+                                    down = firstContentRequester ?: FocusRequester.Cancel
+                                    right = lastFilterRequester
+                                    left = FocusRequester.Cancel
+                                }
+                            }
+                            .onPreviewKeyEvent { event ->
+                                if (!isTv || event.type != KeyEventType.KeyDown) {
+                                    false
+                                } else {
+                                    when (event.key) {
+                                        Key.DirectionUp -> moveFocusTo(selectedFilterRequester)
+                                        Key.DirectionDown -> {
+                                            firstContentRequester?.let { moveFocusTo(it) } ?: true
+                                        }
+                                        Key.DirectionRight -> moveFocusTo(lastFilterRequester)
+                                        Key.DirectionLeft -> true
+                                        else -> false
+                                    }
+                                }
+                            },
+                        primary = false,
+                        compact = true,
+                        outlined = true,
+                        scaleOnFocus = false,
                     )
                 }
             }
-            if (!isTv && screenWidth >= 600 && !imeVisible) {
-                FocusButton(
-                    text = "تغيير المستخدم",
-                    onClick = onSwitchProfile,
-                    primary = false,
-                    compact = true,
-                    outlined = true,
-                )
-            }
         }
 
-        Spacer(Modifier.height(if (compactHeight || imeVisible) 8.dp else 14.dp))
-
-        SmartSearchInput(
-            value = state.searchQuery,
-            onValueChange = onSearch,
-            isTv = isTv,
-            hasResults = results.isNotEmpty(),
-            hasRecent = state.searchQuery.isBlank() && recentEntries.isNotEmpty(),
-            searchFieldRequester = searchFieldRequester,
-            firstFilterRequester = if (isTv) selectedFilterRequester else null,
-            firstResultRequester = firstResultRequester,
-            firstRecentRequester = firstRecentRequester,
-            railSearchRequester = railSearchRequester,
-            onFocusStateChanged = onSearchFieldFocusChanged,
-        )
-
-        Spacer(Modifier.height(if (compactHeight || imeVisible) 7.dp else 10.dp))
-
-        SmartSearchFilterBar(
-            selected = selectedFilter,
-            isTv = isTv,
-            requesters = filterRequesters,
-            searchFieldRequester = searchFieldRequester,
-            downRequester = firstContentRequester,
-            railSearchRequester = railSearchRequester,
-            onContentFocusTargetChanged = onContentFocusTargetChanged,
-            onSelect = onFilterSelected,
-        )
-
-        Spacer(Modifier.height(if (compactHeight || imeVisible) 7.dp else 10.dp))
-
         when {
-            state.searchQuery.isBlank() -> {
-                SmartRecentSection(
+            state.searchQuery.isBlank() && gridRows.isNotEmpty() -> {
+                SmartSearchCatalogGrid(
                     modifier = Modifier.weight(1f),
-                    entries = recentEntries,
+                    rows = gridRows,
                     isTv = isTv,
-                    firstRecentRequester = firstRecentRequester,
-                    topRequester = selectedFilterRequester,
+                    editing = isTv && tvEditing,
+                    restoreKey = restoreKey,
+                    firstItemRequester = firstGridRequester,
+                    railSearchRequester = railSearchRequester,
+                    onFocusedRow = { index, key ->
+                        navigationMemory.save(
+                            destination = MainDestination.SEARCH,
+                            itemKey = key,
+                            itemIndex = index,
+                            rowKey = selectedFilter.name,
+                        )
+                    },
+                    onMoveUpFromFirstRow = { moveFocusTo(selectedFilterRequester) },
                     onContentFocusTargetChanged = onContentFocusTargetChanged,
-                    onOpen = onOpenRecent,
-                    onRemove = onRemoveRecent,
-                    onClear = onClearRecent,
+                    onOpenRow = { row ->
+                        when (row) {
+                            is SmartSearchGridRow.Result -> onOpenResult(row.item)
+                            is SmartSearchGridRow.History -> onOpenRecent(row.entry)
+                        }
+                    },
+                    onDeleteRow = { row -> onRemoveRecent(row.entry) },
+                    isFavorite = isFavorite,
+                    onToggleFavorite = onToggleFavorite,
                 )
             }
 
-            state.searchQuery.trim().length < SMART_SEARCH_MIN_QUERY_LENGTH -> {
-                SearchMessage(
+            state.searchQuery.isBlank() -> {
+                SmartSearchStateNotice(
+                    modifier = Modifier.weight(1f),
+                    isTv = isTv,
+                    title = "ابدا البحث",
+                    subtitle = "اكتب اسم فلم او مسلسل او قناة",
+                )
+            }
+
+            !queryEligible -> {
+                SmartSearchStateNotice(
                     modifier = Modifier.weight(1f),
                     isTv = isTv,
                     title = "اكتب حرفين على الاقل",
@@ -563,34 +854,100 @@ private fun SmartSearchContent(
             }
 
             results.isNotEmpty() -> {
-                SmartResultsGrid(
-                    modifier = Modifier.weight(1f),
-                    results = results,
-                    isTv = isTv,
-                    firstResultRequester = firstResultRequester,
-                    topRequester = selectedFilterRequester,
-                    railSearchRequester = railSearchRequester,
-                    onContentFocusTargetChanged = onContentFocusTargetChanged,
-                    isFavorite = { item -> "${item.type.name}:${item.id}" in state.favorites },
-                    onOpenResult = onOpenResult,
-                    onToggleFavorite = onToggleFavorite,
-                )
-            }
-
-            searchPending -> {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    LoadingRing(label = "جاري البحث…")
+                Column(Modifier.weight(1f).fillMaxWidth()) {
+                    if (errorMessage != null) {
+                        MoviesErrorNotice(
+                            title = if (offline) "لا يوجد اتصال بالانترنت" else "تعذر تحميل المحتوى",
+                            body = if (offline) "تحقق من اتصالك وحاول مرة اخرى" else "حاول مرة اخرى",
+                            onRetry = onRefresh,
+                            isTv = isTv,
+                            networkFailure = offline,
+                            retryRequester = retryRequester,
+                            onRetryFocusChanged = { focused ->
+                                if (isTv && focused) onContentFocusTargetChanged(retryRequester)
+                            },
+                            onRetryUp = if (isTv) {
+                                { moveFocusTo(selectedFilterRequester) }
+                            } else {
+                                null
+                            },
+                            onRetryDown = if (isTv) {
+                                { moveFocusTo(firstGridRequester) }
+                            } else {
+                                null
+                            },
+                        )
+                        Spacer(Modifier.height(10.dp))
+                    }
+                    SmartSearchCatalogGrid(
+                        modifier = Modifier.weight(1f),
+                        rows = gridRows,
+                        isTv = isTv,
+                        editing = isTv && tvEditing,
+                        restoreKey = restoreKey,
+                        firstItemRequester = firstGridRequester,
+                        railSearchRequester = railSearchRequester,
+                        onFocusedRow = { index, key ->
+                            navigationMemory.save(
+                                destination = MainDestination.SEARCH,
+                                itemKey = key,
+                                itemIndex = index,
+                                rowKey = selectedFilter.name,
+                            )
+                        },
+                        onMoveUpFromFirstRow = { moveFocusTo(selectedFilterRequester) },
+                        onContentFocusTargetChanged = onContentFocusTargetChanged,
+                        onOpenRow = { row ->
+                            (row as? SmartSearchGridRow.Result)?.let { onOpenResult(it.item) }
+                        },
+                        onDeleteRow = null,
+                        isFavorite = isFavorite,
+                        onToggleFavorite = onToggleFavorite,
+                    )
                 }
             }
 
+            searchPending -> {
+                SmartSearchStateNotice(
+                    modifier = Modifier.weight(1f),
+                    isTv = isTv,
+                    title = "جاري البحث",
+                    subtitle = null,
+                    loading = true,
+                )
+            }
+
             loadingCatalogs -> {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    LoadingRing(label = "جاري تحميل بقية المحتوى…")
+                SmartSearchStateNotice(
+                    modifier = Modifier.weight(1f),
+                    isTv = isTv,
+                    title = "جاري تحميل المحتوى",
+                    subtitle = null,
+                    loading = true,
+                )
+            }
+
+            errorMessage != null -> {
+                Box(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    MoviesOfflineEmptyState(
+                        onRetry = onRefresh,
+                        title = if (offline) {
+                            "لا يوجد اتصال بالانترنت ، تحقق من اتصالك وحاول مرة اخرى"
+                        } else {
+                            "تعذر تحميل المحتوى ، حاول مرة اخرى"
+                        },
+                        body = null,
+                        networkFailure = offline,
+                        retryRequester = retryRequester,
+                    )
                 }
             }
 
             else -> {
-                SearchMessage(
+                SmartSearchStateNotice(
                     modifier = Modifier.weight(1f),
                     isTv = isTv,
                     title = if (selectedFilter == SmartSearchFilter.ALL) {
@@ -598,7 +955,7 @@ private fun SmartSearchContent(
                     } else {
                         "لا توجد نتائج في ${selectedFilter.label}"
                     },
-                    subtitle = "جرب جزءا آخر من الاسم أو اختر نوع محتوى مختلف",
+                    subtitle = "جرب اسما اخر او غير نوع المحتوى",
                 )
             }
         }
@@ -606,48 +963,88 @@ private fun SmartSearchContent(
 }
 
 @Composable
-private fun SearchMessage(
+private fun SmartSearchToolbarTitle(
+    title: String,
+    count: Int,
+    countUnit: String,
+    isTv: Boolean,
+) {
+    val colors = LocalHulkColors.current
+    Column(Modifier.width(if (isTv) 185.dp else 105.dp)) {
+        Text(
+            text = title,
+            color = colors.text,
+            fontSize = if (isTv) 27.sp else MOBILE_SECTION_TITLE_SIZE,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = "$count $countUnit",
+            color = colors.textMuted,
+            fontSize = if (isTv) 10.sp else MOBILE_SECTION_COUNT_SIZE,
+        )
+    }
+}
+
+@Composable
+private fun SmartSearchStateNotice(
     modifier: Modifier,
     isTv: Boolean,
     title: String,
-    subtitle: String,
+    subtitle: String?,
+    loading: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(colors.surfaceRaised.copy(alpha = .55f)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                imageVector = Icons.Rounded.Search,
-                contentDescription = null,
-                tint = colors.goldBright,
-                modifier = Modifier.size(34.dp),
-            )
+    val shape = RoundedCornerShape(12.dp)
+    Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = if (isTv) 520.dp else 380.dp)
+                .fillMaxWidth()
+                .clip(shape)
+                .background(Color(0xFF11120D))
+                .border(1.dp, colors.gold.copy(alpha = .35f), shape)
+                .padding(horizontal = 16.dp, vertical = if (isTv) 20.dp else 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (loading) {
+                LoadingRing()
+            } else {
+                Icon(
+                    imageVector = Icons.Rounded.Search,
+                    contentDescription = null,
+                    tint = colors.gold,
+                    modifier = Modifier.size(if (isTv) 26.dp else 24.dp),
+                )
+            }
             Spacer(Modifier.height(8.dp))
             Text(
                 text = title,
                 color = colors.text,
                 fontWeight = FontWeight.Bold,
-                fontSize = if (isTv) 18.sp else 15.sp,
+                fontSize = if (isTv) 15.sp else 14.sp,
+                textAlign = TextAlign.Center,
             )
-            Text(
-                text = subtitle,
-                color = colors.textMuted,
-                fontSize = if (isTv) 11.sp else 10.sp,
-            )
+            if (subtitle != null) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = subtitle,
+                    color = colors.textMuted,
+                    fontSize = if (isTv) 11.sp else 10.sp,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SmartSearchInput(
     value: String,
     onValueChange: (String) -> Unit,
     isTv: Boolean,
+    editing: Boolean,
+    onEditingChange: (Boolean) -> Unit,
     hasResults: Boolean,
     hasRecent: Boolean,
     searchFieldRequester: FocusRequester,
@@ -656,26 +1053,37 @@ private fun SmartSearchInput(
     firstRecentRequester: FocusRequester,
     railSearchRequester: FocusRequester?,
     onFocusStateChanged: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
-    var tvEditing by remember { mutableStateOf(false) }
+    val windowInfo = LocalWindowInfo.current
+    var backSequenceConsumed by remember { mutableStateOf(false) }
     val voiceSearchRequester = remember { FocusRequester() }
+    val imeVisibleOnTv = isTv && WindowInsets.isImeVisible
+    var hadImeVisible by remember { mutableStateOf(false) }
+    // The system keyboard can close itself (Back reaches the IME window first) without any app
+    // focus change; that still ends the TV editing session while query and page stay untouched.
+    LaunchedEffect(isTv, editing, imeVisibleOnTv) {
+        if (!isTv) return@LaunchedEffect
+        if (imeVisibleOnTv) hadImeVisible = true
+        if (editing && hadImeVisible && !imeVisibleOnTv) {
+            onEditingChange(false)
+        }
+        if (!editing) hadImeVisible = imeVisibleOnTv
+    }
 
     val moveDown: () -> Boolean = {
         when {
             firstFilterRequester != null -> {
-                tvEditing = false
                 keyboardController?.hide()
                 runCatching { firstFilterRequester.requestFocus() }.getOrDefault(false)
             }
             hasResults -> {
-                tvEditing = false
                 keyboardController?.hide()
                 runCatching { firstResultRequester.requestFocus() }.getOrDefault(false)
             }
             hasRecent -> {
-                tvEditing = false
                 keyboardController?.hide()
                 runCatching { firstRecentRequester.requestFocus() }.getOrDefault(false)
             }
@@ -694,29 +1102,52 @@ private fun SmartSearchInput(
             }
             .onFocusChanged { state ->
                 onFocusStateChanged(state.isFocused)
-                if (!state.isFocused) {
-                    tvEditing = false
+                // A transient platform/IME window blur is not intentional app navigation; only a
+                // real focus transfer inside the focused app window ends the editing session.
+                if (!state.isFocused && windowInfo.isWindowFocused) {
+                    onEditingChange(false)
                     keyboardController?.hide()
                 }
             }
             .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) {
+                if (event.key == Key.Back && editing) {
+                    // One Back owner: the first Back closes editing and keeps the query and the
+                    // Search page. While the system keyboard is still visible its Back is
+                    // consumed with its release; when the keyboard already closed itself, this
+                    // Back is the later one and must follow the existing navigation.
+                    when {
+                        event.type == KeyEventType.KeyDown && imeVisibleOnTv -> {
+                            backSequenceConsumed = true
+                            onEditingChange(false)
+                            keyboardController?.hide()
+                            true
+                        }
+                        event.type == KeyEventType.KeyDown -> {
+                            onEditingChange(false)
+                            false
+                        }
+                        event.type == KeyEventType.KeyUp && backSequenceConsumed -> {
+                            backSequenceConsumed = false
+                            true
+                        }
+                        else -> false
+                    }
+                } else if (event.type != KeyEventType.KeyDown) {
                     false
-                } else if (!tvEditing && (event.key == Key.Enter || event.key == Key.DirectionCenter)) {
-                    tvEditing = true
+                } else if (!editing && (event.key == Key.Enter || event.key == Key.DirectionCenter)) {
+                    onEditingChange(true)
                     keyboardController?.show()
                     true
-                } else if (!tvEditing && event.key == Key.DirectionDown) {
+                } else if (!editing && event.key == Key.DirectionDown) {
                     moveDown()
+                } else if (!editing && event.key == Key.DirectionUp) {
                     true
-                } else if (!tvEditing && event.key == Key.DirectionUp) {
-                    true
-                } else if (!tvEditing && event.key == Key.DirectionLeft) {
-                    runCatching { voiceSearchRequester.requestFocus() }
-                    true
-                } else if (!tvEditing && event.key == Key.DirectionRight) {
-                    railSearchRequester?.let { runCatching { it.requestFocus() } }
-                    true
+                } else if (!editing && event.key == Key.DirectionLeft) {
+                    runCatching { voiceSearchRequester.requestFocus() }.getOrDefault(false)
+                } else if (!editing && event.key == Key.DirectionRight) {
+                    railSearchRequester?.let {
+                        runCatching { it.requestFocus() }.getOrDefault(false)
+                    } ?: true
                 } else {
                     false
                 }
@@ -725,24 +1156,28 @@ private fun SmartSearchInput(
         Modifier.onFocusChanged { onFocusStateChanged(it.isFocused) }
     }
 
-    Box(Modifier.fillMaxWidth()) {
+    Box(modifier) {
         HulkTextField(
             value = value,
             onValueChange = onValueChange,
-            label = "اكتب اسم فيلم او مسلسل او قناة…",
+            label = "اكتب اسم فلم او مسلسل او قناة",
             modifier = Modifier.fillMaxWidth().then(tvModifier),
-            readOnly = isTv && !tvEditing,
+            readOnly = isTv && !editing,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(
                 onSearch = {
                     keyboardController?.hide()
                     if (isTv) {
+                        // The explicit IME Search/Done transition ends editing once and hands the
+                        // focus to the first toolbar target without activating it.
+                        onEditingChange(false)
                         moveDown()
                     } else {
                         focusManager.clearFocus(force = true)
                     }
                 },
             ),
+            endActionSpace = if (isTv) 38.dp else 40.dp,
         )
         InlineVoiceSearchAction(
             query = value,
@@ -765,29 +1200,53 @@ private fun SmartSearchFilterBar(
     searchFieldRequester: FocusRequester,
     downRequester: FocusRequester?,
     railSearchRequester: FocusRequester?,
+    leftEdgeRequester: FocusRequester?,
     onContentFocusTargetChanged: (FocusRequester) -> Unit,
     onSelect: (SmartSearchFilter) -> Unit,
 ) {
+    val itemMetrics = rememberLiveCategoryStripMetrics()
+    val sidebarUnderlap = rememberCategorySidebarUnderlap(isTv, 8.dp)
     val focusScope = rememberCoroutineScope()
+    var downFocusJob by remember { mutableStateOf<Job?>(null) }
+
+    fun cancelDownFocusJob() {
+        downFocusJob?.cancel()
+        downFocusJob = null
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { downFocusJob?.cancel() }
+    }
+
+    fun moveFocus(target: FocusRequester?): Boolean =
+        target != null && runCatching { target.requestFocus() }.getOrDefault(false)
 
     fun requestDownFocus(): Boolean {
-        val target = downRequester ?: return true
+        val target = downRequester ?: return false
         val focused = runCatching { target.requestFocus() }.getOrDefault(false)
-        if (!focused) {
-            focusScope.launch {
-                delay(TV_GRID_FOCUS_SETTLE_MS)
-                runCatching { target.requestFocus() }
-            }
+        cancelDownFocusJob()
+        if (focused) return true
+        // The content may still be attaching; keep exactly one bounded retry and cancel it as soon
+        // as this selector loses focus so an obsolete job cannot pull focus back to the content.
+        downFocusJob = focusScope.launch {
+            delay(TV_GRID_FOCUS_SETTLE_MS)
+            runCatching { target.requestFocus() }
         }
-        return true
+        return false
     }
 
     LazyRow(
         modifier = Modifier
             .fillMaxWidth()
+            .extendCategoryViewportTowardStart(sidebarUnderlap.viewportExtraDp.dp)
             .focusGroup(),
-        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 7.dp),
+        contentPadding = PaddingValues(
+            start = sidebarUnderlap.startContentPaddingDp.dp,
+            top = 8.dp,
+            end = 8.dp,
+            bottom = 8.dp,
+        ),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         items(
             items = SmartSearchFilter.entries,
@@ -804,6 +1263,7 @@ private fun SmartSearchFilterBar(
                 modifier = Modifier
                     .focusRequester(requester)
                     .onFocusChanged { state ->
+                        if (!state.isFocused) cancelDownFocusJob()
                         if (isTv && state.isFocused) onContentFocusTargetChanged(requester)
                     }
                     .focusProperties {
@@ -814,7 +1274,9 @@ private fun SmartSearchFilterBar(
                             down = FocusRequester.Cancel
                         }
                         if (isTv) {
-                            left = leftNeighbor?.let(requesters::getValue) ?: FocusRequester.Cancel
+                            left = leftNeighbor?.let(requesters::getValue)
+                                ?: leftEdgeRequester
+                                ?: FocusRequester.Cancel
                             right = rightNeighbor?.let(requesters::getValue)
                                 ?: railSearchRequester
                                 ?: FocusRequester.Cancel
@@ -826,165 +1288,619 @@ private fun SmartSearchFilterBar(
                         } else {
                             when (event.key) {
                                 Key.DirectionUp -> {
-                                    runCatching { searchFieldRequester.requestFocus() }
-                                    true
+                                    cancelDownFocusJob()
+                                    moveFocus(searchFieldRequester)
                                 }
                                 Key.DirectionDown -> requestDownFocus()
                                 Key.DirectionLeft -> {
-                                    leftNeighbor?.let { runCatching { requesters.getValue(it).requestFocus() } }
-                                    true
+                                    cancelDownFocusJob()
+                                    when {
+                                        leftNeighbor != null -> moveFocus(requesters.getValue(leftNeighbor))
+                                        leftEdgeRequester != null -> moveFocus(leftEdgeRequester)
+                                        else -> true
+                                    }
                                 }
                                 Key.DirectionRight -> {
+                                    cancelDownFocusJob()
                                     if (rightNeighbor != null) {
-                                        runCatching { requesters.getValue(rightNeighbor).requestFocus() }
+                                        moveFocus(requesters.getValue(rightNeighbor))
                                     } else {
                                         onContentFocusTargetChanged(requester)
-                                        railSearchRequester?.let { runCatching { it.requestFocus() } }
+                                        if (railSearchRequester != null) {
+                                            moveFocus(railSearchRequester)
+                                        } else {
+                                            true
+                                        }
                                     }
-                                    true
                                 }
                                 else -> false
                             }
                         }
-                    },
+                    }
+                    .then(itemMetrics.compactHeightModifier),
                 primary = active,
                 compact = true,
-                outlined = !active,
+                scaleOnFocus = false,
+                textSizeSp = itemMetrics.textSizeSp,
+                textLineHeightSp = 15,
             )
         }
     }
 }
 
-@Composable
-private fun SmartRecentSection(
-    modifier: Modifier,
-    entries: List<ProfileContentSearchHistoryEntry>,
-    isTv: Boolean,
-    firstRecentRequester: FocusRequester,
-    topRequester: FocusRequester,
-    onContentFocusTargetChanged: (FocusRequester) -> Unit,
-    onOpen: (ProfileContentSearchHistoryEntry) -> Unit,
-    onRemove: (ProfileContentSearchHistoryEntry) -> Unit,
-    onClear: () -> Unit,
-) {
-    val colors = LocalHulkColors.current
-    val recentKeys = entries.map { it.stableKey }
-    val openRequesters = remember(recentKeys, firstRecentRequester) {
-        List(entries.size) { index -> if (index == 0) firstRecentRequester else FocusRequester() }
-    }
-    val deleteRequesters = remember(recentKeys) {
-        List(entries.size) { FocusRequester() }
-    }
-    val clearAllRequester = remember { FocusRequester() }
-    val nearestRecentRequester = deleteRequesters.lastOrNull() ?: firstRecentRequester
 
-    Column(modifier = modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = if (entries.isEmpty()) "ابدأ البحث" else "المحتوى الذي بحثت عنه مؤخرا",
-                    color = colors.text,
-                    fontSize = if (isTv) 20.sp else 16.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = if (entries.isEmpty()) {
-                        "يتم حفظ المحتوى الذي تختاره فقط"
-                    } else {
-                        "المحتوى الذي تختاره يظهر هنا بدون تكرار"
-                    },
-                    color = colors.textMuted,
-                    fontSize = if (isTv) 11.sp else 10.sp,
-                    maxLines = 2,
-                )
+/** One unified Search catalog row: a ranked result or a saved-history entry. */
+private sealed interface SmartSearchGridRow {
+    val key: String
+
+    data class Result(val item: ContentItem) : SmartSearchGridRow {
+        override val key: String get() = "result:${item.type}:${item.id}"
+    }
+
+    data class History(
+        val entry: ProfileContentSearchHistoryEntry,
+        val resolved: ContentItem?,
+    ) : SmartSearchGridRow {
+        override val key: String get() = "history:${entry.stableKey}"
+
+        val cardItem: ContentItem
+            get() = resolved ?: ContentItem(
+                id = entry.contentId,
+                name = entry.title,
+                categoryId = "",
+                type = entry.contentType,
+                posterUrl = entry.posterUrl,
+                rating = null,
+                year = entry.year,
+                containerExtension = null,
+            )
+    }
+}
+
+/**
+ * One vertical Search catalog grid for both projections, on the accepted R10 single-scroll-owner
+ * policy: accepted catalog metrics and column policy shared by layout and D-pad arithmetic, no
+ * competing framework BringIntoView on TV, and a measured full-card reveal that includes the
+ * footer/actions and the TV safe bottom inset. Search keeps its own memory row and never shares
+ * another destination's navigation memory.
+ */
+@Composable
+private fun SmartSearchCatalogGrid(
+    modifier: Modifier,
+    rows: List<SmartSearchGridRow>,
+    isTv: Boolean,
+    editing: Boolean,
+    restoreKey: String?,
+    firstItemRequester: FocusRequester,
+    railSearchRequester: FocusRequester?,
+    onFocusedRow: (Int, String) -> Unit,
+    onMoveUpFromFirstRow: () -> Boolean,
+    onContentFocusTargetChanged: (FocusRequester) -> Unit,
+    onOpenRow: (SmartSearchGridRow) -> Unit,
+    onDeleteRow: ((SmartSearchGridRow.History) -> Unit)?,
+    isFavorite: (ContentItem) -> Boolean,
+    onToggleFavorite: (ContentItem) -> Unit,
+) {
+    val adaptiveUi = LocalAdaptiveUi.current
+    val isTelevision = adaptiveUi.isTelevision
+    val density = LocalDensity.current
+    val metrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
+        tvCatalogMetrics(
+            screenWidthDp = adaptiveUi.screenWidthDp,
+            screenHeightDp = adaptiveUi.screenHeightDp,
+            boxedCards = true,
+        )
+    }
+    val keys = remember(rows) { rows.map { it.key } }
+    val requesters = remember(keys, firstItemRequester) {
+        List(keys.size) { index -> if (index == 0) firstItemRequester else FocusRequester() }
+    }
+    val deleteRequesters = remember(keys, onDeleteRow != null) {
+        List(keys.size) { FocusRequester() }
+    }
+    val focusMoveState = remember(keys) { TvCatalogFocusMoveState() }
+    val scope = rememberCoroutineScope()
+    var focusedIndex by remember { mutableIntStateOf(-1) }
+    var focusedKey by remember { mutableStateOf<String?>(null) }
+    var deleteFocusedIndex by remember { mutableIntStateOf(-1) }
+    var suppressSelectKeyUp by remember { mutableStateOf(false) }
+    val previousKeys = remember { mutableStateOf(keys) }
+    val editingNow = rememberUpdatedState(editing)
+    val initialIndex = remember(keys, restoreKey) {
+        restoreKey?.let(keys::indexOf)?.takeIf { it >= 0 } ?: 0
+    }
+    val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = initialIndex)
+    val focusViewportInsetPx = with(density) { metrics.focusViewportInsetDp.dp.roundToPx() }
+    val focusSafeBottomInsetPx = with(density) { metrics.focusSafeBottomInsetDp.dp.roundToPx() }
+    val inheritedBringIntoViewSpec = LocalBringIntoViewSpec.current
+    val searchBringIntoViewSpec = remember { moviesNoBringIntoViewSpec() }
+    val gridBringIntoViewSpec = if (isTelevision) searchBringIntoViewSpec else inheritedBringIntoViewSpec
+
+    DisposableEffect(focusMoveState) {
+        onDispose { focusMoveState.job?.cancel() }
+    }
+
+    // Editing owns the input while it is active: obsolete grid focus jobs are cancelled the
+    // moment editing begins so a queued relocation can never pull focus out of the query field.
+    LaunchedEffect(editing) {
+        if (editing) {
+            focusMoveState.job?.cancel()
+            focusMoveState.job = null
+        }
+    }
+
+    fun currentIndexCorrection(index: Int): Int? {
+        val layoutInfo = gridState.layoutInfo
+        val targetInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return null
+        return focusedCardScrollCorrection(
+            itemTop = targetInfo.offset.y,
+            itemBottom = targetInfo.offset.y + targetInfo.size.height,
+            usableStart = layoutInfo.viewportStartOffset + focusViewportInsetPx,
+            usableEnd = layoutInfo.viewportEndOffset - focusSafeBottomInsetPx - focusViewportInsetPx,
+            marginPx = focusViewportInsetPx,
+        )
+    }
+
+    suspend fun ensureIndexFullyVisible(index: Int) {
+        revealFocusedGridItem(
+            gridState = gridState,
+            index = index,
+            focusInsetPx = focusViewportInsetPx,
+            safeBottomInsetPx = focusSafeBottomInsetPx,
+            extraMarginPx = focusViewportInsetPx,
+        )
+    }
+
+    suspend fun focusIndex(index: Int, ensureFullyVisible: Boolean) {
+        val requester = requesters.getOrNull(index) ?: return
+        // An offscreen target first gets a bounded one-row reveal; the attachment below comes from
+        // real layout, never from a fixed settle delay. Once attached, one measured correction is
+        // applied and focus is granted immediately.
+        if (currentIndexCorrection(index) == null) {
+            repeat(2) {
+                val visible = gridState.layoutInfo.visibleItemsInfo
+                if (visible.any { it.index == index }) return@repeat
+                val rowHeight = visible.firstOrNull()?.size?.height ?: return@repeat
+                val step = rowHeight + with(density) { metrics.verticalSpacingDp.dp.roundToPx() }
+                val firstVisible = visible.minOfOrNull { it.index } ?: return@repeat
+                val lastVisible = visible.maxOfOrNull { it.index } ?: return@repeat
+                when {
+                    index > lastVisible -> gridState.animateScrollBy(step.toFloat())
+                    index < firstVisible -> gridState.animateScrollBy(-step.toFloat())
+                    else -> return@repeat
+                }
             }
-            if (entries.isNotEmpty()) {
-                FocusButton(
-                    text = "مسح الكل",
-                    onClick = onClear,
-                    modifier = Modifier
-                        .focusRequester(clearAllRequester)
+        }
+        if (ensureFullyVisible) {
+            currentIndexCorrection(index)?.let { correction ->
+                if (correction != 0) gridState.scrollBy(correction.toFloat())
+            }
+        }
+        runCatching { requester.requestFocus() }
+    }
+
+    fun saveFocusedRow(index: Int) {
+        val key = keys.getOrNull(index) ?: return
+        focusedIndex = index
+        focusedKey = key
+        onFocusedRow(index, key)
+    }
+
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val columnCount: Int
+        val contentPadding: PaddingValues
+        val horizontalSpacing: Dp
+        val verticalSpacing: Dp
+        val availableGridWidth: Dp
+        if (isTelevision) {
+            horizontalSpacing = metrics.horizontalSpacingDp.dp
+            verticalSpacing = metrics.verticalSpacingDp.dp
+            contentPadding = PaddingValues(
+                start = metrics.horizontalContentPaddingDp.dp,
+                top = metrics.horizontalContentPaddingDp.dp,
+                end = metrics.endContentPaddingDp.dp,
+                bottom = metrics.bottomContentPaddingDp.dp,
+            )
+            availableGridWidth = (
+                maxWidth - metrics.horizontalContentPaddingDp.dp - metrics.endContentPaddingDp.dp
+                ).coerceAtLeast(metrics.minCellWidthDp.dp)
+            columnCount = movieCatalogColumnCount(
+                availableWidthDp = availableGridWidth.value,
+                spacingDp = metrics.horizontalSpacingDp,
+                minCellWidthDp = metrics.minCellWidthDp,
+            )
+        } else {
+            horizontalSpacing = FAVORITES_MOBILE_HORIZONTAL_SPACING
+            verticalSpacing = FAVORITES_MOBILE_VERTICAL_SPACING
+            contentPadding = PaddingValues(
+                start = FAVORITES_MOBILE_HORIZONTAL_PADDING,
+                top = 5.dp,
+                end = FAVORITES_MOBILE_HORIZONTAL_PADDING,
+                bottom = FAVORITES_MOBILE_BOTTOM_PADDING,
+            )
+            val compactWidth = adaptiveUi.windowWidthClass == HulkWindowWidthClass.COMPACT
+            availableGridWidth = (
+                maxWidth - FAVORITES_MOBILE_HORIZONTAL_PADDING * 2
+                ).coerceAtLeast(1.dp)
+            val minCellWidthDp = if (compactWidth) {
+                FAVORITES_MOBILE_MIN_CELL_WIDTH.value
+            } else {
+                movieCatalogMinCellWidthDp(adaptiveUi.screenWidthDp)
+            }
+            val rawColumns = movieCatalogColumnCount(
+                availableWidthDp = availableGridWidth.value,
+                spacingDp = FAVORITES_MOBILE_HORIZONTAL_SPACING.value,
+                minCellWidthDp = minCellWidthDp,
+            )
+            columnCount = if (compactWidth) rawColumns.coerceAtMost(2) else rawColumns
+        }
+        val cellWidth = (
+            (availableGridWidth - horizontalSpacing * (columnCount - 1)) / columnCount
+            ).coerceAtLeast(1.dp)
+        val usableGridHeightPx = with(density) {
+            (maxHeight - metrics.horizontalContentPaddingDp.dp -
+                (if (isTelevision) metrics.focusSafeBottomInsetDp.dp else 0.dp))
+                .coerceAtLeast(1.dp)
+                .roundToPx()
+        }
+        var boxedFooterHeightPx by remember(keys) { mutableIntStateOf(0) }
+        val compactArtworkHeightDp = if (isTelevision && boxedFooterHeightPx > 0) {
+            movieCompactArtworkHeightPx(
+                cellWidthPx = with(density) { cellWidth.roundToPx() },
+                footerHeightPx = boxedFooterHeightPx,
+                usableHeightPx = usableGridHeightPx,
+                minArtworkHeightPx = with(density) {
+                    MOVIE_COMPACT_ARTWORK_MIN_HEIGHT_DP.dp.roundToPx()
+                },
+            )?.let { heightPx -> with(density) { heightPx.toDp() } }
+        } else {
+            null
+        }
+
+        fun moveGridTo(nextIndex: Int): Boolean {
+            val requester = requesters.getOrNull(nextIndex) ?: return false
+            val layoutInfo = gridState.layoutInfo
+            val targetInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.index == nextIndex }
+            val focusPath = tvCatalogFocusPath(
+                targetIndex = nextIndex,
+                itemCount = rows.size,
+                itemTop = targetInfo?.offset?.y,
+                itemBottom = targetInfo?.let { it.offset.y + it.size.height },
+                viewportStart = layoutInfo.viewportStartOffset + focusViewportInsetPx,
+                viewportEnd = layoutInfo.viewportEndOffset -
+                    focusSafeBottomInsetPx - focusViewportInsetPx,
+                extraMargin = focusViewportInsetPx,
+            )
+            if (focusPath == TvCatalogFocusPath.INVALID) return false
+            focusMoveState.begin(nextIndex)
+            saveFocusedRow(nextIndex)
+            focusMoveState.job?.cancel()
+            focusMoveState.job = null
+            val focusedDirectly = if (focusPath == TvCatalogFocusPath.DIRECT) {
+                runCatching { requester.requestFocus() }.getOrDefault(false)
+            } else {
+                false
+            }
+            if (focusedDirectly) {
+                focusMoveState.complete(nextIndex)
+            } else {
+                focusMoveState.job = scope.launch {
+                    focusIndex(nextIndex, ensureFullyVisible = true)
+                    focusMoveState.complete(nextIndex)
+                }
+            }
+            return true
+        }
+
+        // One content transition owner: a removal moves focus to the next surviving stable key,
+        // then the previous item; any other key transition resets the grid location. The release of
+        // the deleting press is consumed once so it can never activate the replacement card.
+        // While editing, a key change is a query/ranking change, never a deletion: it must not
+        // relocate focus to a card.
+        LaunchedEffect(keys) {
+            val previous = previousKeys.value
+            previousKeys.value = keys
+            val removedKey = focusedKey
+            val isRemoval = !editingNow.value &&
+                removedKey != null && removedKey in previous && removedKey !in keys
+            focusMoveState.job?.cancel()
+            focusMoveState.job = null
+            if (isRemoval) {
+                val removedIndex = previous.indexOf(removedKey)
+                val nextIndex = favoritesRemovalFocusIndex(removedIndex, keys.size)
+                if (nextIndex == null) {
+                    focusedIndex = -1
+                    focusedKey = null
+                    return@LaunchedEffect
+                }
+                val nextKey = keys[nextIndex]
+                snapshotFlow {
+                    gridState.layoutInfo.visibleItemsInfo.any { it.key == nextKey }
+                }.first { it }
+                if (editingNow.value) return@LaunchedEffect
+                ensureIndexFullyVisible(nextIndex)
+                runCatching { requesters[nextIndex].requestFocus() }
+                focusedIndex = nextIndex
+                focusedKey = nextKey
+                onFocusedRow(nextIndex, nextKey)
+            } else {
+                focusedIndex = -1
+                focusedKey = null
+                if (!editingNow.value && restoreKey == null && gridState.firstVisibleItemIndex != 0) {
+                    gridState.scrollToItem(0)
+                }
+            }
+        }
+
+        LaunchedEffect(keys, restoreKey) {
+            val index = restoreKey?.let(keys::indexOf) ?: -1
+            if (index < 0 || focusedIndex == index) return@LaunchedEffect
+            // Restoration is an entry/navigation effect; an active editing session owns the input
+            // and an ordinary typing change must not restore a card over the query field.
+            if (editingNow.value) return@LaunchedEffect
+            gridState.scrollToItem(index)
+            snapshotFlow {
+                gridState.layoutInfo.visibleItemsInfo.any { it.index == index }
+            }.first { it }
+            if (editingNow.value) return@LaunchedEffect
+            ensureIndexFullyVisible(index)
+            if (editingNow.value) return@LaunchedEffect
+            runCatching { requesters[index].requestFocus() }
+            // The framework focus restorer may re-apply its own target a frame later; re-assert
+            // the restored card for a bounded number of frames, never with a sleep, and recheck
+            // the input ownership after each suspension.
+            for (attempt in 0 until 3) {
+                withFrameNanos { }
+                if (editingNow.value) break
+                if (focusedIndex == index) break
+                runCatching { requesters[index].requestFocus() }
+            }
+        }
+
+        CompositionLocalProvider(LocalBringIntoViewSpec provides gridBringIntoViewSpec) {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(columnCount),
+                state = gridState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (isTelevision) {
+                            Modifier.onPreviewKeyEvent { event ->
+                                val selectKey = event.key == Key.Enter ||
+                                    event.key == Key.DirectionCenter ||
+                                    event.key == Key.NumPadEnter ||
+                                    event.key == Key.Spacebar
+                                when (
+                                    favoritesSelectGuardDecision(
+                                        armed = suppressSelectKeyUp,
+                                        isSelectKey = selectKey,
+                                        isKeyUp = event.type == KeyEventType.KeyUp,
+                                        keyDownRepeatCount = event.nativeKeyEvent.repeatCount,
+                                    )
+                                ) {
+                                    FavoritesSelectGuardDecision.CONSUME_RELEASE -> {
+                                        suppressSelectKeyUp = false
+                                        true
+                                    }
+                                    FavoritesSelectGuardDecision.CLEAR_ARMED_ON_PRESS -> {
+                                        suppressSelectKeyUp = false
+                                        false
+                                    }
+                                    FavoritesSelectGuardDecision.PASS -> false
+                                }
+                            }
+                        } else {
+                            Modifier
+                        },
+                    ),
+                contentPadding = contentPadding,
+                horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
+                verticalArrangement = Arrangement.spacedBy(verticalSpacing),
+            ) {
+                itemsIndexed(
+                    items = rows,
+                    key = { index, _ -> keys[index] },
+                ) { index, row ->
+                    val rowKey = keys[index]
+                    val cardModifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(requesters[index])
                         .onFocusChanged { state ->
-                            if (isTv && state.isFocused) onContentFocusTargetChanged(clearAllRequester)
-                        }
-                        .focusProperties {
-                            if (isTv) {
-                                up = topRequester
-                                down = nearestRecentRequester
-                                right = nearestRecentRequester
-                                left = FocusRequester.Cancel
+                            if (!state.isFocused && focusedIndex == index) {
+                                focusedIndex = -1
                             }
                         }
                         .onPreviewKeyEvent { event ->
-                            if (!isTv || event.type != KeyEventType.KeyDown) {
-                                false
-                            } else {
-                                when (event.key) {
-                                    Key.DirectionUp -> {
-                                        runCatching { topRequester.requestFocus() }
-                                        true
+                            if (!isTelevision) return@onPreviewKeyEvent false
+                            // While this card's Delete owns focus the ancestor body handler must
+                            // not intercept the action's directional keys.
+                            if (deleteFocusedIndex == index) return@onPreviewKeyEvent false
+                            val move = when (event.key) {
+                                Key.DirectionLeft -> TvGridFocusMove.LEFT
+                                Key.DirectionRight -> TvGridFocusMove.RIGHT
+                                Key.DirectionUp -> TvGridFocusMove.UP
+                                Key.DirectionDown -> TvGridFocusMove.DOWN
+                                else -> null
+                            } ?: return@onPreviewKeyEvent false
+                            if (event.type == KeyEventType.KeyUp) return@onPreviewKeyEvent true
+                            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                            if (
+                                move == TvGridFocusMove.DOWN &&
+                                onDeleteRow != null &&
+                                row is SmartSearchGridRow.History
+                            ) {
+                                // The saved-content card body's DOWN entry point to its own
+                                // Delete; only a real focus transfer is consumed.
+                                return@onPreviewKeyEvent moveFocusTo(
+                                    deleteRequesters.getOrNull(index),
+                                )
+                            }
+                            val baseIndex = focusMoveState.baseIndex(index)
+                            val nextIndex = nextTvGridFocusIndex(
+                                currentIndex = baseIndex,
+                                itemCount = rows.size,
+                                columnCount = columnCount,
+                                move = move,
+                            )
+                            if (nextIndex == null) {
+                                return@onPreviewKeyEvent when (move) {
+                                    TvGridFocusMove.UP -> {
+                                        val onFirstRow = (baseIndex / columnCount) == 0
+                                        if (onFirstRow) onMoveUpFromFirstRow() else false
                                     }
-                                    Key.DirectionDown, Key.DirectionRight -> {
-                                        runCatching { nearestRecentRequester.requestFocus() }
-                                        true
+                                    TvGridFocusMove.RIGHT -> {
+                                        if (railSearchRequester != null) {
+                                            onContentFocusTargetChanged(requesters[index])
+                                            moveFocusTo(railSearchRequester)
+                                        } else {
+                                            true
+                                        }
                                     }
-                                    Key.DirectionLeft -> true
-                                    else -> false
+                                    TvGridFocusMove.DOWN, TvGridFocusMove.LEFT -> true
                                 }
                             }
-                        },
-                    primary = false,
-                    compact = true,
-                    outlined = true,
-                )
-            }
-        }
-        Spacer(Modifier.height(12.dp))
+                            moveGridTo(nextIndex)
+                        }
+                    val onFocusedCard = {
+                        saveFocusedRow(index)
+                        onContentFocusTargetChanged(requesters[index])
+                        // A card that received focus from outside the grid transaction (for
+                        // example DOWN from the toolbar) still gets one measured reveal when its
+                        // complete bounds are clipped.
+                        val clipped = currentIndexCorrection(index)?.let { it != 0 } == true
+                        if (isTelevision && clipped) {
+                            scope.launch { ensureIndexFullyVisible(index) }
+                        }
+                    }
+                    when (row) {
+                        is SmartSearchGridRow.Result -> when (row.item.type) {
+                            ContentType.LIVE -> LiveChannelHomeCard(
+                                name = row.item.name,
+                                artworkUrl = row.item.posterUrl,
+                                isFavorite = isFavorite(row.item),
+                                onClick = { onOpenRow(row) },
+                                modifier = cardModifier,
+                                onLongClick = { onToggleFavorite(row.item) },
+                                onFocused = onFocusedCard,
+                            )
 
-        if (entries.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(colors.surfaceRaised.copy(alpha = .52f))
-                    .border(1.dp, Color.White.copy(alpha = .06f), RoundedCornerShape(18.dp))
-                    .padding(vertical = if (isTv) 36.dp else 26.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Search,
-                    contentDescription = null,
-                    tint = colors.goldBright,
-                    modifier = Modifier.size(if (isTv) 42.dp else 34.dp),
-                )
-            }
-        } else {
-            LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusGroup(),
-                contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
-            ) {
-                itemsIndexed(
-                    items = entries,
-                    key = { _, entry -> entry.stableKey },
-                ) { index, entry ->
-                    SmartRecentCard(
-                        entry = entry,
-                        isTv = isTv,
-                        openRequester = openRequesters[index],
-                        deleteRequester = deleteRequesters[index],
-                        rightCardRequester = deleteRequesters.getOrNull(index - 1),
-                        leftCardRequester = openRequesters.getOrNull(index + 1) ?: clearAllRequester,
-                        topRequester = topRequester,
-                        onContentFocusTargetChanged = onContentFocusTargetChanged,
-                        onOpen = { onOpen(entry) },
-                        onRemove = { onRemove(entry) },
-                    )
+                            ContentType.SERIES -> SeriesCatalogBoxedCard(
+                                item = row.item,
+                                isFavorite = isFavorite(row.item),
+                                onClick = { onOpenRow(row) },
+                                modifier = cardModifier,
+                                onLongClick = { onToggleFavorite(row.item) },
+                                onFocused = onFocusedCard,
+                                artworkHeightDp = compactArtworkHeightDp,
+                                onFooterHeightMeasured = { boxedFooterHeightPx = it },
+                            )
+
+                            else -> MoviesCatalogBoxedCard(
+                                item = row.item,
+                                isFavorite = isFavorite(row.item),
+                                onClick = { onOpenRow(row) },
+                                modifier = cardModifier,
+                                onLongClick = { onToggleFavorite(row.item) },
+                                onFocused = onFocusedCard,
+                                artworkHeightDp = compactArtworkHeightDp,
+                                onFooterHeightMeasured = { boxedFooterHeightPx = it },
+                            )
+                        }
+
+                        is SmartSearchGridRow.History -> {
+                            val item = row.cardItem
+                            val deleteAction: (@Composable () -> Unit)? = onDeleteRow?.let { deleteRow ->
+                                {
+                                    SmartSearchHistoryDeleteAction(
+                                        requester = deleteRequesters[index],
+                                        cardRequester = requesters[index],
+                                        isTv = isTelevision,
+                                        onDelete = {
+                                            suppressSelectKeyUp = true
+                                            deleteRow(row)
+                                        },
+                                        onFocused = {
+                                            deleteFocusedIndex = index
+                                            onFocusedCard()
+                                        },
+                                        onFocusLost = {
+                                            if (deleteFocusedIndex == index) {
+                                                deleteFocusedIndex = -1
+                                            }
+                                        },
+                                        onMoveDown = {
+                                            val nextIndex = nextTvGridFocusIndex(
+                                                currentIndex = index,
+                                                itemCount = rows.size,
+                                                columnCount = columnCount,
+                                                move = TvGridFocusMove.DOWN,
+                                            )
+                                            if (nextIndex != null) moveGridTo(nextIndex) else true
+                                        },
+                                        onMoveLeft = {
+                                            val nextIndex = nextTvGridFocusIndex(
+                                                currentIndex = index,
+                                                itemCount = rows.size,
+                                                columnCount = columnCount,
+                                                move = TvGridFocusMove.LEFT,
+                                            )
+                                            if (nextIndex != null) {
+                                                moveFocusTo(deleteRequesters.getOrNull(nextIndex))
+                                            } else {
+                                                true
+                                            }
+                                        },
+                                        onMoveRight = {
+                                            val nextIndex = nextTvGridFocusIndex(
+                                                currentIndex = index,
+                                                itemCount = rows.size,
+                                                columnCount = columnCount,
+                                                move = TvGridFocusMove.RIGHT,
+                                            )
+                                            if (nextIndex != null) {
+                                                moveFocusTo(deleteRequesters.getOrNull(nextIndex))
+                                            } else {
+                                                true
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                            when (item.type) {
+                                ContentType.LIVE -> LiveChannelHomeCard(
+                                    name = item.name,
+                                    artworkUrl = item.posterUrl,
+                                    isFavorite = false,
+                                    onClick = { onOpenRow(row) },
+                                    modifier = cardModifier,
+                                    onFocused = onFocusedCard,
+                                    footerAction = deleteAction,
+                                )
+
+                                ContentType.SERIES -> SeriesCatalogBoxedCard(
+                                    item = item,
+                                    isFavorite = false,
+                                    onClick = { onOpenRow(row) },
+                                    modifier = cardModifier,
+                                    onFocused = onFocusedCard,
+                                    artworkHeightDp = compactArtworkHeightDp,
+                                    onFooterHeightMeasured = { boxedFooterHeightPx = it },
+                                    footerAction = deleteAction,
+                                )
+
+                                else -> MoviesCatalogBoxedCard(
+                                    item = item,
+                                    isFavorite = false,
+                                    onClick = { onOpenRow(row) },
+                                    modifier = cardModifier,
+                                    onFocused = onFocusedCard,
+                                    artworkHeightDp = compactArtworkHeightDp,
+                                    onFooterHeightMeasured = { boxedFooterHeightPx = it },
+                                    footerAction = deleteAction,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -992,279 +1908,56 @@ private fun SmartRecentSection(
 }
 
 @Composable
-private fun SmartRecentCard(
-    entry: ProfileContentSearchHistoryEntry,
+private fun SmartSearchHistoryDeleteAction(
+    requester: FocusRequester,
+    cardRequester: FocusRequester,
     isTv: Boolean,
-    openRequester: FocusRequester,
-    deleteRequester: FocusRequester,
-    rightCardRequester: FocusRequester?,
-    leftCardRequester: FocusRequester,
-    topRequester: FocusRequester,
-    onContentFocusTargetChanged: (FocusRequester) -> Unit,
-    onOpen: () -> Unit,
-    onRemove: () -> Unit,
+    onDelete: () -> Unit,
+    onFocused: () -> Unit,
+    onFocusLost: () -> Unit,
+    onMoveDown: () -> Boolean,
+    onMoveLeft: () -> Boolean,
+    onMoveRight: () -> Boolean,
 ) {
-    val colors = LocalHulkColors.current
-    Column(
+    FocusButton(
+        text = "حذف",
+        onClick = onDelete,
         modifier = Modifier
-            .width(if (isTv) 220.dp else 170.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xFF11130F))
-            .border(1.dp, Color.White.copy(alpha = .08f), RoundedCornerShape(16.dp))
-            .then(if (isTv) Modifier else Modifier.clickable(role = Role.Button, onClick = onOpen))
-            .padding(10.dp),
-    ) {
-        AsyncImage(
-            model = entry.posterUrl,
-            contentDescription = entry.title,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(if (isTv) 116.dp else 92.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(colors.surfaceRaised),
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = entry.title,
-            color = colors.text,
-            fontSize = if (isTv) 14.sp else 12.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = listOfNotNull(entry.contentType.smartLabel(), entry.year).joinToString(" • "),
-            color = colors.textMuted,
-            fontSize = if (isTv) 10.sp else 9.sp,
-            maxLines = 1,
-        )
-        Spacer(Modifier.height(7.dp))
-        Row(
-            modifier = Modifier.focusGroup(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            FocusButton(
-                text = "فتح",
-                onClick = onOpen,
-                modifier = Modifier
-                    .weight(1f)
-                    .focusRequester(openRequester)
-                    .onFocusChanged { state ->
-                        if (isTv && state.isFocused) onContentFocusTargetChanged(openRequester)
-                    }
-                    .focusProperties {
-                        if (isTv) {
-                            up = topRequester
-                            down = FocusRequester.Cancel
-                            left = deleteRequester
-                            right = rightCardRequester ?: FocusRequester.Cancel
-                        }
-                    }
-                    .onPreviewKeyEvent { event ->
-                        if (!isTv || event.type != KeyEventType.KeyDown) {
-                            false
-                        } else {
-                            when (event.key) {
-                                Key.DirectionUp -> {
-                                    runCatching { topRequester.requestFocus() }
-                                    true
-                                }
-                                Key.DirectionDown -> true
-                                Key.DirectionLeft -> {
-                                    runCatching { deleteRequester.requestFocus() }
-                                    true
-                                }
-                                Key.DirectionRight -> {
-                                    rightCardRequester?.let { runCatching { it.requestFocus() } }
-                                    true
-                                }
-                                else -> false
-                            }
-                        }
-                    },
-                compact = true,
-            )
-            FocusButton(
-                text = "حذف",
-                onClick = onRemove,
-                modifier = Modifier
-                    .focusRequester(deleteRequester)
-                    .onFocusChanged { state ->
-                        if (isTv && state.isFocused) onContentFocusTargetChanged(deleteRequester)
-                    }
-                    .focusProperties {
-                        if (isTv) {
-                            up = topRequester
-                            down = FocusRequester.Cancel
-                            right = openRequester
-                            left = leftCardRequester
-                        }
-                    }
-                    .onPreviewKeyEvent { event ->
-                        if (!isTv || event.type != KeyEventType.KeyDown) {
-                            false
-                        } else {
-                            when (event.key) {
-                                Key.DirectionUp -> {
-                                    runCatching { topRequester.requestFocus() }
-                                    true
-                                }
-                                Key.DirectionDown -> true
-                                Key.DirectionRight -> {
-                                    runCatching { openRequester.requestFocus() }
-                                    true
-                                }
-                                Key.DirectionLeft -> {
-                                    runCatching { leftCardRequester.requestFocus() }
-                                    true
-                                }
-                                else -> false
-                            }
-                        }
-                    },
-                primary = false,
-                compact = true,
-                outlined = true,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SmartResultsGrid(
-    modifier: Modifier,
-    results: List<ContentItem>,
-    isTv: Boolean,
-    firstResultRequester: FocusRequester,
-    topRequester: FocusRequester,
-    railSearchRequester: FocusRequester?,
-    onContentFocusTargetChanged: (FocusRequester) -> Unit,
-    isFavorite: (ContentItem) -> Boolean,
-    onOpenResult: (ContentItem) -> Unit,
-    onToggleFavorite: (ContentItem) -> Unit,
-) {
-    val colors = LocalHulkColors.current
-    val gridState = rememberLazyGridState()
-    val navigationScope = rememberCoroutineScope()
-    val resultKeys = results.map { "${it.type}:${it.id}" }
-    val resultRequesters = remember(resultKeys, firstResultRequester) {
-        List(results.size) { index -> if (index == 0) firstResultRequester else FocusRequester() }
-    }
-    var navigationJob by remember(results) { mutableStateOf<Job?>(null) }
-
-    fun requestResultFocus(targetIndex: Int): Boolean {
-        val requester = resultRequesters.getOrNull(targetIndex) ?: return false
-        val targetGridIndex = targetIndex + 1
-        navigationJob?.cancel()
-
-        val targetVisible = gridState.layoutInfo.visibleItemsInfo.any { it.index == targetGridIndex }
-        if (targetVisible) {
-            val focused = runCatching { requester.requestFocus() }.getOrDefault(false)
-            if (focused) return true
-        }
-
-        navigationJob = navigationScope.launch {
-            runCatching { gridState.scrollToItem(targetGridIndex) }
-            delay(TV_GRID_FOCUS_SETTLE_MS)
-            runCatching { requester.requestFocus() }
-        }
-        return true
-    }
-
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = if (isTv) 146.dp else 112.dp),
-        state = gridState,
-        modifier = modifier
-            .fillMaxWidth()
-            .focusGroup(),
-        contentPadding = PaddingValues(bottom = if (isTv) 24.dp else 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
-        verticalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
-    ) {
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "النتائج",
-                    color = colors.text,
-                    fontSize = if (isTv) 18.sp else 14.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(Modifier.width(7.dp))
-                Text(
-                    text = "${results.size} نتيجة",
-                    color = colors.textMuted,
-                    fontSize = if (isTv) 11.sp else 10.sp,
-                )
+            .focusRequester(requester)
+            .onFocusChanged { state ->
+                if (state.isFocused) onFocused() else onFocusLost()
             }
-        }
-
-        itemsIndexed(
-            items = results,
-            key = { _, item -> "result:${item.type}:${item.id}" },
-        ) { index, item ->
-            UniversalPosterCard(
-                item = item,
-                isFavorite = isFavorite(item),
-                onClick = { onOpenResult(item) },
-                onLongClick = { onToggleFavorite(item) },
-                onFocused = {
-                    navigationJob?.cancel()
-                    navigationJob = null
-                    if (isTv) onContentFocusTargetChanged(resultRequesters[index])
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(resultRequesters[index])
-                    .onPreviewKeyEvent { event ->
-                        if (!isTv || event.type != KeyEventType.KeyDown) {
-                            false
-                        } else {
-                            val columns = gridState.layoutInfo.maxSpan.coerceAtLeast(1)
-                            val rowStart = (index / columns) * columns
-                            val rowEnd = minOf(rowStart + columns - 1, results.lastIndex)
-                            when (event.key) {
-                                Key.DirectionUp -> {
-                                    val target = index - columns
-                                    if (target >= 0) {
-                                        requestResultFocus(target)
-                                    } else {
-                                        runCatching { topRequester.requestFocus() }
-                                    }
-                                    true
-                                }
-                                Key.DirectionDown -> {
-                                    val target = index + columns
-                                    if (target < results.size) {
-                                        requestResultFocus(target)
-                                    }
-                                    true
-                                }
-                                Key.DirectionLeft -> {
-                                    if (index < rowEnd) {
-                                        requestResultFocus(index + 1)
-                                    }
-                                    true
-                                }
-                                Key.DirectionRight -> {
-                                    if (index > rowStart) {
-                                        requestResultFocus(index - 1)
-                                    } else {
-                                        navigationJob?.cancel()
-                                        navigationJob = null
-                                        onContentFocusTargetChanged(resultRequesters[index])
-                                        railSearchRequester?.let { runCatching { it.requestFocus() } }
-                                    }
-                                    true
-                                }
-                                else -> false
-                            }
-                        }
-                    },
-            )
-        }
-    }
+            .focusProperties {
+                if (isTv) {
+                    up = cardRequester
+                    down = FocusRequester.Cancel
+                    left = FocusRequester.Cancel
+                    right = FocusRequester.Cancel
+                }
+            }
+            .onPreviewKeyEvent { event ->
+                if (!isTv || event.type != KeyEventType.KeyDown) {
+                    false
+                } else {
+                    when (event.key) {
+                        Key.DirectionUp -> moveFocusTo(cardRequester)
+                        Key.DirectionDown -> onMoveDown()
+                        Key.DirectionLeft -> onMoveLeft()
+                        Key.DirectionRight -> onMoveRight()
+                        else -> false
+                    }
+                }
+            },
+        primary = false,
+        compact = true,
+        outlined = true,
+        scaleOnFocus = false,
+    )
 }
+
+private fun smartSearchFilterFromMemoryKey(key: String?): SmartSearchFilter =
+    SmartSearchFilter.entries.firstOrNull { it.name == key } ?: SmartSearchFilter.ALL
+
 
 @Composable
 private fun SmartSearchRail(
@@ -1656,7 +2349,7 @@ internal fun normalizeSearchText(raw: String): String {
 
 private fun ContentType.smartLabel(): String = when (this) {
     ContentType.LIVE -> "قناة"
-    ContentType.MOVIE -> "فيلم"
+    ContentType.MOVIE -> "فلم"
     ContentType.SERIES -> "مسلسل"
 }
 
@@ -1667,7 +2360,24 @@ private const val TV_INITIAL_SEARCH_FOCUS_RETRY_MS = 120L
 private const val TV_INITIAL_SEARCH_FOCUS_ATTEMPTS = 6
 private const val TV_RAIL_FOCUS_REDIRECT_DELAY_MS = 20L
 private const val TV_GRID_FOCUS_SETTLE_MS = 24L
+private const val RECENT_FOCUS_REVEAL_MARGIN_DP = 6
+private const val SEARCH_TOOLBAR_STACK_WIDTH_DP = 320
+private const val SEARCH_TITLE_SLOT_WIDTH_DP = 185
+private const val SEARCH_HEADER_GAP_DP = 11
 private const val SEARCH_CANCELLATION_MASK = 63
 private const val SEARCH_RANK_COUNT = 11
 private const val MAX_RESULTS_PER_RANK = 48
 private const val MAX_SEARCH_RESULTS = 120
+
+/**
+ * Focus transfer with real success reporting: an event is consumed only when the requested target
+ * actually took focus, so a failed transfer is never swallowed and can fall back safely.
+ */
+private fun moveFocusTo(target: FocusRequester?): Boolean {
+    if (target == null) return false
+    return try {
+        target.requestFocus()
+    } catch (error: RuntimeException) {
+        false
+    }
+}

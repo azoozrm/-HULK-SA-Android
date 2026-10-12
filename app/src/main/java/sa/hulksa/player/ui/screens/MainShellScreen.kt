@@ -238,8 +238,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 
 internal const val FAVORITES_CATEGORY_ID = "__hulk_favorites__"
 internal const val CONTINUE_CATEGORY_ID = "__hulk_continue__"
-private const val TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP = 14f
-private val TV_PAGE_GUTTER = 8.dp
+internal const val TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP = 14f
+internal val TV_PAGE_GUTTER = 8.dp
 private val TV_LIVE_ACTION_INSET = 8.dp
 
 /** Keeps the resting chip position unchanged while extending only the scroll viewport. */
@@ -267,7 +267,7 @@ internal fun categorySidebarUnderlapPolicy(
 }
 
 @Composable
-private fun rememberCategorySidebarUnderlap(
+internal fun rememberCategorySidebarUnderlap(
     isTv: Boolean,
     baseContentPadding: Dp,
 ): CategorySidebarUnderlapPolicy {
@@ -293,7 +293,7 @@ private fun rememberCategorySidebarUnderlap(
  * Measures the LazyRow through the sidebar-side inset while reporting its original width upstream.
  * The rail remains responsible for visually occluding chips that scroll into this extra viewport.
  */
-private fun Modifier.extendCategoryViewportTowardStart(extraWidth: Dp): Modifier {
+internal fun Modifier.extendCategoryViewportTowardStart(extraWidth: Dp): Modifier {
     if (extraWidth <= 0.dp) return this
     return layout { measurable, constraints ->
         val extraWidthPx = extraWidth.roundToPx().coerceAtLeast(0)
@@ -2737,8 +2737,10 @@ private fun HomeHeroActions(
         gapPx = iconGapPx,
     ) + bufferPx
     val primaryRequiredPx = requiredWidthPx(primaryCaption)
-    // Reserve the longest real favorite wording so selecting/unselecting never reflows the group.
-    val favoriteCaption = if (isFavorite) "في المفضلة" else "المفضلة"
+    // The accepted Home hero favorite caption is constant in both observed states; only the
+    // Favorite/FavoriteBorder glyph changes. Keep the historical longest-wording width reservation
+    // so the accepted action group never shrinks or reflows (the longer wording is no longer shown).
+    val favoriteCaption = "المفضلة"
     val favoriteRequiredPx = maxOf(requiredWidthPx("المفضلة"), requiredWidthPx("في المفضلة"))
     val rowGapPx = with(density) { 9.dp.roundToPx() }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -6485,7 +6487,7 @@ private fun CategoryBar(
     }
 }
 
-private data class LiveCategoryStripMetrics(
+internal data class LiveCategoryStripMetrics(
     val itemMinHeight: Dp = 36.dp,
     val iconSize: Dp = 24.dp,
     val textSizeSp: Int = 12,
@@ -6503,7 +6505,7 @@ private data class LiveCategoryStripMetrics(
 }
 
 @Composable
-private fun rememberLiveCategoryStripMetrics(): LiveCategoryStripMetrics {
+internal fun rememberLiveCategoryStripMetrics(): LiveCategoryStripMetrics {
     val adaptiveUi = LocalAdaptiveUi.current
     val shortSide = minOf(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp).toFloat()
     val minHeight = (shortSide * 0.067f).coerceIn(36f, 40f)

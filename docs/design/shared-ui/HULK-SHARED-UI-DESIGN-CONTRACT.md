@@ -800,3 +800,307 @@ The R01 Favorites candidate review is **PENDING** and the R02 candidate
 (`favorites-ui-alignment-20261011-r02`) supersedes it for all Favorites review scope. Captures
 remain OFF; automated visual validation is NOT RUN — CAPTURE NOT AUTHORIZED.
 
+## 15. Search Model 01 adoption and Home hero favorite caption correction (2026-10-12)
+
+On 2026-10-12 01:48:18 Asia/Riyadh the owner selected Search Model 01 — Unified Grid and a
+separate bounded Home hero correction. The accepted reference package is
+`HULK-SEARCH-MODEL-01-20261012.zip` (SHA-256
+`99de8ef20dd45200e054a1873a0a602a8961ca94e036ca076f5b593510f4105b`). This record documents
+**design-reference acceptance**. The Android implementation
+(`search-ui-alignment-20261012`, LOCAL_ROUND R01) is under owner review — **PENDING**; no Search
+merge, signing, tag or release is authorized or implied. The active Search route is
+`ProfileSmartSearchLayer.kt` (dispatched from `HulkApp.kt`); the unreachable legacy
+`UnifiedSearchScreen` in `MainShellScreen.kt` is not the active owner.
+
+### 15.1 Adopted Search composition
+
+- One page owner (`ProfileSmartSearchLayer.kt`) with the compact real header title `البحث` and
+  subtitle `ابحث في الافلام والمسلسلات والقنوات`, one compact editable input (hint
+  `اكتب اسم فلم او مسلسل او قناة`, existing microphone entry and IME handling preserved, end
+  action space reserved so text never runs under the microphone), compact type filters and one
+  unified results grid. The existing TV rail and stable mobile navigation ownership are unchanged.
+  See 15.4 for the owner's header/naming correction that supersedes the badge and the earlier
+  `فيلم` wording.
+- Physical RTL filter order is `الكل` / `الافلام` / `المسلسلات` / `القنوات`, using the accepted
+  Live fixed-category `FocusButton` anatomy and `rememberLiveCategoryStripMetrics` height/text
+  expressions, 7dp between chips, committed gold selection, a separate in-bounds focus edge and no
+  focus scaling. The search filters reorder only this selector; they never touch the rail
+  destination list order.
+- Results heading `نتائج البحث`; any count shown is the real current filtered result count.
+  Movies and Series reuse `MoviesCatalogBoxedCard` / `SeriesCatalogBoxedCard` (square artwork, two
+  reserved title lines, truthful reserved footers); channels use `LiveChannelHomeCard` (contained
+  16:9 logo, real name and `بث مباشر`, no VOD metadata). Card activation keeps the existing
+  open/route callback and long-press keeps the observed favorite behavior.
+- One grid/scroll owner with stable `type:id` keys. TV columns derive from
+  `tvCatalogMetrics(boxedCards = true)` and `movieCatalogMinCellWidthDp`; compact phone portrait is
+  capped at two accepted columns when both fit, otherwise one; short windows keep the scroll owner
+  and the keyboard/IME reachability path.
+
+### 15.2 History and subordinate states
+
+- Blank query keeps the existing profile-scoped recent CONTENT history (same store, dedup,
+  ordering, open/delete/clear callbacks). History cards adopt the accepted square-artwork/title/
+  footer family with real stored title/type/year only, compact natural-width `فتح` / `حذف` and a
+  compact `مسح الكل` shown only when history exists; no fake ContentItem or new persistence owner.
+- The oversized empty rectangle is removed. Applicable states use one compact centered dark/gold
+  notice family (`SmartSearchStateNotice`, surface `#11120D`, gold border/ glyph): no history
+  `ابدا البحث` / `اكتب اسم فلم او مسلسل او قناة`; minimum length `اكتب حرفين على الاقل` /
+  `تظهر النتائج مباشرة بعد كتابة حرفين`; pending `جاري البحث`; catalog resolving
+  `جاري تحميل المحتوى`; no match `لا توجد نتائج مطابقة` / `جرب اسما اخر او غير نوع المحتوى`;
+  filter-specific no match stays truthful to the selected type.
+- Catalog failure/retry reuses `MoviesErrorNotice` / `MoviesOfflineEmptyState` with the existing
+  authoritative usable-network binding and the existing refresh owner, and cached local results
+  stay usable behind one bounded notice. A failed request alone is never labeled offline.
+- Preserved intact: ranking, normalization, phonetic cross-script matching, the two-character
+  threshold, debounce, cancellation, stale-result protection, profile/Kids isolation, history
+  storage and voice callbacks. The activity-level voice status messages (listening/permission/
+  unavailable/error) remain their existing transient system messages; converting them into the
+  in-composition notice family would change activity-level voice ownership and is not part of
+  R01. TV reaches input, microphone, filters, cards/history controls and the rail; Back and
+  details-return restore the existing context.
+
+### 15.3 Bounded Home hero correction
+
+Source-confirmed cause: `HomeHeroActions` resolved
+`favoriteCaption = if (isFavorite) "في المفضلة" else "المفضلة"`. For BOTH Movie and Series Home
+hero on TV and non-TV the displayed caption is now the constant `المفضلة`; only the observed
+`Favorite` / `FavoriteBorder` glyph changes with `isFavorite`. The accepted fixed action-width
+reservation (the historical longest wording), height, spacing, physical placement, gold icon tint,
+once-only callback, primary action, hero facts/artwork/rotation, focus edge and measured
+narrow-layout fallback are preserved, so the action group never shrinks or reflows. Other
+Details/player/card favorite captions are untouched.
+
+### 15.4 R01 owner corrections — naming, header and catalog card sizing (2026-10-12)
+
+The owner reviewed the R01 candidate and requested a bounded correction in the same LOCAL_ROUND.
+This supersedes only the conflicting wording in 15.1/15.2 and the reference wording:
+
+- Movie wording: app-authored Search copy uses the approved singular `فلم` everywhere (input
+  hint, empty-state instruction, `ContentType.smartLabel()` movie branch, recent-content labels,
+  counts and notices), matching `catalogCountUnit` / `favoritesCountUnit`. Exact input and
+  empty-state instruction: `اكتب اسم فلم او مسلسل او قناة`. The reference board's `فيلم` wording
+  is superseded; server titles and stored content are untouched.
+- Header: the decorative circular magnifying-glass badge and its reserved spacing are removed. The
+  Search header is the accepted text-only section header of `FavoritesScreen`
+  (`MainShellScreen.kt`): title `البحث` at 27sp TV / `MOBILE_SECTION_TITLE_SIZE` phone, bold, with
+  the muted subtitle at 11sp TV / `MOBILE_SECTION_COUNT_SIZE` phone, physical right alignment, the
+  `TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP` start inset plus `tvPageSafeInsets` top inset on TV and
+  the accepted phone section insets. Functional microphone and navigation Search icons stay.
+- Filters: `SmartSearchFilterBar` adopts the accepted `FavoritesTypeFilterBar` anatomy — the same
+  `rememberLiveCategoryStripMetrics` text/height expressions, `rememberCategorySidebarUnderlap`
+  viewport/padding expressions, 7dp spacing, committed gold fill, separate in-bounds focus edge
+  and stable dimensions — while keeping the Search-specific D-pad wiring.
+- Catalog card sizing: the results grid and the recent-content cards use the exact accepted
+  catalog expressions (`tvCatalogMetrics(boxedCards = true)`,
+  `movieCatalogMinCellWidthDp`, `movieCatalogColumnCount`, the internal
+  `FAVORITES_MOBILE_*` phone policy) through one shared Search layout. The previous extra parent
+  horizontal padding around the grid was removed so the TV cell matches the Movies/Series catalog
+  cell, and the previous Search-only miniature recent-card widths were replaced by the same
+  computed catalog cell width. Single items keep the normal card size; TV short windows use the
+  accepted `movieCompactArtworkHeightPx` artwork fallback with grid scrolling. Channels keep the
+  approved `LiveChannelHomeCard` variant. No focus scaling, clipped footer or fabricated metadata.
+- The Home hero correction in 15.3 is preserved unchanged.
+
+Implementation status: LOCAL_ROUND R01 candidate (corrected) was reviewed by the owner and is
+**REJECTED for the reported recent-content viewport/focus scope** (clipped recent section, card
+sliding behind the heading, bottom actions hidden and TV focus trapped). R01's other corrections
+remain valid. The R02 candidate (`search-ui-alignment-20261012-r02`, same LOCAL_ROUND) supersedes
+it for that scope. Captures remain OFF.
+
+### 15.5 R02 owner corrections — recent viewport and TV focus transfer (2026-10-12)
+
+- Measured viewport: the TV safe insets are applied exactly once per region — the header/content
+  block keeps the accepted top/start insets and now also the physical-left safe inset, the recent
+  section applies the accepted bottom safe inset, and the results grid keeps its own accepted
+  catalog bottom/end padding. The input border, history controls, "مسح الكل" and card focus edges
+  stay inside the usable screen.
+- One vertical owner: the complete recent body (heading, `مسح الكل` and cards) scrolls inside a
+  single vertical scroll container instead of a LazyRow below a fixed heading. Automatic
+  framework relocation is disabled for that body (`moviesNoBringIntoViewSpec`) and the accepted
+  measured reveal (`focusedCardScrollCorrection`) reveals the complete card (artwork, title, type,
+  buttons, padding, focus edge) whenever it fits; the existing approved
+  `movieCompactArtworkHeightPx` short-window fallback shrinks only the artwork when the whole card
+  cannot fit the viewport. Card width, typography and normal square artwork are unchanged — no
+  miniature recent cards.
+- TV focus transfer: from both `فتح` and `حذف`, one UP press reaches the attached selected type
+  filter and the next UP reaches the search field. Directional events are consumed only when the
+  requested focus transfer actually succeeded or the boundary is intentionally handled
+  (`moveFocusTo` reports the real `requestFocus` result); LEFT/RIGHT stay stable. Obsolete reveal
+  and navigation jobs (recent reveal, filter's bounded DOWN retry, results-grid navigation) are
+  cancelled when focus leaves the content or the owner is disposed, so no automatic relocation
+  can pull focus back to the bottom actions.
+- All previous corrections are preserved: `فلم` naming, text-only section header, accepted filter
+  styling, unified result grid, catalog card sizing, history/profile isolation and existing
+  callbacks, and the Home hero constant `المفضلة` caption with heart-only state changes.
+
+Implementation status: LOCAL_ROUND R02 candidate was reviewed by the owner and is **REJECTED**
+for the reported Search defects (clipped/trapped recent section, missing/inoperative voice
+search, and the last-card Delete LEFT fallback to Clear All). R02's accepted corrections remain
+recorded. The R03 candidate (`search-ui-alignment-20261012-r03`, same LOCAL_ROUND) supersedes it.
+
+### 15.6 R03 owner corrections — simplified page, working voice and exact D-pad boundaries (2026-10-12)
+
+- Simplified page and raised cards: the recent-content heading `المحتوى الذي بحثت عنه مؤخرا`, its
+  subtitle `المحتوى الذي تختاره يظهر هنا بدون تكرار`, the heading row, spacer and reserved height
+  are removed completely and are not replaced by another heading. The type-filter toolbar is
+  followed immediately by the catalog-sized history cards, so on initial entry, before any
+  directional input, the complete first card (artwork, title, type and both actions) is visible.
+  The compact `مسح الكل` control moves to the physical LEFT of the accepted filter toolbar whenever
+  history exists, keeping its callback; its UP reaches the selected filter, DOWN the current
+  content target, RIGHT the last filter chip and LEFT is a boundary.
+- Working voice search: `currentVoiceSearchOwner()` bases voice ownership on the authenticated
+  account/session/profile scope and the active Search destination; the notification UI readiness
+  latch (which could remain false on a valid session) no longer disables voice. The microphone
+  stays visible, focusable and clickable on TV and phone, TV OK activates it, and the existing
+  permission, lifecycle, cancellation, request-gate and stale-owner protections are preserved.
+  After activation, TV focus returns to the search field, so recognition/cancellation always
+  leaves a valid focus target; transcripts still deliver through
+  `updateSearchFromVoice`/`updateSearch` into the same query/results owners.
+- Exact D-pad boundaries: the last history card's `حذف` no longer falls back to `مسح الكل`;
+  RIGHT stays on the same card's `فتح`, LEFT moves only to the next card when it exists, and at
+  the final card LEFT stays on `حذف`. From both card actions one UP reaches the selected type
+  filter and the next UP reaches the search field. Moving between Open/Delete does not start
+  competing reveal jobs (one reveal per focused card index); leaving the card cancels the obsolete
+  relocation and keeps the single measured scroll/reveal owner with complete card visibility.
+- Preserved: `فلم` naming, accepted text-only header and filter styling, catalog card sizing,
+  history storage/profile isolation and callbacks, and the Home hero constant `المفضلة` caption
+  with heart-only state changes.
+
+Implementation status: LOCAL_ROUND R03 candidate was reviewed by the owner and is **REJECTED**
+for the reported TV Search composition/reveal/navigation scope (full-width Search field in its own
+row, oversized Open/Delete saved-content footers, incomplete second-row reveal and unreliable
+upward navigation). The R04 candidate (`search-ui-alignment-20261012-r04`, same LOCAL_ROUND)
+supersedes it; R03's working voice path and naming are preserved.
+
+### 15.7 R04 owner corrections — TV Search as an accepted catalog section (2026-10-12)
+
+- Top toolbar: Search adopts the accepted `CatalogHeader` hierarchy instead of a separate tall
+  header. On TV the section title `البحث` and the truthful current count (results `نتيجة` when the
+  query is eligible, saved-history `عنصر` otherwise) sit at the physical RIGHT in the accepted
+  185dp title column with 27sp/10sp typography; the compact query field follows immediately beside
+  it toward the physical LEFT using the accepted `Modifier.weight(1f).widthIn(max = 630.dp)`
+  bounded field policy, with the existing functional microphone at the field's physical LEFT end.
+  The large circular Search icon and the separate description row stay removed.
+- Filters: the accepted Live fixed-category strip stays immediately below the toolbar in physical
+  RTL order `الكل` / `الافلام` / `المسلسلات` / `القنوات`; the compact `مسح الكل` stays at its
+  physical LEFT whenever the saved-history projection has removable entries and never deletes
+  ordinary results. No permanent Refresh/Category Management controls are added; the existing
+  error-only Retry is unchanged. The redundant full-width `نتائج البحث` grid heading is removed;
+  the real result count now lives in the top header.
+- One catalog body: both projections (saved history when the query is blank, ranked results when
+  the existing eligibility/debounce contract permits) render in ONE vertical TV catalog grid on
+  the accepted R10 single-scroll-owner policy — `tvCatalogMetrics(boxedCards = true)`,
+  `movieCatalogMinCellWidthDp`, `movieCatalogColumnCount` producing a single `GridCells.Fixed`
+  column count shared by layout and D-pad arithmetic, `moviesNoBringIntoViewSpec` scoped to the TV
+  grid, and the measured `focusedCardScrollCorrection`/`revealFocusedGridItem` reveal including
+  footer/actions, focus inset and TV bottom safe inset. The saved-content strip is no longer a
+  horizontal `LazyRow` inside a scrolling Column. Search keeps its own memory row and never shares
+  Movies/Series/Favorites navigation memory.
+- Cards: results and saved history reuse `MoviesCatalogBoxedCard`/`SeriesCatalogBoxedCard` and the
+  accepted contained-logo live variant, with the same square artwork, two reserved title lines,
+  reserved footer slots and in-bounds focus edge. Saved history activates the card to open the
+  content once and keeps its Delete action as a compact secondary control inside the uniformly
+  reserved catalog footer (`footerAction`); the oversized separate Open/Delete footer row is
+  removed. Deletion keeps its callback, confirmation behavior, storage ownership, select-release
+  guard and surviving-item focus fallback; no new long-press meaning is introduced.
+- D-pad and restoration: DOWN/LEFT/RIGHT use the RTL column order and full-card reveal; UP from
+  the first row reaches the selected filter, then the query field. A partially composed card is
+  never a completed reveal, movement is cancelled when direction reverses or the projection
+  changes, and there are no settle sleeps or second scroll owners. The terminal Delete control
+  keeps focus on LEFT (no Clear All fallback). Details return restores the same surviving
+  item/filter/location through the existing per-profile navigation owner; deleting the last item
+  falls back to the always-attached selected filter.
+- Adaptive/state: when the toolbar genuinely cannot fit (very narrow non-TV windows) the compact
+  stacked composition is used; phone-only card sizing never applies to TV. Loading, empty,
+  short-query, results, saved-history, cached-error and Retry states keep their shared bounded
+  notices within measured content space.
+- Preserved: the working voice path and its authenticated-session/account/profile/context guards
+  (`notificationUiReady` stays out of `currentVoiceSearchOwner`), `فلم` naming, query placeholder
+  `اكتب اسم فلم او مسلسل او قناة`, filter naming, truthful offline/service classification, and the
+  Home hero constant `المفضلة` caption with heart-only state changes.
+
+Implementation status: LOCAL_ROUND R04 candidate under owner review — **PENDING**. Captures remain
+OFF; automated visual validation is NOT RUN — CAPTURE NOT AUTHORIZED.
+
+### 15.8 R05 owner corrections — exact Series field allocation and saved-card Delete reachability (2026-10-12)
+
+- Supersession: the R04 TV toolbar policy of a `Modifier.weight(1f).widthIn(max = 630.dp)` field is
+  superseded for TV. For the same window the Search field's outer geometry must equal the accepted
+  `CatalogHeader` field slot on the Series/Movies catalogs; the visual comparison showed the
+  weighted field did not preserve that equality.
+- Exact TV allocation: the Search toolbar keeps the accepted hierarchy — 185dp title column,
+  `11.dp - TV_PAGE_GUTTER` gap, then the field. The field is a fixed, measured width:
+  row content width (`maxWidth - TV_PAGE_GUTTER`, with the accepted `padding(end = TV_PAGE_GUTTER)`
+  row) minus title 185dp, minus the 3dp title gap, minus the real management slot (caption
+  `ادارة الفئات` measured with `rememberTextMeasurer()` at 13sp bold plus the accepted compact
+  `FocusButton` structure 6dp + 17dp + 24dp), minus 11dp, minus the accepted refresh touch size
+  `homeHeaderActionTouchSizeDp()` (48dp), minus 11dp, minus the trailing `TV_PAGE_GUTTER` spacer —
+  bounded by `120.dp` minimum and the accepted `630.dp` maximum. The management/refresh action
+  space toward the physical LEFT stays unused; no hidden or fake controls, no weight or fill
+  expansion on TV. The functional microphone stays inside the field at its physical LEFT end. The
+  phone toolbar keeps the existing weight/stack policy.
+- Measured equality (Mi Box 4, 1920x1080, density 2, verified by frame capture border analysis):
+  Series field border columns x[385..1370], border rows y[48..146]; R05 Search field border
+  columns x[385..1370], border rows y[48..146]; both text-field nodes share the same right edge
+  (x=1342). Search renders no management or refresh controls.
+- Saved-content Delete reachability: on TV the saved-history card body's DOWN moves focus to that
+  card's own compact Delete (`حذف`); while a card's Delete owns focus the card's ancestor key
+  handler returns false so it cannot steal the action's keys (`deleteFocusedIndex` guard). Delete
+  UP returns to its own card body; Delete DOWN moves to the same-column next-row card body (no
+  wrap when no next row); Delete LEFT/RIGHT move between neighboring Deletes in the accepted RTL
+  column order and terminal directions stay on the Delete — never Clear All. Delete activation
+  keeps its direct-removal behavior (no confirmation dialog exists), select-release guard and
+  surviving-item focus fallback.
+- Device verification: the complete graph above was verified with D-pad probes on the qualified
+  Preview build (DOWN/UP/DOWN-next-row/LEFT/RIGHT/terminal-left/terminal-right/terminal-down
+  focus dumps). Activation was not re-run in R05 to preserve real owner history; direct removal
+  was verified in the R04 evidence. History count/order changed between probes while the owner was
+  concurrently using the physical device; one probe accidentally sent a DPAD_CENTER on a focused
+  Delete and the resulting state could not be fully attributed.
+- Preserved: voice path and guards, `فلم` naming, query placeholder, filter naming, one-grid R10
+  body, complete-card reveal, Clear All behavior, offline classification, and the Home hero
+  `المفضلة` caption.
+
+Implementation status: LOCAL_ROUND R05 candidate under owner review — **PENDING**. Captures remain
+OFF; automated visual validation is NOT RUN — CAPTURE NOT AUTHORIZED.
+
+### 15.9 RESUME correction — TV query editing keeps the keyboard (2026-10-12)
+
+- Owner observation: on TV, typing one or two characters closed the system keyboard as results
+  appeared; Backspace and further input also closed it.
+- Source-confirmed cause: `results` is intentionally empty while the query/debounce/snapshot state
+  settles; the `previouslyHadRows` effect requested the selected filter whenever the TV projection
+  emptied, with no editing ownership. The field's focus loss then ended the local `tvEditing` state
+  and hid the keyboard. Projection key changes could also trigger the grid removal/restoration
+  paths to request card focus during typing.
+- Correction: one authoritative TV editing owner hoisted to `SmartSearchContent` (the previous
+  local flag moved, not duplicated). While editing, projection transitions request no
+  filter/card/restored focus; the previouslyHadRows effect rechecks ownership after its frame
+  suspension; the grid removal path no longer treats query/ranking key changes as deletions; the
+  grid restore path is skipped while editing and rechecks ownership after every suspension; queued
+  grid focus jobs are cancelled when editing begins; `readOnly` remains editing-driven only.
+  Transient platform/IME window blur is not treated as navigation. One Back owner: the first Back
+  ends editing and keeps the query/page (consumed with its release while the system keyboard is
+  still visible; the later Back follows existing navigation once the keyboard closed itself). The
+  explicit IME Search/Done action ends editing once and hands focus over without activating a
+  result/filter/Delete.
+- No keyboard re-show loops, forced focus/recomposition, arbitrary delays, disabled live results
+  or changed query thresholds are used.
+- Erratum: the R05 export labeled this work NEW although it was a correction inside the same
+  section task; the RESUME record supersedes that label. The publication candidate exports the
+  complete tracked/untracked patch with `--- /dev/null` headers for new files and binds its actual
+  hash in the candidate metadata.
+- Evidence corrections: the R05 runtime dumps represent different projections (6 → 5 → 4 saved
+  items) and are not one uninterrupted sequence; unsupported sequence claims are NOT PROVEN. The
+  R05 PNG frames were device-side screenshots taken despite Capture OFF and are recorded as such.
+  The R05 `testDebugUnitTest` invocation was UP-TO-DATE; source-string compatibility assertions do
+  not prove keyboard/D-pad behavior. Phone/voice re-verification remains NOT RUN. The disclosed
+  accidental CENTER press and the saved-history count change remain recorded without attributing
+  every change to the probe.
+- Verified: TV IME regression exercised with the actual system keyboard on the qualified Preview
+  candidate; see the publication evidence archive for the bounded input/focus records.
+
+Implementation status: SECTION_PUBLISH candidate for the Search section — owner review PENDING.
+Captures remain OFF; automated visual validation is NOT RUN — CAPTURE NOT AUTHORIZED.
+
+

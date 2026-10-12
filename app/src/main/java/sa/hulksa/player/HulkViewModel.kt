@@ -752,9 +752,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         if (
             currentState.screen != HulkScreen.MAIN ||
             currentState.account == null ||
-            currentState.destination != MainDestination.SEARCH ||
-            !notificationUiReady
+            currentState.destination != MainDestination.SEARCH
         ) return null
+        // Voice ownership is the authenticated account/session/profile scope; the notification UI
+        // readiness latch is a notification-presentation gate and must not disable Search voice.
         val authenticatedOwner = AuthenticatedSessionRegistry.currentOwner() ?: return null
         if (session !== authenticatedOwner.session) return null
         val activeAccountId = repository.activeAccountSession()?.accountId ?: return null
