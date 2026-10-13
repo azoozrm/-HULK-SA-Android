@@ -8,8 +8,21 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Downloading
+import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -22,7 +35,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import sa.hulksa.player.AccountDecisionChoice
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
@@ -37,6 +53,9 @@ import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.rememberAdaptiveUiState
 import sa.hulksa.player.ui.adaptive.trackAdaptiveInput
 import sa.hulksa.player.ui.screens.AccountIdentityDecisionDialog
+import sa.hulksa.player.ui.screens.DownloadFeedback
+import sa.hulksa.player.ui.screens.DownloadFeedbackGlyph
+import sa.hulksa.player.ui.screens.HomeActionNotice
 import sa.hulksa.player.ui.screens.LIVE_TV_PRO_CONTEXT_ALL
 import sa.hulksa.player.ui.screens.LIVE_TV_PRO_CONTEXT_FAVORITES
 import sa.hulksa.player.ui.screens.LocalNotificationCenterScreen
@@ -45,8 +64,10 @@ import sa.hulksa.player.ui.screens.MainShellScreen
 import sa.hulksa.player.ui.screens.MovieDetailsProPolishedScreen
 import sa.hulksa.player.ui.screens.NavigationMemoryStore
 import sa.hulksa.player.ui.screens.PlayerProScreen
+import sa.hulksa.player.ui.screens.ScopedHomeActionNotice
 import sa.hulksa.player.ui.screens.SeriesDetailsProPolishedScreen
 import sa.hulksa.player.ui.screens.detailsProRelatedItems
+import sa.hulksa.player.ui.screens.downloadNoticeDisplayText
 import sa.hulksa.player.ui.screens.liveTvProDecorateMainState
 import sa.hulksa.player.ui.screens.liveTvProMainCategoryToContext
 import sa.hulksa.player.ui.screens.playerProEpisodeNeighbors
@@ -77,10 +98,38 @@ fun HulkApp(
     var searchInitialFocusAcquired by remember(navigationMemory) { mutableStateOf(false) }
     // Scoped ephemeral presentation for a real notification-opening failure result.
     var notificationOpenError by remember { mutableStateOf<String?>(null) }
+    // ONE scoped in-app action notice for Home actions and download feedback; it replaces the
+    // previous unstyled download Toasts without creating a competing notice owner.
+    var actionNotice by remember { mutableStateOf<HomeActionNotice?>(null) }
+    LaunchedEffect(actionNotice) {
+        val notice = actionNotice ?: return@LaunchedEffect
+        delay(5_000L)
+        if (actionNotice == notice) actionNotice = null
+    }
     val (adaptiveUi, adaptiveInputController) = rememberAdaptiveUiState(isTelevisionDevice)
     val isTv = adaptiveUi.isTelevision
     val context = LocalContext.current
     val colors = LocalHulkColors.current
+    // A transient notice never outlives its owning screen/destination/profile/disposal.
+    LaunchedEffect(state.screen, state.destination) { actionNotice = null }
+    LaunchedEffect(catalogNavigationMemory) { actionNotice = null }
+    val postActionNotice: (String, ImageVector) -> Unit = { message, icon ->
+        actionNotice = HomeActionNotice(message = message, icon = icon)
+    }
+    val postDownloadFeedback: (DownloadFeedback) -> Unit = { feedback ->
+        // Download feedback belongs to the download-owning screens; a late result must not
+        // paint over the player or the entry/notification surfaces.
+        if (
+            state.screen == HulkScreen.MAIN ||
+            state.screen == HulkScreen.MOVIE_DETAILS ||
+            state.screen == HulkScreen.SERIES
+        ) {
+            actionNotice = HomeActionNotice(
+                message = downloadNoticeDisplayText(feedback.message),
+                icon = downloadFeedbackIcon(feedback.glyph),
+            )
+        }
+    }
     val requestProfileSwitch = LocalProfileSwitchRequester.current
     val windowBackground =
         if (state.screen == HulkScreen.LOGIN || state.screen == HulkScreen.PLAYER) {
@@ -297,17 +346,25 @@ fun HulkApp(
                                     onClearHistory = viewModel::clearHistory,
                                     onPlayDownload = viewModel::playDownload,
                                     onDeleteDownload = { item ->
-                                        viewModel.deleteDownload(item)
-                                        notify("تم حذف التحميل.")
+                                        viewModel.deleteDownload(item, postDownloadFeedback)
                                     },
-                                    onRetryDownload = { item -> viewModel.retryDownload(item, notify) },
-                                    onToggleWifiOnly = { notify(viewModel.toggleWifiOnly()) },
-                                    onToggleDownloadSchedule = { notify(viewModel.toggleDownloadSchedule()) },
-                                    onCycleConcurrentDownloads = { notify(viewModel.cycleConcurrentDownloads()) },
+                                    onRetryDownload = { item ->
+                                        viewModel.retryDownload(item, postDownloadFeedback)
+                                    },
+                                    onToggleWifiOnly = { postDownloadFeedback(viewModel.toggleWifiOnly()) },
+                                    onToggleDownloadSchedule = {
+                                        postDownloadFeedback(viewModel.toggleDownloadSchedule())
+                                    },
+                                    onCycleConcurrentDownloads = {
+                                        postDownloadFeedback(viewModel.cycleConcurrentDownloads())
+                                    },
                                     onToggleEpisodeNotificationMaster = {
                                         viewModel.toggleEpisodeNotificationMaster(notify)
                                     },
-                                    onCycleDownloadPriority = { item -> notify(viewModel.cycleDownloadPriority(item)) },
+                                    onCycleDownloadPriority = { item ->
+                                        postDownloadFeedback(viewModel.cycleDownloadPriority(item))
+                                    },
+                                    onActionNotice = postActionNotice,
                                     onRefreshAccount = { viewModel.refreshAccount(notify) },
                                     onRunDiagnostics = viewModel::runDiagnostics,
                                     onLogout = viewModel::logout,
@@ -345,15 +402,14 @@ fun HulkApp(
                                 onPlay = viewModel::playSelectedMovie,
                                 onDownload = {
                                     if (movieDownload == null) {
-                                        viewModel.downloadSelectedMovie(notify)
+                                        viewModel.downloadSelectedMovie(postDownloadFeedback)
                                     } else {
-                                        viewModel.retryDownload(movieDownload, notify)
+                                        viewModel.retryDownload(movieDownload, postDownloadFeedback)
                                     }
                                 },
                                 onCancelDownload = {
                                     movieDownload?.let {
-                                        viewModel.deleteDownload(it)
-                                        notify("تم الغاء التحميل.")
+                                        viewModel.deleteDownload(it, postDownloadFeedback)
                                     }
                                 },
                                 onToggleFavorite = { viewModel.toggleFavorite(item) },
@@ -420,17 +476,16 @@ fun HulkApp(
                                         it.historyKey == "SERIES:${episode.id}"
                                     }
                                     if (existing == null) {
-                                        viewModel.downloadEpisode(episode, notify)
+                                        viewModel.downloadEpisode(episode, postDownloadFeedback)
                                     } else {
-                                        viewModel.retryDownload(existing, notify)
+                                        viewModel.retryDownload(existing, postDownloadFeedback)
                                     }
                                 },
                                 onCancelDownload = { episode ->
                                     state.downloads.firstOrNull {
                                         it.historyKey == "SERIES:${episode.id}"
                                     }?.let {
-                                        viewModel.deleteDownload(it)
-                                        notify("تم الغاء التحميل.")
+                                        viewModel.deleteDownload(it, postDownloadFeedback)
                                     }
                                 },
                                 onToggleFavorite = { viewModel.toggleFavorite(series) },
@@ -531,7 +586,39 @@ fun HulkApp(
                         modifier = Modifier.align(Alignment.BottomCenter),
                     )
                 }
+                actionNotice?.let { notice ->
+                    ScopedHomeActionNotice(
+                        notice = notice,
+                        isTv = isTv,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(
+                                bottom = if (isTv) {
+                                    28.dp
+                                } else {
+                                    MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT + 12.dp
+                                },
+                            ),
+                    )
+                }
             }
         }
     }
+}
+
+/** Semantic glyph mapping for the scoped download feedback notice. */
+private fun downloadFeedbackIcon(glyph: DownloadFeedbackGlyph): ImageVector = when (glyph) {
+    DownloadFeedbackGlyph.PREPARING -> Icons.Rounded.Downloading
+    DownloadFeedbackGlyph.QUEUED -> Icons.Rounded.Download
+    DownloadFeedbackGlyph.COMPLETED -> Icons.Rounded.Check
+    DownloadFeedbackGlyph.PAUSE -> Icons.Rounded.Pause
+    DownloadFeedbackGlyph.RESUME -> Icons.Rounded.PlayArrow
+    DownloadFeedbackGlyph.RETRY -> Icons.Rounded.Refresh
+    DownloadFeedbackGlyph.CANCEL -> Icons.Rounded.DeleteOutline
+    DownloadFeedbackGlyph.DELETE -> Icons.Rounded.DeleteOutline
+    DownloadFeedbackGlyph.WIFI -> Icons.Rounded.Language
+    DownloadFeedbackGlyph.SCHEDULE -> Icons.Rounded.Schedule
+    DownloadFeedbackGlyph.CONCURRENCY -> Icons.Rounded.Tune
+    DownloadFeedbackGlyph.PRIORITY -> Icons.Rounded.Tune
+    DownloadFeedbackGlyph.ERROR -> Icons.Outlined.ErrorOutline
 }

@@ -99,16 +99,22 @@ private fun isTerminalErrorDecoration(character: Char): Boolean =
         character == '\u2069'
 
 /**
- * Display-copy rule for app-presented errors: remove only trailing full stops / ellipsis (and
- * trailing whitespace/directional marks), never interior punctuation, decimals, domains or
- * meaningful content. The raw error remains the classification/identity source.
+ * Shared display-copy cleanup: remove only trailing full stops / ellipsis (and trailing
+ * whitespace/directional marks), never interior punctuation, decimals, domains or meaningful
+ * content. The raw text remains the classification/identity source.
  */
-internal fun entryErrorDisplayText(raw: String): String {
+internal fun stripTerminalDecoration(raw: String): String {
     var end = raw.length
     while (end > 0 && isTerminalErrorDecoration(raw[end - 1])) end--
-    val stripped = raw.substring(0, end)
-    return stripped.ifBlank { ENTRY_ERROR_FALLBACK_TEXT }
+    return raw.substring(0, end)
 }
+
+/**
+ * Display-copy rule for app-presented errors: the shared terminal-decoration cleanup with the
+ * existing truthful generic fallback when nothing meaningful remains.
+ */
+internal fun entryErrorDisplayText(raw: String): String =
+    stripTerminalDecoration(raw).ifBlank { ENTRY_ERROR_FALLBACK_TEXT }
 
 /**
  * Scoped entry-section notice family (Login / Who's Watching / entry options / management / PIN /

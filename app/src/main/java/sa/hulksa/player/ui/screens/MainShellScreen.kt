@@ -5,7 +5,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.StatFs
 import android.view.KeyEvent as AndroidKeyEvent
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -70,6 +69,8 @@ import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Download
@@ -81,9 +82,11 @@ import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Star
@@ -93,9 +96,11 @@ import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -154,12 +159,15 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1049,6 +1057,7 @@ fun MainShellScreen(
     homeMessagePresentation: HomeMessagePresentationState,
     onOpenAnnouncementDetail: (OperationsAnnouncement) -> Unit,
     onOpenUpdateDetail: () -> Unit,
+    onActionNotice: (String, ImageVector) -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val context = LocalContext.current
@@ -1148,26 +1157,15 @@ fun MainShellScreen(
         favoriteOverrides[key] ?: isFavorite(item)
     }
     var growthQrDestination by remember { mutableStateOf<GrowthDestination?>(null) }
-    // Scoped dark/gold notice for real Home-owned action feedback; it replaces the previous
-    // unstyled Toasts and carries the actual result without creating another state owner.
-    var homeActionNotice by remember { mutableStateOf<HomeActionNotice?>(null) }
-    LaunchedEffect(homeActionNotice) {
-        val notice = homeActionNotice ?: return@LaunchedEffect
-        delay(5_000L)
-        if (homeActionNotice == notice) homeActionNotice = null
-    }
-    // A transient notice never outlives its owning destination.
-    LaunchedEffect(state.destination) { homeActionNotice = null }
+    // The shell-level scoped action notice is owned above this screen (single notice owner);
+    // real Home action results are posted to it instead of the previous unstyled Toasts.
     val openGrowthDestination: (GrowthDestination) -> Unit = { destination ->
         when (resolveGrowthAction(state.operations.growth, destination, isTv)) {
             GrowthAction.OPEN_QR -> growthQrDestination = destination
             GrowthAction.OPEN_URL -> {
                 val url = state.operations.growth.link(destination).url.orEmpty()
                 if (!launchGrowthUrl(context, url)) {
-                    homeActionNotice = HomeActionNotice(
-                        message = "تعذر فتح الرابط على هذا الجهاز",
-                        icon = Icons.Outlined.ErrorOutline,
-                    )
+                    onActionNotice("تعذر فتح الرابط على هذا الجهاز", Icons.Outlined.ErrorOutline)
                 }
             }
             GrowthAction.NO_ACTION -> Unit
@@ -1188,13 +1186,13 @@ fun MainShellScreen(
             val optimisticValue = !wasFavorite
             favoriteOverrides[pressedKey] = optimisticValue
             onToggleFavorite(pressedItem)
-            homeActionNotice = HomeActionNotice(
-                message = if (wasFavorite) {
+            onActionNotice(
+                if (wasFavorite) {
                     "تمت ازالة $pressedTitle من المفضلة"
                 } else {
                     "تمت اضافة $pressedTitle الى المفضلة"
                 },
-                icon = if (wasFavorite) Icons.Outlined.FavoriteBorder else Icons.Rounded.Favorite,
+                if (wasFavorite) Icons.Outlined.FavoriteBorder else Icons.Rounded.Favorite,
             )
             favoriteScope.launch {
                 delay(1_600L)
@@ -1353,33 +1351,21 @@ fun MainShellScreen(
                 )
             }
         }
-        homeActionNotice?.let { notice ->
-            ScopedHomeActionNotice(
-                notice = notice,
-                isTv = isTv,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(
-                        bottom = if (isTv) {
-                            28.dp
-                        } else {
-                            MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT + 12.dp
-                        },
-                    ),
-            )
-        }
     }
 }
 
-/** Scoped Home action feedback with its semantic glyph (default failure uses the error icon). */
-private data class HomeActionNotice(
+/**
+ * Scoped action feedback with its semantic glyph, shared by Home actions and download feedback.
+ * The single host lives above the destination layer so every screen renders the same notice.
+ */
+internal data class HomeActionNotice(
     val message: String,
     val icon: ImageVector,
 )
 
-/** Compact dark/gold notice family used for real Home-visible action feedback. */
+/** Compact dark/gold notice family used for real action feedback. */
 @Composable
-private fun ScopedHomeActionNotice(
+internal fun ScopedHomeActionNotice(
     notice: HomeActionNotice,
     isTv: Boolean,
     modifier: Modifier = Modifier,
@@ -2208,6 +2194,7 @@ private fun ActiveDownloadsSection(
             items(downloads, key = OfflineDownload::downloadId) { item ->
                 var focused by remember(item.downloadId) { mutableStateOf(false) }
                 val shape = RoundedCornerShape(if (isTv) 15.dp else 14.dp)
+                val identity = downloadDisplayIdentity(item)
                 Column(
                     modifier = Modifier
                         .width(if (isTv) 270.dp else 300.dp)
@@ -2222,26 +2209,52 @@ private fun ActiveDownloadsSection(
                         .clickable(role = Role.Button, onClick = onOpenDownloads)
                         .padding(13.dp),
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(9.dp),
-                    ) {
-                        // Title physically RIGHT with its glyph physically LEFT in RTL.
-                        Text(
-                            text = item.title,
-                            color = colors.text,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Canonical name once + independent metadata at physical RIGHT.
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = identity.title,
+                                color = colors.text,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (identity.metadata.isNotEmpty()) {
+                                Spacer(Modifier.height(3.dp))
+                                Text(
+                                    text = identity.metadata,
+                                    color = colors.textMuted,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(9.dp))
+                        Box(
+                            Modifier
+                                .width(1.dp)
+                                .height(40.dp)
+                                .background(colors.line.copy(alpha = .30f)),
                         )
-                        Icon(
-                            Icons.Rounded.Download,
-                            contentDescription = null,
-                            tint = colors.goldBright,
-                            modifier = Modifier.size(17.dp),
-                        )
+                        Spacer(Modifier.width(9.dp))
+                        // Real state glyph at physical LEFT with its truthful caption.
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                downloadHomeStateGlyph(item.status),
+                                contentDescription = null,
+                                tint = colors.goldBright,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = downloadTvRowStatusLabel(item.status),
+                                color = colors.textMuted,
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                            )
+                        }
                     }
                     // A known real total shows the real track; unknown progress stays
                     // indeterminate with no invented percentage or empty fake track.
@@ -2263,21 +2276,45 @@ private fun ActiveDownloadsSection(
                             )
                         }
                     }
+                    val telemetry = downloadStatusLine(item)
+                    if (
+                        telemetry.isNotBlank() &&
+                        (item.status == OfflineStatus.DOWNLOADING || item.status == OfflineStatus.PAUSED)
+                    ) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "\u200E$telemetry",
+                            color = colors.textMuted,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                        )
+                    }
+                    Spacer(Modifier.height(9.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(colors.line.copy(alpha = .30f)),
+                    )
                     Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = downloadStatusLine(item),
-                        color = if (focused) colors.goldBright else colors.textMuted,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                    )
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        text = downloadStateCaption(item.status),
-                        color = colors.textMuted,
-                        fontSize = 10.sp,
-                        maxLines = 1,
-                    )
+                    // Caption physically RIGHT, opening chevron physically LEFT; this is the
+                    // affordance of the single whole-card action, not a nested control.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "فتح التنزيلات",
+                            color = colors.goldBright,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            Icons.Rounded.ChevronLeft,
+                            contentDescription = null,
+                            tint = colors.goldBright,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                 }
             }
         }
@@ -2298,22 +2335,31 @@ private fun downloadKnownProgress(item: OfflineDownload): Float? =
  * total never produces an invented percentage; the real transfer rate stays when it is known.
  */
 internal fun downloadStatusLine(item: OfflineDownload): String = when (item.status) {
-    OfflineStatus.DOWNLOADING -> {
-        val rate = formatTransferRate(item.bytesPerSecond)
-        if (item.totalBytes > 0L) "${(item.progress * 100).toInt()}%  •  $rate" else rate
-    }
+    OfflineStatus.DOWNLOADING -> listOfNotNull(
+        if (item.totalBytes > 0L) "${(item.progress * 100).toInt()}%" else null,
+        if (item.bytesPerSecond > 0L) formatTransferRate(item.bytesPerSecond) else null,
+    ).joinToString("  •  ")
+
     OfflineStatus.PAUSED -> if (item.totalBytes > 0L) "${(item.progress * 100).toInt()}%" else ""
-    OfflineStatus.CHECKING -> "جاري الفحص"
-    OfflineStatus.WAITING_NETWORK -> "بانتظار الشبكة"
-    OfflineStatus.WAITING_SCHEDULE -> "مجدول"
-    OfflineStatus.WAITING_STORAGE -> "بانتظار مساحة"
-    else -> "في قائمة الانتظار"
+    OfflineStatus.CHECKING -> ""
+    OfflineStatus.WAITING_NETWORK -> ""
+    OfflineStatus.WAITING_SCHEDULE -> ""
+    OfflineStatus.WAITING_STORAGE -> ""
+    else -> ""
 }
 
-private fun downloadStateCaption(status: OfflineStatus): String = when (status) {
-    OfflineStatus.DOWNLOADING -> "جاري التحميل"
-    OfflineStatus.PAUSED -> "متوقف مؤقتا"
-    else -> "التفاصيل في التنزيلات"
+private fun downloadHomeStateGlyph(status: OfflineStatus): ImageVector = when (status) {
+    OfflineStatus.QUEUED,
+    OfflineStatus.CHECKING,
+    -> Icons.Rounded.Download
+
+    OfflineStatus.DOWNLOADING -> Icons.Rounded.Downloading
+    OfflineStatus.PAUSED -> Icons.Rounded.Pause
+    OfflineStatus.WAITING_NETWORK -> Icons.Rounded.WifiOff
+    OfflineStatus.WAITING_SCHEDULE -> Icons.Rounded.Schedule
+    OfflineStatus.WAITING_STORAGE -> Icons.Rounded.Storage
+    OfflineStatus.COMPLETED -> Icons.Rounded.Check
+    OfflineStatus.FAILED -> Icons.Outlined.ErrorOutline
 }
 
 @Composable
@@ -4481,27 +4527,28 @@ internal suspend fun readAvailableDownloadStorageBytes(
     storageRootProvider: () -> java.io.File,
     statFsAvailableBytes: (String) -> Long = { path -> StatFs(path).availableBytes },
     usableSpaceBytes: (java.io.File) -> Long = { root -> root.usableSpace },
-): Long = withContext(Dispatchers.IO) {
+): Long? = withContext(Dispatchers.IO) {
+    // Both reads failing means the real available space is unknown; it must stay unknown instead
+    // of collapsing into a fabricated 0 MB.
     try {
         val storageRoot = storageRootProvider()
-        val bytes = try {
-            statFsAvailableBytes(storageRoot.absolutePath)
+        try {
+            statFsAvailableBytes(storageRoot.absolutePath).coerceAtLeast(0L)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             try {
-                usableSpaceBytes(storageRoot)
+                usableSpaceBytes(storageRoot).coerceAtLeast(0L)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                0L
+                null
             }
         }
-        bytes.coerceAtLeast(0L)
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Exception) {
-        0L
+        null
     }
 }
 
@@ -4564,7 +4611,7 @@ private fun DownloadsScreen(
     val storageObservationKey = remember(downloads) {
         downloadStorageObservationKey(downloads)
     }
-    var availableBytes by remember { mutableLongStateOf(0L) }
+    var availableBytes by remember { mutableStateOf<Long?>(null) }
     LaunchedEffect(appContext, storageObservationKey) {
         availableBytes = readAvailableDownloadStorageBytes(
             storageRootProvider = {
@@ -4604,18 +4651,8 @@ private fun DownloadsScreen(
         val verticalInset = if (isTv) tvSafeInsets.verticalDp.dp else 0.dp
         val availableContentWidth = (maxWidth - horizontalInset - horizontalInset).coerceAtLeast(1.dp)
         val gridGap = if (isTv) 14.dp else 10.dp
-        val preferredCardWidth = when {
-            isTv && compactHeight -> 218.dp
-            isTv -> 236.dp
-            availableContentWidth < 480.dp -> 170.dp
-            availableContentWidth < 600.dp -> 184.dp
-            availableContentWidth < 840.dp -> 205.dp
-            else -> 218.dp
-        }
-        val columnCount = (
-            (availableContentWidth.value + gridGap.value) /
-                (preferredCardWidth.value + gridGap.value)
-        ).toInt().coerceAtLeast(1)
+        // One full-width row per stable downloadId on every window; the grid stays single-column.
+        val columnCount = 1
         val graph = remember(downloadIds, columnCount) {
             DownloadTvFocusGraph(downloadIds, columnCount)
         }
@@ -4639,6 +4676,40 @@ private fun DownloadsScreen(
         } else {
             inheritedBringIntoViewSpec
         }
+        // Measured once from the real captions at the current font scale so every TV row's
+        // primary button keeps one identical width and complete captions.
+        val actionCaptionStyle = LocalTextStyle.current.copy(
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        val density = LocalDensity.current
+        val textMeasurer = rememberTextMeasurer()
+        val tvPrimaryActionWidth = remember(textMeasurer, density, actionCaptionStyle) {
+            val widestCaptionPx = DownloadTvRowAction.entries.maxOf { action ->
+                textMeasurer.measure(
+                    text = AnnotatedString(downloadTvRowActionCaption(action)),
+                    style = actionCaptionStyle,
+                    maxLines = 1,
+                ).size.width
+            }
+            with(density) {
+                (
+                    movieActionRequiredWidthPx(
+                        captionWidthPx = widestCaptionPx,
+                        iconSizePx = 17.dp.roundToPx(),
+                        horizontalPaddingPx = 12.dp.roundToPx(),
+                        gapPx = 6.dp.roundToPx(),
+                    ) + 6.dp.roundToPx()
+                    ).toDp()
+            }
+        }
+        // The accepted wide row is used on TV and on a non-TV window only when its measured
+        // columns actually fit; narrower windows get the portrait card.
+        val useHorizontalDownloadRow = downloadListUsesHorizontalRow(
+            isTv = isTv,
+            availableWidthDp = availableContentWidth.value,
+            primaryActionWidthDp = tvPrimaryActionWidth.value,
+        )
         val focusTransaction = remember { DownloadFocusMoveTransaction() }
         val focusHistory = remember { DownloadFocusHistory(graph) }
         var focusedTarget by remember { mutableStateOf<DownloadTvFocusTarget?>(null) }
@@ -4886,33 +4957,60 @@ private fun DownloadsScreen(
                             state = downloadsState,
                             horizontalArrangement = Arrangement.spacedBy(gridGap),
                             verticalArrangement = Arrangement.spacedBy(gridGap),
-                            contentPadding = PaddingValues(bottom = if (isTv) 12.dp else 20.dp),
+                            contentPadding = PaddingValues(
+                                start = if (isTv) 0.dp else 4.dp,
+                                end = if (isTv) 0.dp else 4.dp,
+                                bottom = if (isTv) 12.dp else 20.dp,
+                            ),
                             modifier = Modifier.fillMaxSize().clipToBounds(),
                         ) {
                             itemsIndexed(downloads, key = { _, item -> item.downloadId }) { _, item ->
                                 val requesters = checkNotNull(cardFocusRegistry[item.downloadId])
-                                DownloadCard(
-                                    item = item,
-                                    isTv = isTv,
-                                    compactHeight = compactHeight,
-                                    focusRequesters = requesters,
-                                    onFocused = { slot ->
-                                        recordFocusedTarget(
-                                            DownloadTvFocusTarget.CardAction(item.downloadId, slot),
-                                        )
-                                    },
-                                    onDirection = { slot, move ->
-                                        handleDirection(
-                                            DownloadTvFocusTarget.CardAction(item.downloadId, slot),
-                                            move,
-                                        )
-                                    },
-                                    onPlay = onPlay,
-                                    onDelete = ::deleteWithFocusTransfer,
-                                    onRetry = onRetry,
-                                    onCyclePriority = onCyclePriority,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
+                                if (useHorizontalDownloadRow) {
+                                    DownloadTvRow(
+                                        item = item,
+                                        isTv = isTv,
+                                        primaryActionWidth = tvPrimaryActionWidth,
+                                        focusRequesters = requesters,
+                                        onFocused = { slot ->
+                                            recordFocusedTarget(
+                                                DownloadTvFocusTarget.CardAction(item.downloadId, slot),
+                                            )
+                                        },
+                                        onDirection = { slot, move ->
+                                            handleDirection(
+                                                DownloadTvFocusTarget.CardAction(item.downloadId, slot),
+                                                move,
+                                            )
+                                        },
+                                        onPlay = onPlay,
+                                        onDelete = ::deleteWithFocusTransfer,
+                                        onRetry = onRetry,
+                                        onCyclePriority = onCyclePriority,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                } else {
+                                    DownloadCard(
+                                        item = item,
+                                        focusRequesters = requesters,
+                                        onFocused = { slot ->
+                                            recordFocusedTarget(
+                                                DownloadTvFocusTarget.CardAction(item.downloadId, slot),
+                                            )
+                                        },
+                                        onDirection = { slot, move ->
+                                            handleDirection(
+                                                DownloadTvFocusTarget.CardAction(item.downloadId, slot),
+                                                move,
+                                            )
+                                        },
+                                        onPlay = onPlay,
+                                        onDelete = ::deleteWithFocusTransfer,
+                                        onRetry = onRetry,
+                                        onCyclePriority = onCyclePriority,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
                             }
                         }
                     }
@@ -4930,7 +5028,7 @@ private fun DownloadsHeader(
     compactHeight: Boolean,
     itemCount: Int,
     activeCount: Int,
-    availableBytes: Long,
+    availableBytes: Long?,
     wifiFocusModifier: Modifier,
     scheduleFocusModifier: Modifier,
     concurrentFocusModifier: Modifier,
@@ -4946,36 +5044,31 @@ private fun DownloadsHeader(
         modifier = Modifier
             .fillMaxWidth()
             .padding(
-                horizontal = if (isTv) 4.dp else 2.dp,
+                horizontal = if (isTv) TV_PAGE_GUTTER else 4.dp,
                 vertical = if (compactHeight) 4.dp else 7.dp,
             ),
     ) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val inlineSummary = maxWidth >= if (isTv) 720.dp else 640.dp
-            if (inlineSummary) {
-                Row(
+            if (maxWidth >= if (isTv) 720.dp else 560.dp) {
+                DownloadsTvHeaderTitle(
+                    isTv = isTv,
+                    itemCount = itemCount,
                     modifier = Modifier.align(Alignment.TopStart),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    DownloadsHeaderTitle(isTv = isTv)
-                    DownloadsSummaryChips(
-                        isTv = isTv,
-                        itemCount = itemCount,
-                        activeCount = activeCount,
-                        availableBytes = availableBytes,
-                    )
-                }
+                )
+                DownloadsTvSummary(
+                    itemCount = itemCount,
+                    activeCount = activeCount,
+                    availableBytes = availableBytes,
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                )
             } else {
                 Column {
-                    DownloadsHeaderTitle(isTv = isTv)
+                    DownloadsTvHeaderTitle(isTv = isTv, itemCount = itemCount)
                     Spacer(Modifier.height(if (compactHeight) 7.dp else 10.dp))
-                    DownloadsSummaryChips(
-                        isTv = isTv,
+                    DownloadsTvSummary(
                         itemCount = itemCount,
                         activeCount = activeCount,
                         availableBytes = availableBytes,
-                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }
@@ -4984,18 +5077,20 @@ private fun DownloadsHeader(
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(7.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp),
-            modifier = if (isTv) Modifier.focusGroup() else Modifier,
+            modifier = Modifier.focusGroup(),
         ) {
-            val controlWidth = if (isTv) 112.dp else 98.dp
-            val controlHeight = if (isTv) 38.dp else 48.dp
+            val controlWidth = 112.dp
+            val controlHeight = if (isTv) 38.dp else 44.dp
             FocusButton(
-                if (settings.wifiOnly) "WiFi فقط  ✓" else "كل الشبكات",
+                if (settings.wifiOnly) "WiFi فقط" else "كل الشبكات",
                 onToggleWifiOnly,
                 primary = settings.wifiOnly,
                 compact = true,
                 outlined = !settings.wifiOnly,
                 scaleOnFocus = false,
-                textSizeSp = if (isTv) 11 else 10,
+                textSizeSp = 11,
+                trailingIcon = if (settings.wifiOnly) Icons.Rounded.Check else Icons.Rounded.Language,
+                trailingIconTint = if (settings.wifiOnly) null else colors.gold,
                 onFocused = { onFocused(DownloadFocusSlot.WIFI) },
                 modifier = wifiFocusModifier
                     .widthIn(min = controlWidth)
@@ -5015,7 +5110,9 @@ private fun DownloadsHeader(
                 compact = true,
                 outlined = settings.scheduleMode != DownloadScheduleMode.NIGHT,
                 scaleOnFocus = false,
-                textSizeSp = if (isTv) 11 else 10,
+                textSizeSp = 11,
+                trailingIcon = Icons.Rounded.Schedule,
+                trailingIconTint = if (settings.scheduleMode == DownloadScheduleMode.NIGHT) null else colors.gold,
                 onFocused = { onFocused(DownloadFocusSlot.SCHEDULE) },
                 modifier = scheduleFocusModifier
                     .widthIn(min = controlWidth)
@@ -5029,13 +5126,15 @@ private fun DownloadsHeader(
                     },
             )
             FocusButton(
-                "متزامنة  ${settings.concurrentDownloads}",
+                "متزامنة ${settings.concurrentDownloads}",
                 onCycleConcurrent,
                 primary = false,
                 compact = true,
                 outlined = true,
                 scaleOnFocus = false,
-                textSizeSp = if (isTv) 11 else 10,
+                textSizeSp = 11,
+                trailingIcon = Icons.Rounded.Tune,
+                trailingIconTint = colors.gold,
                 onFocused = { onFocused(DownloadFocusSlot.CONCURRENT) },
                 modifier = concurrentFocusModifier
                     .widthIn(min = controlWidth)
@@ -5060,144 +5159,133 @@ private fun DownloadsHeader(
 }
 
 @Composable
-private fun DownloadsHeaderTitle(
+private fun DownloadsTvHeaderTitle(
     isTv: Boolean,
+    itemCount: Int,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(9.dp),
-    ) {
-        Icon(
-            Icons.Rounded.Download,
-            contentDescription = null,
-            tint = colors.goldBright,
-            modifier = Modifier.size(if (isTv) 27.dp else 23.dp),
-        )
+    Column(modifier) {
         Text(
             "التنزيلات",
             color = colors.text,
-            fontSize = if (isTv) 24.sp else 20.sp,
+            fontSize = if (isTv) 27.sp else MOBILE_SECTION_TITLE_SIZE,
             fontWeight = FontWeight.Bold,
         )
+        Text(
+            if (itemCount == 1) "1 عنصر" else "$itemCount عناصر",
+            color = colors.textMuted,
+            fontSize = if (isTv) 11.sp else MOBILE_SECTION_COUNT_SIZE,
+        )
     }
-}
-
-private enum class DownloadSummaryTone {
-    ACTIVE,
-    NEUTRAL,
-    STORAGE,
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DownloadsSummaryChips(
-    isTv: Boolean,
+private fun DownloadsTvSummary(
     itemCount: Int,
     activeCount: Int,
-    availableBytes: Long,
+    availableBytes: Long?,
     modifier: Modifier = Modifier,
 ) {
+    val colors = LocalHulkColors.current
     FlowRow(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(7.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        itemVerticalAlignment = Alignment.CenterVertically,
     ) {
-        DownloadSummaryChip(
+        DownloadsTvSummaryEntry(
             icon = Icons.Rounded.Downloading,
-            value = "$activeCount نشط",
-            label = "التنزيلات النشطة",
-            tone = DownloadSummaryTone.ACTIVE,
-            isTv = isTv,
+            value = "$activeCount",
+            label = "نشط",
+            iconColor = colors.goldBright,
+            valueColor = colors.goldBright,
         )
-        DownloadSummaryChip(
+        DownloadsTvSummaryDivider()
+        DownloadsTvSummaryEntry(
             icon = Icons.Rounded.VideoLibrary,
-            value = if (itemCount == 1) "1 عنصر" else "$itemCount عناصر",
-            label = "إجمالي العناصر",
-            tone = DownloadSummaryTone.NEUTRAL,
-            isTv = isTv,
+            value = "$itemCount",
+            label = if (itemCount == 1) "عنصر" else "عناصر",
+            iconColor = colors.gold,
+            valueColor = colors.text,
         )
-        DownloadSummaryChip(
-            icon = Icons.Rounded.Storage,
-            value = "${formatBytes(availableBytes)} متبقي",
-            label = "المساحة المتبقية",
-            tone = DownloadSummaryTone.STORAGE,
-            isTv = isTv,
+        DownloadsTvSummaryDivider()
+        if (availableBytes != null) {
+            DownloadsTvSummaryEntry(
+                icon = Icons.Rounded.Storage,
+                value = formatBytes(availableBytes),
+                label = "متبقي",
+                iconColor = colors.gold,
+                valueColor = colors.text,
+            )
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                Text(
+                    "المساحة غير متاحة",
+                    color = colors.textMuted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+                Icon(
+                    Icons.Rounded.Storage,
+                    contentDescription = null,
+                    tint = colors.textMuted,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadsTvSummaryEntry(
+    icon: ImageVector,
+    value: String,
+    label: String,
+    iconColor: Color,
+    valueColor: Color,
+) {
+    val colors = LocalHulkColors.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Text(
+            text = buildAnnotatedString {
+                withStyle(SpanStyle(color = valueColor, fontWeight = FontWeight.Bold)) {
+                    append(value)
+                }
+                append(" ")
+                withStyle(SpanStyle(color = colors.textMuted)) {
+                    append(label)
+                }
+            },
+            fontSize = 11.sp,
+            maxLines = 1,
+        )
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = iconColor,
+            modifier = Modifier.size(16.dp),
         )
     }
 }
 
 @Composable
-private fun DownloadSummaryChip(
-    icon: ImageVector,
-    value: String,
-    label: String,
-    tone: DownloadSummaryTone,
-    isTv: Boolean,
-) {
+private fun DownloadsTvSummaryDivider() {
     val colors = LocalHulkColors.current
-    val backgroundColor = when (tone) {
-        DownloadSummaryTone.ACTIVE -> colors.gold.copy(alpha = .16f)
-        DownloadSummaryTone.NEUTRAL -> colors.surfaceRaised.copy(alpha = .78f)
-        DownloadSummaryTone.STORAGE -> colors.gold.copy(alpha = .07f)
-    }
-    val borderColor = when (tone) {
-        DownloadSummaryTone.ACTIVE -> colors.goldBright.copy(alpha = .72f)
-        DownloadSummaryTone.NEUTRAL -> colors.line.copy(alpha = .52f)
-        DownloadSummaryTone.STORAGE -> colors.gold.copy(alpha = .38f)
-    }
-    val iconColor = when (tone) {
-        DownloadSummaryTone.ACTIVE -> colors.goldBright
-        DownloadSummaryTone.NEUTRAL -> colors.textMuted
-        DownloadSummaryTone.STORAGE -> colors.gold
-    }
-    val valueColor = if (tone == DownloadSummaryTone.ACTIVE) {
-        colors.goldBright
-    } else {
-        colors.text
-    }
-    val shape = RoundedCornerShape(12.dp)
-    Row(
-        modifier = Modifier
-            .widthIn(min = if (isTv) 126.dp else 112.dp)
-            .clip(shape)
-            .background(backgroundColor)
-            .border(
-                width = if (tone == DownloadSummaryTone.ACTIVE) 1.5.dp else 1.dp,
-                color = borderColor,
-                shape = shape,
-            )
-            .padding(
-                horizontal = if (isTv) 10.dp else 9.dp,
-                vertical = if (isTv) 7.dp else 8.dp,
-            ),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = iconColor,
-            modifier = Modifier.size(if (isTv) 18.dp else 17.dp),
-        )
-        Column {
-            Text(
-                value,
-                color = valueColor,
-                fontSize = if (isTv) 11.sp else 10.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-            )
-            Text(
-                label,
-                color = colors.textMuted,
-                fontSize = if (isTv) 8.sp else 8.sp,
-                maxLines = 1,
-            )
-        }
-    }
+    Box(
+        Modifier
+            .width(1.dp)
+            .height(16.dp)
+            .background(colors.line.copy(alpha = .42f)),
+    )
 }
 
 @Composable
@@ -5249,8 +5337,6 @@ private fun DownloadsEmptyState(
 @Composable
 private fun DownloadCard(
     item: OfflineDownload,
-    isTv: Boolean,
-    compactHeight: Boolean,
     focusRequesters: DownloadCardFocusRequesters,
     onFocused: (DownloadFocusSlot) -> Unit,
     onDirection: (DownloadFocusSlot, DownloadFocusMove) -> Boolean,
@@ -5261,46 +5347,89 @@ private fun DownloadCard(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    var focused by remember { mutableStateOf(false) }
+    TrackDownloadFocusHandle(focusRequesters.primary, false)
+    TrackDownloadFocusHandle(focusRequesters.priority, false)
+    TrackDownloadFocusHandle(focusRequesters.cancel, false)
+    val shape = RoundedCornerShape(14.dp)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.surface.copy(alpha = .92f))
+            .border(1.dp, colors.line.copy(alpha = .34f), shape)
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+    ) {
+        // Portrait row: compact artwork physically RIGHT with the identity alongside it.
+        Row(verticalAlignment = Alignment.Top) {
+            DownloadTvRowArtwork(item = item, width = 112.dp)
+            Spacer(Modifier.width(10.dp))
+            DownloadTvRowDetails(item = item, modifier = Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(8.dp))
+        DownloadTvRowStatus(item = item, isTv = false, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(10.dp))
+        DownloadTvRowActions(
+            item = item,
+            isTv = false,
+            primaryActionWidth = 0.dp,
+            focusRequesters = focusRequesters,
+            onFocused = onFocused,
+            onDirection = onDirection,
+            onPlay = onPlay,
+            onDelete = onDelete,
+            onRetry = onRetry,
+            onCyclePriority = onCyclePriority,
+            fillPrimaryWidth = true,
+        )
+    }
+}
+
+@Composable
+private fun DownloadTvRow(
+    item: OfflineDownload,
+    isTv: Boolean,
+    primaryActionWidth: Dp,
+    focusRequesters: DownloadCardFocusRequesters,
+    onFocused: (DownloadFocusSlot) -> Unit,
+    onDirection: (DownloadFocusSlot, DownloadFocusMove) -> Boolean,
+    onPlay: (OfflineDownload) -> Unit,
+    onDelete: (OfflineDownload) -> Unit,
+    onRetry: (OfflineDownload) -> Unit,
+    onCyclePriority: (OfflineDownload) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
     TrackDownloadFocusHandle(focusRequesters.primary, isTv)
     TrackDownloadFocusHandle(focusRequesters.priority, isTv)
     TrackDownloadFocusHandle(focusRequesters.cancel, isTv)
-    val shape = RoundedCornerShape(if (isTv) 15.dp else 14.dp)
-    Column(
+    val shape = RoundedCornerShape(14.dp)
+    Row(
         modifier = modifier
+            .fillMaxWidth()
             .clip(shape)
-            .background(
-                if (focused) {
-                    colors.gold.copy(alpha = .10f)
-                } else {
-                    colors.surface.copy(alpha = .92f)
-                },
-            )
-            .border(
-                if (focused) 2.dp else 1.dp,
-                if (focused) colors.goldBright else colors.line.copy(alpha = .46f),
-                shape,
-            )
-            .onFocusChanged { focused = it.hasFocus }
-            .then(if (isTv) Modifier.focusGroup() else Modifier)
-            .padding(if (isTv) 9.dp else 8.dp),
+            .background(colors.surface.copy(alpha = .92f))
+            .border(1.dp, colors.line.copy(alpha = .34f), shape)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        DownloadArtwork(
-            item = item,
-            isTv = isTv,
-            compactHeight = compactHeight,
-            modifier = Modifier.fillMaxWidth(),
+        // Physical RIGHT-to-LEFT: artwork, then identity, then telemetry, then actions.
+        DownloadTvRowArtwork(item = item, width = 160.dp)
+        Spacer(Modifier.width(12.dp))
+        DownloadTvRowDetails(item = item, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(12.dp))
+        Box(
+            Modifier
+                .width(1.dp)
+                .height(56.dp)
+                .background(colors.line.copy(alpha = .30f)),
         )
-        Spacer(Modifier.height(if (compactHeight) 7.dp else 9.dp))
-        DownloadDetails(
+        Spacer(Modifier.width(12.dp))
+        DownloadTvRowStatus(item = item, isTv = isTv, modifier = Modifier.width(228.dp))
+        Spacer(Modifier.width(12.dp))
+        DownloadTvRowActions(
             item = item,
             isTv = isTv,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(if (compactHeight) 7.dp else 9.dp))
-        DownloadCardActions(
-            item = item,
-            isTv = isTv,
+            primaryActionWidth = primaryActionWidth,
             focusRequesters = focusRequesters,
             onFocused = onFocused,
             onDirection = onDirection,
@@ -5313,17 +5442,16 @@ private fun DownloadCard(
 }
 
 @Composable
-private fun DownloadArtwork(
+private fun DownloadTvRowArtwork(
     item: OfflineDownload,
-    isTv: Boolean,
-    compactHeight: Boolean,
-    modifier: Modifier = Modifier,
+    width: Dp,
 ) {
     val colors = LocalHulkColors.current
-    val shape = RoundedCornerShape(if (isTv) 12.dp else 11.dp)
+    val shape = RoundedCornerShape(12.dp)
     Box(
-        modifier = modifier
-            .aspectRatio(if (compactHeight) 2f else 16f / 9f)
+        modifier = Modifier
+            .width(width)
+            .aspectRatio(16f / 9f)
             .clip(shape)
             .background(colors.surfaceRaised),
         contentAlignment = Alignment.Center,
@@ -5343,207 +5471,32 @@ private fun DownloadArtwork(
                     .graphicsLayer { alpha = .56f },
             )
         }
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(6.dp)
-                .clip(CircleShape)
-                .background(colors.background.copy(alpha = .86f))
-                .border(1.dp, colors.gold.copy(alpha = .38f), CircleShape)
-                .padding(horizontal = 7.dp, vertical = 3.dp),
-        ) {
-            Text(
-                downloadCompactStatusLabel(item.status),
-                color = if (item.status == OfflineStatus.COMPLETED) {
-                    colors.goldBright
-                } else {
-                    colors.text
-                },
-                fontSize = if (isTv) 9.sp else 8.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-            )
-        }
     }
 }
 
 @Composable
-private fun DownloadDetails(
+private fun DownloadTvRowDetails(
     item: OfflineDownload,
-    isTv: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    val displayTitle = item.seriesTitle ?: item.title
-    val metadata = buildList {
-        if (item.streamKind == "movie") {
-            add("فيلم")
-        } else {
-            item.season?.let { add("الموسم $it") }
-            item.episodeNumber?.let { add("الحلقة $it") }
-            if (item.season == null && item.episodeNumber == null && item.title != displayTitle) {
-                add(item.title)
-            }
-        }
-        add("أولوية ${priorityLabel(item.priority)}")
-    }.joinToString("  •  ")
+    val identity = downloadDisplayIdentity(item)
     Column(modifier) {
         Text(
-            displayTitle,
+            identity.title,
             color = colors.text,
-            fontSize = if (isTv) 14.sp else 13.sp,
+            fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
-            lineHeight = if (isTv) 18.sp else 17.sp,
+            lineHeight = 20.sp,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.heightIn(min = if (isTv) 36.dp else 34.dp),
+            modifier = Modifier.heightIn(min = 40.dp),
         )
-        Text(
-            metadata,
-            color = colors.textMuted,
-            fontSize = if (isTv) 9.sp else 8.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(6.dp))
-        DownloadProgress(item, isTv)
-    }
-}
-
-@Composable
-private fun DownloadCardActions(
-    item: OfflineDownload,
-    isTv: Boolean,
-    focusRequesters: DownloadCardFocusRequesters,
-    onFocused: (DownloadFocusSlot) -> Unit,
-    onDirection: (DownloadFocusSlot, DownloadFocusMove) -> Boolean,
-    onPlay: (OfflineDownload) -> Unit,
-    onDelete: (OfflineDownload) -> Unit,
-    onRetry: (OfflineDownload) -> Unit,
-    onCyclePriority: (OfflineDownload) -> Unit,
-) {
-    val primaryLabel = when (item.status) {
-        OfflineStatus.COMPLETED -> "تشغيل"
-        OfflineStatus.FAILED -> "إعادة"
-        OfflineStatus.PAUSED,
-        OfflineStatus.WAITING_SCHEDULE,
-        OfflineStatus.WAITING_NETWORK,
-        OfflineStatus.WAITING_STORAGE,
-        -> "استئناف"
-        OfflineStatus.QUEUED,
-        OfflineStatus.CHECKING,
-        OfflineStatus.DOWNLOADING,
-        -> "إيقاف"
-    }
-    val primaryAction = when (item.status) {
-        OfflineStatus.COMPLETED -> onPlay
-        else -> onRetry
-    }
-    val actionHeight = if (isTv) 38.dp else 48.dp
-    Row(
-        modifier = Modifier.fillMaxWidth().height(actionHeight).focusGroup(),
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        DownloadActionButton(
-            label = primaryLabel,
-            text = primaryLabel,
-            emphasized = true,
-            isTv = isTv,
-            onClick = { primaryAction(item) },
-            onFocused = { onFocused(DownloadFocusSlot.PRIMARY) },
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .applyDownloadTvFocusNode(isTv, focusRequesters.primary) { move ->
-                    onDirection(DownloadFocusSlot.PRIMARY, move)
-                },
-        )
-        DownloadActionButton(
-            label = "الأولوية ${priorityLabel(item.priority)}",
-            icon = Icons.Rounded.Tune,
-            selected = item.priority != 0,
-            isTv = isTv,
-            onClick = { onCyclePriority(item) },
-            onFocused = { onFocused(DownloadFocusSlot.PRIORITY) },
-            modifier = Modifier
-                .size(actionHeight)
-                .applyDownloadTvFocusNode(isTv, focusRequesters.priority) { move ->
-                    onDirection(DownloadFocusSlot.PRIORITY, move)
-                },
-        )
-        DownloadActionButton(
-            label = if (item.status == OfflineStatus.COMPLETED) "حذف التنزيل" else "إلغاء التنزيل",
-            icon = Icons.Rounded.DeleteOutline,
-            danger = true,
-            isTv = isTv,
-            onClick = { onDelete(item) },
-            onFocused = { onFocused(DownloadFocusSlot.CANCEL) },
-            modifier = Modifier
-                .size(actionHeight)
-                .applyDownloadTvFocusNode(isTv, focusRequesters.cancel) { move ->
-                    onDirection(DownloadFocusSlot.CANCEL, move)
-                },
-        )
-    }
-}
-
-@Composable
-private fun DownloadActionButton(
-    label: String,
-    isTv: Boolean,
-    onClick: () -> Unit,
-    onFocused: () -> Unit,
-    modifier: Modifier = Modifier,
-    text: String? = null,
-    icon: ImageVector? = null,
-    emphasized: Boolean = false,
-    selected: Boolean = false,
-    danger: Boolean = false,
-) {
-    val colors = LocalHulkColors.current
-    var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(10.dp)
-    val background = when {
-        focused -> colors.gold.copy(alpha = .20f)
-        emphasized -> colors.gold.copy(alpha = .11f)
-        selected -> colors.gold.copy(alpha = .08f)
-        else -> colors.surfaceRaised.copy(alpha = .92f)
-    }
-    val foreground = when {
-        danger -> Color(0xFFFF9B8E)
-        emphasized || selected || focused -> colors.goldBright
-        else -> colors.text
-    }
-    Box(
-        modifier = modifier
-            .clip(shape)
-            .background(background)
-            .border(
-                if (focused) 2.dp else 1.dp,
-                if (focused) colors.goldBright else colors.line.copy(alpha = .48f),
-                shape,
-            )
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onFocused()
-            }
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = if (icon == null) 6.dp else 0.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (icon != null) {
-            Icon(
-                icon,
-                contentDescription = label,
-                tint = foreground,
-                modifier = Modifier.size(if (isTv) 18.dp else 20.dp),
-            )
-        } else {
+        if (identity.metadata.isNotEmpty()) {
             Text(
-                text = text.orEmpty(),
-                color = foreground,
-                fontSize = if (isTv) 11.sp else 10.sp,
-                fontWeight = FontWeight.Bold,
+                identity.metadata,
+                color = colors.textMuted,
+                fontSize = 11.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -5552,104 +5505,239 @@ private fun DownloadActionButton(
 }
 
 @Composable
-private fun DownloadProgress(item: OfflineDownload, isTv: Boolean) {
+private fun DownloadTvRowStatus(
+    item: OfflineDownload,
+    isTv: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val colors = LocalHulkColors.current
-    val targetProgress = (
-        if (item.status == OfflineStatus.COMPLETED) 1f else item.progress
-    ).coerceIn(0f, 1f)
-    val progress by animateFloatAsState(targetProgress, label = "downloadProgress")
-    val percent = (targetProgress * 100).toInt()
-    val sizeLine = when {
-        item.status == OfflineStatus.COMPLETED ->
-            "${formatBytes(item.totalBytes.coerceAtLeast(item.bytesDownloaded))}  •  ${item.storageLabel}"
-        item.totalBytes > 0L ->
-            "${formatBytes(item.bytesDownloaded)} / ${formatBytes(item.totalBytes)}"
-        item.bytesDownloaded > 0L -> formatBytes(item.bytesDownloaded)
-        else -> item.storageLabel
-    }
-    val detailLine = when {
-        item.status == OfflineStatus.DOWNLOADING && item.bytesPerSecond > 0L ->
-            "${formatTransferRate(item.bytesPerSecond)}  •  المتبقي ${formatEta(item.etaSeconds)}"
-        item.status == OfflineStatus.WAITING_SCHEDULE && item.scheduledAtEpochMs > 0L ->
-            "سيبدا ${formatScheduledTime(item.scheduledAtEpochMs)}"
-        !item.errorMessage.isNullOrBlank() -> item.errorMessage
-        else -> downloadStatusLabel(item.status)
-    }
-    val detailTextSize = if (isTv) 9.sp else 8.sp
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(
-            "\u200E$sizeLine",
-            color = colors.textMuted,
-            fontSize = detailTextSize,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        if (item.totalBytes > 0L || item.status == OfflineStatus.COMPLETED) {
+    val telemetry = downloadTvRowTelemetry(
+        item = item,
+        formatBytes = ::formatBytes,
+        scheduledLabel = ::formatScheduledTime,
+    )
+    val statusColor = if (item.status == OfflineStatus.FAILED) colors.danger else colors.text
+    val statusTextSize = if (isTv) 12.sp else 13.sp
+    val detailTextSize = if (isTv) 10.sp else 12.sp
+    Column(modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                "\u200E$percent%",
-                color = colors.goldBright,
-                fontSize = detailTextSize,
+                downloadTvRowStatusLabel(item.status),
+                color = statusColor,
+                fontSize = statusTextSize,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (item.status == OfflineStatus.WAITING_NETWORK) {
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    Icons.Rounded.WifiOff,
+                    contentDescription = null,
+                    tint = colors.gold,
+                    modifier = Modifier.size(if (isTv) 15.dp else 17.dp),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            telemetry.percent?.let { percent ->
+                Text(
+                    "\u200E$percent%",
+                    color = colors.goldBright,
+                    fontSize = statusTextSize,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+            }
+        }
+        if (telemetry.showTrack) {
+            Spacer(Modifier.height(6.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = .13f)),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(item.progress.coerceIn(0f, 1f))
+                        .fillMaxHeight()
+                        .background(colors.gold),
+                )
+            }
+        }
+        telemetry.sizeLine?.let { sizeLine ->
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "\u200E$sizeLine",
+                color = colors.textMuted,
+                fontSize = detailTextSize,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        telemetry.detailLine?.let { detail ->
+            Spacer(Modifier.height(4.dp))
+            Text(
+                detail,
+                color = if (item.status == OfflineStatus.FAILED) colors.danger else colors.textMuted,
+                fontSize = detailTextSize,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
-    Spacer(Modifier.height(4.dp))
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(4.dp)
-            .clip(CircleShape)
-            .background(Color.White.copy(alpha = .13f)),
+}
+
+@Composable
+private fun DownloadTvRowActions(
+    item: OfflineDownload,
+    isTv: Boolean,
+    primaryActionWidth: Dp,
+    focusRequesters: DownloadCardFocusRequesters,
+    onFocused: (DownloadFocusSlot) -> Unit,
+    onDirection: (DownloadFocusSlot, DownloadFocusMove) -> Boolean,
+    onPlay: (OfflineDownload) -> Unit,
+    onDelete: (OfflineDownload) -> Unit,
+    onRetry: (OfflineDownload) -> Unit,
+    onCyclePriority: (OfflineDownload) -> Unit,
+    fillPrimaryWidth: Boolean = false,
+) {
+    val action = downloadTvRowAction(item.status)
+    val actionHeight = if (isTv) 42.dp else 46.dp
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth(progress)
-                .fillMaxHeight()
-                .background(colors.goldBright),
+        DownloadTvRowActionButton(
+            label = downloadTvRowActionCaption(action),
+            icon = when (action) {
+                DownloadTvRowAction.PLAY,
+                DownloadTvRowAction.RESUME,
+                -> Icons.Rounded.PlayArrow
+                DownloadTvRowAction.PAUSE -> Icons.Rounded.Pause
+                DownloadTvRowAction.RETRY -> Icons.Rounded.Refresh
+            },
+            isTv = isTv,
+            emphasized = true,
+            onClick = {
+                if (action == DownloadTvRowAction.PLAY) onPlay(item) else onRetry(item)
+            },
+            onFocused = { onFocused(DownloadFocusSlot.PRIMARY) },
+            modifier = (
+                if (fillPrimaryWidth) {
+                    Modifier.weight(1f)
+                } else {
+                    Modifier.width(primaryActionWidth)
+                }
+                ).height(actionHeight)
+                .applyDownloadTvFocusNode(isTv = isTv, handle = focusRequesters.primary) { move ->
+                    onDirection(DownloadFocusSlot.PRIMARY, move)
+                },
+        )
+        DownloadTvRowActionButton(
+            label = "الاولوية ${priorityLabel(item.priority)}",
+            icon = Icons.Rounded.Tune,
+            isTv = isTv,
+            selected = item.priority != 0,
+            onClick = { onCyclePriority(item) },
+            onFocused = { onFocused(DownloadFocusSlot.PRIORITY) },
+            modifier = Modifier
+                .size(actionHeight)
+                .applyDownloadTvFocusNode(isTv = isTv, handle = focusRequesters.priority) { move ->
+                    onDirection(DownloadFocusSlot.PRIORITY, move)
+                },
+        )
+        DownloadTvRowActionButton(
+            label = if (item.status == OfflineStatus.COMPLETED) "حذف التنزيل" else "الغاء التنزيل",
+            icon = Icons.Rounded.DeleteOutline,
+            isTv = isTv,
+            onClick = { onDelete(item) },
+            onFocused = { onFocused(DownloadFocusSlot.CANCEL) },
+            modifier = Modifier
+                .size(actionHeight)
+                .applyDownloadTvFocusNode(isTv = isTv, handle = focusRequesters.cancel) { move ->
+                    onDirection(DownloadFocusSlot.CANCEL, move)
+                },
         )
     }
-    Spacer(Modifier.height(5.dp))
-    Text(
-        detailLine,
-        color = if (item.status == OfflineStatus.FAILED) {
-            Color(0xFFFF9B8E)
+}
+
+@Composable
+private fun DownloadTvRowActionButton(
+    label: String,
+    icon: ImageVector,
+    isTv: Boolean,
+    onClick: () -> Unit,
+    onFocused: () -> Unit,
+    modifier: Modifier = Modifier,
+    emphasized: Boolean = false,
+    selected: Boolean = false,
+) {
+    val colors = LocalHulkColors.current
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(10.dp)
+    val background = when {
+        emphasized -> colors.gold
+        selected -> colors.gold.copy(alpha = .16f)
+        else -> colors.surfaceRaised.copy(alpha = .92f)
+    }
+    val foreground = when {
+        emphasized -> Color(0xFF100E04)
+        selected -> colors.goldBright
+        else -> colors.text
+    }
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(background)
+            .goldFocusEdge(shape = shape, visible = focused)
+            .border(
+                width = if (!emphasized && !focused) 1.dp else 0.dp,
+                color = if (!emphasized) colors.line.copy(alpha = .48f) else Color.Transparent,
+                shape = shape,
+            )
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = if (emphasized) 12.dp else 0.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (emphasized) {
+            // Caption physically RIGHT with its single glyph immediately LEFT at one 6dp gap.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = label,
+                    color = foreground,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = foreground,
+                    modifier = Modifier.size(if (isTv) 17.dp else 18.dp),
+                )
+            }
         } else {
-            colors.textMuted
-        },
-        fontSize = detailTextSize,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-    )
-}
-
-private fun downloadCompactStatusLabel(status: OfflineStatus): String = when (status) {
-    OfflineStatus.QUEUED -> "قيد الانتظار"
-    OfflineStatus.CHECKING -> "فحص"
-    OfflineStatus.DOWNLOADING -> "جار التحميل"
-    OfflineStatus.PAUSED -> "متوقف"
-    OfflineStatus.WAITING_SCHEDULE -> "مجدول"
-    OfflineStatus.WAITING_NETWORK -> "بانتظار الشبكة"
-    OfflineStatus.WAITING_STORAGE -> "بانتظار التخزين"
-    OfflineStatus.COMPLETED -> "جاهز"
-    OfflineStatus.FAILED -> "فشل"
-}
-
-private fun downloadStatusLabel(status: OfflineStatus): String = when (status) {
-    OfflineStatus.QUEUED -> "في قائمة الانتظار"
-    OfflineStatus.CHECKING -> "جاري فحص الحجم والمساحة"
-    OfflineStatus.DOWNLOADING -> "جاري التحميل"
-    OfflineStatus.PAUSED -> "متوقف مؤقتا"
-    OfflineStatus.WAITING_SCHEDULE -> "مجدول للتحميل الليلي"
-    OfflineStatus.WAITING_NETWORK -> "بانتظار عودة الشبكة"
-    OfflineStatus.WAITING_STORAGE -> "بانتظار وحدة التخزين"
-    OfflineStatus.COMPLETED -> "اكتمل وتم التحقق"
-    OfflineStatus.FAILED -> "تعذر التحميل"
+            Icon(
+                icon,
+                contentDescription = label,
+                tint = foreground,
+                modifier = Modifier.size(if (isTv) 19.dp else 20.dp),
+            )
+        }
+    }
 }
 
 private fun priorityLabel(priority: Int): String = when (priority) {
@@ -5660,17 +5748,6 @@ private fun priorityLabel(priority: Int): String = when (priority) {
 
 private fun formatScheduledTime(epochMs: Long): String =
     SimpleDateFormat("EEE  HH:mm", Locale.forLanguageTag("ar-SA")).format(Date(epochMs))
-
-private fun formatEta(seconds: Long): String {
-    if (seconds < 0L) return "يحسب..."
-    val minutes = seconds / 60L
-    val remainingSeconds = seconds % 60L
-    return when {
-        minutes >= 60L -> "${minutes / 60L} س ${minutes % 60L} د"
-        minutes > 0L -> "$minutes د $remainingSeconds ث"
-        else -> "$remainingSeconds ث"
-    }
-}
 
 private fun formatTransferRate(bytesPerSecond: Long): String {
     if (bytesPerSecond <= 0L) return "0 KB/ث"

@@ -1103,4 +1103,110 @@ OFF; automated visual validation is NOT RUN — CAPTURE NOT AUTHORIZED.
 Implementation status: SECTION_PUBLISH candidate for the Search section — owner review PENDING.
 Captures remain OFF; automated visual validation is NOT RUN — CAPTURE NOT AUTHORIZED.
 
+## 16. Downloads Model 01 adoption record (2026-10-13)
+
+On 2026-10-13 01:50:10 Asia/Riyadh the owner accepted Downloads Model 01 («ممتاز اعتمد هذا»).
+The accepted reference package is `HULK-DOWNLOADS-MODEL-01-20261013.zip` (SHA-256
+`803ca4ee06fa28c45704729ae238798ffc1ddc0996867b9cc3a4c27b7ea78957`). This record documents
+**design-reference acceptance**. The Android implementation
+(`downloads-ui-alignment-20261013`, LOCAL_ROUND R01) is under owner review — **PENDING**; no
+Downloads merge, signing, tag or release is authorized or implied.
+
+### 16.1 Adopted TV composition
+
+- TV-only header: the accepted text-only section heading `التنزيلات` with the real item count
+  (27sp/11sp, the Favorites header family) at physical RIGHT; a compact inline summary at
+  physical LEFT with the real active count (existing QUEUED/CHECKING/DOWNLOADING/PAUSED/
+  WAITING_* predicate), the real item count and the measured available storage. A failed storage
+  read stays unknown (`المساحة غير متاحة`) instead of becoming a fabricated `0 MB`. The three
+  oversized boxed summary widgets stay phone-only.
+- TV settings toolbar at physical RIGHT keeps the existing `كل الشبكات` / `WiFi فقط`,
+  `الجدولة الان` / real scheduled value and `متزامنة` + real value controls, callbacks,
+  supported choices and persisted state; WiFi-only uses the real check glyph (no textual `✓`
+  decoration), and the controls use the shared compact button family with the accepted semantic
+  glyphs. No Search, Refresh, Category Management or new filter is added.
+- TV body: one vertically scrolling full-width list, one row per stable `downloadId`. Each row's
+  physical RIGHT-to-LEFT anatomy is landscape artwork (16:9, real record artwork with the
+  existing brand fallback) → title with the reserved two-line slot and real film/season/episode
+  metadata → status/telemetry column → action cluster. Fixed artwork/status/action columns and a
+  weighted title column keep the columns aligned across rows; rows use the scoped dark surface
+  and a restrained separator. No poster-card columns, hero or second selected-item panel.
+- Actions keep the existing authoritative routing: COMPLETED `تشغيل`, FAILED `اعادة التحميل`,
+  PAUSED/eligible WAITING_* `استئناف`, QUEUED/CHECKING/DOWNLOADING `ايقاف`, through the existing
+  `onPlayDownload` / `onRetryDownload` owners; the Tune priority control keeps its real selected
+  state and the Delete/Cancel control keeps distinct `حذف التنزيل` / `الغاء التنزيل` semantics.
+  The primary action is the accepted gold fill with the dark caption and one glyph at physical
+  LEFT immediately beside the physically-RIGHT caption, one 6dp gap.
+- Truthful telemetry: a known total on DOWNLOADING/PAUSED shows the real percent with the thin
+  gold track and the real byte pair; an unknown total shows no percent, track, total or ETA; a
+  completed row shows its real size with no decorative track; real errors and the real schedule
+  line stay visible. `WAITING_NETWORK` keeps its waiting wording and is never presented as a
+  proven outage.
+- Focus: the existing `DownloadTvFocusGraph`, `DownloadFocusMoveTransaction`,
+  `DownloadFocusHistory` and downloadId focus registry are reused with a single TV column;
+  LEFT/RIGHT traverse PRIMARY → PRIORITY → CANCEL and back, the right boundary reaches the
+  navigation rail, terminal LEFT and last-row DOWN stay bounded, UP/DOWN preserve the eligible
+  action slot, and first-row UP reaches the matching toolbar control. Offscreen rows are revealed
+  completely before focus is granted using real layout signals; the focused actionable node
+  alone receives the in-bounds `goldFocusEdge`, with no scale or simultaneous row border.
+- Wording: app-authored copy uses `فلم` and normalized `ا` (for example `ايقاف`, `اعادة`,
+  `اولوية`, `الغاء`) while `استئناف`, `ئ`, `ؤ` and `ء` stay correct; no terminal full stop or
+  ellipsis and numeric runs stay LTR. Server titles and stored content are untouched.
+
+### 16.2 Preservation boundary
+
+Phone/touch keeps its existing adaptive grid and `DownloadCard` composition. Home download cards,
+Details download controls, rail icons/order, download engine/queue/scheduler/foreground
+lifecycle/pause durability/file integrity, account/profile isolation, storage queries and
+persistence are unchanged. This is a presentation/focus alignment; no migration, data reset or
+new dependency is introduced.
+
+Implementation status: LOCAL_ROUND R01 under owner review — **PENDING**. Captures remain OFF;
+automated visual validation is NOT RUN — CAPTURE NOT AUTHORIZED.
+
+### 16.3 Owner corrections — phone list, canonical names, Home card, download notices (2026-10-13)
+
+Owner steering 2026-10-13 03:24 Asia/Riyadh (`HULK-DOWNLOADS-OWNER-CORRECTIONS-20261013.zip`,
+SHA-256 `a581b0f4e36ad7fbea67efb2e97fd273c3d7a76812d47bad2fecf24204efd099`) supersedes only the
+conflicting earlier wording; the accepted TV composition stays. The reference package's
+`OWNER-MOBILE-ISSUE.png` records the phone rejection, `OWNER-HOME-NAME-DUPLICATION.jpeg` the
+repeated name, `HOME-DOWNLOAD-CARD-MODEL.png` the Home card, and `ACCEPTED-APP-NOTICE.jpeg` the
+accepted slim notice family. Android exact-candidate review remains **PENDING**.
+
+- **Phone list**: the previous instruction to keep the phone poster grid is superseded. Phone
+  Downloads now renders ONE full-content-width column in the same Model 01 family: portrait cards
+  with compact real 16:9 artwork physically RIGHT, canonical title + independent metadata beside
+  it, the real status/percent/track/bytes block below, and the compact gold primary + priority +
+  Delete/Cancel action row below; one vertical scroll owner; a non-TV window uses the wide
+  horizontal row only when the measured columns fit. The compact text-only heading + real
+  count, inline summary (real active count, item count, measured storage; unknown stays unknown)
+  and the existing settings controls (with the real WiFi-only check glyph) replace the three
+  boxed summary widgets on phone as well.
+- **Canonical name once**: one scoped display projection (`downloadDisplayIdentity`) is used by
+  Home, Downloads and feedback. Series render the nonblank `seriesTitle` once with independent
+  `الموسم N  •  الحلقة M`; movies render their canonical title once with `فلم`; the raw
+  composite request title is never appended; fallback is the stored record title only when
+  canonical fields are missing. Stored records, IDs, files, playback identity and owner scope
+  are untouched; no duplicate-word stripping.
+- **Home active-download card**: the compact model — canonical title + independent
+  season/episode line, real state glyph/caption (`DOWNLOADING`, `PAUSED`, `WAITING_*`), real
+  track and telemetry only for known totals, and one whole-card `onOpenDownloads` action whose
+  `فتح التنزيلات` caption + physical-left chevron is an affordance, not a nested focusable.
+  Up-to-four active entries, stable `downloadId` keys, horizontal browsing and the existing
+  progress orientation are preserved; no Home Play/Pause/Delete controls.
+- **Download notices**: download instructions/results/errors no longer use the system Toast.
+  One scoped notice host above the destination layer renders the exact `ScopedHomeActionNotice`
+  family (dark `0xF211120D`, `RoundedCornerShape(12.dp)`, 1dp gold `.45` border, 12/9dp padding,
+  ivory 12sp/17sp text, 17dp gold glyph, 8dp gap, caption RIGHT / glyph LEFT, 560dp TV / 340dp
+  phone max width, bottom content placement with phone navigation clearance). It is
+  nonfocusable, transient (auto-clears), and cleared on owning screen/destination/profile/
+  logout transitions. A typed `DownloadFeedback` result keeps the actual outcome semantics
+  (preparing, queued, completed, pause, resume, retry, cancel, delete, WiFi, schedule,
+  concurrency, priority, error) and never reports success for a button press or a previous
+  owner's asynchronous result; unrelated `notify` Toast consumers are unchanged. The display
+  layer strips terminal decoration and normalizes `أ/إ/آ → ا` without rewriting stored or
+  server data. Android foreground-service notifications remain outside this scope.
+
+Implementation status: SECTION_PUBLISH candidate under owner review — **PENDING**. Captures
+remain OFF; automated visual validation is NOT RUN — CAPTURE NOT AUTHORIZED.
 
