@@ -40,8 +40,9 @@ class TvNotificationCardScrollPolicyTest {
     fun twoNotificationsMoveAcrossCardBoundaryInBothDirections() {
         val graph = graph(2)
 
+        // Row changes preserve the action slot: DELETE stays DELETE, OPEN stays OPEN.
         assertEquals(
-            cardTarget(2, NotificationTvCardAction.OPEN),
+            cardTarget(2, NotificationTvCardAction.DELETE),
             notificationTvFocusMove(
                 graph,
                 cardTarget(1, NotificationTvCardAction.DELETE),
@@ -49,7 +50,7 @@ class TvNotificationCardScrollPolicyTest {
             ),
         )
         assertEquals(
-            cardTarget(1, NotificationTvCardAction.DELETE),
+            cardTarget(1, NotificationTvCardAction.OPEN),
             notificationTvFocusMove(
                 graph,
                 cardTarget(2, NotificationTvCardAction.OPEN),
@@ -59,7 +60,7 @@ class TvNotificationCardScrollPolicyTest {
     }
 
     @Test
-    fun unreadCardMovesThroughEveryActionWithoutSkipping() {
+    fun unreadCardTraversesEveryActionHorizontally() {
         val graph = graph(2)
 
         assertEquals(
@@ -67,7 +68,7 @@ class TvNotificationCardScrollPolicyTest {
             notificationTvFocusMove(
                 graph,
                 cardTarget(1, NotificationTvCardAction.OPEN),
-                NotificationFocusDirection.DOWN,
+                NotificationFocusDirection.RIGHT,
             ),
         )
         assertEquals(
@@ -75,7 +76,7 @@ class TvNotificationCardScrollPolicyTest {
             notificationTvFocusMove(
                 graph,
                 cardTarget(1, NotificationTvCardAction.MARK_READ),
-                NotificationFocusDirection.DOWN,
+                NotificationFocusDirection.RIGHT,
             ),
         )
         assertEquals(
@@ -83,7 +84,7 @@ class TvNotificationCardScrollPolicyTest {
             notificationTvFocusMove(
                 graph,
                 cardTarget(1, NotificationTvCardAction.DELETE),
-                NotificationFocusDirection.UP,
+                NotificationFocusDirection.LEFT,
             ),
         )
         assertEquals(
@@ -91,7 +92,7 @@ class TvNotificationCardScrollPolicyTest {
             notificationTvFocusMove(
                 graph,
                 cardTarget(1, NotificationTvCardAction.MARK_READ),
-                NotificationFocusDirection.UP,
+                NotificationFocusDirection.LEFT,
             ),
         )
     }
@@ -111,7 +112,7 @@ class TvNotificationCardScrollPolicyTest {
             notificationTvFocusMove(
                 graph,
                 cardTarget(1, NotificationTvCardAction.OPEN),
-                NotificationFocusDirection.DOWN,
+                NotificationFocusDirection.RIGHT,
             ),
         )
         assertEquals(
@@ -119,11 +120,11 @@ class TvNotificationCardScrollPolicyTest {
             notificationTvFocusMove(
                 graph,
                 cardTarget(1, NotificationTvCardAction.DELETE),
-                NotificationFocusDirection.UP,
+                NotificationFocusDirection.LEFT,
             ),
         )
         assertEquals(
-            cardTarget(2, NotificationTvCardAction.OPEN),
+            cardTarget(2, NotificationTvCardAction.DELETE),
             notificationTvFocusMove(
                 graph,
                 cardTarget(1, NotificationTvCardAction.DELETE),
@@ -146,7 +147,7 @@ class TvNotificationCardScrollPolicyTest {
             val graph = graph(count)
             for (index in 1 until count) {
                 assertEquals(
-                    cardTarget(index + 1, NotificationTvCardAction.OPEN),
+                    cardTarget(index + 1, NotificationTvCardAction.DELETE),
                     notificationTvFocusMove(
                         graph,
                         cardTarget(index, NotificationTvCardAction.DELETE),
@@ -154,7 +155,7 @@ class TvNotificationCardScrollPolicyTest {
                     ),
                 )
                 assertEquals(
-                    cardTarget(index, NotificationTvCardAction.DELETE),
+                    cardTarget(index, NotificationTvCardAction.OPEN),
                     notificationTvFocusMove(
                         graph,
                         cardTarget(index + 1, NotificationTvCardAction.OPEN),
@@ -356,6 +357,7 @@ class TvNotificationCardScrollPolicyTest {
         assertTrue(NotificationFocusDirection.LEFT in readAllBlocked)
         assertTrue(NotificationFocusDirection.UP in readAllBlocked)
 
+        // OPEN is the physical leftmost action: LEFT is the row edge, RIGHT moves to MARK_READ.
         val firstOpenBlocked = notificationTvBlockedDirections(
             graph = graph,
             current = cardTarget(1, NotificationTvCardAction.OPEN),
@@ -363,7 +365,7 @@ class TvNotificationCardScrollPolicyTest {
         assertFalse(NotificationFocusDirection.DOWN in firstOpenBlocked)
         assertFalse(NotificationFocusDirection.UP in firstOpenBlocked)
         assertTrue(NotificationFocusDirection.LEFT in firstOpenBlocked)
-        assertTrue(NotificationFocusDirection.RIGHT in firstOpenBlocked)
+        assertFalse(NotificationFocusDirection.RIGHT in firstOpenBlocked)
     }
 
     private fun graph(count: Int): NotificationTvFocusGraph = NotificationTvFocusGraph(

@@ -2,7 +2,8 @@ package sa.hulksa.player.ui.screens
 
 import android.content.Context
 import android.os.Build
-import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -29,7 +31,21 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Logout
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.CreditCard
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PlayCircle
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SupportAgent
 import androidx.compose.material3.Icon
@@ -42,6 +58,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,9 +69,15 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -65,7 +88,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.yield
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.data.GrowthDestination
@@ -77,6 +99,8 @@ import sa.hulksa.player.data.isGrowthLinkUsable
 import sa.hulksa.player.data.isInstallableOperationsUpdate
 import sa.hulksa.player.model.AccountInfo
 import sa.hulksa.player.model.DownloadScheduleMode
+import sa.hulksa.player.ui.components.EntrySwitchVisual
+import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.LocalProfileSwitchRequester
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.io.File
@@ -88,6 +112,17 @@ private enum class SettingsConfirmation {
     CLEAR_HISTORY,
     RESET_PLAYBACK,
     LOGOUT,
+}
+
+/** The TV section list / phone list-page entries; each owns its existing detail controls. */
+private enum class SettingsSection(val title: String, val icon: ImageVector) {
+    SUBSCRIPTION("بيانات الاشتراك", Icons.Rounded.CreditCard),
+    PLAYBACK("التشغيل", Icons.Rounded.PlayCircle),
+    NOTIFICATIONS("الاشعارات", Icons.Rounded.Notifications),
+    DOWNLOADS("التنزيلات والتخزين", Icons.Rounded.Download),
+    ACCOUNT("الحساب", Icons.Rounded.Person),
+    SERVICES("خدمات HULK", Icons.Rounded.GridView),
+    ABOUT("حول التطبيق", Icons.Rounded.Info),
 }
 
 private class SettingsFocusGraph {
@@ -107,12 +142,54 @@ private class SettingsFocusGraph {
     val switchProfile = FocusRequester()
     val refreshLibrary = FocusRequester()
     val clearHistory = FocusRequester()
+    val logout = FocusRequester()
     val subscribe = FocusRequester()
     val support = FocusRequester()
     val updateApp = FocusRequester()
-    val logout = FocusRequester()
+    val subscriptionSection = FocusRequester()
+    val playbackSection = FocusRequester()
+    val notificationsSection = FocusRequester()
+    val downloadsSection = FocusRequester()
+    val accountSection = FocusRequester()
+    val servicesSection = FocusRequester()
+    val aboutSection = FocusRequester()
+
+    fun sectionRequester(section: SettingsSection): FocusRequester = when (section) {
+        SettingsSection.SUBSCRIPTION -> subscriptionSection
+        SettingsSection.PLAYBACK -> playbackSection
+        SettingsSection.NOTIFICATIONS -> notificationsSection
+        SettingsSection.DOWNLOADS -> downloadsSection
+        SettingsSection.ACCOUNT -> accountSection
+        SettingsSection.SERVICES -> servicesSection
+        SettingsSection.ABOUT -> aboutSection
+    }
 }
 
+private fun settingsSectionFirstRequester(
+    section: SettingsSection,
+    focus: SettingsFocusGraph,
+    renewalAvailable: Boolean,
+    supportAvailable: Boolean,
+): FocusRequester = when (section) {
+    SettingsSection.SUBSCRIPTION -> focus.refreshAccount
+    SettingsSection.PLAYBACK -> focus.autoplayNext
+    SettingsSection.NOTIFICATIONS -> focus.episodeNotifications
+    SettingsSection.DOWNLOADS -> focus.wifiOnly
+    SettingsSection.ACCOUNT -> focus.switchProfile
+    SettingsSection.SERVICES -> when {
+        renewalAvailable -> focus.subscribe
+        supportAvailable -> focus.support
+        else -> focus.updateApp
+    }
+    SettingsSection.ABOUT -> focus.updateApp
+}
+
+/**
+ * Settings adopts the selected TV section-list/detail composition (list physical RIGHT beside the
+ * rail, one authoritative detail pane LEFT) and the phone list-then-detail page with Back
+ * restoration. Selection is separate from focus; every existing control, value, callback and
+ * confirmation owner is preserved.
+ */
 @Composable
 internal fun SettingsProScreen(
     state: HulkUiState,
@@ -130,27 +207,32 @@ internal fun SettingsProScreen(
     onToggleEpisodeNotificationMaster: () -> Unit,
     onGrowthAction: (GrowthDestination) -> Unit,
     onLogout: () -> Unit,
+    onNotice: (String, ImageVector) -> Unit,
 ) {
     val context = LocalContext.current
+    val colors = LocalHulkColors.current
     val profileSwitch = LocalProfileSwitchRequester.current
     val settingsStore = remember(context) { SettingsProStore(context) }
     val updateInstaller = remember(context) { OperationsApkInstaller(context) }
     val scope = rememberCoroutineScope()
-    val scrollState = rememberScrollState()
     val focus = remember { SettingsFocusGraph() }
     var playback by remember(state.account?.username) { mutableStateOf(settingsStore.playbackSettings()) }
     var cacheBytes by remember { mutableLongStateOf(0L) }
     var pendingConfirmation by remember { mutableStateOf<SettingsConfirmation?>(null) }
     var isManualUpdateRunning by remember { mutableStateOf(false) }
-
-    fun toast(message: String) {
-        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+    var selectedSection by remember { mutableStateOf(SettingsSection.SUBSCRIPTION) }
+    var phoneDetailOpen by remember { mutableStateOf(false) }
+    var pendingSectionFocus by remember { mutableStateOf<SettingsSection?>(null) }
+    var detailOwnsFocus by remember { mutableStateOf(false) }
+    val sectionScrollStates = remember {
+        SettingsSection.entries.associateWith { ScrollState(initial = 0) }
     }
 
     fun restoreFocusAfterDialog(requester: FocusRequester) {
         if (!isTv) return
         scope.launch {
-            delay(90L)
+            withFrameNanos { }
+            withFrameNanos { }
             runCatching { requester.requestFocus() }
         }
     }
@@ -164,11 +246,11 @@ internal fun SettingsProScreen(
         val update = state.operations.update
         when {
             update.latestVersionCode <= BuildConfig.VERSION_CODE -> {
-                toast("لديك أحدث إصدار")
+                onNotice("لديك احدث اصدار", Icons.Rounded.Check)
             }
 
             !isInstallableOperationsUpdate(update) -> {
-                toast("التحديث غير متاح للتثبيت حاليا")
+                onNotice("التحديث غير متاح للتثبيت حاليا", Icons.Outlined.ErrorOutline)
             }
 
             else -> {
@@ -179,16 +261,20 @@ internal fun SettingsProScreen(
                             OperationsInstallResult.InstallerOpened -> Unit
                             OperationsInstallResult.UnknownSourcesBlocked -> {
                                 val opened = updateInstaller.openUnknownSourcesSettings()
-                                toast(
+                                onNotice(
                                     if (opened) {
                                         "فعل تثبيت التطبيقات ثم ارجع واضغط تحديث التطبيق"
                                     } else {
-                                        "فعل تثبيت التطبيقات من مصادر غير معروفة ثم حاول مرة أخرى"
+                                        "فعل تثبيت التطبيقات من مصادر غير معروفة ثم حاول مرة اخرى"
                                     },
+                                    if (opened) Icons.Rounded.Settings else Icons.Outlined.ErrorOutline,
                                 )
                             }
 
-                            is OperationsInstallResult.Failure -> toast(result.message)
+                            is OperationsInstallResult.Failure -> onNotice(
+                                scopedNoticeDisplayText(result.message),
+                                Icons.Outlined.ErrorOutline,
+                            )
                         }
                     } finally {
                         isManualUpdateRunning = false
@@ -200,19 +286,6 @@ internal fun SettingsProScreen(
 
     LaunchedEffect(Unit) {
         cacheBytes = withContext(Dispatchers.IO) { settingsCacheBytes(context) }
-    }
-
-    LaunchedEffect(isTv) {
-        scrollState.scrollTo(0)
-        if (isTv) {
-            yield()
-            val focused = runCatching { focus.refreshAccount.requestFocus() }.getOrDefault(false)
-            if (!focused) {
-                delay(40L)
-                runCatching { focus.refreshAccount.requestFocus() }
-            }
-            scrollState.scrollTo(0)
-        }
     }
 
     val account = state.account
@@ -229,25 +302,386 @@ internal fun SettingsProScreen(
         GrowthDestination.SUPPORT,
         growth.support,
     )
-    val firstGrowthRequester = when {
-        renewalAvailable -> focus.subscribe
-        supportAvailable -> focus.support
-        else -> focus.updateApp
-    }
-    val lastGrowthRequester = when {
-        supportAvailable -> focus.support
-        renewalAvailable -> focus.subscribe
-        historyAvailable -> focus.clearHistory
-        else -> focus.refreshLibrary
+    val sections = remember(renewalAvailable, supportAvailable) {
+        SettingsSection.entries.filter { section ->
+            section != SettingsSection.SERVICES || renewalAvailable || supportAvailable
+        }
     }
     val updateBusy =
         isManualUpdateRunning || state.operations.download.status == OperationsDownloadStatus.DOWNLOADING
+
+    val openSection: (SettingsSection) -> Unit = { section ->
+        selectedSection = section
+        if (isTv) {
+            pendingSectionFocus = section
+        } else {
+            phoneDetailOpen = true
+        }
+    }
+    val returnToSectionList: () -> Unit = {
+        if (isTv) {
+            scope.launch {
+                withFrameNanos { }
+                runCatching { focus.sectionRequester(selectedSection).requestFocus() }
+            }
+        } else {
+            phoneDetailOpen = false
+        }
+    }
+
+    // Entry/selection focus uses real frame signals: the target exists only after the selected
+    // detail composes, and focus is requested on the attached control without sleeps.
+    LaunchedEffect(isTv, pendingSectionFocus, selectedSection) {
+        val pending = pendingSectionFocus ?: return@LaunchedEffect
+        if (!isTv || pending != selectedSection) return@LaunchedEffect
+        withFrameNanos { }
+        withFrameNanos { }
+        val focused = runCatching {
+            settingsSectionFirstRequester(pending, focus, renewalAvailable, supportAvailable)
+                .requestFocus()
+        }.getOrDefault(false)
+        if (focused) pendingSectionFocus = null
+    }
+    // First Settings entry focuses the selected section row in the RIGHT section column; the
+    // detail callback is not invoked and no detail action is focused until OK/LEFT opens it.
+    LaunchedEffect(isTv) {
+        if (!isTv) return@LaunchedEffect
+        withFrameNanos { }
+        withFrameNanos { }
+        runCatching { focus.sectionRequester(selectedSection).requestFocus() }
+    }
+
+    val detailContent: @Composable () -> Unit = {
+        when (selectedSection) {
+            SettingsSection.SUBSCRIPTION -> {
+                SubscriptionSummary(account = account, expanded = isTv)
+                SettingsDivider(
+                    verticalPadding = if (isTv) 18.dp else 14.dp,
+                )
+                SettingsMenuRow(
+                    label = if (state.isAccountRefreshing) "جاري تحديث بيانات الاشتراك" else "تحديث بيانات الاشتراك",
+                    value = if (state.isAccountRefreshing) "..." else "تحديث",
+                    accentValue = true,
+                    leadingIcon = Icons.Rounded.Refresh,
+                    enabled = account != null || state.isAccountRefreshing,
+                    expanded = isTv,
+                    focusRequester = focus.refreshAccount,
+                    upRequester = focus.sectionRequester(SettingsSection.SUBSCRIPTION),
+                    rightRequester = focus.sectionRequester(SettingsSection.SUBSCRIPTION),
+                    downRequester = FocusRequester.Cancel,
+                    onClick = {
+                        if (!state.isAccountRefreshing) onRefreshAccount()
+                    },
+                )
+            }
+
+            SettingsSection.PLAYBACK -> {
+                SettingsMenuRow(
+                    label = "تشغيل الحلقة التالية",
+                    value = settingsToggleLabel(playback.autoplayNextEpisode),
+                    toggle = playback.autoplayNextEpisode,
+                    expanded = isTv,
+                    focusRequester = focus.autoplayNext,
+                    upRequester = focus.sectionRequester(SettingsSection.PLAYBACK),
+                    rightRequester = focus.sectionRequester(SettingsSection.PLAYBACK),
+                    downRequester = focus.resumePlayback,
+                    onClick = {
+                        playback = settingsStore.setAutoplayNextEpisode(!playback.autoplayNextEpisode)
+                        onNotice("تم تحديث تشغيل الحلقة التالية", Icons.Rounded.Check)
+                    },
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "استكمال المشاهدة",
+                    value = settingsToggleLabel(playback.resumePlayback),
+                    toggle = playback.resumePlayback,
+                    expanded = isTv,
+                    focusRequester = focus.resumePlayback,
+                    upRequester = focus.autoplayNext,
+                    rightRequester = focus.sectionRequester(SettingsSection.PLAYBACK),
+                    downRequester = focus.seekStep,
+                    onClick = {
+                        playback = settingsStore.setResumePlayback(!playback.resumePlayback)
+                        onNotice("تم تحديث استكمال المشاهدة", Icons.Rounded.Check)
+                    },
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "التقديم والترجيع",
+                    value = "${playback.seekStepSeconds} ث",
+                    trailingChevron = true,
+                    expanded = isTv,
+                    focusRequester = focus.seekStep,
+                    upRequester = focus.resumePlayback,
+                    rightRequester = focus.sectionRequester(SettingsSection.PLAYBACK),
+                    downRequester = focus.keepScreenOn,
+                    onClick = {
+                        playback = settingsStore.cycleSeekStep()
+                        onNotice(
+                            "التقديم والترجيع ${playback.seekStepSeconds} ثانية",
+                            Icons.Rounded.Check,
+                        )
+                    },
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "ابقاء الشاشة اثناء التشغيل",
+                    value = settingsToggleLabel(playback.keepScreenOn),
+                    toggle = playback.keepScreenOn,
+                    expanded = isTv,
+                    focusRequester = focus.keepScreenOn,
+                    upRequester = focus.seekStep,
+                    rightRequester = focus.sectionRequester(SettingsSection.PLAYBACK),
+                    downRequester = focus.autoHideControls,
+                    onClick = {
+                        playback = settingsStore.setKeepScreenOn(!playback.keepScreenOn)
+                    },
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "اخفاء ادوات التحكم تلقائيا",
+                    value = settingsToggleLabel(playback.autoHideControls),
+                    toggle = playback.autoHideControls,
+                    expanded = isTv,
+                    focusRequester = focus.autoHideControls,
+                    upRequester = focus.keepScreenOn,
+                    rightRequester = focus.sectionRequester(SettingsSection.PLAYBACK),
+                    downRequester = focus.resetPlayback,
+                    onClick = {
+                        playback = settingsStore.setAutoHideControls(!playback.autoHideControls)
+                    },
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "اعادة ضبط اعدادات التشغيل",
+                    value = "",
+                    expanded = isTv,
+                    focusRequester = focus.resetPlayback,
+                    upRequester = focus.autoHideControls,
+                    rightRequester = focus.sectionRequester(SettingsSection.PLAYBACK),
+                    downRequester = FocusRequester.Cancel,
+                    onClick = { pendingConfirmation = SettingsConfirmation.RESET_PLAYBACK },
+                )
+            }
+
+            SettingsSection.NOTIFICATIONS -> {
+                SettingsMenuRow(
+                    label = "تنبيهات الحلقات الجديدة",
+                    value = if (episodeNotificationsAvailable) {
+                        settingsToggleLabel(notificationMasterEnabled)
+                    } else {
+                        "متوقفة مؤقتًا"
+                    },
+                    subtitle = if (episodeNotificationsAvailable) {
+                        "تلقي تنبيه عند توفر حلقة جديدة"
+                    } else {
+                        null
+                    },
+                    toggle = if (episodeNotificationsAvailable) notificationMasterEnabled else null,
+                    enabled = episodeNotificationsAvailable,
+                    expanded = isTv,
+                    focusRequester = focus.episodeNotifications,
+                    upRequester = focus.sectionRequester(SettingsSection.NOTIFICATIONS),
+                    rightRequester = focus.sectionRequester(SettingsSection.NOTIFICATIONS),
+                    downRequester = FocusRequester.Cancel,
+                    onClick = onToggleEpisodeNotificationMaster,
+                )
+            }
+
+            SettingsSection.DOWNLOADS -> {
+                StorageSummary(
+                    downloadedBytes = downloadedBytes,
+                    cacheBytes = cacheBytes,
+                    expanded = isTv,
+                )
+                SettingsDivider(
+                    verticalPadding = if (isTv) 18.dp else 14.dp,
+                )
+                SettingsMenuRow(
+                    label = "التنزيل عبر Wi-Fi فقط",
+                    value = settingsToggleLabel(state.downloadSettings.wifiOnly),
+                    toggle = state.downloadSettings.wifiOnly,
+                    expanded = isTv,
+                    focusRequester = focus.wifiOnly,
+                    upRequester = focus.sectionRequester(SettingsSection.DOWNLOADS),
+                    rightRequester = focus.sectionRequester(SettingsSection.DOWNLOADS),
+                    downRequester = focus.downloadSchedule,
+                    onClick = onToggleWifiOnly,
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "جدولة التنزيل",
+                    value = if (state.downloadSettings.scheduleMode == DownloadScheduleMode.NIGHT) "2 ليلًا" else "الآن",
+                    trailingChevron = true,
+                    expanded = isTv,
+                    focusRequester = focus.downloadSchedule,
+                    upRequester = focus.wifiOnly,
+                    rightRequester = focus.sectionRequester(SettingsSection.DOWNLOADS),
+                    downRequester = focus.concurrentDownloads,
+                    onClick = onToggleDownloadSchedule,
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "التنزيلات المتزامنة",
+                    value = state.downloadSettings.concurrentDownloads.toString(),
+                    trailingChevron = true,
+                    expanded = isTv,
+                    focusRequester = focus.concurrentDownloads,
+                    upRequester = focus.downloadSchedule,
+                    rightRequester = focus.sectionRequester(SettingsSection.DOWNLOADS),
+                    downRequester = if (downloadsEnabled) focus.manageDownloads else focus.clearCache,
+                    onClick = onCycleConcurrentDownloads,
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "ادارة التنزيلات",
+                    value = if (downloadsEnabled) "" else "متوقفة مؤقتًا",
+                    accentValue = downloadsEnabled,
+                    trailingChevron = downloadsEnabled,
+                    enabled = downloadsEnabled,
+                    expanded = isTv,
+                    focusRequester = focus.manageDownloads,
+                    upRequester = focus.concurrentDownloads,
+                    rightRequester = focus.sectionRequester(SettingsSection.DOWNLOADS),
+                    downRequester = focus.clearCache,
+                    onClick = onOpenDownloads,
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "مسح الكاش",
+                    value = settingsFormatBytes(cacheBytes),
+                    leadingIcon = Icons.Rounded.DeleteOutline,
+                    expanded = isTv,
+                    focusRequester = focus.clearCache,
+                    upRequester = if (downloadsEnabled) focus.manageDownloads else focus.concurrentDownloads,
+                    rightRequester = focus.sectionRequester(SettingsSection.DOWNLOADS),
+                    downRequester = FocusRequester.Cancel,
+                    onClick = {
+                        scope.launch {
+                            withContext(Dispatchers.IO) { clearSettingsCache(context) }
+                            cacheBytes = withContext(Dispatchers.IO) { settingsCacheBytes(context) }
+                            onNotice("تم مسح الكاش", Icons.Rounded.DeleteOutline)
+                        }
+                    },
+                )
+            }
+
+            SettingsSection.ACCOUNT -> {
+                SettingsMenuRow(
+                    label = "تغيير المستخدم",
+                    value = "",
+                    accentValue = true,
+                    trailingChevron = true,
+                    expanded = isTv,
+                    focusRequester = focus.switchProfile,
+                    upRequester = focus.sectionRequester(SettingsSection.ACCOUNT),
+                    rightRequester = focus.sectionRequester(SettingsSection.ACCOUNT),
+                    downRequester = focus.refreshLibrary,
+                    onClick = profileSwitch,
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "تحديث المكتبة",
+                    value = "",
+                    trailingChevron = true,
+                    expanded = isTv,
+                    focusRequester = focus.refreshLibrary,
+                    upRequester = focus.switchProfile,
+                    rightRequester = focus.sectionRequester(SettingsSection.ACCOUNT),
+                    downRequester = if (historyAvailable) focus.clearHistory else focus.logout,
+                    onClick = onRefreshLibrary,
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "مسح سجل المشاهدة",
+                    value = if (state.history.isEmpty()) "فارغ" else "",
+                    enabled = historyAvailable,
+                    expanded = isTv,
+                    focusRequester = focus.clearHistory,
+                    upRequester = focus.refreshLibrary,
+                    rightRequester = focus.sectionRequester(SettingsSection.ACCOUNT),
+                    downRequester = focus.logout,
+                    onClick = { pendingConfirmation = SettingsConfirmation.CLEAR_HISTORY },
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "تسجيل الخروج",
+                    value = "",
+                    leadingIcon = Icons.AutoMirrored.Rounded.Logout,
+                    leadingIconTint = colors.danger,
+                    expanded = isTv,
+                    focusRequester = focus.logout,
+                    upRequester = focus.clearHistory,
+                    rightRequester = focus.sectionRequester(SettingsSection.ACCOUNT),
+                    downRequester = FocusRequester.Cancel,
+                    onClick = { pendingConfirmation = SettingsConfirmation.LOGOUT },
+                )
+            }
+
+            SettingsSection.SERVICES -> {
+                if (renewalAvailable) {
+                    SettingsMenuRow(
+                        label = "الموقع الالكتروني",
+                        subtitle = "الاشتراك والتجديد عبر hulksa.com",
+                        value = if (isTv) "اضغط OK" else "",
+                        accentValue = true,
+                        leadingIcon = Icons.Rounded.Language,
+                        iconBesideLabel = true,
+                        expanded = isTv,
+                        focusRequester = focus.subscribe,
+                        upRequester = focus.sectionRequester(SettingsSection.SERVICES),
+                        rightRequester = focus.sectionRequester(SettingsSection.SERVICES),
+                        downRequester = if (supportAvailable) focus.support else FocusRequester.Cancel,
+                        onClick = { onGrowthAction(GrowthDestination.RENEWAL) },
+                    )
+                }
+                if (renewalAvailable && supportAvailable) SettingsDivider()
+                if (supportAvailable) {
+                    SettingsMenuRow(
+                        label = "الدعم الفني",
+                        subtitle = "تواصل معنا عبر واتساب",
+                        value = if (isTv) "اضغط OK" else "",
+                        accentValue = true,
+                        leadingIcon = Icons.Rounded.SupportAgent,
+                        iconBesideLabel = true,
+                        expanded = isTv,
+                        focusRequester = focus.support,
+                        upRequester = if (renewalAvailable) {
+                            focus.subscribe
+                        } else {
+                            focus.sectionRequester(SettingsSection.SERVICES)
+                        },
+                        rightRequester = focus.sectionRequester(SettingsSection.SERVICES),
+                        downRequester = FocusRequester.Cancel,
+                        onClick = { onGrowthAction(GrowthDestination.SUPPORT) },
+                    )
+                }
+            }
+
+            SettingsSection.ABOUT -> {
+                SettingsAboutInfoRows(expanded = isTv)
+                SettingsStandaloneAction(
+                    label = if (updateBusy) "جاري تنزيل التحديث" else "تحديث التطبيق",
+                    primary = true,
+                    busy = updateBusy,
+                    expanded = isTv,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = if (isTv) 18.dp else 14.dp),
+                    focusRequester = focus.updateApp,
+                    upRequester = focus.sectionRequester(SettingsSection.ABOUT),
+                    downRequester = FocusRequester.Cancel,
+                    rightRequester = focus.sectionRequester(SettingsSection.ABOUT),
+                    onClick = ::updateApp,
+                )
+            }
+        }
+    }
 
     BoxWithConstraints(
         modifier = Modifier.fillMaxSize(),
     ) {
         val expandedLayout = isTv || maxWidth >= 720.dp
-        val metricColumns = if (maxWidth >= 720.dp) 4 else 2
         val tvTopInset = if (isTv) {
             tvPageSafeInsets(
                 screenWidthDp = maxWidth.value.toInt(),
@@ -265,360 +699,128 @@ internal fun SettingsProScreen(
         val topPadding = if (isTv) 0.dp else if (expandedLayout) 24.dp else 0.dp
         val bottomPadding = if (isTv) 24.dp else 96.dp
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scrollState)
-                .padding(
-                    start = horizontalPadding,
-                    end = horizontalPadding,
-                    top = topPadding,
-                    bottom = bottomPadding,
-                ),
-            verticalArrangement = Arrangement.spacedBy(if (expandedLayout) 18.dp else 12.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(
-                        if (isTv) {
-                            Modifier.padding(start = 2.dp, top = tvTopInset, end = 2.dp)
-                        } else {
-                            Modifier
-                        },
-                    ),
-            ) {
-                SettingsHeader(expanded = expandedLayout, isTv = isTv)
-            }
-
-            SettingsPanel(title = "بيانات الاشتراك", expanded = expandedLayout, emphasized = true) {
-                SubscriptionSummary(
-                    account = account,
-                    expanded = expandedLayout,
-                    columns = metricColumns,
-                )
-                SettingsDivider(
-                    verticalPadding = if (expandedLayout) 18.dp else 14.dp,
-                )
-                SettingsMenuRow(
-                    label = if (state.isAccountRefreshing) "جاري تحديث بيانات الاشتراك" else "تحديث بيانات الاشتراك",
-                    value = if (state.isAccountRefreshing) "..." else "تحديث",
-                    accentValue = true,
-                    enabled = account != null || state.isAccountRefreshing,
-                    expanded = expandedLayout,
-                    focusRequester = focus.refreshAccount,
-                    upRequester = FocusRequester.Cancel,
-                    downRequester = focus.autoplayNext,
-                    onFocused = {
-                        if (isTv) {
-                            scope.launch {
-                                yield()
-                                scrollState.scrollTo(0)
-                            }
-                        }
-                    },
-                    onClick = {
-                        if (!state.isAccountRefreshing) onRefreshAccount()
-                    },
-                )
-            }
-
-            SettingsPanel(title = "التشغيل", expanded = expandedLayout) {
-                SettingsMenuRow(
-                    label = "تشغيل الحلقة التالية",
-                    value = settingsToggleLabel(playback.autoplayNextEpisode),
-                    accentValue = playback.autoplayNextEpisode,
-                    expanded = expandedLayout,
-                    focusRequester = focus.autoplayNext,
-                    upRequester = focus.refreshAccount,
-                    downRequester = focus.resumePlayback,
-                    onClick = {
-                        playback = settingsStore.setAutoplayNextEpisode(!playback.autoplayNextEpisode)
-                        toast("تم تحديث تشغيل الحلقة التالية")
-                    },
-                )
-                SettingsDivider()
-                SettingsMenuRow(
-                    label = "استكمال المشاهدة",
-                    value = settingsToggleLabel(playback.resumePlayback),
-                    accentValue = playback.resumePlayback,
-                    expanded = expandedLayout,
-                    focusRequester = focus.resumePlayback,
-                    upRequester = focus.autoplayNext,
-                    downRequester = focus.seekStep,
-                    onClick = {
-                        playback = settingsStore.setResumePlayback(!playback.resumePlayback)
-                        toast("تم تحديث استكمال المشاهدة")
-                    },
-                )
-                SettingsDivider()
-                SettingsMenuRow(
-                    label = "التقديم والترجيع",
-                    value = "${playback.seekStepSeconds} ث",
-                    expanded = expandedLayout,
-                    focusRequester = focus.seekStep,
-                    upRequester = focus.resumePlayback,
-                    downRequester = focus.keepScreenOn,
-                    onClick = {
-                        playback = settingsStore.cycleSeekStep()
-                        toast("التقديم والترجيع ${playback.seekStepSeconds} ثانية")
-                    },
-                )
-                SettingsDivider()
-                SettingsMenuRow(
-                    label = "إبقاء الشاشة أثناء التشغيل",
-                    value = settingsToggleLabel(playback.keepScreenOn),
-                    accentValue = playback.keepScreenOn,
-                    expanded = expandedLayout,
-                    focusRequester = focus.keepScreenOn,
-                    upRequester = focus.seekStep,
-                    downRequester = focus.autoHideControls,
-                    onClick = {
-                        playback = settingsStore.setKeepScreenOn(!playback.keepScreenOn)
-                    },
-                )
-                SettingsDivider()
-                SettingsMenuRow(
-                    label = "إخفاء أدوات التحكم تلقائيًا",
-                    value = settingsToggleLabel(playback.autoHideControls),
-                    accentValue = playback.autoHideControls,
-                    expanded = expandedLayout,
-                    focusRequester = focus.autoHideControls,
-                    upRequester = focus.keepScreenOn,
-                    downRequester = focus.resetPlayback,
-                    onClick = {
-                        playback = settingsStore.setAutoHideControls(!playback.autoHideControls)
-                    },
-                )
-                SettingsDivider()
-                SettingsMenuRow(
-                    label = "إعادة ضبط إعدادات التشغيل",
-                    value = "",
-                    expanded = expandedLayout,
-                    focusRequester = focus.resetPlayback,
-                    upRequester = focus.autoHideControls,
-                    downRequester = if (episodeNotificationsAvailable) {
-                        focus.episodeNotifications
-                    } else {
-                        focus.wifiOnly
-                    },
-                    onClick = { pendingConfirmation = SettingsConfirmation.RESET_PLAYBACK },
-                )
-            }
-
-            SettingsPanel(title = "الإشعارات", expanded = expandedLayout) {
-                SettingsMenuRow(
-                    label = "تنبيهات الحلقات الجديدة",
-                    value = if (episodeNotificationsAvailable) {
-                        settingsToggleLabel(notificationMasterEnabled)
-                    } else {
-                        "متوقفة مؤقتًا"
-                    },
-                    accentValue = notificationMasterEnabled,
-                    enabled = episodeNotificationsAvailable,
-                    expanded = expandedLayout,
-                    focusRequester = focus.episodeNotifications,
-                    upRequester = focus.resetPlayback,
-                    downRequester = focus.wifiOnly,
-                    onClick = onToggleEpisodeNotificationMaster,
-                )
-            }
-
-            SettingsPanel(title = "التنزيلات والتخزين", expanded = expandedLayout) {
-                StorageSummary(
-                    downloadedBytes = downloadedBytes,
-                    cacheBytes = cacheBytes,
-                    expanded = expandedLayout,
-                )
-                SettingsDivider(
-                    verticalPadding = if (expandedLayout) 18.dp else 14.dp,
-                )
-                SettingsMenuRow(
-                    label = "التنزيل عبر Wi-Fi فقط",
-                    value = settingsToggleLabel(state.downloadSettings.wifiOnly),
-                    accentValue = state.downloadSettings.wifiOnly,
-                    expanded = expandedLayout,
-                    focusRequester = focus.wifiOnly,
-                    upRequester = if (episodeNotificationsAvailable) {
-                        focus.episodeNotifications
-                    } else {
-                        focus.resetPlayback
-                    },
-                    downRequester = focus.downloadSchedule,
-                    onClick = onToggleWifiOnly,
-                )
-                SettingsDivider()
-                SettingsMenuRow(
-                    label = "جدولة التنزيل",
-                    value = if (state.downloadSettings.scheduleMode == DownloadScheduleMode.NIGHT) "2 ليلًا" else "الآن",
-                    expanded = expandedLayout,
-                    focusRequester = focus.downloadSchedule,
-                    upRequester = focus.wifiOnly,
-                    downRequester = focus.concurrentDownloads,
-                    onClick = onToggleDownloadSchedule,
-                )
-                SettingsDivider()
-                SettingsMenuRow(
-                    label = "التنزيلات المتزامنة",
-                    value = state.downloadSettings.concurrentDownloads.toString(),
-                    expanded = expandedLayout,
-                    focusRequester = focus.concurrentDownloads,
-                    upRequester = focus.downloadSchedule,
-                    downRequester = if (downloadsEnabled) focus.manageDownloads else focus.clearCache,
-                    onClick = onCycleConcurrentDownloads,
-                )
-                SettingsDivider()
-                SettingsMenuRow(
-                    label = "إدارة التنزيلات",
-                    value = if (downloadsEnabled) "" else "متوقفة مؤقتًا",
-                    accentValue = downloadsEnabled,
-                    enabled = downloadsEnabled,
-                    expanded = expandedLayout,
-                    focusRequester = focus.manageDownloads,
-                    upRequester = focus.concurrentDownloads,
-                    downRequester = focus.clearCache,
-                    onClick = onOpenDownloads,
-                )
-                SettingsDivider()
-                SettingsMenuRow(
-                    label = "مسح الكاش",
-                    value = settingsFormatBytes(cacheBytes),
-                    expanded = expandedLayout,
-                    focusRequester = focus.clearCache,
-                    upRequester = if (downloadsEnabled) focus.manageDownloads else focus.concurrentDownloads,
-                    downRequester = focus.switchProfile,
-                    onClick = {
-                        scope.launch {
-                            withContext(Dispatchers.IO) { clearSettingsCache(context) }
-                            cacheBytes = withContext(Dispatchers.IO) { settingsCacheBytes(context) }
-                            toast("تم مسح الكاش")
-                        }
-                    },
-                )
-            }
-
-            SettingsPanel(title = "الحساب", expanded = expandedLayout) {
-                SettingsMenuRow(
-                    label = "تغيير المستخدم",
-                    value = "",
-                    accentValue = true,
-                    expanded = expandedLayout,
-                    focusRequester = focus.switchProfile,
-                    upRequester = focus.clearCache,
-                    downRequester = focus.refreshLibrary,
-                    onClick = profileSwitch,
-                )
-                SettingsDivider()
-                SettingsMenuRow(
-                    label = "تحديث المكتبة",
-                    value = "",
-                    expanded = expandedLayout,
-                    focusRequester = focus.refreshLibrary,
-                    upRequester = focus.switchProfile,
-                    downRequester = if (historyAvailable) focus.clearHistory else firstGrowthRequester,
-                    onClick = onRefreshLibrary,
-                )
-                SettingsDivider()
-                SettingsMenuRow(
-                    label = "مسح سجل المشاهدة",
-                    value = if (state.history.isEmpty()) "فارغ" else "",
-                    enabled = historyAvailable,
-                    expanded = expandedLayout,
-                    focusRequester = focus.clearHistory,
-                    upRequester = focus.refreshLibrary,
-                    downRequester = firstGrowthRequester,
-                    onClick = { pendingConfirmation = SettingsConfirmation.CLEAR_HISTORY },
-                )
-            }
-
-            if (renewalAvailable || supportAvailable) {
-                SettingsPanel(title = "خدمات HULK SA", expanded = expandedLayout) {
-                    if (renewalAvailable) {
-                        SettingsMenuRow(
-                            label = "الموقع الالكتروني",
-                            subtitle = "جدد اشتراكك من موقع HULK SA",
-                            value = if (isTv) "اضغط OK" else "",
-                            accentValue = true,
-                            expanded = expandedLayout,
-                            leadingIcon = Icons.Rounded.Language,
-                            focusRequester = focus.subscribe,
-                            upRequester = if (historyAvailable) focus.clearHistory else focus.refreshLibrary,
-                            downRequester = if (supportAvailable) focus.support else focus.updateApp,
-                            onClick = { onGrowthAction(GrowthDestination.RENEWAL) },
+        if (isTv) {
+            val sectionListWidth = (maxWidth * .27f).coerceIn(300.dp, 420.dp)
+            Row(modifier = Modifier.fillMaxSize()) {
+                Column(
+                    modifier = Modifier
+                        .width(sectionListWidth)
+                        .fillMaxHeight()
+                        .padding(
+                            start = 12.dp,
+                            end = 10.dp,
+                            top = tvTopInset,
+                            bottom = bottomPadding,
                         )
-                    }
-                    if (renewalAvailable && supportAvailable) SettingsDivider()
-                    if (supportAvailable) {
-                        SettingsMenuRow(
-                            label = "الدعم الفني",
-                            subtitle = "تواصل معنا عبر واتساب",
-                            value = if (isTv) "اضغط OK" else "",
-                            accentValue = true,
-                            expanded = expandedLayout,
-                            leadingIcon = Icons.Rounded.SupportAgent,
-                            focusRequester = focus.support,
-                            upRequester = if (renewalAvailable) {
-                                focus.subscribe
-                            } else if (historyAvailable) {
-                                focus.clearHistory
-                            } else {
-                                focus.refreshLibrary
-                            },
-                            downRequester = focus.updateApp,
-                            onClick = { onGrowthAction(GrowthDestination.SUPPORT) },
-                        )
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    SettingsSectionList(
+                        sections = sections,
+                        selected = selectedSection,
+                        focus = focus,
+                        expanded = true,
+                        onOpen = openSection,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(1.dp)
+                        .background(colors.line.copy(alpha = .22f)),
+                )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .padding(
+                            start = 30.dp,
+                            end = 22.dp,
+                            top = tvTopInset,
+                            bottom = bottomPadding,
+                        ),
+                ) {
+                    SettingsDetailHeader(section = selectedSection)
+                    Spacer(Modifier.height(14.dp))
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .onFocusChanged { detailOwnsFocus = it.hasFocus }
+                            .verticalScroll(sectionScrollStates.getValue(selectedSection)),
+                    ) {
+                        detailContent()
                     }
                 }
             }
-
-            SettingsPanel(title = "حول التطبيق", expanded = expandedLayout) {
-                SettingsInfoRow("اصدار HULK SA", BuildConfig.VERSION_NAME, expandedLayout)
-                SettingsDivider()
-                SettingsInfoRow(
-                    "اصدار Android",
-                    Build.VERSION.RELEASE.orEmpty().trim().ifBlank { "Android" },
-                    expandedLayout,
-                )
-                SettingsDivider()
-                SettingsInfoRow(
-                    "نوع الجهاز",
-                    "${Build.MANUFACTURER.orEmpty().trim()} ${Build.MODEL.orEmpty().trim()}".trim().ifBlank { "Android" },
-                    expandedLayout,
-                )
-                SettingsDivider()
-                SettingsInfoRow("مطور التطبيق", "Mega Store", expandedLayout)
+        } else {
+            BackHandler(enabled = phoneDetailOpen, onBack = returnToSectionList)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(
+                        start = horizontalPadding,
+                        end = horizontalPadding,
+                        top = topPadding,
+                        bottom = bottomPadding,
+                    ),
+            ) {
+                if (!phoneDetailOpen) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        SettingsHeader(expanded = expandedLayout, isTv = false)
+                    }
+                    Spacer(Modifier.height(if (expandedLayout) 18.dp else 12.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        SettingsSectionList(
+                            sections = sections,
+                            selected = selectedSection,
+                            focus = focus,
+                            expanded = expandedLayout,
+                            onOpen = openSection,
+                        )
+                    }
+                } else {
+                    SettingsPhoneDetailHeader(
+                        title = selectedSection.title,
+                        onBack = returnToSectionList,
+                    )
+                    Spacer(Modifier.height(if (expandedLayout) 16.dp else 12.dp))
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .verticalScroll(sectionScrollStates.getValue(selectedSection)),
+                    ) {
+                        detailContent()
+                    }
+                }
             }
-
-            SettingsAboutActions(
-                expanded = expandedLayout,
-                updateBusy = updateBusy,
-                updateRequester = focus.updateApp,
-                logoutRequester = focus.logout,
-                upRequester = lastGrowthRequester,
-                onUpdate = ::updateApp,
-                onLogout = { pendingConfirmation = SettingsConfirmation.LOGOUT },
-            )
         }
+
+        BackHandler(enabled = isTv && detailOwnsFocus, onBack = returnToSectionList)
 
         pendingConfirmation?.let { confirmation ->
             val (title, message, confirmLabel) = when (confirmation) {
                 SettingsConfirmation.CLEAR_HISTORY -> Triple(
                     "مسح سجل المشاهدة؟",
                     "سيتم حذف سجل المشاهدة لهذا المستخدم، " +
-                        "ولا يمكن التراجع عن هذا الإجراء.",
+                        "ولا يمكن التراجع عن هذا الاجراء",
                     "مسح السجل",
                 )
 
                 SettingsConfirmation.RESET_PLAYBACK -> Triple(
-                    "إعادة ضبط إعدادات التشغيل؟",
-                    "ستعود إعدادات التشغيل إلى قيمها الافتراضية دون التأثير على الحساب " +
-                        "أو التنزيلات أو سجل المشاهدة.",
-                    "إعادة الضبط",
+                    "اعادة ضبط اعدادات التشغيل؟",
+                    "ستعود اعدادات التشغيل الى قيمها الافتراضية دون التاثير على الحساب " +
+                        "او التنزيلات او سجل المشاهدة",
+                    "اعادة الضبط",
                 )
 
                 SettingsConfirmation.LOGOUT -> Triple(
                     "تسجيل الخروج؟",
-                    "سيتم إنهاء جلسة هذا المستخدم وستحتاج إلى تسجيل الدخول مرة أخرى.",
+                    "سيتم انهاء جلسة هذا المستخدم وستحتاج الى تسجيل الدخول مرة اخرى",
                     "تسجيل الخروج",
                 )
             }
@@ -648,7 +850,7 @@ internal fun SettingsProScreen(
 
                         SettingsConfirmation.RESET_PLAYBACK -> {
                             playback = settingsStore.resetPlaybackSettings()
-                            toast("تمت إعادة ضبط إعدادات التشغيل")
+                            onNotice("تمت اعادة ضبط اعدادات التشغيل", Icons.Rounded.Refresh)
                             restoreFocusAfterDialog(focus.resetPlayback)
                         }
 
@@ -661,72 +863,178 @@ internal fun SettingsProScreen(
 }
 
 @Composable
-private fun SettingsAboutActions(
+private fun SettingsSectionList(
+    sections: List<SettingsSection>,
+    selected: SettingsSection,
+    focus: SettingsFocusGraph,
     expanded: Boolean,
-    updateBusy: Boolean,
-    updateRequester: FocusRequester,
-    logoutRequester: FocusRequester,
-    upRequester: FocusRequester,
-    onUpdate: () -> Unit,
-    onLogout: () -> Unit,
+    onOpen: (SettingsSection) -> Unit,
 ) {
-    if (expanded) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            SettingsStandaloneAction(
-                label = if (updateBusy) "جاري تنزيل التحديث" else "تحديث التطبيق",
-                primary = true,
-                busy = updateBusy,
-                expanded = true,
-                modifier = Modifier.weight(1f),
-                focusRequester = updateRequester,
-                upRequester = upRequester,
-                downRequester = FocusRequester.Cancel,
-                leftRequester = logoutRequester,
-                onClick = onUpdate,
+    Column(modifier = Modifier.fillMaxWidth()) {
+        sections.forEachIndexed { index, section ->
+            SettingsSectionRow(
+                section = section,
+                selected = section == selected,
+                expanded = expanded,
+                focusRequester = focus.sectionRequester(section),
+                upRequester = sections.getOrNull(index - 1)?.let(focus::sectionRequester),
+                downRequester = sections.getOrNull(index + 1)?.let(focus::sectionRequester),
+                onOpen = { onOpen(section) },
             )
-            SettingsStandaloneAction(
-                label = "تسجيل الخروج",
-                primary = false,
-                expanded = true,
-                modifier = Modifier.weight(1f),
-                focusRequester = logoutRequester,
-                upRequester = upRequester,
-                downRequester = FocusRequester.Cancel,
-                rightRequester = updateRequester,
-                onClick = onLogout,
-            )
+            if (index != sections.lastIndex) {
+                Spacer(Modifier.height(if (expanded) 8.dp else 6.dp))
+            }
         }
-    } else {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(9.dp),
+    }
+}
+
+@Composable
+private fun SettingsSectionRow(
+    section: SettingsSection,
+    selected: Boolean,
+    expanded: Boolean,
+    focusRequester: FocusRequester,
+    upRequester: FocusRequester?,
+    downRequester: FocusRequester?,
+    onOpen: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(if (expanded) 14.dp else 12.dp)
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .heightIn(min = if (expanded) 58.dp else 50.dp)
+                .focusRequester(focusRequester)
+                .focusProperties {
+                    if (upRequester != null) up = upRequester
+                    if (downRequester != null) down = downRequester
+                }
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
+                        onOpen()
+                        true
+                    } else {
+                        false
+                    }
+                }
+                .clip(shape)
+                .background(
+                    when {
+                        selected -> colors.gold.copy(alpha = .13f)
+                        focused -> Color(0xFF181914)
+                        else -> Color.Transparent
+                    },
+                )
+                .goldFocusEdge(shape = shape, visible = focused)
+                .border(
+                    width = 1.dp,
+                    color = if (selected) colors.gold.copy(alpha = .32f) else Color.Transparent,
+                    shape = shape,
+                )
+                .onFocusChanged { focused = it.isFocused }
+                .clickable(role = Role.Button, onClick = onOpen)
+                .focusable()
+                .padding(horizontal = if (expanded) 16.dp else 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            SettingsStandaloneAction(
-                label = if (updateBusy) "جاري تنزيل التحديث" else "تحديث التطبيق",
-                primary = true,
-                busy = updateBusy,
-                expanded = false,
-                modifier = Modifier.fillMaxWidth(),
-                focusRequester = updateRequester,
-                upRequester = upRequester,
-                downRequester = logoutRequester,
-                onClick = onUpdate,
+            Text(
+                text = section.title,
+                color = if (selected) colors.goldBright else colors.text,
+                fontSize = if (expanded) 16.sp else 14.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Start,
             )
-            SettingsStandaloneAction(
-                label = "تسجيل الخروج",
-                primary = false,
-                expanded = false,
-                modifier = Modifier.fillMaxWidth(),
-                focusRequester = logoutRequester,
-                upRequester = updateRequester,
-                downRequester = FocusRequester.Cancel,
-                onClick = onLogout,
+            Icon(
+                imageVector = section.icon,
+                contentDescription = null,
+                tint = if (selected) colors.goldBright else colors.textMuted,
+                modifier = Modifier.size(if (expanded) 21.dp else 19.dp),
             )
         }
     }
+}
+
+@Composable
+private fun SettingsDetailHeader(section: SettingsSection) {
+    val colors = LocalHulkColors.current
+    Text(
+        text = section.title,
+        color = colors.text,
+        fontSize = 22.sp,
+        fontWeight = FontWeight.Black,
+        modifier = Modifier.fillMaxWidth(),
+        textAlign = TextAlign.Start,
+    )
+}
+
+@Composable
+private fun SettingsPhoneDetailHeader(title: String, onBack: () -> Unit) {
+    val colors = LocalHulkColors.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = title,
+            color = colors.text,
+            fontSize = MOBILE_SECTION_TITLE_SIZE,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.Start,
+        )
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .background(Color(0xFF171812))
+                .border(1.dp, colors.gold.copy(alpha = .24f), RoundedCornerShape(50))
+                .clickable(role = Role.Button, onClick = onBack)
+                .padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Text(
+                text = "رجوع",
+                color = colors.goldBright,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                contentDescription = null,
+                tint = colors.goldBright,
+                modifier = Modifier.size(17.dp),
+            )
+        }
+    }
+}
+
+/** The shared "حول التطبيق" table used by both the services and about detail panes. */
+@Composable
+private fun SettingsAboutInfoRows(expanded: Boolean) {
+    SettingsInfoRow("اصدار HULK SA", BuildConfig.VERSION_NAME, expanded)
+    SettingsDivider()
+    SettingsInfoRow(
+        "اصدار Android",
+        Build.VERSION.RELEASE.orEmpty().trim().ifBlank { "Android" },
+        expanded,
+    )
+    SettingsDivider()
+    SettingsInfoRow(
+        "نوع الجهاز",
+        "${Build.MANUFACTURER.orEmpty().trim()} ${Build.MODEL.orEmpty().trim()}".trim().ifBlank { "Android" },
+        expanded,
+    )
+    SettingsDivider()
+    SettingsInfoRow("مطور التطبيق", "Mega Store", expanded)
 }
 
 @Composable
@@ -864,7 +1172,7 @@ private fun SettingsConfirmationDialog(
                         onClick = onConfirm,
                     )
                     SettingsDialogAction(
-                        label = "إلغاء",
+                        label = "الغاء",
                         primary = false,
                         expanded = expanded,
                         modifier = Modifier.weight(1f),
@@ -976,121 +1284,91 @@ private fun SettingsHeader(expanded: Boolean, isTv: Boolean) {
 }
 
 @Composable
-private fun SettingsPanel(
-    title: String,
-    expanded: Boolean,
-    emphasized: Boolean = false,
-    content: @Composable () -> Unit,
-) {
-    val colors = LocalHulkColors.current
-    val shape = RoundedCornerShape(if (expanded) 22.dp else 17.dp)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(if (emphasized) Color(0xFF14150F) else Color(0xFF10110E))
-            .border(
-                width = 1.dp,
-                color = colors.gold.copy(alpha = if (emphasized) .34f else .11f),
-                shape = shape,
-            )
-            .padding(
-                horizontal = if (expanded) 24.dp else 16.dp,
-                vertical = if (expanded) 20.dp else 15.dp,
-            ),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(if (expanded) 11.dp else 9.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .width(4.dp)
-                    .height(if (expanded) 25.dp else 20.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.goldBright.copy(alpha = if (emphasized) .95f else .65f)),
-            )
-            Text(
-                text = title,
-                color = colors.text,
-                fontSize = if (expanded) 22.sp else 18.sp,
-                fontWeight = FontWeight.Black,
-            )
-        }
-        Spacer(Modifier.height(if (expanded) 16.dp else 12.dp))
-        content()
-    }
-}
-
-@Composable
-private fun SubscriptionSummary(
-    account: AccountInfo?,
-    expanded: Boolean,
-    columns: Int,
-) {
-    val colors = LocalHulkColors.current
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (expanded) 18.dp else 12.dp),
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = "الحساب",
-                color = colors.textMuted,
-                fontSize = if (expanded) 12.sp else 10.sp,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = account?.username?.let(::maskedSettingsUsername) ?: "—",
-                color = colors.text,
-                fontSize = if (expanded) 18.sp else 15.sp,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(
-                text = "الحالة",
-                color = colors.textMuted,
-                fontSize = if (expanded) 12.sp else 10.sp,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = settingsSubscriptionStatus(account),
-                color = colors.goldBright,
-                fontSize = if (expanded) 14.sp else 12.sp,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(colors.gold.copy(alpha = .10f))
-                    .border(1.dp, colors.gold.copy(alpha = .24f), RoundedCornerShape(50))
-                    .padding(horizontal = if (expanded) 12.dp else 10.dp, vertical = 5.dp),
-            )
-        }
-    }
-    Spacer(Modifier.height(if (expanded) 18.dp else 14.dp))
-    val metrics = listOf(
-        "تاريخ الانتهاء" to settingsExpiryDate(account),
-        "المتبقي" to settingsRemaining(account),
-        "الاتصالات" to settingsConnectionUsage(account),
-        "نوع الاشتراك" to when (account?.isTrial) {
+private fun SubscriptionSummary(account: AccountInfo?, expanded: Boolean) {
+    SettingsSubscriptionValueRow(
+        label = "الحساب",
+        value = account?.username?.let(::maskedSettingsUsername) ?: "—",
+        expanded = expanded,
+    )
+    SettingsDivider()
+    SettingsSubscriptionValueRow(
+        label = "الحالة",
+        value = settingsSubscriptionStatus(account),
+        expanded = expanded,
+        pill = true,
+    )
+    SettingsDivider()
+    SettingsSubscriptionValueRow(
+        label = "تاريخ الانتهاء",
+        value = settingsExpiryDate(account),
+        expanded = expanded,
+    )
+    SettingsDivider()
+    SettingsSubscriptionValueRow(
+        label = "المتبقي",
+        value = settingsRemaining(account),
+        expanded = expanded,
+    )
+    SettingsDivider()
+    SettingsSubscriptionValueRow(
+        label = "الاتصالات",
+        value = settingsConnectionUsage(account),
+        expanded = expanded,
+    )
+    SettingsDivider()
+    SettingsSubscriptionValueRow(
+        label = "نوع الاشتراك",
+        value = when (account?.isTrial) {
             true -> "تجريبي"
             false -> "عادي"
             null -> "—"
         },
+        expanded = expanded,
     )
-    val safeColumns = columns.coerceIn(1, metrics.size)
-    Column(verticalArrangement = Arrangement.spacedBy(if (expanded) 10.dp else 8.dp)) {
-        metrics.chunked(safeColumns).forEach { rowMetrics ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(if (expanded) 12.dp else 8.dp),
-            ) {
-                rowMetrics.forEach { (label, value) ->
-                    SettingsMetric(label, value, expanded, Modifier.weight(1f))
-                }
-                repeat(safeColumns - rowMetrics.size) { Spacer(Modifier.weight(1f)) }
-            }
+}
+
+/** Board 09 detail row: label physical RIGHT, real value physical LEFT, optional status pill. */
+@Composable
+private fun SettingsSubscriptionValueRow(
+    label: String,
+    value: String,
+    expanded: Boolean,
+    pill: Boolean = false,
+) {
+    val colors = LocalHulkColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                horizontal = if (expanded) 16.dp else 12.dp,
+                vertical = if (expanded) 14.dp else 11.dp,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(if (expanded) 16.dp else 12.dp),
+    ) {
+        Text(
+            text = label,
+            color = colors.textMuted,
+            fontSize = if (expanded) 13.sp else 11.sp,
+            modifier = Modifier.weight(.30f),
+        )
+        Box(modifier = Modifier.weight(.70f), contentAlignment = Alignment.CenterEnd) {
+            Text(
+                text = value,
+                color = if (pill) colors.goldBright else colors.text,
+                fontSize = if (expanded) 15.sp else 13.sp,
+                fontWeight = if (pill) FontWeight.Black else FontWeight.SemiBold,
+                maxLines = 1,
+                modifier = if (pill) {
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(colors.gold.copy(alpha = .10f))
+                        .border(1.dp, colors.gold.copy(alpha = .24f), RoundedCornerShape(50))
+                        .padding(horizontal = 12.dp, vertical = 5.dp)
+                } else {
+                    Modifier
+                },
+            )
         }
     }
 }
@@ -1144,12 +1422,18 @@ private fun SettingsMenuRow(
     value: String,
     subtitle: String? = null,
     leadingIcon: ImageVector? = null,
+    leadingIconTint: Color? = null,
     accentValue: Boolean = false,
+    toggle: Boolean? = null,
+    trailingChevron: Boolean = false,
+    iconBesideLabel: Boolean = false,
     enabled: Boolean = true,
     expanded: Boolean,
     focusRequester: FocusRequester? = null,
     upRequester: FocusRequester? = null,
     downRequester: FocusRequester? = null,
+    leftRequester: FocusRequester? = null,
+    rightRequester: FocusRequester? = null,
     onFocused: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
@@ -1161,6 +1445,8 @@ private fun SettingsMenuRow(
         .focusProperties {
             if (upRequester != null) up = upRequester
             if (downRequester != null) down = downRequester
+            if (leftRequester != null) left = leftRequester
+            if (rightRequester != null) right = rightRequester
         }
 
     Row(
@@ -1190,21 +1476,20 @@ private fun SettingsMenuRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (expanded) 16.dp else 12.dp),
     ) {
-        leadingIcon?.let { icon ->
-            Box(
-                modifier = Modifier
-                    .size(if (expanded) 39.dp else 35.dp)
-                    .clip(CircleShape)
-                    .background(colors.gold.copy(alpha = if (focused) .18f else .09f)),
-                contentAlignment = Alignment.Center,
-            ) {
+        // Services-only anatomy: glyph begins at physical RIGHT beside the title; the value hint
+        // stays the last physical LEFT element. All other rows keep their corrected defaults.
+        val glyphContent: @Composable (() -> Unit)? = leadingIcon?.let { icon ->
+            {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = colors.goldBright,
+                    tint = leadingIconTint ?: colors.goldBright,
                     modifier = Modifier.size(if (expanded) 21.dp else 19.dp),
                 )
             }
+        }
+        if (iconBesideLabel) {
+            glyphContent?.invoke()
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -1226,7 +1511,9 @@ private fun SettingsMenuRow(
                 )
             }
         }
-        if (value.isNotBlank()) {
+        if (toggle != null) {
+            EntrySwitchVisual(checked = toggle, expanded = expanded)
+        } else if (value.isNotBlank()) {
             Text(
                 text = value,
                 color = if (accentValue) colors.goldBright else colors.textMuted,
@@ -1243,6 +1530,17 @@ private fun SettingsMenuRow(
                         vertical = if (expanded) 6.dp else 5.dp,
                     ),
             )
+        }
+        if (trailingChevron) {
+            Icon(
+                imageVector = Icons.Rounded.ChevronLeft,
+                contentDescription = null,
+                tint = colors.textMuted,
+                modifier = Modifier.size(if (expanded) 19.dp else 17.dp),
+            )
+        }
+        if (!iconBesideLabel) {
+            glyphContent?.invoke()
         }
     }
 }
@@ -1274,6 +1572,7 @@ private fun SettingsInfoRow(label: String, value: String, expanded: Boolean) {
             modifier = Modifier.weight(.70f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.End,
         )
     }
 }

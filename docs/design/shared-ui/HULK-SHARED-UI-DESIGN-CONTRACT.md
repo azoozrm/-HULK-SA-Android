@@ -1210,3 +1210,216 @@ accepted slim notice family. Android exact-candidate review remains **PENDING**.
 Implementation status: SECTION_PUBLISH candidate under owner review — **PENDING**. Captures
 remain OFF; automated visual validation is NOT RUN — CAPTURE NOT AUTHORIZED.
 
+## 17. Remaining pages + unified action/error notices adoption record (2026-10-13)
+
+The owner selected the remaining-pages bundle (`HULK-REMAINING-PAGES-DESIGNS-20261013-R02.zip`,
+SHA-256 `1fa3317df8d7f1df4e32f9133db00d137a65675b3409fda9c472d571fd6dfd3a`) and directed its Android
+implementation (`remaining-pages-ui-alignment-20261013`, LOCAL_ROUND R01). The accepted notice
+reference is `reference/ACCEPTED-APP-NOTICE.jpeg` rendered by the canonical
+`ScopedHomeActionNotice` in `MainShellScreen.kt`. This record documents **design-reference
+acceptance and the adopted supersessions**; the Android candidate is under owner review —
+**PENDING**; no merge, signing, tag or release is authorized or implied. Captures remain OFF.
+
+### 17.1 Unified affected action/instruction/error presentation
+
+- The affected Search/voice, Settings/preference/update, profile/security, notification and
+  Growth/QR outcomes use the canonical compact notice atoms (`Color(0xF211120D)`,
+  `RoundedCornerShape(12.dp)`, 1dp theme-gold border at .45 alpha, 12/9dp padding, ivory
+  12sp/17sp text, one 8dp gap, 17dp gold semantic glyph, caption RIGHT/glyph LEFT, 560dp TV /
+  340dp phone width cap). The duplicate `AppScopedNoticeCard` copy and its extra 2dp Spacer are
+  removed; `ProfileAwareHulkApp` now renders the same canonical family.
+- Notice events carry their own identity, so consecutive identical real outcomes remain distinct
+  events and an obsolete timeout can never clear a newer notice. Ordinary transient notices
+  remain nonfocusable and never steal focus, scroll or selection; status/empty/loading notices
+  stay in their content slots; validation/PIN errors stay in context; genuinely blocking
+  errors/destructive confirmations keep their bounded dark/gold dialogs with real owners.
+- `VoiceSearchDelegate.showMessage` no longer uses Android Toast. Real voice outcomes route
+  through a scoped feedback (owner + sequence) and are consumed only while the emitting
+  account/session/profile/generation still owns the Search request; stale previous-owner results
+  are dropped. Voice copy follows 05-MESSAGE-CONTRACT exactly and supersedes section 15.2's
+  activity-level voice-status system-message exemption only — speech/permission/request/lifecycle
+  ownership is unchanged.
+- `SettingsProScreen` no longer uses raw Toasts; its affected results surface through the shared
+  notice. App-authored Settings/voice/Growth/popup/update copy is normalized (`أ/إ/آ` → `ا`, no
+  terminal periods/ellipses); stored/server content is never rewritten.
+
+### 17.2 Search
+
+- The merged Search layout/geometry, keyboard, voice callbacks and focus are preserved. Only the
+  page background changes: `SmartSearchContent`'s vertical gradient is replaced by solid
+  `LocalHulkColors.background`; unrelated theme tokens and legitimate gold control
+  selection/focus are untouched. Board 08 remains illustrative.
+
+### 17.3 Profile / entry / PIN arrangements
+
+- The merged picker composition and management-row anatomy are preserved. The editor adopts the
+  selected split: fields physical RIGHT, avatar/name preview physical LEFT with a separating
+  line and a top Back action; narrow windows keep a condensed preview above the fields. Entry
+  options adopt rows with the context pane at physical RIGHT and full-width option rows; PIN
+  adopts keypad physical LEFT and profile context/masked slots physical RIGHT on TV
+  (`PinPanel(splitTv)`), keeping every existing length/attempt/lockout/cancellation and
+  `MAX_PROFILES`/primary/Kids/policy owner. A list-view profile deletion failure now surfaces its
+  existing truthful message instead of being set but never shown.
+
+### 17.4 Settings, notifications and QR
+
+- Settings adopts the selected TV section-list/detail composition (list physical RIGHT beside
+  the existing rail, one authoritative detail pane physical LEFT, selection separate from focus,
+  deterministic list↔detail focus return and per-section scroll memory) and the phone
+  list-then-detail page with Back restoration. All existing controls/values/callbacks/gating are
+  mapped, not reinvented; toggles render a nonfocusable switch visual reflecting the persisted
+  value, and cycle/open rows keep their real values.
+- Notification Center TV rows replace the poster strip with the semantic gold bell circle and
+  keep wide rows, unread state, actions LEFT and the untouched `NotificationTvFocusGraph`,
+  keys/order/profile scope and open/read/delete/clear semantics.
+- The new-episode alert adopts the bounded horizontal dark bar: gold bell glyph physical RIGHT,
+  real title once with independent season/episode metadata, divider, and the existing
+  primary/Later actions physical LEFT. Suppression/foreground precedence, presentation
+  acknowledgement, once-only activation, popup focus/Back/trigger return and the summary
+  Open Notifications route are unchanged; it remains an interactive foreground popup, not a
+  passive notice.
+- The existing Growth QR dialog adopts the selected horizontal TV family (copy physical RIGHT,
+  actual QR with its white quiet zone physical LEFT, vertical divider, compact Back) and stacks
+  vertically on narrow windows. Destination model, custom-QR validation/fallback, allowlists and
+  real direct-link callbacks are unchanged; no endpoint, enum or phone number was invented.
+
+Implementation status: LOCAL_ROUND R01 candidate under owner review — **PENDING**. Captures remain
+OFF; automated visual validation is NOT RUN — CAPTURE NOT AUTHORIZED.
+
+### 17.5 R02 owner rejection and scoped corrections (2026-10-13)
+
+The owner reviewed the R01 Android candidate (`remaining-pages-ui-alignment-20261013-r01`) and
+**REJECTED** it for the profile, PIN, Settings, Notification Center and Growth dialog surfaces
+(`HULK-REMAINING-PAGES-OWNER-CORRECTIONS-20261013-R02.zip`, SHA-256
+`3f9055fcd75826f920a3903f4ff39b730d2681ed729c6391c9c2f92b780a35d6`, independently reviewed
+`FAIL`, coordinator review attributed separately on the VPS). The R02 candidate is under owner
+review — **PENDING**. Captures remain OFF. This record supersedes only the conflicting 17.1–17.4
+wording:
+
+- **Profile pages**: the R01 statement that the merged picker composition stays unchanged is
+  superseded. The picker adopts circular identity/Add targets with one equal measured footprint,
+  identical avatar/Add bounds and reserved label/badge slots (focus, current or Kids state can
+  never change item geometry). Every affected profile page drops its decorative gold radial
+  overlay for the existing solid `LocalHulkColors.background`; the scoped dark surfaces and
+  legitimate gold action/focus/selection remain. Every profile page Back is the compact control
+  at physical RIGHT in the header, visibly separate from the title, caption RIGHT of one
+  right-facing physical-LEFT glyph, with first-press Back/cancel and return to the originating
+  control.
+- **Switches**: the relative R01 `CenterStart` checked alignment is superseded. One shared narrow
+  `EntrySwitchVisual` renders checked as theme-gold track with the light thumb physically LEFT
+  and unchecked as the accepted muted track with the thumb physically RIGHT, independent of the
+  ambient layout direction; the persisted Boolean is never negated and the row owns the single
+  activation.
+- **PIN**: the R01 compact stacked TV fallback is superseded. TV always uses the board-05 split
+  (profile/context/masked slots RIGHT, one keypad LEFT, Back in the RIGHT header) fitted to the
+  real usable window; the keypad owns focus only after a real placement signal and has a
+  deterministic path from its bottom keys to Back. The confirmation-input regression is addressed
+  by the production `PinEntryBuffer` (one buffer per stage, single completion, reset on stage
+  change) plus numeric-remote digit delivery; attempt/lockout/cancellation policy is unchanged.
+- **Settings**: first entry focuses the selected section row in the RIGHT section column; OK/LEFT
+  opens the section and transfers to its first eligible detail action, RIGHT/Back returns to the
+  selected section row, and modal closure restores the actual trigger. The separate 4dp selected
+  marker and its reserved gap are removed while the accepted selected-row treatment and in-bounds
+  focus edge remain. Row glyphs render physically LEFT beside their caption (Logout keeps its
+  single glyph and confirmation). SERVICES contains only the real enabled website/subscription and
+  support rows; ABOUT owns the app/device/version information and app update, and the Services
+  focus chain no longer targets the uncomposed update action. The board-13 combined About
+  visualization is superseded by this split.
+- **Notification Center**: TV rows adopt board 06's wide row with horizontal actions at physical
+  LEFT (left-to-right `مشاهدة الان`, `تعليم كمقروء`, `حذف`, only eligible actions) and one solid
+  page background. `NotificationTvFocusGraph` follows the new physical geometry: LEFT/RIGHT
+  traverse the action row, UP/DOWN change rows through the same eligible slot with an
+  index-clamped fallback, and the existing stable-ID/eligibility/fallback/bulk-header behavior is
+  preserved. The new-episode alert stays the accepted interactive bounded horizontal popup.
+- **Growth dialogs**: boards 15–17 share one measured horizontal family; copy and the LTR
+  domain/phone display are centered inside the RIGHT copy column, the actual QR with its white
+  quiet zone is in the LEFT column behind a restrained divider, and the compact Back owns the
+  centered bottom footer. The QR budget is derived after header/footer/insets so it can never
+  exceed the available height; destination configs, allowlists, custom-QR fallback and direct
+  routes are unchanged.
+
+R01 remains recorded as rejected history; this record does not rewrite earlier acceptance
+records and does not claim any new visual acceptance.
+
+### 17.6 R03 owner rejection and four scoped corrections (2026-10-13)
+
+The owner reviewed the R02 Android candidate and **REJECTED** four visual scopes: the Notification
+Center row composition/icons, the Who-is-Watching logo/group/name-badge spacing, the HULK Services
+icon placement, and the subscription/support QR modal composition
+(`HULK-REMAINING-PAGES-OWNER-CORRECTIONS-20261013-R03.zip`, SHA-256
+`2bc810e657f4b65b9d130306c86def1b41a18ae790bc8fd28091b8b1b45dc2f7`; coordinator review attributed
+separately on the VPS). The R03 candidate is under owner review — **PENDING**. Captures remain
+OFF. This record supersedes only the conflicting 17.5 wording for these four scopes:
+
+- **Notification Center** (board 06): TV rows are flat full-width list rows with one restrained
+  gold separator and content-measured height; the old 14dp rounded outer card, card
+  background/border and poster-derived 132dp floor are removed. Bell/unread/title/season-episode/
+  time remain grouped at physical RIGHT, horizontal eligible actions remain at physical LEFT
+  (`مشاهدة الان` / `تعليم كمقروء` / `حذف`) and now carry their repository vectors (Play,
+  MarkEmailRead, DeleteOutline) with the accepted EntryActionButton anatomy (caption RIGHT, 17dp
+  glyph LEFT, one 6dp gap); Watch keeps the warm-gold primary treatment. Header Mark-all-read/
+  Clear-all gain MarkEmailRead/ClearAll vectors and the approved Back glyph. The R02 horizontal
+  focus graph, stable IDs, eligibility fallback, row/slot UP/DOWN navigation and callbacks are
+  preserved; popup/other consumers keep shared defaults.
+- **Who is Watching** (board 01, solid-black background): TV uses the existing `logoWidthDp`/
+  `logoHeightDp` responsive source with usable-height/aspect bounds instead of the generic 68–88dp
+  square cap. Item footprints are measured from the actual avatar/Add circles and the complete
+  measured Arabic labels, with the adaptive `cardGapDp` between them (no invisible rectangular
+  card width). The full name and `الحالي`/`اطفال` badge are separate measured blocks with an
+  explicit 10dp/8dp gap and a reserved equal badge row for Add and non-current profiles, so the
+  badge sits clearly below `الرئيسي` without clipping. Footer glyphs, callbacks, stable keys,
+  MAX_PROFILES, current-profile semantics, safe Back and the phone grid are unchanged.
+- **HULK Services** (owner direction): only these two rows use a narrow Services anatomy — the
+  globe/support glyph begins at physical RIGHT beside the title/subtitle group, flexible space
+  follows, and `اضغط OK` remains the last physical LEFT element. `SettingsMenuRow` defaults are
+  unchanged; Logout keeps its physical-LEFT glyph, the separate ABOUT owner, corrected switch
+  orientation and all other R02 Settings behavior.
+- **Growth QR family** (boards 15–17): one bounded centered horizontal modal — compact QR pane at
+  physical LEFT (budget derived after footer/insets, capped compact), narrow warm-gold divider,
+  coherent copy pane at physical RIGHT with ALL heading/subtitle/instruction/destination centered
+  in that pane; domain/phone keep explicit LTR; compact Back with the local gold caption sits
+  centered in the bottom footer and restores its trigger on first press. Real encoder/configured
+  destinations/allowlists/fallback and phone adaptive stacking are preserved; sample board QR/
+  phone/domain are never reproduced.
+
+R01/R02 remain recorded history; this record does not rewrite earlier decisions and does not claim
+visual acceptance of the R03 candidate.
+
+### 17.7 R04 corrections — picker logo, PIN confirmation input, review blockers (2026-10-13)
+
+The owner added two defects to the pending correction packet (TV picker HS logo still too small;
+Profile PIN confirmation accepts no digits after the first four) and the independent R03
+publication review recorded two broken focus bindings plus two stale Compatibility guards
+(`HULK-REMAINING-PAGES-R04-CORRECTIONS-20261013.zip`, SHA-256
+`4a6824400b5a3b0f1d213900df78c771537daece4e31731ea0cac8d569cb600d`; attributed reviewer records
+kept separately on the VPS). The R04 candidate is under owner review — **PENDING**. Captures
+remain OFF. This record scopes only these corrections:
+
+- **Picker TV logo**: both original logo resources have square canvases, so the R03 rectangular
+  `logoWidthDp x logoHeightDp` slot height-limited the square drawable. This caller now uses the
+  preferred SQUARE side from `logoWidthDp` (106/122/136dp) bounded to the real safe window and the
+  space left after the unchanged title/subtitle/circles/footer neighbours. Original drawable,
+  aspect, Fit scaling, colours, bytes and the phone caller are unchanged.
+- **PIN confirmation input (on-device root cause)**: an isolated non-persistent Compose UI fixture
+  reproduced the owner failure on the Mi Box: the confirmation stage rendered, owned keypad focus
+  and clickable keys, but presses delivered to the previous stage's state, so the new stage's
+  buffer/callback never received digits (and the mismatch error never appeared). The correction
+  recreates the keypad subtree per stage (`key(title, resetToken)`), so each stage owns its own
+  input and completion path; the buffer/stage/reset lifetime, attempt/lockout, cancellation,
+  profile isolation and storage owners are unchanged.
+- **Back focus bindings**: the split-TV `EntryBackAction` now binds the existing
+  `cancelFocusRequester`, and `PinKey` no longer consumes a directional key when the focus request
+  failed; the Growth QR `EntryBackAction` binds the existing `backRequester` in both wide and
+  stacked branches. Layout/callbacks/QR centering/encoder/config/allowlists/fallback unchanged.
+- **Compatibility guards**: the two stale assertions were updated to the adopted architecture
+  (transient stage-scoped `PinEntryBuffer` transient ownership; Settings section-first entry with
+  the eligible attached detail path) without deleting, skipping or weakening the security and
+  navigation guarantees.
+
+Reviewed on-device workflow coverage (isolated in-memory fixture, Mi Box 4): first four digits
+advance once, confirmation begins empty and owns keypad focus, all four digits are accepted via
+tap and supported numeric-remote keys, masked slots update, backspace removes exactly one digit,
+mismatch stays editable for retry, matching confirmation saves once, cancel never saves, bottom
+keypad row reaches the visible Back, direct PinPanel stage change completes both stages, and the
+QR Back receives focus and dismisses once. R01–R03 records are preserved; this record supersedes
+only the conflicting R03 logo-slot wording and adds the confirmed PIN stage-input cause.

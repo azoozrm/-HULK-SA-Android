@@ -26,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -74,6 +75,7 @@ import sa.hulksa.player.ui.components.EntryNotice
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.screens.AdaptiveProfileManagementScreen
 import sa.hulksa.player.ui.screens.MaintenanceScreen
+import sa.hulksa.player.ui.screens.HomeActionNotice
 import sa.hulksa.player.ui.screens.NavigationMemoryStore
 import sa.hulksa.player.ui.screens.NewEpisodeAlertOverlay
 import sa.hulksa.player.ui.screens.OperationsAnnouncementOverlay
@@ -82,6 +84,8 @@ import sa.hulksa.player.ui.screens.OptionalUpdateOverlay
 import sa.hulksa.player.ui.screens.ParentalCodeBootstrapScreen
 import sa.hulksa.player.ui.screens.ParentalCodeUnlockScreen
 import sa.hulksa.player.ui.screens.ProfilePickerScreen
+import sa.hulksa.player.ui.screens.ScopedHomeActionNotice
+import sa.hulksa.player.ui.screens.scopedNoticeDisplayText
 import sa.hulksa.player.ui.screens.ProfilePinProtectionScreen
 import sa.hulksa.player.ui.screens.ProfilePinUnlockScreen
 import sa.hulksa.player.ui.screens.RequiredUpdateScreen
@@ -199,12 +203,24 @@ fun ProfileAwareHulkApp(
     }
     var homeUpdateDetailVersionCode by remember(activeProfileId) { mutableStateOf<Int?>(null) }
     // Scoped dark/gold notice for update/notification action results; it replaces the default
-    // Android Toasts on these Home-visible surfaces without creating another state owner.
-    var appActionNotice by remember(activeProfileId) { mutableStateOf<AppScopedNotice?>(null) }
+    // Android Toasts on these Home-visible surfaces without creating another state owner. The
+    // canonical ScopedHomeActionNotice renderer and a per-event identity keep consecutive
+    // identical real outcomes distinct and never let an obsolete timeout clear a newer notice.
+    var appActionNotice by remember(activeProfileId) { mutableStateOf<AppNoticeEvent?>(null) }
+    var appNoticeSequence by remember(activeProfileId) { mutableLongStateOf(0L) }
     LaunchedEffect(appActionNotice) {
-        val notice = appActionNotice ?: return@LaunchedEffect
+        val event = appActionNotice ?: return@LaunchedEffect
         delay(6_000L)
-        if (appActionNotice == notice) appActionNotice = null
+        if (appActionNotice == event) appActionNotice = null
+    }
+    // A transient notice never outlives its owning screen/destination.
+    LaunchedEffect(state.screen, state.destination) { appActionNotice = null }
+    val postAppNotice: (String, ImageVector) -> Unit = { message, icon ->
+        appNoticeSequence += 1L
+        appActionNotice = AppNoticeEvent(
+            appNoticeSequence,
+            HomeActionNotice(scopedNoticeDisplayText(message), icon),
+        )
     }
     val activeProfile = remember(profiles, activeProfileId) {
         profiles.firstOrNull { it.id == activeProfileId }
@@ -1010,7 +1026,7 @@ fun ProfileAwareHulkApp(
                 onUpdate = viewModel::startOperationsUpdate,
                 onOpenUnknownSourcesSettings = {
                     viewModel.openOperationsInstallSettings { message ->
-                        appActionNotice = AppScopedNotice(message, Icons.Rounded.Settings)
+                        postAppNotice(message, Icons.Rounded.Settings)
                     }
                 },
             )
@@ -1351,7 +1367,7 @@ fun ProfileAwareHulkApp(
                         },
                         onOpenUnknownSourcesSettings = {
                             viewModel.openOperationsInstallSettings { message ->
-                                appActionNotice = AppScopedNotice(message, Icons.Rounded.Settings)
+                                postAppNotice(message, Icons.Rounded.Settings)
                             }
                         },
                     )
@@ -1369,7 +1385,7 @@ fun ProfileAwareHulkApp(
                         },
                         onOpenUnknownSourcesSettings = {
                             viewModel.openOperationsInstallSettings { message ->
-                                appActionNotice = AppScopedNotice(message, Icons.Rounded.Settings)
+                                postAppNotice(message, Icons.Rounded.Settings)
                             }
                         },
                     )
@@ -1394,7 +1410,7 @@ fun ProfileAwareHulkApp(
                         onPrimary = {
                             viewModel.activateNotificationPopup { message ->
                                 message?.let {
-                                    appActionNotice = AppScopedNotice(it, Icons.Outlined.ErrorOutline)
+                                    postAppNotice(it, Icons.Outlined.ErrorOutline)
                                 }
                             }
                         },
@@ -1411,9 +1427,9 @@ fun ProfileAwareHulkApp(
                 }
             }
         }
-        appActionNotice?.let { notice ->
-            AppScopedNoticeCard(
-                notice = notice,
+        appActionNotice?.let { event ->
+            ScopedHomeActionNotice(
+                notice = event.notice,
                 isTv = isTelevisionDevice,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -1423,43 +1439,8 @@ fun ProfileAwareHulkApp(
     }
 }
 
-/** Transient app-level action feedback with the dark/gold notice family. */
-private data class AppScopedNotice(
-    val message: String,
-    val icon: ImageVector,
+/** A notice event with its own identity so consecutive identical messages stay distinct. */
+private data class AppNoticeEvent(
+    val id: Long,
+    val notice: HomeActionNotice,
 )
-
-@Composable
-private fun AppScopedNoticeCard(
-    notice: AppScopedNotice,
-    isTv: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalHulkColors.current
-    val shape = RoundedCornerShape(12.dp)
-    Row(
-        modifier = modifier
-            .widthIn(max = if (isTv) 560.dp else 340.dp)
-            .clip(shape)
-            .background(Color(0xF211120D))
-            .border(1.dp, colors.gold.copy(alpha = .45f), shape)
-            .padding(horizontal = 12.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            text = notice.message,
-            color = colors.text,
-            fontSize = 12.sp,
-            lineHeight = 17.sp,
-            modifier = Modifier.weight(1f),
-        )
-        Spacer(Modifier.width(2.dp))
-        Icon(
-            imageVector = notice.icon,
-            contentDescription = null,
-            tint = colors.gold,
-            modifier = Modifier.size(17.dp),
-        )
-    }
-}

@@ -135,8 +135,19 @@ class ParentalCodeArchitectureContractTest(unittest.TestCase):
         self.assertIn("var firstCode by remember(credentialScopeKey)", self.parent_ui)
         self.assertNotIn("var firstCode by rememberSaveable", self.parent_ui)
         pin_screen = (UI_ROOT / "screens/ProfilePinSecurityScreen.kt").read_text()
-        self.assertIn("var pin by remember(stateKey, title, resetToken)", pin_screen)
+        pin_buffer = (UI_ROOT / "screens/PinEntryBuffer.kt").read_text()
+        # Raw PIN digits live only in the transient, stage-scoped production buffer: it is
+        # remembered (not saved) per (stateKey, title, resetToken), and every stage change owns a
+        # fresh keypad subtree, so raw digits can never be process-restored or reused by a
+        # previous stage.
+        self.assertIn(
+            "val buffer = remember(stateKey, title, resetToken) { PinEntryBuffer() }",
+            pin_screen,
+        )
+        self.assertIn("key(title, resetToken) {", pin_screen)
+        self.assertNotIn("var pin by remember(stateKey, title, resetToken)", pin_screen)
         self.assertNotIn("var pin by rememberSaveable", pin_screen)
+        self.assertNotIn("rememberSaveable", pin_buffer)
 
     def test_parental_authorization_cannot_survive_process_recreation(self):
         self.assertIn(

@@ -16,6 +16,7 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.runtime.mutableStateOf
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -27,6 +28,7 @@ import kotlinx.coroutines.launch
 import sa.hulksa.player.ui.ProfileAwareHulkApp
 import sa.hulksa.player.ui.VoiceSearchAppLayer
 import sa.hulksa.player.ui.VoiceSearchDelegate
+import sa.hulksa.player.ui.VoiceSearchFeedback
 import sa.hulksa.player.ui.isVoiceSearchDestination
 import sa.hulksa.player.ui.isVoiceSearchHardwareKey
 import sa.hulksa.player.ui.theme.HulkTheme
@@ -35,6 +37,7 @@ class MainActivity : ComponentActivity() {
     private val viewModel: HulkViewModel by viewModels()
     private var currentScreen: HulkScreen = HulkScreen.LOGIN
     private lateinit var voiceSearchDelegate: VoiceSearchDelegate
+    private val voiceSearchFeedback = mutableStateOf<VoiceSearchFeedback?>(null)
     private lateinit var subscriptionResumeEnforcer: SubscriptionResumeEnforcer
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,6 +56,7 @@ class MainActivity : ComponentActivity() {
             activity = this,
             ownerProvider = viewModel::currentVoiceSearchOwner,
             onTranscript = viewModel::updateSearchFromVoice,
+            onFeedback = { feedback -> voiceSearchFeedback.value = feedback },
         )
 
         configurePhoneWindow()
@@ -68,6 +72,7 @@ class MainActivity : ComponentActivity() {
                     viewModel = viewModel,
                     isTv = false,
                     onVoiceSearch = voiceSearchDelegate::launch,
+                    voiceFeedback = voiceSearchFeedback,
                 ) {
                     ProfileAwareHulkApp(
                         viewModel = viewModel,

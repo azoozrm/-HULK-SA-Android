@@ -9,7 +9,6 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.view.KeyEvent
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -23,6 +22,7 @@ import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -104,10 +104,39 @@ internal class VoiceSearchRequestGate {
     }
 }
 
+/** Exact authored copy for real voice outcomes, kept free of terminal punctuation. */
+internal object VoiceSearchCopy {
+    const val NO_MATCH = "لم يتم التعرف على صوت واضح ، حاول مرة اخرى"
+    const val MICROPHONE_DENIED = "يلزم السماح بالميكروفون لاستخدام البحث الصوتي"
+    const val PERMISSION_LAUNCH_FAILED = "تعذر طلب صلاحية الميكروفون ، حاول مرة اخرى"
+    const val RECOGNITION_UNAVAILABLE = "البحث الصوتي غير متاح على هذا الجهاز"
+    const val SERVICE_FAILED = "تعذر تشغيل البحث الصوتي ، حاول مرة اخرى"
+    const val INSUFFICIENT_PERMISSION = "تعذر استخدام الميكروفون ، تحقق من الصلاحية"
+    const val OTHER_FAILURE = "تعذر اكمال البحث الصوتي ، حاول مرة اخرى"
+}
+
+/** Semantic class of a real voice-search outcome, mapped to a shared notice glyph by the app. */
+internal enum class VoiceSearchFeedbackGlyph {
+    VOICE,
+    ERROR,
+}
+
+/**
+ * One real voice-search outcome scoped to the owner that requested it. The sequence keeps
+ * consecutive identical outcomes distinct events for the shared notice host.
+ */
+internal data class VoiceSearchFeedback(
+    val owner: VoiceSearchOwner,
+    val message: String,
+    val glyph: VoiceSearchFeedbackGlyph,
+    val sequence: Long,
+)
+
 internal class VoiceSearchDelegate(
     private val activity: ComponentActivity,
     private val ownerProvider: () -> VoiceSearchOwner?,
     private val onTranscript: (VoiceSearchOwner, String) -> Unit,
+    private val onFeedback: (VoiceSearchFeedback) -> Unit,
 ) : DefaultLifecycleObserver {
     private data class PendingRecognition(
         val request: VoiceSearchRequestGate.Request,
@@ -119,6 +148,7 @@ internal class VoiceSearchDelegate(
     private var activeRequest: VoiceSearchRequestGate.Request? = null
     private var pendingRecognition: PendingRecognition? = null
     private var permissionRequestInFlight = false
+    private var feedbackSequence = 0L
 
     private val microphonePermissionLauncher = activity.registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -131,7 +161,10 @@ internal class VoiceSearchDelegate(
             startRecognition(pending)
         } else if (isCurrent(pending.request)) {
             requestGate.complete(pending.request)
-            showMessage("يلزم السماح بالميكروفون لاستخدام البحث الصوتي.")
+            showMessage(
+                VoiceSearchCopy.MICROPHONE_DENIED,
+                VoiceSearchFeedbackGlyph.VOICE,
+            )
         }
     }
 
@@ -150,7 +183,10 @@ internal class VoiceSearchDelegate(
         val owner = ownerProvider() ?: return
         if (!activity.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return
         if (!SpeechRecognizer.isRecognitionAvailable(activity)) {
-            showMessage("البحث الصوتي غير متاح على هذا الجهاز.")
+            showMessage(
+                VoiceSearchCopy.RECOGNITION_UNAVAILABLE,
+                VoiceSearchFeedbackGlyph.ERROR,
+            )
             return
         }
 
@@ -174,7 +210,10 @@ internal class VoiceSearchDelegate(
                     permissionRequestInFlight = false
                     pendingRecognition = null
                     requestGate.complete(request)
-                    showMessage("تعذر طلب صلاحية الميكروفون. حاول مرة أخرى.")
+                    showMessage(
+                        VoiceSearchCopy.PERMISSION_LAUNCH_FAILED,
+                        VoiceSearchFeedbackGlyph.ERROR,
+                    )
                 }
             }
             return
@@ -206,7 +245,10 @@ internal class VoiceSearchDelegate(
         } catch (_: RuntimeException) {
             if (isCurrent(pending.request)) {
                 requestGate.complete(pending.request)
-                showMessage("تعذر تشغيل خدمة البحث الصوتي على هذا الجهاز.")
+                showMessage(
+                    VoiceSearchCopy.SERVICE_FAILED,
+                    VoiceSearchFeedbackGlyph.ERROR,
+                )
             }
             return
         }
@@ -232,12 +274,21 @@ internal class VoiceSearchDelegate(
                     when (error) {
                         SpeechRecognizer.ERROR_NO_MATCH,
                         SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
-                            showMessage("لم يتم التعرف على صوت واضح. حاول مرة اخرى.")
+                            showMessage(
+                                VoiceSearchCopy.NO_MATCH,
+                                VoiceSearchFeedbackGlyph.VOICE,
+                            )
 
                         SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
-                            showMessage("تعذر استخدام الميكروفون. تحقق من صلاحية الميكروفون.")
+                            showMessage(
+                                VoiceSearchCopy.INSUFFICIENT_PERMISSION,
+                                VoiceSearchFeedbackGlyph.ERROR,
+                            )
 
-                        else -> showMessage("تعذر اكمال البحث الصوتي. حاول مرة اخرى.")
+                        else -> showMessage(
+                            VoiceSearchCopy.OTHER_FAILURE,
+                            VoiceSearchFeedbackGlyph.ERROR,
+                        )
                     }
                 }
 
@@ -249,7 +300,10 @@ internal class VoiceSearchDelegate(
                     releaseRecognizer(cancel = false)
                     requestGate.complete(pending.request)
                     if (transcript == null) {
-                        showMessage("لم يتم التعرف على صوت واضح. حاول مرة اخرى.")
+                        showMessage(
+                            VoiceSearchCopy.NO_MATCH,
+                            VoiceSearchFeedbackGlyph.VOICE,
+                        )
                     } else {
                         onTranscript(pending.request.owner, transcript)
                     }
@@ -287,7 +341,10 @@ internal class VoiceSearchDelegate(
             releaseRecognizer(cancel = false)
             if (isCurrent(pending.request)) {
                 requestGate.complete(pending.request)
-                showMessage("تعذر تشغيل البحث الصوتي. حاول مرة اخرى.")
+                showMessage(
+                    VoiceSearchCopy.SERVICE_FAILED,
+                    VoiceSearchFeedbackGlyph.ERROR,
+                )
             }
         }
     }
@@ -313,10 +370,18 @@ internal class VoiceSearchDelegate(
         runCatching { recognizer.destroy() }
     }
 
-    private fun showMessage(message: String) {
-        if (activity.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
-            Toast.makeText(activity, message, Toast.LENGTH_SHORT).show()
-        }
+    private fun showMessage(message: String, glyph: VoiceSearchFeedbackGlyph) {
+        if (!activity.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return
+        val owner = ownerProvider() ?: return
+        feedbackSequence += 1L
+        onFeedback(
+            VoiceSearchFeedback(
+                owner = owner,
+                message = message,
+                glyph = glyph,
+                sequence = feedbackSequence,
+            ),
+        )
     }
 }
 
@@ -362,16 +427,20 @@ internal fun isVoiceSearchDestination(state: HulkUiState): Boolean =
 
 internal val LocalVoiceSearchLauncher = staticCompositionLocalOf<((String) -> Unit)?> { null }
 
+internal val LocalVoiceSearchFeedback = staticCompositionLocalOf<MutableState<VoiceSearchFeedback?>?> { null }
+
 @Suppress("UNUSED_PARAMETER")
 @Composable
 internal fun VoiceSearchAppLayer(
     viewModel: HulkViewModel,
     isTv: Boolean,
     onVoiceSearch: (String) -> Unit,
+    voiceFeedback: MutableState<VoiceSearchFeedback?>? = null,
     content: @Composable () -> Unit,
 ) {
     CompositionLocalProvider(
         LocalVoiceSearchLauncher provides onVoiceSearch,
+        LocalVoiceSearchFeedback provides voiceFeedback,
         content = content,
     )
 }

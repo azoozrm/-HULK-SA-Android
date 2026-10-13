@@ -8,11 +8,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -35,7 +36,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -52,7 +52,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -62,8 +61,11 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -78,7 +80,9 @@ import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
 import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.EntryActionButton
+import sa.hulksa.player.ui.components.EntryBackAction
 import sa.hulksa.player.ui.components.EntryNotice
+import sa.hulksa.player.ui.components.EntrySwitchVisual
 import sa.hulksa.player.ui.components.ProfileAvatar
 import sa.hulksa.player.ui.components.entryPanelMaxWidthDp
 import sa.hulksa.player.ui.theme.LocalHulkColors
@@ -210,6 +214,17 @@ fun ProfilePickerScreen(
     val compactMobile = !isTv && (mobileLandscape || adaptiveUi.screenHeightDp < 620)
     val actionFloorDp = movieActionHeightDp(isTv = isTv, compactHeight = !isTv && compactMobile)
     val headerMarkSize = (adaptiveUi.screenWidthDp * .20f).coerceIn(68f, 88f).dp
+    // Both original logo resources have square canvases, so the TV header must use a SQUARE side.
+    // The preferred side comes from the existing TV metrics logoWidthDp (106/122/136dp), bounded
+    // by the real safe window and the space left after the unchanged title/subtitle/circles/footer
+    // neighbours. This narrowly supersedes R03's height-limited rectangular slot for this caller.
+    val tvLogoSide = minOf(
+        tvMetrics.logoWidthDp.dp,
+        (adaptiveUi.screenWidthDp * .22f).dp,
+        (adaptiveUi.screenHeightDp * .24f).dp,
+    )
+    val tvLogoWidth = tvLogoSide
+    val tvLogoHeight = tvLogoSide
     val expandedPanel = isTv || adaptiveUi.screenWidthDp >= 720
 
     LaunchedEffect(isTv, activeProfileId, profileIds, showEntryOptions) {
@@ -236,17 +251,6 @@ fun ProfilePickerScreen(
             .fillMaxSize()
             .background(colors.background),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(colors.goldDeep.copy(alpha = .12f), Color.Transparent),
-                        radius = if (isTv) 980f else 620f,
-                    ),
-                ),
-        )
-
         if (showEntryOptions) {
             ProfileEntryOptionsPanel(
                 profiles = profiles,
@@ -302,6 +306,15 @@ fun ProfilePickerScreen(
             val rowPadding = if (isTv) tvMetrics.rowPaddingDp.dp else 0.dp
 
             if (isTv) {
+                val textMeasurer = rememberTextMeasurer()
+                val density = LocalDensity.current
+                val widestLabelDp = remember(profiles, tvMetrics) {
+                    val style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Black)
+                    val widestPx = (profiles.map { it.displayName } + "اضافة ملف")
+                        .maxOf { textMeasurer.measure(it, style).size.width }
+                    with(density) { widestPx.toDp().value }
+                }
+                val tvItemWidthDp = maxOf(tvMetrics.avatarSizeDp, widestLabelDp + 6f)
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -314,6 +327,8 @@ fun ProfilePickerScreen(
                         compactMobile = false,
                         tvMetrics = tvMetrics,
                         headerMarkSize = headerMarkSize,
+                        tvLogoWidth = tvLogoWidth,
+                        tvLogoHeight = tvLogoHeight,
                     )
 
                     Spacer(Modifier.height(24.dp))
@@ -334,7 +349,7 @@ fun ProfilePickerScreen(
                                 isTv = true,
                                 enabled = !isSwitching,
                                 focusRequester = focusRequesters.getValue(profile.id),
-                                cardWidthDp = tvMetrics.cardWidthDp,
+                                cardWidthDp = tvItemWidthDp,
                                 avatarSizeDp = tvMetrics.avatarSizeDp,
                                 focusBorderDp = tvMetrics.focusBorderDp,
                                 onClick = { onSelectProfile(profile) },
@@ -345,7 +360,7 @@ fun ProfilePickerScreen(
                                 AddProfileCard(
                                     isTv = true,
                                     enabled = !isSwitching,
-                                    cardWidthDp = tvMetrics.cardWidthDp,
+                                    cardWidthDp = tvItemWidthDp,
                                     avatarSizeDp = tvMetrics.avatarSizeDp,
                                     focusBorderDp = tvMetrics.focusBorderDp,
                                     onClick = onCreateProfile,
@@ -423,13 +438,6 @@ fun ProfilePickerScreen(
                             verticalArrangement = Arrangement.spacedBy(cardGap),
                         ) {
                             gridItems(items = profiles, key = UserProfile::id) { profile ->
-                                val profileAvatarSize = if (
-                                    profile.kind == ProfileKind.KIDS && profile.id != activeProfileId
-                                ) {
-                                    (gridAvatarSize * .82f).coerceAtLeast(44f)
-                                } else {
-                                    gridAvatarSize
-                                }
                                 ProfilePickerCard(
                                     profile = profile,
                                     isActive = profile.id == activeProfileId,
@@ -437,7 +445,7 @@ fun ProfilePickerScreen(
                                     enabled = !isSwitching,
                                     focusRequester = focusRequesters.getValue(profile.id),
                                     cardWidthDp = gridCardWidth.value,
-                                    avatarSizeDp = profileAvatarSize,
+                                    avatarSizeDp = gridAvatarSize,
                                     focusBorderDp = 2f,
                                     onClick = { onSelectProfile(profile) },
                                 )
@@ -489,11 +497,16 @@ private fun ProfilePickerHeading(
     compactMobile: Boolean,
     tvMetrics: ProfilePickerTvMetrics,
     headerMarkSize: Dp,
+    tvLogoWidth: Dp = headerMarkSize,
+    tvLogoHeight: Dp = headerMarkSize,
 ) {
     val colors = LocalHulkColors.current
     BrandLogo(
         modifier = Modifier
-            .size(headerMarkSize)
+            .size(
+                width = if (isTv) tvLogoWidth else headerMarkSize,
+                height = if (isTv) tvLogoHeight else headerMarkSize,
+            )
             .clearAndSetSemantics { },
         contentScale = ContentScale.Fit,
     )
@@ -578,7 +591,6 @@ private fun ProfilePickerStatus(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ProfileEntryOptionsPanel(
     profiles: List<UserProfile>,
@@ -615,12 +627,18 @@ private fun ProfileEntryOptionsPanel(
         contentAlignment = Alignment.Center,
     ) {
         BoxWithConstraints(
-            modifier = Modifier
-                .widthIn(max = entryPanelMaxWidthDp(expandedPanel).dp)
-                .fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(),
         ) {
+            val availableWidth = maxWidth
             Column(
                 modifier = Modifier
+                    .widthIn(
+                        max = if (expandedPanel) {
+                            minOf(availableWidth, 880.dp)
+                        } else {
+                            entryPanelMaxWidthDp(expandedPanel).dp
+                        },
+                    )
                     .fillMaxWidth()
                     .heightIn(max = maxHeight)
                     .clip(panelShape)
@@ -631,91 +649,147 @@ private fun ProfileEntryOptionsPanel(
                         horizontal = if (isTv) 24.dp else 18.dp,
                         vertical = if (isTv) 20.dp else 16.dp,
                     ),
-                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(
-                    text = "خيارات الدخول",
-                    color = colors.text,
-                    fontSize = if (isTv) 26.sp else 22.sp,
-                    fontWeight = FontWeight.Black,
-                    textAlign = TextAlign.Center,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
+                ) {
+                    EntryBackAction(
+                        onClick = onClose,
+                        minHeightDp = actionFloorDp,
+                    )
+                    Text(
+                        text = "خيارات الدخول",
+                        color = colors.text,
+                        fontSize = if (isTv) 26.sp else 22.sp,
+                        fontWeight = FontWeight.Black,
+                        textAlign = TextAlign.Start,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
                 Spacer(Modifier.height(6.dp))
                 Text(
                     text = "حدد هل تريد اختيار المستخدم عند كل تشغيل او الدخول مباشرة",
                     color = colors.textMuted,
                     fontSize = if (isTv) 13.sp else 12.sp,
-                    textAlign = TextAlign.Center,
+                    textAlign = if (expandedPanel) TextAlign.Start else TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(if (isTv) 18.dp else 14.dp))
 
-                EntryToggleRow(
-                    text = "الدخول المباشر",
-                    checked = directEntryEnabled,
-                    isTv = isTv,
-                    focusRequester = firstFocusRequester,
-                    onToggle = onToggleDirectEntry,
-                )
-
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = if (directEntryEnabled) {
-                        "عند تشغيل التطبيق سيتم تجاوز صفحة اختيار المستخدم"
-                    } else {
-                        "سيستمر ظهور صفحة اختيار المستخدم عند تشغيل التطبيق"
-                    },
-                    color = colors.textMuted,
-                    fontSize = if (isTv) 12.sp else 11.sp,
-                    textAlign = TextAlign.Center,
-                )
-
-                Spacer(Modifier.height(if (isTv) 20.dp else 16.dp))
-                Text(
-                    text = "المستخدم الافتراضي",
-                    color = colors.text,
-                    fontSize = if (isTv) 17.sp else 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "اختر مستخدما محددا، او اختر اخر مستخدم للدخول باخر ملف استخدم",
-                    color = colors.textMuted,
-                    fontSize = if (isTv) 12.sp else 11.sp,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(if (isTv) 12.dp else 10.dp))
-
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    itemVerticalAlignment = Alignment.CenterVertically,
-                ) {
-                    EntryPreferenceRow(
-                        text = "اخر مستخدم",
-                        avatarKey = null,
-                        selected = defaultProfileId == null,
-                        onClick = { onSelectDefaultProfile(null) },
+                val body: @Composable ColumnScope.() -> Unit = {
+                    EntryToggleRow(
+                        text = "الدخول المباشر",
+                        checked = directEntryEnabled,
+                        isTv = isTv,
+                        focusRequester = firstFocusRequester,
+                        onToggle = onToggleDirectEntry,
+                        modifier = if (expandedPanel) Modifier.fillMaxWidth() else Modifier,
                     )
-                    profiles.forEach { profile ->
+
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = if (directEntryEnabled) {
+                            "عند تشغيل التطبيق سيتم تجاوز صفحة اختيار المستخدم"
+                        } else {
+                            "سيستمر ظهور صفحة اختيار المستخدم عند تشغيل التطبيق"
+                        },
+                        color = colors.textMuted,
+                        fontSize = if (isTv) 12.sp else 11.sp,
+                        textAlign = if (expandedPanel) TextAlign.Start else TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    Spacer(Modifier.height(if (isTv) 20.dp else 16.dp))
+                    Text(
+                        text = "المستخدم الافتراضي",
+                        color = colors.text,
+                        fontSize = if (isTv) 17.sp else 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = if (expandedPanel) TextAlign.Start else TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "اختر مستخدما محددا، او اختر اخر مستخدم للدخول باخر ملف استخدم",
+                        color = colors.textMuted,
+                        fontSize = if (isTv) 12.sp else 11.sp,
+                        textAlign = if (expandedPanel) TextAlign.Start else TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(if (isTv) 12.dp else 10.dp))
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
                         EntryPreferenceRow(
-                            text = profile.displayName,
-                            avatarKey = profile.avatarKey,
-                            selected = defaultProfileId == profile.id,
-                            onClick = { onSelectDefaultProfile(profile.id) },
+                            text = "اخر مستخدم",
+                            avatarKey = null,
+                            selected = defaultProfileId == null,
+                            onClick = { onSelectDefaultProfile(null) },
+                            modifier = Modifier.fillMaxWidth(),
                         )
+                        profiles.forEach { profile ->
+                            EntryPreferenceRow(
+                                text = profile.displayName,
+                                avatarKey = profile.avatarKey,
+                                selected = defaultProfileId == profile.id,
+                                onClick = { onSelectDefaultProfile(profile.id) },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     }
+
                 }
 
-                Spacer(Modifier.height(if (isTv) 8.dp else 6.dp))
-                EntryActionButton(
-                    text = "رجوع",
-                    onClick = onClose,
-                    outlined = true,
-                    glyph = Icons.AutoMirrored.Rounded.ArrowBack,
-                    minHeightDp = actionFloorDp,
-                )
+                if (expandedPanel) {
+                    val contextColumnWidth = (availableWidth * .32f).coerceIn(240.dp, 340.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Min),
+                        horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier.width(contextColumnWidth),
+                        ) {
+                            Text(
+                                text = "الدخول الى التطبيق",
+                                color = colors.text,
+                                fontSize = 21.sp,
+                                fontWeight = FontWeight.Black,
+                                textAlign = TextAlign.Start,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = "حدد طريقة اختيار الملف عند تشغيل التطبيق",
+                                color = colors.textMuted,
+                                fontSize = 13.sp,
+                                textAlign = TextAlign.Start,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .width(1.dp)
+                                .background(colors.line.copy(alpha = .35f)),
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            body()
+                        }
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        body()
+                    }
+                }
             }
         }
     }
@@ -728,12 +802,13 @@ private fun EntryToggleRow(
     isTv: Boolean,
     focusRequester: FocusRequester,
     onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(12.dp)
     Row(
-        modifier = Modifier
+        modifier = modifier
             .heightIn(min = 48.dp)
             .focusRequester(focusRequester)
             .clip(shape)
@@ -776,27 +851,7 @@ private fun EntryToggleRow(
             modifier = Modifier.widthIn(max = 220.dp),
         )
         Spacer(Modifier.width(10.dp))
-        Box(
-            modifier = Modifier
-                .width(42.dp)
-                .height(24.dp)
-                .clip(RoundedCornerShape(50))
-                .background(if (checked) colors.gold else colors.surface)
-                .border(
-                    1.dp,
-                    if (checked) colors.goldBright.copy(alpha = .72f) else Color.White.copy(alpha = .18f),
-                    RoundedCornerShape(50),
-                )
-                .padding(3.dp),
-            contentAlignment = if (checked) Alignment.CenterStart else Alignment.CenterEnd,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(18.dp)
-                    .clip(CircleShape)
-                    .background(if (checked) Color(0xFF100E04) else colors.textMuted.copy(alpha = .55f)),
-            )
-        }
+        EntrySwitchVisual(checked = checked)
     }
 }
 
@@ -806,12 +861,13 @@ private fun EntryPreferenceRow(
     avatarKey: String?,
     selected: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(12.dp)
     Row(
-        modifier = Modifier
+        modifier = modifier
             .heightIn(min = 48.dp)
             .clip(shape)
             .background(
@@ -898,74 +954,47 @@ private fun AddProfileCard(
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(if (isTv) 22.dp else 18.dp)
-
-    Column(
-        modifier = Modifier
-            .width(cardWidthDp.dp)
-            .clip(shape)
-            .background(if (focused) colors.surfaceRaised else colors.surface.copy(alpha = .94f))
-            .border(
-                width = if (focused) focusBorderDp.dp else 1.dp,
-                color = if (focused) colors.goldBright else Color.White.copy(alpha = .10f),
-                shape = shape,
-            )
-            .onFocusChanged { focused = it.isFocused }
-            .onPreviewKeyEvent { event ->
-                val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
-                if (!isTv || !remoteSelect) {
-                    false
-                } else if (!enabled) {
-                    true
-                } else {
-                    when (event.type) {
-                        KeyEventType.KeyDown -> true
-                        KeyEventType.KeyUp -> { onClick(); true }
-                        else -> false
-                    }
-                }
+    ProfilePickerItemFrame(
+        isTv = isTv,
+        enabled = enabled,
+        cardWidthDp = cardWidthDp,
+        avatarSizeDp = avatarSizeDp,
+        focusBorderDp = focusBorderDp,
+        focused = focused,
+        active = false,
+        focusRequester = null,
+        onFocusChanged = { focused = it },
+        onClick = onClick,
+        avatar = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = if (focused) .08f else .04f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "+",
+                    color = if (focused) colors.goldBright else colors.textMuted,
+                    fontSize = if (isTv) 46.sp else 38.sp,
+                    lineHeight = if (isTv) 50.sp else 42.sp,
+                    fontWeight = FontWeight.Light,
+                    textAlign = TextAlign.Center,
+                )
             }
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(
-                horizontal = if (isTv) 16.dp else 12.dp,
-                vertical = if (isTv) 18.dp else 14.dp,
-            ),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(avatarSizeDp.dp)
-                .clip(RoundedCornerShape(50))
-                .background(Color.White.copy(alpha = if (focused) .08f else .04f))
-                .border(
-                    if (focused) focusBorderDp.dp else 1.dp,
-                    if (focused) colors.goldBright else Color.White.copy(alpha = .22f),
-                    RoundedCornerShape(50),
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
+        },
+        label = {
             Text(
-                text = "+",
-                color = if (focused) colors.goldBright else colors.textMuted,
-                fontSize = if (isTv) 46.sp else 38.sp,
-                lineHeight = if (isTv) 50.sp else 42.sp,
-                fontWeight = FontWeight.Light,
+                text = "اضافة ملف",
+                color = if (focused) colors.text else colors.textMuted,
+                fontSize = if (isTv) 17.sp else 15.sp,
+                fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
+                maxLines = 1,
             )
-        }
-
-        Spacer(Modifier.height(if (isTv) 14.dp else 10.dp))
-        Text(
-            text = "اضافة ملف",
-            color = if (focused) colors.text else colors.textMuted,
-            fontSize = if (isTv) 17.sp else 15.sp,
-            lineHeight = if (isTv) 21.sp else 19.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-        )
-        Spacer(Modifier.height(if (isTv) 24.dp else 22.dp))
-    }
+        },
+        badge = {},
+    )
 }
 
 @Composable
@@ -982,99 +1011,150 @@ private fun ProfilePickerCard(
 ) {
     val colors = LocalHulkColors.current
     var focused by remember(profile.id) { mutableStateOf(false) }
-    val shape = RoundedCornerShape(if (isTv) 22.dp else 18.dp)
+    ProfilePickerItemFrame(
+        isTv = isTv,
+        enabled = enabled,
+        cardWidthDp = cardWidthDp,
+        avatarSizeDp = avatarSizeDp,
+        focusBorderDp = focusBorderDp,
+        focused = focused,
+        active = isActive,
+        focusRequester = focusRequester,
+        onFocusChanged = { focused = it },
+        onClick = onClick,
+        avatar = {
+            ProfileAvatar(
+                avatarKey = profile.avatarKey,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape),
+                highlighted = false,
+            )
+        },
+        label = {
+            Text(
+                text = profile.displayName,
+                color = colors.text,
+                fontSize = if (isTv) 17.sp else 15.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        badge = {
+            when {
+                isActive -> Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(colors.gold.copy(alpha = .15f))
+                        .border(1.dp, colors.gold.copy(alpha = .35f), RoundedCornerShape(50))
+                        .padding(horizontal = 9.dp, vertical = 3.dp),
+                ) {
+                    Text(
+                        text = "الحالي",
+                        color = colors.goldBright,
+                        fontSize = if (isTv) 11.sp else 10.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
 
+                profile.kind == ProfileKind.KIDS -> Text(
+                    text = "اطفال",
+                    color = colors.textMuted,
+                    fontSize = if (isTv) 11.sp else 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        },
+    )
+}
+
+/**
+ * One equal-footprint circular identity slot shared by profiles and Add. The avatar/add circle
+ * keeps identical bounds and the label/badge slots are reserved for every item, so focus,
+ * current/Kids state or the Add affordance can never change the item geometry.
+ */
+@Composable
+private fun ProfilePickerItemFrame(
+    isTv: Boolean,
+    enabled: Boolean,
+    cardWidthDp: Float,
+    avatarSizeDp: Float,
+    focusBorderDp: Float,
+    focused: Boolean,
+    active: Boolean,
+    focusRequester: FocusRequester?,
+    onFocusChanged: (Boolean) -> Unit,
+    onClick: () -> Unit,
+    avatar: @Composable () -> Unit,
+    label: @Composable () -> Unit,
+    badge: @Composable () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    val badgeSlot = if (isTv) 22.dp else 20.dp
     Column(
         modifier = Modifier
             .width(cardWidthDp.dp)
-            .clip(shape)
-            .background(
-                when {
-                    focused -> colors.surfaceRaised
-                    isActive -> colors.surfaceRaised
-                    else -> colors.surface.copy(alpha = .94f)
-                },
-            )
-            .border(
-                width = when {
-                    focused -> focusBorderDp.dp
-                    isActive -> 1.5.dp
-                    else -> 1.dp
-                },
-                color = when {
-                    focused -> colors.goldBright
-                    isActive -> colors.gold.copy(alpha = .60f)
-                    else -> Color.White.copy(alpha = .10f)
-                },
-                shape = shape,
-            )
-            .focusRequester(focusRequester)
-            .onFocusChanged { focused = it.isFocused }
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .onFocusChanged { onFocusChanged(it.isFocused) }
             .onPreviewKeyEvent { event ->
                 val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
-                if (!isTv || !remoteSelect) {
-                    false
-                } else if (!enabled) {
-                    true
-                } else {
-                    when (event.type) {
-                        KeyEventType.KeyDown -> true
-                        KeyEventType.KeyUp -> { onClick(); true }
-                        else -> false
+                when {
+                    !isTv || !remoteSelect -> false
+                    !enabled -> true
+                    event.type == KeyEventType.KeyDown -> true
+                    event.type == KeyEventType.KeyUp -> {
+                        onClick()
+                        true
                     }
+                    else -> false
                 }
             }
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(
-                horizontal = if (isTv) 16.dp else 12.dp,
-                vertical = if (isTv) 18.dp else 14.dp,
-            ),
+            .padding(vertical = if (isTv) 8.dp else 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        ProfileAvatar(
-            avatarKey = profile.avatarKey,
-            modifier = Modifier.size(avatarSizeDp.dp),
-            highlighted = focused || isActive,
-        )
-
-        Spacer(Modifier.height(if (isTv) 14.dp else 10.dp))
-        Text(
-            text = profile.displayName,
-            color = colors.text,
-            fontSize = if (isTv) 17.sp else 15.sp,
-            lineHeight = if (isTv) 21.sp else 19.sp,
-            fontWeight = FontWeight.Black,
-            textAlign = TextAlign.Center,
-            maxLines = if (isTv) 1 else 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-
-        Spacer(Modifier.height(7.dp))
-        if (isActive) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(colors.gold.copy(alpha = .15f))
-                    .border(1.dp, colors.gold.copy(alpha = .35f), RoundedCornerShape(50))
-                    .padding(horizontal = 9.dp, vertical = 3.dp),
-            ) {
-                Text(
-                    text = "الحالي",
-                    color = colors.goldBright,
-                    fontSize = if (isTv) 11.sp else 10.sp,
-                    fontWeight = FontWeight.Bold,
+        Box(
+            modifier = Modifier
+                .size(avatarSizeDp.dp)
+                .clip(CircleShape)
+                .background(colors.surface.copy(alpha = .72f))
+                .border(
+                    width = when {
+                        focused -> focusBorderDp.dp
+                        active -> 2.dp
+                        else -> 1.dp
+                    },
+                    color = when {
+                        focused -> colors.goldBright
+                        active -> colors.gold.copy(alpha = .65f)
+                        else -> Color.White.copy(alpha = .12f)
+                    },
+                    shape = CircleShape,
                 )
-            }
-        } else if (profile.kind == ProfileKind.KIDS) {
-            Text(
-                text = "اطفال",
-                color = colors.textMuted,
-                fontSize = if (isTv) 11.sp else 10.sp,
-                fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.Center,
-            )
-        } else {
-            Spacer(Modifier.height(if (isTv) 17.dp else 15.dp))
+                .padding(3.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            avatar()
+        }
+        Spacer(Modifier.height(if (isTv) 10.dp else 8.dp))
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            label()
+        }
+        Spacer(Modifier.height(if (isTv) 8.dp else 6.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = badgeSlot),
+            contentAlignment = Alignment.Center,
+        ) {
+            badge()
         }
     }
 }
