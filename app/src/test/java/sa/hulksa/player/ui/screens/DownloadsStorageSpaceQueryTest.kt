@@ -6,6 +6,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
 import sa.hulksa.player.model.OfflineDownload
@@ -48,7 +49,7 @@ class DownloadsStorageSpaceQueryTest {
     }
 
     @Test
-    fun storageReadFallsBackAndReturnsZeroWhenBothReadsFail() {
+    fun storageReadFallsBackAndReportsUnknownWhenBothReadsFail() {
         val fallback = runBlocking {
             readAvailableDownloadStorageBytes(
                 storageRootProvider = { File(".") },
@@ -65,7 +66,7 @@ class DownloadsStorageSpaceQueryTest {
         }
 
         assertEquals(2_048L, fallback)
-        assertEquals(0L, unavailable)
+        assertNull(unavailable)
     }
 
     @Test

@@ -98,6 +98,29 @@ import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.security.CredentialEnvelopeRemovalException
 import sa.hulksa.player.tv.TvDeepLinkDispatchDecision
+import sa.hulksa.player.ui.screens.DownloadFeedback
+import sa.hulksa.player.ui.screens.DownloadFeedbackGlyph
+import sa.hulksa.player.ui.screens.downloadAlreadyCompletedFeedback
+import sa.hulksa.player.ui.screens.downloadAlreadyQueuedFeedback
+import sa.hulksa.player.ui.screens.downloadCancelConfirmedFeedback
+import sa.hulksa.player.ui.screens.downloadConcurrencyFeedback
+import sa.hulksa.player.ui.screens.downloadDeletionConfirmedFeedback
+import sa.hulksa.player.ui.screens.downloadDeletionFailedFeedback
+import sa.hulksa.player.ui.screens.downloadDuplicatePendingFeedback
+import sa.hulksa.player.ui.screens.downloadFeatureDisabledFeedback
+import sa.hulksa.player.ui.screens.downloadGenericFailureFeedback
+import sa.hulksa.player.ui.screens.downloadOwnerChangedFeedback
+import sa.hulksa.player.ui.screens.downloadOwnerFixFailedFeedback
+import sa.hulksa.player.ui.screens.downloadPauseFailedFeedback
+import sa.hulksa.player.ui.screens.downloadPausePersistedFeedback
+import sa.hulksa.player.ui.screens.downloadPreparingFeedback
+import sa.hulksa.player.ui.screens.downloadPriorityFeedback
+import sa.hulksa.player.ui.screens.downloadResumeAcceptedFeedback
+import sa.hulksa.player.ui.screens.downloadRetryAcceptedFeedback
+import sa.hulksa.player.ui.screens.downloadScheduleFeedback
+import sa.hulksa.player.ui.screens.downloadSessionRequiredFeedback
+import sa.hulksa.player.ui.screens.downloadTargetUnresolvedFeedback
+import sa.hulksa.player.ui.screens.downloadWifiFeedback
 import sa.hulksa.player.tv.TvDeepLinkResolution
 import sa.hulksa.player.tv.TvDeepLinkRouter
 import sa.hulksa.player.tv.TvDeepLinkTarget
@@ -1071,19 +1094,19 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         startPlayback(repository.playback(activeSession, channel))
     }
 
-    fun downloadSelectedMovie(onResult: (String) -> Unit) {
+    fun downloadSelectedMovie(onResult: (DownloadFeedback) -> Unit) {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            onResult("التنزيلات متوقفة مؤقتًا")
+            onResult(downloadFeatureDisabledFeedback())
             return
         }
         val activeSession = session
         if (activeSession == null) {
-            onResult("سجل الدخول اولا لبدء التحميل")
+            onResult(downloadSessionRequiredFeedback())
             return
         }
         val movie = mutableState.value.selectedItem?.takeIf { it.type == ContentType.MOVIE }
         if (movie == null) {
-            onResult("تعذر تحديد الفيلم")
+            onResult(downloadTargetUnresolvedFeedback(isMovie = true))
             return
         }
         enqueueDownload(
@@ -1093,19 +1116,19 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun downloadEpisode(episode: Episode, onResult: (String) -> Unit) {
+    fun downloadEpisode(episode: Episode, onResult: (DownloadFeedback) -> Unit) {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            onResult("التنزيلات متوقفة مؤقتًا")
+            onResult(downloadFeatureDisabledFeedback())
             return
         }
         val activeSession = session
         if (activeSession == null) {
-            onResult("سجل الدخول اولا لبدء التحميل")
+            onResult(downloadSessionRequiredFeedback())
             return
         }
         val series = mutableState.value.selectedSeries
         if (series == null) {
-            onResult("تعذر تحديد المسلسل")
+            onResult(downloadTargetUnresolvedFeedback(isMovie = false))
             return
         }
         enqueueDownload(
@@ -1136,7 +1159,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun deleteDownload(item: OfflineDownload) {
+    fun deleteDownload(item: OfflineDownload, onResult: (DownloadFeedback) -> Unit = {}) {
         val expectedAccountId = downloadRepository.activeAccountIdForCleanup() ?: return
         val expectedProfileId = profileStore.activeProfileId()
         viewModelScope.launch {
@@ -1156,65 +1179,71 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 )
             ) {
                 mutableState.update { state -> state.copy(downloads = downloads) }
+                // Only the owning context's actually published mutation reports a result; a
+                // failed removal keeps the record (with its real failure state) and never
+                // claims success from the button press.
+                if (downloads.none { download -> download.downloadId == item.downloadId }) {
+                    onResult(
+                        if (item.status == OfflineStatus.COMPLETED) {
+                            downloadDeletionConfirmedFeedback()
+                        } else {
+                            downloadCancelConfirmedFeedback()
+                        },
+                    )
+                } else {
+                    onResult(downloadDeletionFailedFeedback())
+                }
             }
         }
     }
 
-    fun toggleWifiOnly(): String {
+    fun toggleWifiOnly(): DownloadFeedback {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            return "التنزيلات متوقفة مؤقتًا"
+            return downloadFeatureDisabledFeedback()
         }
         val next = mutableState.value.downloadSettings.copy(
             wifiOnly = !mutableState.value.downloadSettings.wifiOnly,
         )
         if (!submitDownloadSettingsMutation(next) { expectedAccountId, expectedProfileId ->
             downloadRepository.setSettings(next, expectedAccountId, expectedProfileId)
-        }) return "تغير المستخدم قبل حفظ اعداد التنزيلات"
-        return if (next.wifiOnly) "تم تفعيل التحميل عبر واي فاي فقط." else "تم السماح بالتحميل عبر جميع الشبكات."
+        }) return downloadOwnerChangedFeedback()
+        return downloadWifiFeedback(next.wifiOnly)
     }
 
-    fun toggleDownloadSchedule(): String {
+    fun toggleDownloadSchedule(): DownloadFeedback {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            return "التنزيلات متوقفة مؤقتًا"
+            return downloadFeatureDisabledFeedback()
         }
         val current = mutableState.value.downloadSettings
         val next = if (current.scheduleMode == DownloadScheduleMode.NOW) DownloadScheduleMode.NIGHT else DownloadScheduleMode.NOW
         val nextSettings = current.copy(scheduleMode = next)
         if (!submitDownloadSettingsMutation(nextSettings) { expectedAccountId, expectedProfileId ->
             downloadRepository.setSettings(nextSettings, expectedAccountId, expectedProfileId)
-        }) return "تغير المستخدم قبل حفظ اعداد التنزيلات"
-        return if (next == DownloadScheduleMode.NIGHT) {
-            "تمت جدولة التحميلات الجديدة والقائمة للساعة 2 ليلا."
-        } else {
-            "تم الغاء الجدولة وبدء التحميلات القائمة الان."
-        }
+        }) return downloadOwnerChangedFeedback()
+        return downloadScheduleFeedback(next == DownloadScheduleMode.NIGHT)
     }
 
-    fun cycleConcurrentDownloads(): String {
+    fun cycleConcurrentDownloads(): DownloadFeedback {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            return "التنزيلات متوقفة مؤقتًا"
+            return downloadFeatureDisabledFeedback()
         }
         val current = mutableState.value.downloadSettings
         val next = if (current.concurrentDownloads >= 3) 1 else current.concurrentDownloads + 1
         val nextSettings = current.copy(concurrentDownloads = next)
         if (!submitDownloadSettingsMutation(nextSettings) { expectedAccountId, expectedProfileId ->
             downloadRepository.setSettings(nextSettings, expectedAccountId, expectedProfileId)
-        }) return "تغير المستخدم قبل حفظ اعداد التنزيلات"
-        return "عدد التحميلات المتزامنة الان $next."
+        }) return downloadOwnerChangedFeedback()
+        return downloadConcurrencyFeedback(next)
     }
 
-    fun cycleDownloadPriority(item: OfflineDownload): String {
+    fun cycleDownloadPriority(item: OfflineDownload): DownloadFeedback {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            return "التنزيلات متوقفة مؤقتًا"
+            return downloadFeatureDisabledFeedback()
         }
         if (!submitDownloadPriorityMutation(item.downloadId) { expectedAccountId, expectedProfileId ->
             downloadRepository.cyclePriority(item.downloadId, expectedAccountId, expectedProfileId)
-        }) return "تغير المستخدم قبل حفظ اعداد التنزيلات"
-        return when (item.priority) {
-            1 -> "تم خفض اولوية التحميل."
-            -1 -> "تم ضبط اولوية التحميل على عادية."
-            else -> "تم رفع اولوية التحميل."
-        }
+        }) return downloadOwnerChangedFeedback()
+        return downloadPriorityFeedback(item.priority)
     }
 
     private fun submitDownloadSettingsMutation(
@@ -1287,13 +1316,13 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         return true
     }
 
-    fun retryDownload(item: OfflineDownload, onResult: (String) -> Unit = {}) {
+    fun retryDownload(item: OfflineDownload, onResult: (DownloadFeedback) -> Unit = {}) {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            onResult("التنزيلات متوقفة مؤقتًا")
+            onResult(downloadFeatureDisabledFeedback())
             return
         }
         when (item.status) {
-            OfflineStatus.COMPLETED -> onResult("التحميل مكتمل وجاهز للتشغيل.")
+            OfflineStatus.COMPLETED -> onResult(downloadAlreadyCompletedFeedback())
             OfflineStatus.QUEUED,
             OfflineStatus.CHECKING,
             OfflineStatus.DOWNLOADING,
@@ -1301,7 +1330,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 val expectedAccountId = downloadRepository.activeAccountIdForCleanup()
                 val expectedProfileId = profileStore.activeProfileId()
                 if (expectedAccountId.isNullOrBlank() || expectedProfileId.isBlank()) {
-                    onResult("تغير المستخدم قبل إيقاف التحميل")
+                    onResult(downloadOwnerChangedFeedback())
                     return
                 }
                 viewModelScope.launch {
@@ -1324,9 +1353,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     if (outcome.applied && outcome.persisted) {
                         mutableState.update { it.copy(downloads = outcome.downloads) }
-                        onResult("تم ايقاف التحميل مؤقتا.")
+                        onResult(downloadPausePersistedFeedback())
                     } else {
-                        onResult("تعذر حفظ إيقاف التحميل. حاول مرة أخرى")
+                        onResult(downloadPauseFailedFeedback())
                     }
                 }
             }
@@ -1334,26 +1363,24 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             OfflineStatus.WAITING_SCHEDULE,
             OfflineStatus.WAITING_NETWORK,
             OfflineStatus.WAITING_STORAGE,
-            -> resumeDownload(item, "جار استئناف التحميل من اخر نقطة.", onResult)
-            OfflineStatus.FAILED -> {
-                resumeDownload(item, "جار اعادة المحاولة من اخر نقطة.", onResult)
-            }
+            -> resumeDownload(item, downloadResumeAcceptedFeedback(), onResult)
+            OfflineStatus.FAILED -> resumeDownload(item, downloadRetryAcceptedFeedback(), onResult)
         }
     }
 
     private fun resumeDownload(
         item: OfflineDownload,
-        successMessage: String,
-        onResult: (String) -> Unit,
+        successFeedback: DownloadFeedback,
+        onResult: (DownloadFeedback) -> Unit,
     ) {
         val expectedSession = session ?: run {
-            onResult(rebuildDownload(item))
+            rebuildDownload(item, onResult)
             return
         }
         val expectedAccountId = downloadRepository.activeAccountIdForCleanup()
         val expectedProfileId = profileStore.activeProfileId()
         if (expectedAccountId.isNullOrBlank() || expectedProfileId.isBlank()) {
-            onResult(rebuildDownload(item))
+            rebuildDownload(item, onResult)
             return
         }
         val gate = downloadResumeMutationGates.getOrPut(item.downloadId, ::DownloadSettingsMutationGate)
@@ -1378,15 +1405,21 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 mutableState.update { state ->
                     state.copy(downloadSettings = outcome.settings, downloads = outcome.downloads)
                 }
-                onResult(successMessage)
+                onResult(successFeedback)
             } else {
-                onResult(rebuildDownload(item))
+                rebuildDownload(item, onResult)
             }
         }
     }
 
-    private fun rebuildDownload(item: OfflineDownload): String {
-        val activeSession = session ?: return "سجل الدخول اولا لاعادة التحميل"
+    private fun rebuildDownload(
+        item: OfflineDownload,
+        onResult: (DownloadFeedback) -> Unit,
+    ) {
+        val activeSession = session ?: run {
+            onResult(downloadSessionRequiredFeedback())
+            return
+        }
         val request = repository.playback(
             activeSession,
             HistoryEntry(
@@ -1409,9 +1442,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             season = item.season,
             episodeNumber = item.episodeNumber,
             replaceDownloadId = item.downloadId,
-            onResult = {},
+            onResult = onResult,
         )
-        return "جار اعادة تجهيز التحميل."
     }
 
     fun openHistory(entry: HistoryEntry) {
@@ -3550,17 +3582,17 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         season: Int? = null,
         episodeNumber: Int? = null,
         replaceDownloadId: Long? = null,
-        onResult: (String) -> Unit,
+        onResult: (DownloadFeedback) -> Unit,
     ) {
         if (!pendingDownloadEnqueues.add(request.historyKey)) {
-            onResult("جار بدء هذا التحميل.")
+            onResult(downloadDuplicatePendingFeedback())
             return
         }
         val expectedAccountId = repository.activeAccountSession()?.accountId
         val expectedProfileId = profileStore.activeProfileId()
         if (expectedAccountId.isNullOrBlank() || expectedProfileId.isBlank()) {
             pendingDownloadEnqueues.remove(request.historyKey)
-            onResult("تعذر تثبيت مالك التحميل")
+            onResult(downloadOwnerFixFailedFeedback())
             return
         }
 
@@ -3595,18 +3627,21 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                val message = when (val result = outcome.result) {
+                val feedback = when (val result = outcome.result) {
                     is DownloadRepository.EnqueueResult.Started -> {
                         mutableState.update { it.copy(downloads = outcome.downloads) }
-                        "بدا فحص حجم ${result.item.title} والمساحة المتاحة."
+                        downloadPreparingFeedback()
                     }
                     is DownloadRepository.EnqueueResult.AlreadyExists -> when (result.item.status) {
-                        OfflineStatus.COMPLETED -> "هذا المحتوى محمل بالفعل."
-                        else -> "هذا المحتوى موجود في قائمة التحميلات."
+                        OfflineStatus.COMPLETED -> downloadAlreadyCompletedFeedback()
+                        else -> downloadAlreadyQueuedFeedback()
                     }
-                    is DownloadRepository.EnqueueResult.Failed -> result.message
+                    is DownloadRepository.EnqueueResult.Failed -> DownloadFeedback(
+                        message = result.message,
+                        glyph = DownloadFeedbackGlyph.ERROR,
+                    )
                 }
-                onResult(message)
+                onResult(feedback)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Throwable) {
@@ -3619,7 +3654,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                         activeProfileId = profileStore.activeProfileId(),
                     )
                 ) {
-                    onResult("تعذر بدء التحميل. حاول مرة اخرى")
+                    onResult(downloadGenericFailureFeedback())
                 }
             } finally {
                 pendingDownloadEnqueues.remove(request.historyKey)
