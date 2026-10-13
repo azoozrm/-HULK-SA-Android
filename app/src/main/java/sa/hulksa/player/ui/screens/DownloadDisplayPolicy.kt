@@ -32,7 +32,13 @@ internal fun downloadDisplayIdentity(item: OfflineDownload): DownloadDisplayIden
  * alef hamza/madda to `ا`. `ئ/ؤ/ء` are preserved; operation outcomes and stored records are not
  * rewritten.
  */
-internal fun downloadNoticeDisplayText(raw: String): String =
+internal fun downloadNoticeDisplayText(raw: String): String = scopedNoticeDisplayText(raw)
+
+/**
+ * Shared display normalization for app-authored in-app action notices outside stored content
+ * names: terminal decoration is stripped and only alef hamza/madda becomes `ا`.
+ */
+internal fun scopedNoticeDisplayText(raw: String): String =
     stripTerminalDecoration(raw)
         .replace('أ', 'ا')
         .replace('إ', 'ا')

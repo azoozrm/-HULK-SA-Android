@@ -70,7 +70,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
@@ -588,11 +587,7 @@ private fun SmartSearchContent(
 
     Column(
         modifier = modifier
-            .background(
-                Brush.verticalGradient(
-                    listOf(colors.background, colors.surface.copy(alpha = .96f), colors.background),
-                ),
-            )
+            .background(colors.background)
             .then(
                 if (isTv) {
                     Modifier

@@ -88,20 +88,25 @@ class LocalNotificationUiPolicyTest {
     }
 
     @Test
-    fun unreadNotificationExposesAllActionsInStableVerticalOrder() {
+    fun unreadNotificationTraversesItsHorizontalActionsAtPhysicalLeft() {
         val graph = focusGraph()
         val open = cardTarget("first", NotificationTvCardAction.OPEN)
         val markRead = cardTarget("first", NotificationTvCardAction.MARK_READ)
         val delete = cardTarget("first", NotificationTvCardAction.DELETE)
 
+        // Physical left-to-right inside the row: OPEN, MARK_READ, DELETE.
+        assertEquals(markRead, notificationTvFocusMove(graph, open, NotificationFocusDirection.RIGHT))
+        assertEquals(delete, notificationTvFocusMove(graph, markRead, NotificationFocusDirection.RIGHT))
+        assertNull(notificationTvFocusMove(graph, delete, NotificationFocusDirection.RIGHT))
+        assertEquals(markRead, notificationTvFocusMove(graph, delete, NotificationFocusDirection.LEFT))
+        assertEquals(open, notificationTvFocusMove(graph, markRead, NotificationFocusDirection.LEFT))
+        assertNull(notificationTvFocusMove(graph, open, NotificationFocusDirection.LEFT))
+
+        // UP from the first row still reaches the bulk header entry.
         assertEquals(
             NotificationTvFocusTarget.ReadAll,
             notificationTvFocusMove(graph, open, NotificationFocusDirection.UP),
         )
-        assertEquals(markRead, notificationTvFocusMove(graph, open, NotificationFocusDirection.DOWN))
-        assertEquals(open, notificationTvFocusMove(graph, markRead, NotificationFocusDirection.UP))
-        assertEquals(delete, notificationTvFocusMove(graph, markRead, NotificationFocusDirection.DOWN))
-        assertEquals(markRead, notificationTvFocusMove(graph, delete, NotificationFocusDirection.UP))
     }
 
     @Test
@@ -112,28 +117,37 @@ class LocalNotificationUiPolicyTest {
         val unavailable = cardTarget("middle", NotificationTvCardAction.MARK_READ)
 
         assertTrue(unavailable !in notificationTvFocusableTargets(graph))
+        assertEquals(delete, notificationTvFocusMove(graph, open, NotificationFocusDirection.RIGHT))
+        assertEquals(open, notificationTvFocusMove(graph, delete, NotificationFocusDirection.LEFT))
+        // DOWN/UP preserve the action slot with an index-clamped fallback into the neighbouring row.
         assertEquals(
-            cardTarget("first", NotificationTvCardAction.DELETE),
-            notificationTvFocusMove(graph, open, NotificationFocusDirection.UP),
+            delete,
+            notificationTvFocusMove(
+                graph,
+                cardTarget("first", NotificationTvCardAction.MARK_READ),
+                NotificationFocusDirection.DOWN,
+            ),
         )
-        assertEquals(delete, notificationTvFocusMove(graph, open, NotificationFocusDirection.DOWN))
-        assertEquals(open, notificationTvFocusMove(graph, delete, NotificationFocusDirection.UP))
+        assertEquals(
+            cardTarget("first", NotificationTvCardAction.MARK_READ),
+            notificationTvFocusMove(graph, delete, NotificationFocusDirection.UP),
+        )
     }
 
     @Test
-    fun firstMiddleAndLastCardsFormOneDeterministicVerticalPath() {
+    fun firstMiddleAndLastCardsKeepTheirActionSlotAcrossRows() {
         val graph = focusGraph()
 
         assertEquals(
             cardTarget("middle", NotificationTvCardAction.OPEN),
             notificationTvFocusMove(
                 graph,
-                cardTarget("first", NotificationTvCardAction.DELETE),
+                cardTarget("first", NotificationTvCardAction.OPEN),
                 NotificationFocusDirection.DOWN,
             ),
         )
         assertEquals(
-            cardTarget("last", NotificationTvCardAction.OPEN),
+            cardTarget("last", NotificationTvCardAction.MARK_READ),
             notificationTvFocusMove(
                 graph,
                 cardTarget("middle", NotificationTvCardAction.DELETE),
@@ -144,7 +158,7 @@ class LocalNotificationUiPolicyTest {
             cardTarget("middle", NotificationTvCardAction.DELETE),
             notificationTvFocusMove(
                 graph,
-                cardTarget("last", NotificationTvCardAction.OPEN),
+                cardTarget("last", NotificationTvCardAction.MARK_READ),
                 NotificationFocusDirection.UP,
             ),
         )
@@ -158,18 +172,13 @@ class LocalNotificationUiPolicyTest {
     }
 
     @Test
-    fun fullDownAndUpTraversalVisitsEveryActionExactlyInGraphOrder() {
+    fun downFromBackVisitsEveryRowThroughTheOpenSlot() {
         val graph = focusGraph()
         val expectedDownPath = listOf(
             NotificationTvFocusTarget.Back,
             cardTarget("first", NotificationTvCardAction.OPEN),
-            cardTarget("first", NotificationTvCardAction.MARK_READ),
-            cardTarget("first", NotificationTvCardAction.DELETE),
             cardTarget("middle", NotificationTvCardAction.OPEN),
-            cardTarget("middle", NotificationTvCardAction.DELETE),
             cardTarget("last", NotificationTvCardAction.OPEN),
-            cardTarget("last", NotificationTvCardAction.MARK_READ),
-            cardTarget("last", NotificationTvCardAction.DELETE),
         )
 
         val actualDownPath = mutableListOf<NotificationTvFocusTarget>()
@@ -365,14 +374,31 @@ class LocalNotificationUiPolicyTest {
     }
 
     @Test
-    fun everyHorizontalCardEdgeAndEveryOuterVerticalEdgeStops() {
+    fun actionRowEdgesStopAndEveryInnerHorizontalStepMoves() {
         val graph = focusGraph()
         val cardTargets = notificationTvFocusableTargets(graph)
             .filterIsInstance<NotificationTvFocusTarget.CardAction>()
 
+        // Only the row's physical edges stop; every inner LEFT/RIGHT step has a target.
         cardTargets.forEach { target ->
-            assertNull(notificationTvFocusMove(graph, target, NotificationFocusDirection.LEFT))
-            assertNull(notificationTvFocusMove(graph, target, NotificationFocusDirection.RIGHT))
+            listOf(NotificationFocusDirection.LEFT, NotificationFocusDirection.RIGHT).forEach { direction ->
+                val moved = notificationTvFocusMove(graph, target, direction)
+                val row = graph.cards.firstOrNull { it.notificationId == target.notificationId }
+                val actions = buildList {
+                    add(NotificationTvCardAction.OPEN)
+                    if (row?.markReadVisible == true) add(NotificationTvCardAction.MARK_READ)
+                    add(NotificationTvCardAction.DELETE)
+                }
+                val isEdge = when (direction) {
+                    NotificationFocusDirection.LEFT -> target.action == NotificationTvCardAction.OPEN
+                    else -> target.action == actions.last()
+                }
+                if (isEdge) {
+                    assertNull(moved)
+                } else {
+                    assertTrue(moved is NotificationTvFocusTarget.CardAction)
+                }
+            }
         }
         assertNull(
             notificationTvFocusMove(

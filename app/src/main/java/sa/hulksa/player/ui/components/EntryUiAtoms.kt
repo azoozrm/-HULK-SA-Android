@@ -14,7 +14,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -29,6 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -43,6 +47,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import sa.hulksa.player.ui.screens.moviesErrorIcon
@@ -196,6 +201,84 @@ internal fun EntryNotice(
     }
 }
 
+
+/**
+ * Narrow shared switch rendering for the affected entry/settings toggles. The persisted Boolean
+ * drives the value; the visual is nonfocusable and the row owns the single activation. ON keeps
+ * the theme-gold track with its light thumb physically LEFT; OFF uses the accepted muted track
+ * with the thumb physically RIGHT, independent of the ambient layout direction.
+ */
+@Composable
+internal fun EntrySwitchVisual(
+    checked: Boolean,
+    modifier: Modifier = Modifier,
+    expanded: Boolean = false,
+) {
+    val colors = LocalHulkColors.current
+    val layoutDirection = LocalLayoutDirection.current
+    val trackWidth = if (expanded) 46.dp else 42.dp
+    val trackHeight = if (expanded) 26.dp else 24.dp
+    val thumbSize = trackHeight - 6.dp
+    val trackShape = RoundedCornerShape(50)
+    val checkedAlignment = if (layoutDirection == LayoutDirection.Rtl) {
+        Alignment.CenterEnd
+    } else {
+        Alignment.CenterStart
+    }
+    val uncheckedAlignment = if (layoutDirection == LayoutDirection.Rtl) {
+        Alignment.CenterStart
+    } else {
+        Alignment.CenterEnd
+    }
+    Box(
+        modifier = modifier
+            .width(trackWidth)
+            .height(trackHeight)
+            .clip(trackShape)
+            .background(if (checked) colors.gold else Color(0xFF2A2C26))
+            .border(
+                width = 1.dp,
+                color = if (checked) {
+                    colors.goldBright.copy(alpha = .72f)
+                } else {
+                    Color.White.copy(alpha = .16f)
+                },
+                shape = trackShape,
+            )
+            .padding(3.dp),
+        contentAlignment = if (checked) checkedAlignment else uncheckedAlignment,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(thumbSize)
+                .clip(CircleShape)
+                .background(
+                    if (checked) colors.text else colors.textMuted.copy(alpha = .55f),
+                ),
+        )
+    }
+}
+
+
+/** Compact profile-page Back action: caption physically RIGHT, one right-facing glyph LEFT. */
+@Composable
+internal fun EntryBackAction(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    minHeightDp: Int = 42,
+    captionColor: Color? = null,
+) {
+    EntryActionButton(
+        text = "رجوع",
+        onClick = onClick,
+        modifier = modifier,
+        outlined = true,
+        glyph = Icons.AutoMirrored.Rounded.ArrowBack,
+        captionColor = captionColor,
+        minHeightDp = minHeightDp,
+    )
+}
+
 /**
  * Scoped compact simple action for the entry section. Uses the accepted Details action atom:
  * 13sp bold complete caption, 17dp single glyph, 6dp internal gap, 12dp/9dp padding, 12dp shape,
@@ -215,6 +298,7 @@ internal fun EntryActionButton(
     loading: Boolean = false,
     glyph: ImageVector? = null,
     glyphTint: Color? = null,
+    captionColor: Color? = null,
     minHeightDp: Int = 46,
     captionGlyphGap: Dp = 6.dp,
     onFocused: (() -> Unit)? = null,
@@ -302,7 +386,7 @@ internal fun EntryActionButton(
         ) {
             Text(
                 text = text,
-                color = foreground,
+                color = captionColor ?: foreground,
                 fontSize = 13.sp,
                 lineHeight = 16.sp,
                 fontWeight = FontWeight.Bold,

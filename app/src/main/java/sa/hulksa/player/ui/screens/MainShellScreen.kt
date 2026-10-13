@@ -1281,6 +1281,7 @@ fun MainShellScreen(
                         homeMessagePresentation = homeMessagePresentation,
                         onOpenAnnouncementDetail = onOpenAnnouncementDetail,
                         onOpenUpdateDetail = onOpenUpdateDetail,
+                        onActionNotice = onActionNotice,
                         initialAllFocusRequester = tvCatalogAllFocusRequesters[state.destination],
                         initialAllFocusPending = currentTvCatalogInitialFocusPending,
                         downloadsExitFocusRequester = tvRailFocusRequesters[MainDestination.DOWNLOADS],
@@ -1332,6 +1333,7 @@ fun MainShellScreen(
                         homeMessagePresentation = homeMessagePresentation,
                         onOpenAnnouncementDetail = onOpenAnnouncementDetail,
                         onOpenUpdateDetail = onOpenUpdateDetail,
+                        onActionNotice = onActionNotice,
                     )
                 }
                 Spacer(
@@ -1518,6 +1520,7 @@ private fun DestinationContent(
     homeMessagePresentation: HomeMessagePresentationState,
     onOpenAnnouncementDetail: (OperationsAnnouncement) -> Unit,
     onOpenUpdateDetail: () -> Unit,
+    onActionNotice: (String, ImageVector) -> Unit,
     initialAllFocusRequester: FocusRequester? = null,
     initialAllFocusPending: Boolean = false,
     downloadsExitFocusRequester: FocusRequester? = null,
@@ -1634,6 +1637,7 @@ private fun DestinationContent(
             onToggleEpisodeNotificationMaster = onToggleEpisodeNotificationMaster,
             onGrowthAction = onGrowthAction,
             onLogout = onLogout,
+            onNotice = onActionNotice,
         )
     }
 }

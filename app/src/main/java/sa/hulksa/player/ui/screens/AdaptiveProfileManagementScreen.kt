@@ -9,10 +9,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -33,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,7 +44,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -59,6 +62,7 @@ import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.components.EntryActionButton
+import sa.hulksa.player.ui.components.EntryBackAction
 import sa.hulksa.player.ui.components.EntryNotice
 import sa.hulksa.player.ui.components.HulkTextField
 import sa.hulksa.player.ui.components.entryPanelMaxWidthDp
@@ -137,17 +141,6 @@ fun AdaptiveProfileManagementScreen(
             .fillMaxSize()
             .background(colors.background),
     ) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.radialGradient(
-                        listOf(colors.goldDeep.copy(alpha = .10f), Color.Transparent),
-                        radius = if (isTv) 1100f else 720f,
-                    ),
-                ),
-        )
-
         if (creating || editingProfile != null) {
             AdaptiveProfileEditor(
                 creating = creating,
@@ -244,15 +237,17 @@ fun AdaptiveProfileManagementScreen(
                         Spacer(Modifier.height(13.dp))
                         Row(
                             Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.Start),
                         ) {
+                            EntryBackAction(
+                                onClick = { if (!operationInProgress) onClose() },
+                                minHeightDp = movieActionHeightDp(isTv = false, compactHeight = false),
+                            )
                             if (profiles.size < ProfileStore.MAX_PROFILES) {
                                 ManagementAction("+ اضافة ملف", false) {
                                     if (!operationInProgress) openCreate()
                                 }
-                            }
-                            ManagementAction("رجوع", false, secondary = true) {
-                                if (!operationInProgress) onClose()
                             }
                         }
                     }
@@ -262,15 +257,19 @@ fun AdaptiveProfileManagementScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        ManagementHeading(isTv = isTv)
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            if (profiles.size < ProfileStore.MAX_PROFILES) {
-                                ManagementAction("+ اضافة ملف", isTv) {
-                                    if (!operationInProgress) openCreate()
-                                }
-                            }
-                            ManagementAction("رجوع", isTv, secondary = true) {
-                                if (!operationInProgress) onClose()
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(if (isTv) 16.dp else 12.dp),
+                        ) {
+                            EntryBackAction(
+                                onClick = { if (!operationInProgress) onClose() },
+                                minHeightDp = movieActionHeightDp(isTv = isTv, compactHeight = false),
+                            )
+                            ManagementHeading(isTv = isTv)
+                        }
+                        if (profiles.size < ProfileStore.MAX_PROFILES) {
+                            ManagementAction("+ اضافة ملف", isTv) {
+                                if (!operationInProgress) openCreate()
                             }
                         }
                     }
@@ -287,6 +286,15 @@ fun AdaptiveProfileManagementScreen(
                         loading = kidsSourceLoading,
                         message = kidsSourceMessage,
                         onRetry = onRetryKidsSource,
+                    )
+                    Spacer(Modifier.height(if (isTv) 12.dp else 9.dp))
+                }
+
+                error?.takeIf { it.isNotBlank() }?.let { listError ->
+                    EntryNotice(
+                        message = listError,
+                        compact = !isTv,
+                        modifier = Modifier.widthIn(max = maxContentWidth),
                     )
                     Spacer(Modifier.height(if (isTv) 12.dp else 9.dp))
                 }
@@ -404,7 +412,8 @@ private fun AdaptiveProfileEditor(
 
     LaunchedEffect(isTv, creating) {
         if (!isTv) return@LaunchedEffect
-        delay(120L)
+        withFrameNanos { }
+        withFrameNanos { }
         runCatching { nameFocus.requestFocus() }
     }
 
@@ -419,156 +428,291 @@ private fun AdaptiveProfileEditor(
         val expandedContent = isTv || maxWidth >= 720.dp
         val cardMax = entryPanelMaxWidthDp(expandedContent).dp
 
-        LazyColumn(
-            modifier = Modifier
-                .widthIn(max = cardMax)
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(if (isTv) 24.dp else 20.dp))
-                .background(colors.surface.copy(alpha = .98f))
-                .border(1.dp, colors.gold.copy(alpha = .26f), RoundedCornerShape(if (isTv) 24.dp else 20.dp))
-                .padding(
-                    horizontal = if (isTv) 34.dp else 20.dp,
-                    vertical = if (phoneLandscape) 14.dp else if (isTv) 25.dp else 20.dp,
-                ),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            item {
-                Text(
-                    if (creating) "اضافة ملف شخصي" else "تعديل الملف الشخصي",
-                    color = colors.text,
-                    fontSize = if (isTv) 29.sp else 23.sp,
-                    fontWeight = FontWeight.Black,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(5.dp))
-                Text(
-                    if (creating) "اختر نوع الملف ثم الاسم والصورة" else "يمكنك تعديل الاسم والصورة",
-                    color = colors.textMuted,
-                    fontSize = if (isTv) 13.sp else 12.sp,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(if (phoneLandscape) 10.dp else 17.dp))
-
-                if (creating) {
-                    FlowRow(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        ProfileKindChoice(
-                            title = "عادي",
-                            subtitle = "التجربة الكاملة",
-                            selected = selectedKind == ProfileKind.STANDARD,
-                            enabled = true,
-                            isTv = isTv,
-                            onClick = { onKindChange(ProfileKind.STANDARD) },
-                        )
-                        ProfileKindChoice(
-                            title = "اطفال",
-                            subtitle = when {
-                                kidsSourceLoading -> "جار التجهيز…"
-                                kidsSourceAvailable -> "واجهة مخصصة للاطفال"
-                                else -> "غير متاح حاليًا"
-                            },
-                            selected = selectedKind == ProfileKind.KIDS,
-                            enabled = kidsSourceAvailable,
-                            isTv = isTv,
-                            onClick = { onKindChange(ProfileKind.KIDS) },
-                        )
-                    }
-                    if (!kidsSourceAvailable) {
-                        Spacer(Modifier.height(8.dp))
-                        EntryNotice(
-                            message = kidsSourceMessage?.takeIf { it.isNotBlank() }
-                                ?: if (kidsSourceLoading) {
-                                    "جار تجهيز وضع الاطفال…"
-                                } else {
-                                    "وضع الاطفال غير متاح حاليًا"
-                                },
-                            compact = !isTv,
-                            liveRegionPolite = !kidsSourceLoading,
-                            action = if (kidsSourceLoading) {
-                                null
-                            } else {
-                                {
-                                    EntryActionButton(
-                                        text = "اعادة المحاولة",
-                                        onClick = onRetryKidsSource,
-                                        outlined = true,
-                                        minHeightDp = movieActionHeightDp(isTv = isTv, compactHeight = false),
-                                    )
-                                }
-                            },
-                        )
-                    }
-                } else {
-                    val kind = editingKind ?: ProfileKind.STANDARD
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(if (kind == ProfileKind.KIDS) colors.gold.copy(alpha = .14f) else colors.surfaceRaised)
-                            .border(
-                                1.dp,
-                                if (kind == ProfileKind.KIDS) colors.gold.copy(alpha = .34f) else Color.White.copy(alpha = .09f),
-                                RoundedCornerShape(50),
-                            )
-                            .padding(horizontal = 14.dp, vertical = 7.dp),
-                    ) {
-                        Text(
-                            if (kind == ProfileKind.KIDS) "ملف اطفال" else "ملف عادي",
-                            color = if (kind == ProfileKind.KIDS) colors.goldBright else colors.textMuted,
-                            fontSize = if (isTv) 13.sp else 11.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(if (phoneLandscape) 10.dp else if (isTv) 19.dp else 15.dp))
-                HulkTextField(
-                    value = name,
-                    onValueChange = onNameChange,
-                    label = "اسم الملف الشخصي",
-                    modifier = Modifier.fillMaxWidth().focusRequester(nameFocus),
-                )
-                Spacer(Modifier.height(if (phoneLandscape) 10.dp else if (isTv) 18.dp else 15.dp))
-                Text(
-                    "اختر صورة الملف",
-                    color = colors.text,
-                    fontSize = if (isTv) 16.sp else 14.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(Modifier.height(10.dp))
+        val cardShape = RoundedCornerShape(if (isTv) 24.dp else 20.dp)
+        val fieldsContent: @Composable ColumnScope.() -> Unit = {
+            if (creating) {
                 FlowRow(
+                    Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(
-                        space = if (isTv) 13.dp else 8.dp,
-                        alignment = Alignment.CenterHorizontally,
+                        space = 10.dp,
+                        alignment = if (expandedContent) Alignment.Start else Alignment.CenterHorizontally,
                     ),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
-                    itemVerticalAlignment = Alignment.CenterVertically,
                 ) {
-                    PROFILE_AVATARS.forEach { key ->
-                        ManagementAvatarChoice(
-                            key = key,
-                            selected = avatarKey == key,
-                            isTv = isTv,
-                            compact = phoneLandscape,
-                            onClick = { onAvatarChange(key) },
+                    ProfileKindChoice(
+                        title = "عادي",
+                        subtitle = "التجربة الكاملة",
+                        selected = selectedKind == ProfileKind.STANDARD,
+                        enabled = true,
+                        isTv = isTv,
+                        onClick = { onKindChange(ProfileKind.STANDARD) },
+                    )
+                    ProfileKindChoice(
+                        title = "اطفال",
+                        subtitle = when {
+                            kidsSourceLoading -> "جار التجهيز…"
+                            kidsSourceAvailable -> "واجهة مخصصة للاطفال"
+                            else -> "غير متاح حاليًا"
+                        },
+                        selected = selectedKind == ProfileKind.KIDS,
+                        enabled = kidsSourceAvailable,
+                        isTv = isTv,
+                        onClick = { onKindChange(ProfileKind.KIDS) },
+                    )
+                }
+                if (!kidsSourceAvailable) {
+                    Spacer(Modifier.height(8.dp))
+                    EntryNotice(
+                        message = kidsSourceMessage?.takeIf { it.isNotBlank() }
+                            ?: if (kidsSourceLoading) {
+                                "جار تجهيز وضع الاطفال…"
+                            } else {
+                                "وضع الاطفال غير متاح حاليًا"
+                            },
+                        compact = !isTv,
+                        liveRegionPolite = !kidsSourceLoading,
+                        action = if (kidsSourceLoading) {
+                            null
+                        } else {
+                            {
+                                EntryActionButton(
+                                    text = "اعادة المحاولة",
+                                    onClick = onRetryKidsSource,
+                                    outlined = true,
+                                    minHeightDp = movieActionHeightDp(isTv = isTv, compactHeight = false),
+                                )
+                            }
+                        },
+                    )
+                }
+            } else {
+                val kind = editingKind ?: ProfileKind.STANDARD
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(if (kind == ProfileKind.KIDS) colors.gold.copy(alpha = .14f) else colors.surfaceRaised)
+                        .border(
+                            1.dp,
+                            if (kind == ProfileKind.KIDS) colors.gold.copy(alpha = .34f) else Color.White.copy(alpha = .09f),
+                            RoundedCornerShape(50),
+                        )
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                ) {
+                    Text(
+                        if (kind == ProfileKind.KIDS) "ملف اطفال" else "ملف عادي",
+                        color = if (kind == ProfileKind.KIDS) colors.goldBright else colors.textMuted,
+                        fontSize = if (isTv) 13.sp else 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(if (phoneLandscape) 10.dp else if (isTv) 19.dp else 15.dp))
+            HulkTextField(
+                value = name,
+                onValueChange = onNameChange,
+                label = "اسم الملف الشخصي",
+                modifier = Modifier.fillMaxWidth().focusRequester(nameFocus),
+            )
+            Spacer(Modifier.height(if (phoneLandscape) 10.dp else if (isTv) 18.dp else 15.dp))
+            Text(
+                "اختر صورة الملف",
+                color = colors.text,
+                fontSize = if (isTv) 16.sp else 14.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = if (expandedContent) TextAlign.Start else TextAlign.Center,
+            )
+            Spacer(Modifier.height(10.dp))
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(
+                    space = if (isTv) 13.dp else 8.dp,
+                    alignment = if (expandedContent) Alignment.Start else Alignment.CenterHorizontally,
+                ),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
+                PROFILE_AVATARS.forEach { key ->
+                    ManagementAvatarChoice(
+                        key = key,
+                        selected = avatarKey == key,
+                        isTv = isTv,
+                        compact = phoneLandscape,
+                        onClick = { onAvatarChange(key) },
+                    )
+                }
+            }
+
+            if (!error.isNullOrBlank()) {
+                Spacer(Modifier.height(10.dp))
+                EntryNotice(
+                    message = error,
+                    compact = !isTv,
+                )
+            }
+
+            Spacer(Modifier.height(if (phoneLandscape) 12.dp else if (isTv) 20.dp else 18.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = if (expandedContent) {
+                    Arrangement.spacedBy(10.dp, Alignment.Start)
+                } else {
+                    Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally)
+                },
+            ) {
+                ManagementAction("حفظ", isTv, onClick = onSave)
+                ManagementAction("الغاء", isTv, secondary = true, onClick = onCancel)
+            }
+        }
+
+        if (expandedContent) {
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 900.dp)
+                    .fillMaxWidth()
+                    .clip(cardShape)
+                    .background(colors.surface.copy(alpha = .98f))
+                    .border(1.dp, colors.gold.copy(alpha = .26f), cardShape)
+                    .padding(horizontal = 34.dp, vertical = 25.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    EntryBackAction(
+                        onClick = onCancel,
+                        minHeightDp = movieActionHeightDp(isTv = isTv, compactHeight = false),
+                    )
+                    Text(
+                        text = if (creating) "اضافة ملف شخصي" else "تعديل الملف الشخصي",
+                        color = colors.text,
+                        fontSize = 29.sp,
+                        fontWeight = FontWeight.Black,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Spacer(Modifier.height(14.dp))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line.copy(alpha = .30f)))
+                Spacer(Modifier.height(22.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min),
+                    horizontalArrangement = Arrangement.spacedBy(26.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        fieldsContent()
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .width(1.dp)
+                            .background(colors.line.copy(alpha = .25f)),
+                    )
+                    Column(
+                        modifier = Modifier
+                            .width(250.dp)
+                            .fillMaxHeight(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        ProfileAvatarArtwork(
+                            avatarKey = avatarKey,
+                            displayName = name.ifBlank { "ملف جديد" },
+                            size = 96.dp,
+                            highlighted = true,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            text = name.ifBlank { "ملف جديد" },
+                            color = colors.text,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "معاينة الملف",
+                            color = colors.textMuted,
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center,
                         )
                     }
                 }
-
-                if (!error.isNullOrBlank()) {
-                    Spacer(Modifier.height(10.dp))
-                    EntryNotice(
-                        message = error,
-                        compact = !isTv,
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .widthIn(max = cardMax)
+                    .fillMaxWidth()
+                    .clip(cardShape)
+                    .background(colors.surface.copy(alpha = .98f))
+                    .border(1.dp, colors.gold.copy(alpha = .26f), cardShape)
+                    .padding(
+                        horizontal = 20.dp,
+                        vertical = if (phoneLandscape) 14.dp else 20.dp,
+                    ),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        EntryBackAction(
+                            onClick = onCancel,
+                            minHeightDp = movieActionHeightDp(isTv = false, compactHeight = phoneLandscape),
+                        )
+                        Text(
+                            text = if (creating) "اضافة ملف شخصي" else "تعديل الملف الشخصي",
+                            color = colors.text,
+                            fontSize = 23.sp,
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        if (creating) "اختر نوع الملف ثم الاسم والصورة" else "يمكنك تعديل الاسم والصورة",
+                        color = colors.textMuted,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Start,
                     )
-                }
-
-                Spacer(Modifier.height(if (phoneLandscape) 12.dp else if (isTv) 20.dp else 18.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ManagementAction("حفظ", isTv, onClick = onSave)
-                    ManagementAction("الغاء", isTv, secondary = true, onClick = onCancel)
+                    Spacer(Modifier.height(if (phoneLandscape) 10.dp else 15.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        ProfileAvatarArtwork(
+                            avatarKey = avatarKey,
+                            displayName = name.ifBlank { "ملف جديد" },
+                            size = 54.dp,
+                            highlighted = true,
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = name.ifBlank { "ملف جديد" },
+                                color = colors.text,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "معاينة الملف",
+                                color = colors.textMuted,
+                                fontSize = 11.sp,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(if (phoneLandscape) 10.dp else 15.dp))
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        fieldsContent()
+                    }
                 }
             }
         }

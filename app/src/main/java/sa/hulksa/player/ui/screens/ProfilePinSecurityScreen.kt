@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,25 +27,27 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -62,6 +65,7 @@ import sa.hulksa.player.data.FourDigitCredentialLockedException
 import sa.hulksa.player.data.FourDigitCredentialProtectionUnavailableException
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.components.EntryActionButton
+import sa.hulksa.player.ui.components.EntryBackAction
 import sa.hulksa.player.ui.components.EntryNotice
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
@@ -585,55 +589,39 @@ private fun ProfilePinEntryScaffold(
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 32.dp, vertical = 24.dp),
+                    .padding(horizontal = 28.dp, vertical = 18.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 val compactTv = maxHeight < 620.dp || maxWidth < 900.dp
-                val compositionWidth = if (compactTv) 360.dp else 420.dp
-                val panelWidth = if (compactTv) 340.dp else 380.dp
-
-                Column(
-                    modifier = Modifier
-                        .widthIn(max = compositionWidth)
-                        .fillMaxWidth()
-                        .then(
-                            if (compactTv) {
-                                Modifier.verticalScroll(rememberScrollState())
-                            } else {
-                                Modifier
-                            },
-                        ),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = if (compactTv) Arrangement.Top else Arrangement.Center,
-                ) {
-                    ProfileSecurityIdentity(
-                        profile = profile,
-                        isTv = true,
-                        shortLandscape = false,
-                        compact = compactTv,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-
-                    Spacer(Modifier.height(if (compactTv) 12.dp else 18.dp))
-
-                    PinPanel(
-                        stateKey = profile.id,
-                        isTv = true,
-                        shortLandscape = false,
-                        compactHeight = false,
-                        tvCompact = compactTv,
-                        title = title,
-                        subtitle = subtitle,
-                        errorMessage = errorMessage,
-                        resetToken = resetToken,
-                        inputEnabled = inputEnabled,
-                        onComplete = onComplete,
-                        onCancel = onCancel,
-                        modifier = Modifier
-                            .widthIn(max = panelWidth)
-                            .fillMaxWidth(),
-                    )
-                }
+                val panelWidth = if (compactTv) 560.dp else 640.dp
+                // Board 05: profile/context/masked slots RIGHT, one keypad LEFT, Back in the
+                // RIGHT header. The split keeps identity, slots, keypad and Back inside the
+                // real usable window instead of clipping the stacked composition.
+                PinPanel(
+                    stateKey = profile.id,
+                    isTv = true,
+                    shortLandscape = false,
+                    compactHeight = false,
+                    tvCompact = compactTv,
+                    splitTv = true,
+                    title = title,
+                    subtitle = subtitle,
+                    errorMessage = errorMessage,
+                    resetToken = resetToken,
+                    inputEnabled = inputEnabled,
+                    onComplete = onComplete,
+                    onCancel = onCancel,
+                    identity = {
+                        ProfileSecurityIdentity(
+                            profile = profile,
+                            isTv = true,
+                            shortLandscape = false,
+                            compact = compactTv,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    },
+                    modifier = Modifier.widthIn(max = panelWidth),
+                )
             }
         } else {
             val padding = when {
@@ -743,15 +731,6 @@ internal fun ProfileSecurityBackdrop(
         modifier = Modifier
             .fillMaxSize()
             .background(colors.background)
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        colors.goldDeep.copy(alpha = .14f),
-                        Color.Transparent,
-                    ),
-                    radius = if (isTv) 900f else 720f,
-                ),
-            )
             .safeDrawingPadding(),
     ) {
         val landscape = maxWidth > maxHeight
@@ -822,6 +801,8 @@ internal fun PinPanel(
     shortLandscape: Boolean,
     compactHeight: Boolean,
     tvCompact: Boolean = false,
+    splitTv: Boolean = false,
+    identity: (@Composable () -> Unit)? = null,
     title: String,
     subtitle: String,
     errorMessage: String?,
@@ -832,10 +813,15 @@ internal fun PinPanel(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    // PIN digits are intentionally not saveable so process state cannot persist the raw value.
-    var pin by remember(stateKey, title, resetToken) { mutableStateOf("") }
+    // One production buffer per entry stage: a stage change (title/resetToken) starts empty and
+    // enabled, each activation appends one digit and completion fires once. PIN digits are
+    // intentionally not saveable so process state cannot persist the raw value.
+    val buffer = remember(stateKey, title, resetToken) { PinEntryBuffer() }
+    var pinLength by remember(stateKey, title, resetToken) { mutableIntStateOf(0) }
     val firstFocusRequester = remember(title, resetToken) { FocusRequester() }
     val cancelFocusRequester = remember(title, resetToken) { FocusRequester() }
+    var keypadPlaced by remember(title, resetToken) { mutableStateOf(false) }
+    var keypadHasFocus by remember(title, resetToken) { mutableStateOf(false) }
     val keySize = when {
         shortLandscape -> 46.dp
         isTv && tvCompact -> 50.dp
@@ -851,24 +837,24 @@ internal fun PinPanel(
     }
     val shape = RoundedCornerShape(if (isTv) 20.dp else 18.dp)
 
-    LaunchedEffect(isTv, title, resetToken) {
-        if (!isTv) return@LaunchedEffect
-        delay(100L)
-        runCatching { firstFocusRequester.requestFocus() }
+    // Focus the current stage's keypad only after the real keypad node is placed, and only when
+    // no key inside it already owns focus. No sleep and no focus on a disposed stage.
+    LaunchedEffect(isTv, title, resetToken, keypadPlaced) {
+        if (!isTv || !keypadPlaced) return@LaunchedEffect
+        withFrameNanos { }
+        if (!keypadHasFocus) {
+            runCatching { firstFocusRequester.requestFocus() }
+        }
     }
 
     fun appendDigit(value: String) {
-        if (!inputEnabled || pin.length >= FOUR_DIGIT_CREDENTIAL_LENGTH) return
-        val next = pin + value
-        pin = next
-        if (next.length == FOUR_DIGIT_CREDENTIAL_LENGTH) {
-            onComplete(next)
-        }
+        buffer.append(value, inputEnabled) { complete -> onComplete(complete) }
+        pinLength = buffer.digits.length
     }
 
     Column(
         modifier = modifier
-            .widthIn(max = if (isTv) 380.dp else 360.dp)
+            .widthIn(max = if (splitTv) 620.dp else if (isTv) 380.dp else 360.dp)
             .clip(shape)
             .background(colors.surface.copy(alpha = .97f))
             .border(1.dp, colors.gold.copy(alpha = .30f), shape)
@@ -889,92 +875,164 @@ internal fun PinPanel(
             ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            text = title,
-            color = colors.text,
-            fontSize = when {
-                shortLandscape -> 18.sp
-                isTv && tvCompact -> 21.sp
-                isTv -> 24.sp
-                compactHeight -> 19.sp
-                else -> 22.sp
-            },
-            fontWeight = FontWeight.Black,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(if (shortLandscape || compactHeight || tvCompact) 3.dp else 4.dp))
-        Text(
-            text = subtitle,
-            color = colors.textMuted,
-            fontSize = when {
-                isTv && tvCompact -> 10.sp
-                isTv -> 12.sp
-                else -> 10.sp
-            },
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(if (shortLandscape || compactHeight || tvCompact) 5.dp else 7.dp))
+        val contextContent: @Composable ColumnScope.() -> Unit = {
+            if (splitTv) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    EntryBackAction(
+                        onClick = onCancel,
+                        minHeightDp = movieActionHeightDp(isTv = true, compactHeight = false),
+                        modifier = Modifier.focusRequester(cancelFocusRequester),
+                    )
+                    Text(
+                        text = title,
+                        color = colors.text,
+                        fontSize = if (tvCompact) 21.sp else 24.sp,
+                        fontWeight = FontWeight.Black,
+                        textAlign = TextAlign.Start,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Spacer(Modifier.height(if (tvCompact) 10.dp else 14.dp))
+                identity?.invoke()
+                Spacer(Modifier.height(if (tvCompact) 8.dp else 12.dp))
+            } else {
+                Text(
+                    text = title,
+                    color = colors.text,
+                    fontSize = when {
+                        shortLandscape -> 18.sp
+                        compactHeight -> 19.sp
+                        else -> 22.sp
+                    },
+                    fontWeight = FontWeight.Black,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(if (shortLandscape || compactHeight) 3.dp else 4.dp))
+            }
+            Text(
+                text = subtitle,
+                color = colors.textMuted,
+                fontSize = when {
+                    isTv && tvCompact -> 10.sp
+                    isTv -> 12.sp
+                    else -> 10.sp
+                },
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(if (shortLandscape || compactHeight || tvCompact) 5.dp else 7.dp))
 
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(if (isTv) 9.dp else 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            repeat(FOUR_DIGIT_CREDENTIAL_LENGTH) { index ->
-                Box(
-                    modifier = Modifier
-                        .size(indicatorSize)
-                        .clip(RoundedCornerShape(50))
-                        .background(
-                            if (index < pin.length) colors.goldBright
-                            else colors.surfaceRaised,
-                        )
-                        .border(
-                            if (index < pin.length) 1.5.dp else 1.dp,
-                            if (index < pin.length) colors.gold else Color.White.copy(alpha = .18f),
-                            RoundedCornerShape(50),
-                        ),
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(if (isTv) 9.dp else 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                repeat(FOUR_DIGIT_CREDENTIAL_LENGTH) { index ->
+                    Box(
+                        modifier = Modifier
+                            .size(indicatorSize)
+                            .clip(RoundedCornerShape(50))
+                            .background(
+                                if (index < pinLength) colors.goldBright
+                                else colors.surfaceRaised,
+                            )
+                            .border(
+                                if (index < pinLength) 1.5.dp else 1.dp,
+                                if (index < pinLength) colors.gold else Color.White.copy(alpha = .18f),
+                                RoundedCornerShape(50),
+                            ),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(if (shortLandscape || compactHeight || tvCompact) 3.dp else 4.dp))
+
+            if (!errorMessage.isNullOrBlank()) {
+                EntryNotice(
+                    message = errorMessage,
+                    compact = true,
+                )
+                Spacer(Modifier.height(if (shortLandscape || compactHeight || tvCompact) 3.dp else 4.dp))
+            }
+
+            if (splitTv) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "استخدم ارقام الريموت او لوحة الارقام",
+                    color = colors.textMuted,
+                    fontSize = 10.sp,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+        val keypadContent: @Composable () -> Unit = {
+            Spacer(Modifier.height(if (shortLandscape || compactHeight || tvCompact) 3.dp else 5.dp))
+
+            Box(
+                modifier = Modifier
+                    .onGloballyPositioned { keypadPlaced = true }
+                    .onFocusChanged { keypadHasFocus = it.hasFocus },
+            ) {
+                NumberPad(
+                    isTv = isTv,
+                    keySize = keySize,
+                    firstFocusRequester = firstFocusRequester,
+                    cancelFocusRequester = cancelFocusRequester,
+                    backspaceEnabled = true,
+                    onDigit = ::appendDigit,
+                    onBackspace = {
+                        buffer.backspace(inputEnabled)
+                        pinLength = buffer.digits.length
+                    },
+                )
+            }
+
+            if (!splitTv) {
+                Spacer(Modifier.height(if (shortLandscape || compactHeight || tvCompact) 4.dp else 6.dp))
+
+                SecurityButton(
+                    text = "رجوع",
+                    isTv = isTv,
+                    secondary = true,
+                    focusRequester = cancelFocusRequester,
+                    onClick = onCancel,
+                    modifier = if (isTv) {
+                        Modifier.widthIn(min = 148.dp, max = 184.dp)
+                    } else {
+                        Modifier.fillMaxWidth()
+                    },
                 )
             }
         }
 
-        Spacer(Modifier.height(if (shortLandscape || compactHeight || tvCompact) 3.dp else 4.dp))
-
-        if (!errorMessage.isNullOrBlank()) {
-            EntryNotice(
-                message = errorMessage,
-                compact = true,
-            )
-            Spacer(Modifier.height(if (shortLandscape || compactHeight || tvCompact) 3.dp else 4.dp))
+        if (splitTv) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(22.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    contextContent()
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // A stage change owns a fresh keypad subtree, so every stage's keys deliver
+                    // to that stage's own buffer/callback instead of the previous stage's state.
+                    key(title, resetToken) {
+                        keypadContent()
+                    }
+                }
+            }
+        } else {
+            contextContent()
+            key(title, resetToken) {
+                keypadContent()
+            }
         }
-
-        Spacer(Modifier.height(if (shortLandscape || compactHeight || tvCompact) 3.dp else 5.dp))
-
-        NumberPad(
-            isTv = isTv,
-            keySize = keySize,
-            firstFocusRequester = firstFocusRequester,
-            cancelFocusRequester = cancelFocusRequester,
-            backspaceEnabled = true,
-            onDigit = ::appendDigit,
-            onBackspace = {
-                if (inputEnabled && pin.isNotEmpty()) pin = pin.dropLast(1)
-            },
-        )
-
-        Spacer(Modifier.height(if (shortLandscape || compactHeight || tvCompact) 4.dp else 6.dp))
-
-        SecurityButton(
-            text = "رجوع",
-            isTv = isTv,
-            secondary = true,
-            focusRequester = cancelFocusRequester,
-            onClick = onCancel,
-            modifier = if (isTv) {
-                Modifier.widthIn(min = 148.dp, max = 184.dp)
-            } else {
-                Modifier.fillMaxWidth()
-            },
-        )
     }
 }
 
@@ -995,8 +1053,41 @@ private fun NumberPad(
 
     fun requester(index: Int): FocusRequester = requesters[index]
 
+    // A real numeric remote sends digit key codes: deliver them through the same production
+    // onDigit owner as the on-screen keys while the keypad subtree owns focus.
+    val hardwareDigits = mapOf(
+        Key.Zero to "0",
+        Key.One to "1",
+        Key.Two to "2",
+        Key.Three to "3",
+        Key.Four to "4",
+        Key.Five to "5",
+        Key.Six to "6",
+        Key.Seven to "7",
+        Key.Eight to "8",
+        Key.Nine to "9",
+        Key.NumPad0 to "0",
+        Key.NumPad1 to "1",
+        Key.NumPad2 to "2",
+        Key.NumPad3 to "3",
+        Key.NumPad4 to "4",
+        Key.NumPad5 to "5",
+        Key.NumPad6 to "6",
+        Key.NumPad7 to "7",
+        Key.NumPad8 to "8",
+        Key.NumPad9 to "9",
+    )
+
     // PIN digits stay in their stable physical LTR order; layout and D-pad wiring share it.
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Box(
+            modifier = Modifier.onPreviewKeyEvent { event ->
+                if (!isTv || event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                val digit = hardwareDigits[event.key] ?: return@onPreviewKeyEvent false
+                onDigit(digit)
+                true
+            },
+        ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(keySpacing),
@@ -1041,7 +1132,7 @@ private fun NumberPad(
                     leftRequester = requester(10),
                     rightRequester = requester(9),
                     upRequester = requester(6),
-                    downRequester = requester(10),
+                    downRequester = cancelFocusRequester,
                     onClick = onBackspace,
                 )
                 PinKey(
@@ -1052,11 +1143,12 @@ private fun NumberPad(
                     leftRequester = if (backspaceEnabled) requester(10) else requester(9),
                     rightRequester = requester(9),
                     upRequester = requester(7),
-                    downRequester = requester(9),
+                    downRequester = cancelFocusRequester,
                     onClick = { onDigit("0") },
                 )
                 Spacer(Modifier.size(keySize))
             }
+        }
         }
     }
 }
@@ -1112,8 +1204,7 @@ private fun PinKey(
                         else -> null
                     }
                     if (target != null) {
-                        runCatching { target.requestFocus() }
-                        true
+                        runCatching { target.requestFocus() }.getOrDefault(false)
                     } else {
                         val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
                         if (!remoteSelect) false else true

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +31,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,14 +55,13 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import sa.hulksa.player.data.GrowthDestination
 import sa.hulksa.player.data.GrowthQrPresentation
 import sa.hulksa.player.data.OperationsGrowthLinkConfig
 import sa.hulksa.player.data.normalizeGrowthCustomQrUrl
 import sa.hulksa.player.data.resolveGrowthQrPresentation
-import sa.hulksa.player.ui.components.FocusButton
+import sa.hulksa.player.ui.components.EntryBackAction
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 @Composable
@@ -76,7 +78,9 @@ internal fun GrowthQrDialog(
     var customImageFailed by remember(customUrl) { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        delay(80L)
+        withFrameNanos { }
+        withFrameNanos { }
+        withFrameNanos { }
         runCatching { backRequester.requestFocus() }
     }
 
@@ -100,105 +104,186 @@ internal fun GrowthQrDialog(
             // physical 720p/1080p height suggests. Reserve a real bottom budget for the
             // focused Back button instead of letting the QR consume that space.
             val compactHeight = maxHeight < 620.dp
-            val qrSize = minOf(
-                maxWidth * if (compactHeight) .48f else .55f,
-                maxHeight * if (compactHeight) .38f else .44f,
-                if (compactHeight) 300.dp else 340.dp,
-            ).coerceAtLeast(if (compactHeight) 170.dp else 210.dp)
-            val qrPixels = with(LocalDensity.current) { qrSize.roundToPx().coerceIn(256, 1_400) }
+            val wide = maxWidth >= 840.dp
             val shape = RoundedCornerShape(24.dp)
-            Column(
-                modifier = Modifier
-                    .widthIn(max = 760.dp)
-                    .fillMaxWidth()
-                    .clip(shape)
-                    .background(Color(0xFF11120E))
-                    .border(1.dp, colors.gold.copy(alpha = .42f), shape)
-                    .padding(
-                        horizontal = if (compactHeight) 24.dp else 28.dp,
-                        vertical = if (compactHeight) 12.dp else 18.dp,
-                    ),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(if (compactHeight) 7.dp else 9.dp),
-            ) {
-                Text(
-                    text = "HULK SA",
-                    color = colors.goldBright,
-                    fontSize = if (compactHeight) 15.sp else 17.sp,
-                    fontWeight = FontWeight.Black,
-                )
-                Text(
-                    text = when {
-                        newSubscriptionCopy -> "اشتراك جديد"
-                        destination == GrowthDestination.RENEWAL -> "الموقع الالكتروني"
-                        else -> "الدعم الفني"
-                    },
-                    color = colors.text,
-                    fontSize = if (compactHeight) 25.sp else 28.sp,
-                    fontWeight = FontWeight.Black,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                )
-                Text(
-                    text = when {
-                        newSubscriptionCopy -> "اشترك الان من موقع HULK SA"
-                        destination == GrowthDestination.RENEWAL -> "جدد اشتراكك من موقع HULK SA"
-                        else -> "تواصل معنا عبر واتساب"
-                    },
-                    color = colors.textMuted,
-                    fontSize = if (compactHeight) 14.sp else 15.sp,
-                    textAlign = TextAlign.Center,
-                )
-                Text(
-                    text = "امسح رمز QR بكاميرا جوالك",
-                    color = colors.goldBright,
-                    fontSize = if (compactHeight) 12.sp else 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
+            val displayText = link.displayText.ifBlank { link.url.orEmpty() }
+            if (wide) {
+                // Boards 15-17: one bounded horizontal family. The body budget is measured after
+                // the footer/insets; a compact QR pane sits LEFT, a narrow gold divider separates
+                // it from the coherent centered copy pane RIGHT, and the compact Back owns the
+                // centered bottom footer.
+                val bodyBudget = (maxHeight - 128.dp).coerceAtLeast(110.dp)
+                val qrSize = minOf(bodyBudget * .62f, 210.dp)
+                    .coerceAtLeast(130.dp)
+                    .coerceAtMost(bodyBudget)
+                val qrPixels = with(LocalDensity.current) {
+                    qrSize.roundToPx().coerceIn(256, 1_400)
+                }
+                Column(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(99.dp))
-                        .background(colors.gold.copy(alpha = .10f))
+                        .widthIn(max = 720.dp)
+                        .fillMaxWidth()
+                        .clip(shape)
+                        .background(Color(0xFF11120E))
+                        .border(1.dp, colors.gold.copy(alpha = .42f), shape)
+                        .padding(horizontal = 28.dp, vertical = 20.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(22.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            GrowthQrCopy(
+                                newSubscriptionCopy = newSubscriptionCopy,
+                                destination = destination,
+                                displayText = displayText,
+                                compactHeight = compactHeight,
+                                wide = true,
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .height(qrSize + 20.dp)
+                                .background(colors.gold.copy(alpha = .45f)),
+                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            GrowthQrImage(
+                                content = link.url.orEmpty(),
+                                customUrl = customUrl,
+                                showCustom = resolveGrowthQrPresentation(link, customImageFailed) ==
+                                    GrowthQrPresentation.CUSTOM_IMAGE,
+                                targetPixels = qrPixels,
+                                customImageFailed = { customImageFailed = true },
+                                modifier = Modifier.size(qrSize),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        EntryBackAction(
+                            onClick = onDismiss,
+                            minHeightDp = movieActionHeightDp(isTv = true, compactHeight = false),
+                            captionColor = colors.goldBright,
+                            modifier = Modifier.focusRequester(backRequester),
+                        )
+                    }
+                }
+            } else {
+                val bodyBudget = (maxHeight - 96.dp).coerceAtLeast(120.dp)
+                val qrSize = minOf(
+                    maxWidth * if (compactHeight) .48f else .55f,
+                    bodyBudget * if (compactHeight) .60f else .68f,
+                    if (compactHeight) 300.dp else 340.dp,
+                ).coerceAtLeast(minOf(if (compactHeight) 150.dp else 180.dp, bodyBudget))
+                val qrPixels = with(LocalDensity.current) { qrSize.roundToPx().coerceIn(256, 1_400) }
+                Column(
+                    modifier = Modifier
+                        .widthIn(max = 760.dp)
+                        .fillMaxWidth()
+                        .clip(shape)
+                        .background(Color(0xFF11120E))
+                        .border(1.dp, colors.gold.copy(alpha = .42f), shape)
                         .padding(
-                            horizontal = if (compactHeight) 12.dp else 14.dp,
-                            vertical = if (compactHeight) 5.dp else 7.dp,
+                            horizontal = if (compactHeight) 24.dp else 28.dp,
+                            vertical = if (compactHeight) 12.dp else 18.dp,
                         ),
-                )
-
-                GrowthQrImage(
-                    content = link.url.orEmpty(),
-                    customUrl = customUrl,
-                    showCustom = resolveGrowthQrPresentation(link, customImageFailed) ==
-                        GrowthQrPresentation.CUSTOM_IMAGE,
-                    targetPixels = qrPixels,
-                    customImageFailed = { customImageFailed = true },
-                    modifier = Modifier.size(qrSize),
-                )
-
-                Text(
-                    text = "\u2066${link.displayText.ifBlank { link.url.orEmpty() }}\u2069",
-                    color = colors.text,
-                    fontSize = if (compactHeight) 16.sp else 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    style = TextStyle(textDirection = TextDirection.Ltr),
-                    maxLines = 1,
-                )
-                Spacer(Modifier.height(if (compactHeight) 0.dp else 1.dp))
-                FocusButton(
-                    text = "رجوع",
-                    onClick = onDismiss,
-                    primary = false,
-                    compact = true,
-                    scaleOnFocus = false,
-                    modifier = Modifier
-                        .focusRequester(backRequester)
-                        .heightIn(min = movieActionHeightDp(isTv = true, compactHeight = false).dp)
-                        .widthIn(min = 160.dp)
-                        .padding(bottom = if (compactHeight) 2.dp else 4.dp),
-                )
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(if (compactHeight) 7.dp else 9.dp),
+                ) {
+                    GrowthQrCopy(
+                        newSubscriptionCopy = newSubscriptionCopy,
+                        destination = destination,
+                        displayText = displayText,
+                        compactHeight = compactHeight,
+                        wide = false,
+                    )
+                    GrowthQrImage(
+                        content = link.url.orEmpty(),
+                        customUrl = customUrl,
+                        showCustom = resolveGrowthQrPresentation(link, customImageFailed) ==
+                            GrowthQrPresentation.CUSTOM_IMAGE,
+                        targetPixels = qrPixels,
+                        customImageFailed = { customImageFailed = true },
+                        modifier = Modifier.size(qrSize),
+                    )
+                    Spacer(Modifier.height(if (compactHeight) 0.dp else 2.dp))
+                    EntryBackAction(
+                        onClick = onDismiss,
+                        minHeightDp = movieActionHeightDp(isTv = true, compactHeight = false),
+                        modifier = Modifier.focusRequester(backRequester),
+                    )
+                }
             }
         }
     }
+}
+
+
+@Composable
+private fun GrowthQrCopy(
+    newSubscriptionCopy: Boolean,
+    destination: GrowthDestination,
+    displayText: String,
+    compactHeight: Boolean,
+    wide: Boolean,
+) {
+    val colors = LocalHulkColors.current
+    val alignment = TextAlign.Center
+    Text(
+        text = when {
+            newSubscriptionCopy -> "اشتراك جديد"
+            destination == GrowthDestination.RENEWAL -> "تجديد الاشتراك"
+            else -> "الدعم الفني"
+        },
+        color = colors.text,
+        fontSize = if (compactHeight) 25.sp else 28.sp,
+        fontWeight = FontWeight.Black,
+        textAlign = alignment,
+        maxLines = 2,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Text(
+        text = when {
+            newSubscriptionCopy -> "ابدا رحلتك مع HULK"
+            destination == GrowthDestination.RENEWAL -> "جدد اشتراكك مع HULK"
+            else -> "تواصل معنا عبر واتساب"
+        },
+        color = colors.text,
+        fontSize = if (compactHeight) 15.sp else 16.sp,
+        fontWeight = FontWeight.Bold,
+        textAlign = alignment,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Text(
+        text = when {
+            newSubscriptionCopy -> "امسح الرمز بكاميرا جوالك لعرض الباقات والاشتراك"
+            destination == GrowthDestination.RENEWAL -> "امسح الرمز بكاميرا جوالك للمتابعة الى التجديد"
+            else -> "امسح الرمز بكاميرا جوالك لبدء المحادثة"
+        },
+        color = colors.textMuted,
+        fontSize = if (compactHeight) 13.sp else 14.sp,
+        textAlign = alignment,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Text(
+        text = "\u2066$displayText\u2069",
+        color = colors.text,
+        fontSize = if (compactHeight) 16.sp else 17.sp,
+        fontWeight = FontWeight.Bold,
+        textAlign = TextAlign.Center,
+        style = TextStyle(textDirection = TextDirection.Ltr),
+        maxLines = 1,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable

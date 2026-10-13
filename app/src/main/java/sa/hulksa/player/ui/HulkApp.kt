@@ -13,11 +13,15 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Downloading
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
@@ -29,6 +33,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
@@ -71,6 +76,7 @@ import sa.hulksa.player.ui.screens.downloadNoticeDisplayText
 import sa.hulksa.player.ui.screens.liveTvProDecorateMainState
 import sa.hulksa.player.ui.screens.liveTvProMainCategoryToContext
 import sa.hulksa.player.ui.screens.playerProEpisodeNeighbors
+import sa.hulksa.player.ui.screens.scopedNoticeDisplayText
 import sa.hulksa.player.ui.screens.saveLiveTvProLaunchContext
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
@@ -98,13 +104,16 @@ fun HulkApp(
     var searchInitialFocusAcquired by remember(navigationMemory) { mutableStateOf(false) }
     // Scoped ephemeral presentation for a real notification-opening failure result.
     var notificationOpenError by remember { mutableStateOf<String?>(null) }
-    // ONE scoped in-app action notice for Home actions and download feedback; it replaces the
-    // previous unstyled download Toasts without creating a competing notice owner.
-    var actionNotice by remember { mutableStateOf<HomeActionNotice?>(null) }
+    // ONE scoped in-app action notice for Home/Settings/voice actions and download feedback; it
+    // replaces the previous unstyled Toasts without creating a competing notice owner. The
+    // sequence keeps consecutive identical real outcomes distinct events, so an obsolete timeout
+    // can never clear a newer notice.
+    var actionNotice by remember { mutableStateOf<ScopedNoticeEvent?>(null) }
+    var actionNoticeSequence by remember { mutableLongStateOf(0L) }
     LaunchedEffect(actionNotice) {
-        val notice = actionNotice ?: return@LaunchedEffect
+        val event = actionNotice ?: return@LaunchedEffect
         delay(5_000L)
-        if (actionNotice == notice) actionNotice = null
+        if (actionNotice == event) actionNotice = null
     }
     val (adaptiveUi, adaptiveInputController) = rememberAdaptiveUiState(isTelevisionDevice)
     val isTv = adaptiveUi.isTelevision
@@ -114,7 +123,28 @@ fun HulkApp(
     LaunchedEffect(state.screen, state.destination) { actionNotice = null }
     LaunchedEffect(catalogNavigationMemory) { actionNotice = null }
     val postActionNotice: (String, ImageVector) -> Unit = { message, icon ->
-        actionNotice = HomeActionNotice(message = message, icon = icon)
+        actionNoticeSequence += 1L
+        actionNotice = ScopedNoticeEvent(
+            id = actionNoticeSequence,
+            notice = HomeActionNotice(message = message, icon = icon),
+        )
+    }
+    val voiceSearchFeedbackState = LocalVoiceSearchFeedback.current
+    val voiceSearchFeedback = voiceSearchFeedbackState?.value
+    LaunchedEffect(voiceSearchFeedback) {
+        val feedback = voiceSearchFeedback ?: return@LaunchedEffect
+        voiceSearchFeedbackState.value = null
+        // A completed outcome is only valid for the owner that still owns the Search request;
+        // a late result from a previous screen/account/session/profile/generation is dropped.
+        if (viewModel.currentVoiceSearchOwner() == feedback.owner) {
+            postActionNotice(
+                feedback.message,
+                when (feedback.glyph) {
+                    VoiceSearchFeedbackGlyph.VOICE -> Icons.Rounded.Mic
+                    VoiceSearchFeedbackGlyph.ERROR -> Icons.Outlined.ErrorOutline
+                },
+            )
+        }
     }
     val postDownloadFeedback: (DownloadFeedback) -> Unit = { feedback ->
         // Download feedback belongs to the download-owning screens; a late result must not
@@ -124,9 +154,9 @@ fun HulkApp(
             state.screen == HulkScreen.MOVIE_DETAILS ||
             state.screen == HulkScreen.SERIES
         ) {
-            actionNotice = HomeActionNotice(
-                message = downloadNoticeDisplayText(feedback.message),
-                icon = downloadFeedbackIcon(feedback.glyph),
+            postActionNotice(
+                downloadNoticeDisplayText(feedback.message),
+                downloadFeedbackIcon(feedback.glyph),
             )
         }
     }
@@ -294,11 +324,16 @@ fun HulkApp(
                                 onToggleFavorite = { item ->
                                     val wasFavorite = viewModel.isFavorite(item)
                                     viewModel.toggleFavorite(item)
-                                    notify(
+                                    postActionNotice(
                                         if (wasFavorite) {
                                             "تمت ازالة ${item.name} من المفضلة"
                                         } else {
                                             "تمت اضافة ${item.name} الى المفضلة"
+                                        },
+                                        if (wasFavorite) {
+                                            Icons.Outlined.FavoriteBorder
+                                        } else {
+                                            Icons.Rounded.Favorite
                                         },
                                     )
                                 },
@@ -359,13 +394,23 @@ fun HulkApp(
                                         postDownloadFeedback(viewModel.cycleConcurrentDownloads())
                                     },
                                     onToggleEpisodeNotificationMaster = {
-                                        viewModel.toggleEpisodeNotificationMaster(notify)
+                                        viewModel.toggleEpisodeNotificationMaster { message ->
+                                            postActionNotice(
+                                                scopedNoticeDisplayText(message),
+                                                Icons.Rounded.Notifications,
+                                            )
+                                        }
                                     },
                                     onCycleDownloadPriority = { item ->
                                         postDownloadFeedback(viewModel.cycleDownloadPriority(item))
                                     },
                                     onActionNotice = postActionNotice,
-                                    onRefreshAccount = { viewModel.refreshAccount(notify) },
+                                    onRefreshAccount = { viewModel.refreshAccount { message ->
+                                        postActionNotice(
+                                            scopedNoticeDisplayText(message),
+                                            Icons.Rounded.Refresh,
+                                        )
+                                    } },
                                     onRunDiagnostics = viewModel::runDiagnostics,
                                     onLogout = viewModel::logout,
                                     homeMessagePresentation = homeMessagePresentation,
@@ -490,7 +535,12 @@ fun HulkApp(
                                 },
                                 onToggleFavorite = { viewModel.toggleFavorite(series) },
                                 onToggleNotifications = {
-                                    viewModel.toggleSeriesNotifications(series, notify)
+                                    viewModel.toggleSeriesNotifications(series) { message ->
+                                        postActionNotice(
+                                            scopedNoticeDisplayText(message),
+                                            Icons.Rounded.Notifications,
+                                        )
+                                    }
                                 },
                                 onToggleRelatedFavorite = { related ->
                                     val wasFavorite = viewModel.isFavorite(related)
@@ -586,9 +636,9 @@ fun HulkApp(
                         modifier = Modifier.align(Alignment.BottomCenter),
                     )
                 }
-                actionNotice?.let { notice ->
+                actionNotice?.let { event ->
                     ScopedHomeActionNotice(
-                        notice = notice,
+                        notice = event.notice,
                         isTv = isTv,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -605,6 +655,12 @@ fun HulkApp(
         }
     }
 }
+
+/** A notice event with its own identity so consecutive identical messages stay distinct. */
+private data class ScopedNoticeEvent(
+    val id: Long,
+    val notice: HomeActionNotice,
+)
 
 /** Semantic glyph mapping for the scoped download feedback notice. */
 private fun downloadFeedbackIcon(glyph: DownloadFeedbackGlyph): ImageVector = when (glyph) {

@@ -233,7 +233,11 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
         self.assertIn("filterRequesters.getValue(activeFilter).requestFocus()", favorites)
         self.assertIn("if (downloads.isEmpty())", downloads)
         self.assertIn(".focusRequester(toolbarFocus.wifi)", downloads)
-        self.assertIn("focus.refreshAccount.requestFocus()", settings)
+        # Settings entry first focuses the selected section row in the RIGHT column; the
+        # refresh-account control is still the attached first SUBSCRIPTION detail action reached
+        # through the eligible settingsSectionFirstRequester path after OK/LEFT.
+        self.assertIn("focus.sectionRequester(selectedSection).requestFocus()", settings)
+        self.assertIn("settingsSectionFirstRequester(", settings)
         self.assertIn("focusRequester = focus.refreshAccount", settings)
 
     def test_existing_destination_focus_memory_remains_in_place(self) -> None:
