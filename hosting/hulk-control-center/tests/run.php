@@ -66,6 +66,7 @@ cc_test(isset($headers['Strict-Transport-Security']), 'HTTPS responses include H
 $sessionDirectory = sys_get_temp_dir() . '/hulk-control-center-tests-' . bin2hex(random_bytes(8));
 cc_test(mkdir($sessionDirectory, 0700), 'isolated session test directory is created');
 $configPath = $sessionDirectory . '/config.php';
+$priorControlCenterConfig = getenv('HULK_CONTROL_CENTER_CONFIG');
 $testConfig = [
     'databases' => [
         'control' => ['dsn' => 'test:', 'username' => '', 'password' => '', 'options' => []],
@@ -100,7 +101,11 @@ $_SESSION['admin_username'] = 'owner';
 $_SESSION['csrf_token'] = cc_csrf_token();
 cc_destroy_admin_session();
 cc_test(session_status() !== PHP_SESSION_ACTIVE && $_SESSION === [], 'logout destroys the live session and clears its data');
-putenv('HULK_CONTROL_CENTER_CONFIG');
+if ($priorControlCenterConfig !== false && $priorControlCenterConfig !== '') {
+    putenv('HULK_CONTROL_CENTER_CONFIG=' . $priorControlCenterConfig);
+} else {
+    putenv('HULK_CONTROL_CENTER_CONFIG');
+}
 unlink($configPath);
 foreach (glob($sessionDirectory . '/sess_*') ?: [] as $sessionFile) {
     unlink($sessionFile);
@@ -305,5 +310,6 @@ require __DIR__ . '/presence.php';
 require __DIR__ . '/phase6.php';
 require __DIR__ . '/phase7.php';
 require __DIR__ . '/phase8.php';
+require __DIR__ . '/pairing.php';
 
 fwrite(STDOUT, "PASS: {$tests} HULK Control Center checks.\n");

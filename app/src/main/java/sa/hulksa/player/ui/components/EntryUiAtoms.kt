@@ -285,6 +285,8 @@ internal fun EntryBackAction(
  * `movieActionHeightDp` minimum height and in-bounds pale focus with no scale or position change.
  * Under RTL the caption sits physically RIGHT and the glyph physically LEFT. Loading replaces only
  * the glyph slot; a loading or disabled action stays focusable and executes nothing twice.
+ * `accentOutlined` is the reviewed pairing-entry variant: transparent fill with the solid gold
+ * outline instead of the default dark raised outline; every other caller keeps its appearance.
  */
 @Composable
 internal fun EntryActionButton(
@@ -293,6 +295,7 @@ internal fun EntryActionButton(
     modifier: Modifier = Modifier,
     primary: Boolean = false,
     outlined: Boolean = false,
+    accentOutlined: Boolean = false,
     danger: Boolean = false,
     enabled: Boolean = true,
     loading: Boolean = false,
@@ -321,7 +324,7 @@ internal fun EntryActionButton(
         EntryActionSurface.DISABLED -> colors.surfaceRaised.copy(alpha = .5f)
         EntryActionSurface.DANGER -> colors.danger.copy(alpha = if (focused) .22f else .14f)
         EntryActionSurface.PRIMARY -> colors.gold
-        EntryActionSurface.OUTLINED -> Color(0xFF151711)
+        EntryActionSurface.OUTLINED -> if (accentOutlined) Color.Transparent else Color(0xFF151711)
         EntryActionSurface.FOCUSED -> Color(0xFF1E2019)
         EntryActionSurface.IDLE -> Color(0xFF181914)
     }
@@ -349,7 +352,7 @@ internal fun EntryActionButton(
                     goldFocused -> Color.Transparent
                     focused -> colors.goldBright
                     danger -> colors.danger.copy(alpha = .45f)
-                    outlined -> colors.gold.copy(alpha = .42f)
+                    outlined -> if (accentOutlined) colors.gold else colors.gold.copy(alpha = .42f)
                     else -> Color.Transparent
                 },
                 shape = shape,

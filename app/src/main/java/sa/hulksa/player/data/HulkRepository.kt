@@ -291,6 +291,17 @@ class HulkRepository(context: Context) {
 
     fun activeAccountSession(): AccountSessionMetadata? = accountSessionStore.metadata()
 
+    /**
+     * Reuses the existing non-secret installation identifier (already shared with successful
+     * authentication) for pairing startup. Read-or-create runs under the same ownership lock so a
+     * concurrent authentication commit cannot create a second identifier authority.
+     */
+    internal suspend fun pairingInstallationId(): String? = withContext(Dispatchers.IO) {
+        synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+            accountSessionStore.installationIdForPairing()
+        }
+    }
+
     internal suspend fun presenceSessionSnapshot(
         expectedSession: AuthenticatedSession,
         device: PresenceDeviceMetadata,

@@ -56,4 +56,56 @@ class AuthenticationAttemptGateTest {
         assertTrue(gate.complete(second))
         assertNotNull(gate.tryStart())
     }
+
+    @Test
+    fun `paired handoff reserves once and carries the explicit login preflight proof`() {
+        val tracker = ManualParentAuthProofTracker()
+        val gate = AuthenticationAttemptGate(tracker)
+
+        val reservation = gate.tryStartPairedHandoff()
+
+        assertNotNull(reservation)
+        assertNull(gate.tryStartPairedHandoff())
+        assertNull(gate.tryStart())
+        tracker.completeAuthenticationSuccess(accountId = "account", sessionId = "session")
+        assertTrue(tracker.hasValidProof())
+        assertTrue(gate.complete(checkNotNull(reservation)))
+    }
+
+    @Test
+    fun `passive busy never manufactures parental proof and is side-effect free`() {
+        val tracker = ManualParentAuthProofTracker()
+        val gate = AuthenticationAttemptGate(tracker)
+
+        assertFalse(gate.isPassivelyBusy())
+        tracker.completeAuthenticationSuccess(accountId = "account", sessionId = "session")
+        assertFalse(tracker.hasValidProof())
+    }
+
+    @Test
+    fun `manual preflight still produces proof when the attempt completes`() {
+        val tracker = ManualParentAuthProofTracker()
+        val gate = AuthenticationAttemptGate(tracker)
+
+        assertFalse(gate.isActive())
+        val reservation = checkNotNull(gate.tryStart())
+        tracker.completeAuthenticationSuccess(accountId = "account", sessionId = "session")
+
+        assertTrue(tracker.hasValidProof())
+        assertTrue(gate.complete(reservation))
+    }
+
+    @Test
+    fun `paired reservation is invalidated by logout and can be reserved again`() {
+        val tracker = ManualParentAuthProofTracker()
+        val gate = AuthenticationAttemptGate(tracker)
+        val first = checkNotNull(gate.tryStartPairedHandoff())
+
+        gate.invalidate()
+        val second = checkNotNull(gate.tryStartPairedHandoff())
+
+        assertFalse(gate.isCurrent(first))
+        assertTrue(gate.isCurrent(second))
+        assertNull(gate.tryStartPairedHandoff())
+    }
 }

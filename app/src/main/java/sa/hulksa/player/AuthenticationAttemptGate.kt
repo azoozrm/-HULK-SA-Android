@@ -23,8 +23,26 @@ internal class AuthenticationAttemptGate(
         return active
     }
 
+    /** Passive busy state without the manual-login preflight side effect. */
     @Synchronized
-    fun tryStart(): Long? {
+    fun isPassivelyBusy(): Boolean = activeGeneration != null
+
+    @Synchronized
+    fun tryStart(): Long? = tryStartLocked()
+
+    /**
+     * Reserves the single authentication attempt for the paired TV handoff. The paired flow is an
+     * explicit user action, so it carries the same manual-login preflight provenance as a manual
+     * submit while remaining a distinct entry point that never calls the public login().
+     */
+    @Synchronized
+    fun tryStartPairedHandoff(): Long? {
+        if (activeGeneration != null) return null
+        manualAuthProof().noteManualLoginPreflight()
+        return tryStartLocked()
+    }
+
+    private fun tryStartLocked(): Long? {
         if (activeGeneration != null) return null
         generation += 1L
         activeGeneration = generation

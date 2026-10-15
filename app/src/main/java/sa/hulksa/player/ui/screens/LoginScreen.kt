@@ -73,6 +73,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -99,10 +100,12 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import sa.hulksa.player.R
+import sa.hulksa.player.PairingUiState
 import sa.hulksa.player.data.GrowthDestination
 import sa.hulksa.player.data.PortalException
 import sa.hulksa.player.data.OperationsGrowthLinkConfig
 import sa.hulksa.player.ui.components.EntryActionButton
+import sa.hulksa.player.ui.components.PairingQuickLoginIcon
 import sa.hulksa.player.ui.components.EntryNotice
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.theme.LocalHulkColors
@@ -268,10 +271,17 @@ private fun resolveLoginLayoutPolicy(
 @Composable
 fun LoginScreen(
     isTv: Boolean,
+    pairingOffered: Boolean,
+    pairing: PairingUiState,
+    pairingReturnFocusSuspended: Boolean,
     isStarting: Boolean,
     isLoading: Boolean,
     errorMessage: String?,
     onLogin: (String, String, String, Boolean) -> Unit,
+    onStartPairing: (Boolean) -> Unit,
+    onRetryPairing: () -> Unit,
+    onRegeneratePairing: () -> Unit,
+    onCancelPairing: () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -434,6 +444,9 @@ fun LoginScreen(
                     onRememberChange = { rememberAccount = !rememberAccount },
                     isLoading = isLoading,
                     isTv = isTv,
+                    pairingOffered = pairingOffered,
+                    pairingVisible = pairing.visible,
+                    pairingReturnFocusSuspended = pairingReturnFocusSuspended,
                     errorMessage = errorMessage,
                     displayedErrorMessage = errorPresentation.displayText,
                     networkFailure = errorPresentation.confirmedOffline,
@@ -446,6 +459,7 @@ fun LoginScreen(
                             openWebsite()
                         }
                     },
+                    onStartPairing = onStartPairing,
                     onTextInputFocus = onTextInputFocus,
                     onNonTextFocus = onNonTextFocus,
                     onCardFocusChanged = lastCardFocusRequester::update,
@@ -500,6 +514,15 @@ fun LoginScreen(
                     onDismiss = { showSubscriptionQr = false },
                 )
             }
+
+            if (pairingOffered && pairing.visible) {
+                PairingLoginDialog(
+                    state = pairing,
+                    onDismiss = onCancelPairing,
+                    onRetry = onRetryPairing,
+                    onRegenerate = onRegeneratePairing,
+                )
+            }
         }
     }
 }
@@ -536,12 +559,16 @@ private fun LoginPanel(
     onRememberChange: () -> Unit,
     isLoading: Boolean,
     isTv: Boolean,
+    pairingOffered: Boolean,
+    pairingVisible: Boolean,
+    pairingReturnFocusSuspended: Boolean,
     errorMessage: String?,
     displayedErrorMessage: String?,
     networkFailure: Boolean,
     websiteErrorMessage: String?,
     onSubmit: () -> Unit,
     onOpenSubscription: () -> Unit,
+    onStartPairing: (Boolean) -> Unit,
     onTextInputFocus: () -> Unit,
     onNonTextFocus: () -> Unit,
     onCardFocusChanged: (FocusRequester) -> Unit,
@@ -557,10 +584,14 @@ private fun LoginPanel(
     val passwordRequester = remember { FocusRequester() }
     val rememberRequester = remember { FocusRequester() }
     val showPasswordRequester = remember { FocusRequester() }
+    val pairingRequester = remember { FocusRequester() }
     val panelShape = RoundedCornerShape(policy.cardRadius)
     val displayedError = displayedErrorMessage
     val actionFloorDp = movieActionHeightDp(isTv = isTv, compactHeight = !isTv && policy.compact)
     val actionCaptionGap = rememberActionCaptionSpace()
+    var pairingWasVisible by remember { mutableStateOf(false) }
+    var pairingTriggerPlaced by remember { mutableStateOf(false) }
+    var pendingPairingReturnFocus by remember { mutableStateOf(false) }
 
     LaunchedEffect(isLoading, errorMessage) {
         if (!isLoading && !errorMessage.isNullOrBlank()) {
@@ -570,6 +601,41 @@ private fun LoginPanel(
                 LoginErrorTarget.PASSWORD -> runCatching { passwordRequester.requestFocus() }
                 LoginErrorTarget.NONE -> Unit
             }
+        }
+    }
+    LaunchedEffect(pairingVisible) {
+        if (pairingVisible) {
+            pairingWasVisible = true
+        } else if (pairingWasVisible) {
+            pairingWasVisible = false
+            // Restore only the actual pairing trigger while it is still offered. Discovery loss
+            // keeps the existing eligible signup/login focus fallback untouched.
+            if (pairingOffered) pendingPairingReturnFocus = true
+        }
+    }
+    LaunchedEffect(pairingOffered) {
+        if (!pairingOffered) pendingPairingReturnFocus = false
+    }
+    // Placement-driven return focus: the pending request resolves only after the real target has
+    // been placed and no newer owner (loading, error target, account decision) owns focus.
+    LaunchedEffect(
+        pendingPairingReturnFocus,
+        pairingOffered,
+        pairingTriggerPlaced,
+        isLoading,
+        errorMessage,
+        pairingReturnFocusSuspended,
+    ) {
+        if (
+            pendingPairingReturnFocus &&
+            pairingOffered &&
+            pairingTriggerPlaced &&
+            !isLoading &&
+            errorMessage.isNullOrBlank() &&
+            !pairingReturnFocusSuspended
+        ) {
+            pendingPairingReturnFocus = false
+            runCatching { pairingRequester.requestFocus() }
         }
     }
 
@@ -798,12 +864,40 @@ private fun LoginPanel(
                 .focusRequester(subscribeRequester)
                 .focusProperties {
                     up = submitRequester
-                    down = FocusRequester.Cancel
+                    down = if (pairingOffered) pairingRequester else FocusRequester.Cancel
                     left = FocusRequester.Cancel
                     right = FocusRequester.Cancel
                 }
                 .fillMaxWidth(),
         )
+        if (pairingOffered) {
+            Spacer(Modifier.height(if (policy.compact) 4.dp else 9.dp))
+            EntryActionButton(
+                text = "الدخول السريع",
+                onClick = {
+                    onNonTextFocus()
+                    onStartPairing(rememberAccount)
+                },
+                outlined = true,
+                accentOutlined = true,
+                glyph = PairingQuickLoginIcon,
+                minHeightDp = actionFloorDp,
+                onFocused = {
+                    onNonTextFocus()
+                    onCardFocusChanged(pairingRequester)
+                },
+                modifier = Modifier
+                    .focusRequester(pairingRequester)
+                    .onPlaced { pairingTriggerPlaced = true }
+                    .focusProperties {
+                        up = subscribeRequester
+                        down = FocusRequester.Cancel
+                        left = FocusRequester.Cancel
+                        right = FocusRequester.Cancel
+                    }
+                    .fillMaxWidth(),
+            )
+        }
     }
 }
 
