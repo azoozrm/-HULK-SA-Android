@@ -216,6 +216,29 @@ ops_test(
     'enabled Presence discovery is bounded and additive'
 );
 
+ops_test(ops_pairing_discovery([]) === null, 'Pairing discovery is absent by default');
+$pairingDiscovery = ops_pairing_discovery([
+    'enabled' => true,
+    'base_url' => 'https://hulksa.com/control-center/api/app/v1/pairing/',
+]);
+ops_test(
+    $pairingDiscovery === [
+        'enabled' => true,
+        'baseUrl' => 'https://hulksa.com/control-center/api/app/v1/pairing/',
+    ],
+    'enabled Pairing discovery is bounded and additive'
+);
+$pairingRejected = false;
+try {
+    ops_pairing_discovery([
+        'enabled' => true,
+        'base_url' => 'https://example.com/control-center/api/app/v1/pairing/',
+    ]);
+} catch (RuntimeException) {
+    $pairingRejected = true;
+}
+ops_test($pairingRejected, 'Pairing discovery rejects a foreign host');
+
 require __DIR__ . '/release-deletion.php';
 require __DIR__ . '/phase9b-redirect.php';
 

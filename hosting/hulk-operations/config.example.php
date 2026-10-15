@@ -31,4 +31,11 @@ return [
         'heartbeat_seconds' => 60,
         'online_ttl_seconds' => 180,
     ],
+
+    // Optional additive schema-v1 pairing discovery (advertisement only; the
+    // authoritative enable state lives in the Control Center private config).
+    'pairing' => [
+        'enabled' => false,
+        'base_url' => 'https://hulksa.com/control-center/api/app/v1/pairing/',
+    ],
 ];

@@ -221,6 +221,35 @@ function ops_presence_discovery(?array $settings = null): ?array
     ];
 }
 
+function ops_pairing_discovery(?array $settings = null): ?array
+{
+    $pairing = $settings ?? (ops_load_config()['pairing'] ?? []);
+    if (!is_array($pairing) || ($pairing['enabled'] ?? false) !== true) {
+        return null;
+    }
+
+    $baseUrl = rtrim(trim((string) ($pairing['base_url'] ?? '')), '/') . '/';
+    $parts = parse_url($baseUrl);
+    if (
+        !filter_var($baseUrl, FILTER_VALIDATE_URL)
+        || !is_array($parts)
+        || ($parts['scheme'] ?? '') !== 'https'
+        || strtolower((string) ($parts['host'] ?? '')) !== 'hulksa.com'
+        || ($parts['path'] ?? '') !== '/control-center/api/app/v1/pairing/'
+        || isset($parts['user'])
+        || isset($parts['pass'])
+        || isset($parts['query'])
+        || isset($parts['fragment'])
+    ) {
+        throw new RuntimeException('Operations pairing discovery configuration is invalid.');
+    }
+
+    return [
+        'enabled' => true,
+        'baseUrl' => $baseUrl,
+    ];
+}
+
 function ops_build_public_config(PDO $db, ?DateTimeImmutable $now = null): array
 {
     $currentTime = $now ?? new DateTimeImmutable('now');
@@ -242,6 +271,10 @@ function ops_build_public_config(PDO $db, ?DateTimeImmutable $now = null): array
     $presence = ops_presence_discovery();
     if ($presence !== null) {
         $payload['presence'] = $presence;
+    }
+    $pairing = ops_pairing_discovery();
+    if ($pairing !== null) {
+        $payload['pairing'] = $pairing;
     }
     return $payload;
 }

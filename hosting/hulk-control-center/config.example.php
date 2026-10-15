@@ -64,4 +64,42 @@ return [
         'cleanup_batch_size' => 200,
         'user_agent' => 'HULK-SA-Host-Health/1.0',
     ],
+
+    // TV/mobile pairing. Disabled by default; discovery in HULK Operations only
+    // advertises availability and never authorizes requests. Keep this file outside
+    // the web root and generate every secret locally; never commit real values.
+    'pairing' => [
+        'enabled' => false,
+        'ttl_seconds' => 600,
+        'retention_seconds' => 86400,
+        'max_retained_rows' => 5000,
+        'max_deliveries' => 20,
+        'poll_interval_seconds' => 3,
+
+        // base64 of >= 32 random bytes; independent from each other and from
+        // every Presence secret. Used to derive claim tokens.
+        'claim_secret' => 'CHANGE_ME_TO_BASE64_32_BYTES',
+
+        // base64 of >= 32 random bytes; HMACs client/request identifiers for
+        // pairing-only rate-limit rows.
+        'rate_limit_secret' => 'CHANGE_ME_TO_ANOTHER_BASE64_32_BYTES',
+
+        // AEAD envelope keys: base64 of EXACTLY 32 random bytes per key id.
+        'envelope_keys' => [
+            'v1' => 'CHANGE_ME_TO_BASE64_32_BYTES',
+        ],
+        'active_envelope_key_id' => 'v1',
+
+        'rate_limits' => [
+            'create_minute_per_ip' => 30,
+            'create_hour_per_ip' => 300,
+            'claim_minute_per_request' => 40,
+            'claim_minute_per_ip' => 600,
+            'ack_minute_per_request' => 10,
+            'cancel_minute_per_request' => 10,
+            'page_lookup_minute_per_ip' => 30,
+            'page_approve_minute_per_ip' => 20,
+            'page_approve_minute_per_request' => 10,
+        ],
+    ],
 ];

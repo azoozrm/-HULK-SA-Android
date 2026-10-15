@@ -1,7 +1,6 @@
 package sa.hulksa.player.ui.screens
 
 import android.graphics.Bitmap
-import android.graphics.Color as AndroidColor
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -50,10 +49,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
-import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import sa.hulksa.player.data.GrowthDestination
@@ -334,26 +329,5 @@ private fun GrowthQrImage(
     }
 }
 
-private fun generateGrowthQrBitmap(content: String, sizePixels: Int): Bitmap? = runCatching {
-    require(content.isNotBlank())
-    val safeSize = sizePixels.coerceIn(256, 1_400)
-    val matrix = QRCodeWriter().encode(
-        content,
-        BarcodeFormat.QR_CODE,
-        safeSize,
-        safeSize,
-        mapOf(
-            EncodeHintType.CHARACTER_SET to "UTF-8",
-            EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
-            EncodeHintType.MARGIN to 4,
-        ),
-    )
-    val pixels = IntArray(safeSize * safeSize)
-    for (y in 0 until safeSize) {
-        val rowOffset = y * safeSize
-        for (x in 0 until safeSize) {
-            pixels[rowOffset + x] = if (matrix[x, y]) AndroidColor.BLACK else AndroidColor.WHITE
-        }
-    }
-    Bitmap.createBitmap(pixels, safeSize, safeSize, Bitmap.Config.ARGB_8888)
-}.getOrNull()
+private fun generateGrowthQrBitmap(content: String, sizePixels: Int): Bitmap? =
+    encodeQrBitmap(content, sizePixels)

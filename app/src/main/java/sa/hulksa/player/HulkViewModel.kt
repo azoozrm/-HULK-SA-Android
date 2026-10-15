@@ -54,6 +54,8 @@ import sa.hulksa.player.data.OperationsServiceStatus
 import sa.hulksa.player.data.OperationsStore
 import sa.hulksa.player.data.OperationsUiState
 import sa.hulksa.player.data.OperationsUpdateDecision
+import sa.hulksa.player.data.PairingClient
+import sa.hulksa.player.data.PairingDeviceInfo
 import sa.hulksa.player.data.PendingAccountIdentityDecision
 import sa.hulksa.player.data.accountIdentityCandidateLabels
 import sa.hulksa.player.data.activePersistentOperationsAnnouncement
@@ -199,6 +201,7 @@ data class HulkUiState(
     val episodeNotificationsEnabled: Boolean = true,
     val notificationPopup: EpisodeNotificationPopup? = null,
     val operations: OperationsUiState = OperationsUiState(),
+    val pairing: PairingUiState = PairingUiState(),
     val playback: PlaybackRequest? = null,
     val diagnostics: DiagnosticsState = DiagnosticsState(),
     val accountDecision: AccountDecisionUiState? = null,
@@ -386,6 +389,39 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var session: AuthenticatedSession? = null
     private var sessionRestorationComplete: Boolean = false
     private val authenticationAttemptGate = AuthenticationAttemptGate()
+    private val pairingClient = PairingClient()
+    private val pairingAckReceiptOwner = PairingAckReceiptOwner(
+        scope = viewModelScope,
+        transport = pairingClient,
+    )
+    private val pairingAuthHandoff = object : PairingAuthHandoff {
+        override fun tryReserve(): Long? = authenticationAttemptGate.tryStartPairedHandoff()
+
+        override fun launch(credentials: Credentials, remember: Boolean, reservation: Long) {
+            beginReservedAuthentication(credentials, remember, reservation)
+        }
+
+        override fun release(reservation: Long) {
+            authenticationAttemptGate.complete(reservation)
+        }
+    }
+    private val pairingController = PairingController(
+        transport = pairingClient,
+        scope = viewModelScope,
+        handoff = pairingAuthHandoff,
+        installationIdProvider = repository::pairingInstallationId,
+        deviceInfoProvider = {
+            PairingDeviceInfo(
+                manufacturer = presenceDeviceMetadata.manufacturer.take(64),
+                model = presenceDeviceMetadata.model.take(64),
+                appVersion = presenceAppMetadata.versionName.take(32),
+            )
+        },
+        onConsumedAck = { baseUrl, requestId, claimToken ->
+            pairingAckReceiptOwner.tryEnqueue(baseUrl, requestId, claimToken)
+        },
+        onState = { pairing -> mutableState.update { it.copy(pairing = pairing) } },
+    )
     private val accountRefreshCoordinator = AccountRefreshCoordinator()
     private val diagnosticsCoordinator = DiagnosticsCoordinator()
     private val profileLibraryStartupGate = ProfileLibraryStartupGate()
@@ -476,6 +512,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun login(accessCode: String, username: String, password: String, remember: Boolean = true) {
+        pairingController.cancel()
         if (logoutJob?.isActive == true || authenticationAttemptGate.isActive()) return
         val normalizedAccessCode = normalizeResellerAccessCode(accessCode)
         if (normalizedAccessCode == null) {
@@ -496,6 +533,20 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             remember,
         )
     }
+
+    fun startPairing(remember: Boolean) {
+        val current = mutableState.value
+        if (current.screen != HulkScreen.LOGIN) return
+        if (current.isStarting || current.isLoading || current.accountDecision != null) return
+        if (!current.pairing.available) return
+        pairingController.start(remember)
+    }
+
+    fun retryPairing() = pairingController.retry()
+
+    fun regeneratePairing() = pairingController.regenerate()
+
+    fun cancelPairing() = pairingController.cancel()
 
     fun handleTvDeepLink(rawUri: String?) {
         if (!operationsDeviceIsTv) return
@@ -2222,6 +2273,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         activeOperationsConfig = config
         activeOperationsFetchedAtEpochMs = fetchedAtEpochMs
         presenceLifecycleOwner.updateDiscovery(config.presence)
+        pairingController.updateDiscovery(if (operationsDeviceIsTv) config.pairing else null)
         val nowEpochMs = System.currentTimeMillis()
         val activeAnnouncements = eligibleOperationsAnnouncements(
             announcements = config.announcements,
@@ -2869,6 +2921,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
         presenceLifecycleOwner.logout()
         authenticationAttemptGate.invalidate()
+        pairingController.cancel()
         pendingAccountDecision = null
         invalidateAccountRefresh()
         val pendingLoginJob = loginJob
@@ -2876,6 +2929,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         loginJob = null
         invalidateDetailsRequest()
         val operationsState = mutableState.value.operations
+        val pairingState = mutableState.value.pairing
         beginTvPlatformProfileTransition(resetPublishedScope = true)
         pendingTvDeepLink = null
         notificationScanJob?.cancel()
@@ -2928,6 +2982,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     episodeNotificationsEnabled = true,
                     notificationPopup = null,
                     operations = operationsState,
+                    pairing = pairingState,
                     errorMessage = errorMessage,
                 )
             } catch (error: CredentialEnvelopeRemovalException) {
@@ -2993,6 +3048,19 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         remember: Boolean,
     ) {
         val attemptGeneration = authenticationAttemptGate.tryStart() ?: return
+        beginReservedAuthentication(credentials, remember, attemptGeneration)
+    }
+
+    /**
+     * Runs an already reserved attempt through the existing loginJob/state/finally ownership.
+     * The reservation may come from a manual submit or from the serialized paired handoff; both
+     * share the one gate and stale-completion rules, and neither can reserve a second attempt.
+     */
+    private fun beginReservedAuthentication(
+        credentials: Credentials,
+        remember: Boolean,
+        attemptGeneration: Long,
+    ) {
         invalidateAccountRefresh()
         mutableState.update {
             it.copy(
@@ -3155,6 +3223,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun completeAuthenticatedLogin(authenticated: AuthenticatedSession) {
+        pairingController.cancel()
         invalidateCatalogRequests()
         invalidateDiagnosticsForSessionChange()
         invalidatePlayerProgressPersistence()

@@ -102,6 +102,11 @@ data class OperationsConfig(
     val features: OperationsFeatureFlags,
     val growth: OperationsGrowthConfig = OperationsGrowthConfig(),
     val presence: OperationsPresenceConfig? = null,
+    val pairing: OperationsPairingConfig? = null,
+)
+
+data class OperationsPairingConfig(
+    val baseUrl: String,
 )
 
 data class OperationsPresenceConfig(
@@ -315,6 +320,7 @@ fun parseOperationsConfig(rawJson: String): OperationsConfig? = runCatching {
     }
     val growth = parseOperationsGrowth(root.optJSONObject("growth"))
     val presence = parseOperationsPresence(root.optJSONObject("presence"))
+    val pairing = parseOperationsPairing(root.optJSONObject("pairing"))
 
     OperationsConfig(
         schemaVersion = schemaVersion,
@@ -325,7 +331,21 @@ fun parseOperationsConfig(rawJson: String): OperationsConfig? = runCatching {
         features = OperationsFeatureFlags.fromRemote(remoteFeatures),
         growth = growth,
         presence = presence,
+        pairing = pairing,
     )
+}.getOrNull()
+
+/**
+ * Optional pairing advertisement. Missing/false/malformed/invalid data disables pairing only and
+ * never rejects an otherwise valid Operations payload. Advertisements authorize no credentials.
+ */
+private fun parseOperationsPairing(value: JSONObject?): OperationsPairingConfig? = runCatching {
+    requireNotNull(value)
+    require(value.has("enabled") && value.get("enabled") is Boolean)
+    if (!value.getBoolean("enabled")) return@runCatching null
+    val baseUrl = canonicalPairingBaseUrl(value.getString("baseUrl"))
+    requireNotNull(baseUrl)
+    OperationsPairingConfig(baseUrl = baseUrl)
 }.getOrNull()
 
 private fun parseOperationsPresence(value: JSONObject?): OperationsPresenceConfig? = runCatching {

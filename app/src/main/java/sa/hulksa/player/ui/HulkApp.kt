@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -43,6 +44,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import sa.hulksa.player.AccountDecisionChoice
 import sa.hulksa.player.HulkScreen
@@ -84,6 +88,15 @@ internal fun detailsEntryShouldBlock(
     remoteLoading: Boolean,
     immediateShellAvailable: Boolean,
 ): Boolean = remoteLoading && !immediateShellAvailable
+
+/**
+ * The pairing entry exists only on real television hardware with an enabled validated discovery:
+ * window width, D-pad presence or an adaptive wide layout never turns a phone/tablet into a TV.
+ */
+internal fun pairingEntryOffered(
+    hardwareTelevision: Boolean,
+    pairingAvailable: Boolean,
+): Boolean = hardwareTelevision && pairingAvailable
 
 @Composable
 fun HulkApp(
@@ -250,6 +263,20 @@ fun HulkApp(
         onBack = viewModel::back,
     )
 
+    // Pairing polling belongs to the foreground LOGIN entry state: a backgrounded app or a screen
+    // change stops pending work; returning requires a fresh eligible user action.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) viewModel.cancelPairing()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(state.screen, viewModel) {
+        if (state.screen != HulkScreen.LOGIN) viewModel.cancelPairing()
+    }
+
     CompositionLocalProvider(LocalAdaptiveUi provides adaptiveUi) {
         Box(
             modifier = Modifier
@@ -278,10 +305,20 @@ fun HulkApp(
                     HulkScreen.LOGIN -> {
                         LoginScreen(
                             isTv = isTv,
+                            pairingOffered = pairingEntryOffered(
+                                hardwareTelevision = isTelevisionDevice,
+                                pairingAvailable = state.pairing.available,
+                            ),
+                            pairing = state.pairing,
+                            pairingReturnFocusSuspended = state.accountDecision != null,
                             isStarting = state.isStarting,
                             isLoading = state.isLoading,
                             errorMessage = state.errorMessage,
                             onLogin = viewModel::login,
+                            onStartPairing = viewModel::startPairing,
+                            onRetryPairing = viewModel::retryPairing,
+                            onRegeneratePairing = viewModel::regeneratePairing,
+                            onCancelPairing = viewModel::cancelPairing,
                         )
                         state.accountDecision?.let { decision ->
                             AccountIdentityDecisionDialog(

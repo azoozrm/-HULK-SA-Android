@@ -227,6 +227,19 @@ class OperationsBackendContractTest(unittest.TestCase):
         self.assertIn("heartbeat_seconds", config)
         self.assertIn("online_ttl_seconds", config)
 
+    def test_pairing_discovery_is_optional_advertisement_only(self) -> None:
+        operations = self.read("lib/operations.php")
+        config = self.read("config.example.php")
+        self.assertIn("'schemaVersion' => 1", operations)
+        self.assertIn("function ops_pairing_discovery", operations)
+        self.assertIn("$payload['pairing'] = $pairing", operations)
+        self.assertIn("'/control-center/api/app/v1/pairing/'", operations)
+        self.assertIn("'pairing' => [", config)
+        self.assertIn("'base_url' => 'https://hulksa.com/control-center/api/app/v1/pairing/'", config)
+        # Discovery never authorizes: no credential handling exists in Operations.
+        self.assertNotIn("iptv_password", operations)
+        self.assertNotIn("access_code", operations)
+
     def test_growth_styles_remain_available_for_reference(self) -> None:
         styles = self.read("assets/app.css")
         self.assertIn("@media (max-width: 650px)", styles)

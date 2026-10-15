@@ -626,6 +626,23 @@ class AccountSessionStore internal constructor(
     fun lastAccessCode(): String? = preferences.getString(KEY_LAST_ACCESS_CODE, null)
         ?.takeIf { it.isNotBlank() }
 
+    /**
+     * Confirms the existing non-secret installation key with a checked commit.
+     * Different store owners share process preferences, including failed-write memory.
+     * Account/session state is unchanged.
+     */
+    @Synchronized
+    fun installationIdForPairing(): String? {
+        val candidate = preferences.getString(KEY_INSTALLATION_ID, null)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?: UUID.randomUUID().toString()
+        val persisted = preferences.edit()
+            .putString(KEY_INSTALLATION_ID, candidate)
+            .commit()
+        return candidate.takeIf { persisted }
+    }
+
     @Synchronized
     fun clearActiveSession() {
         val currentAccountId = preferences.getString(KEY_ACCOUNT_ID, null)
