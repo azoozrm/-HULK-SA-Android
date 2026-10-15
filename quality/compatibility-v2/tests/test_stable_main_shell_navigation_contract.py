@@ -240,6 +240,29 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
         self.assertIn("settingsSectionFirstRequester(", settings)
         self.assertIn("focusRequester = focus.refreshAccount", settings)
 
+    def test_settings_entry_uses_the_explicit_attached_selected_section_target(self) -> None:
+        shell = self.read(MAIN_SHELL)
+        settings = self.read(SETTINGS_SCREEN)
+
+        # The shell owns one explicit Settings entry target and routes the SETTINGS handoff to it
+        # instead of the generic content group, so no detail action can take the first focus.
+        self.assertIn("val tvSettingsEntryFocusRequester = remember { FocusRequester() }", shell)
+        self.assertIn("?: if (state.destination == MainDestination.SETTINGS)", shell)
+        self.assertIn("tvSettingsEntryFocusRequester = tvSettingsEntryFocusRequester", shell)
+        self.assertIn("tvEntryFocusRequester = settingsEntryFocusRequester", shell)
+
+        # Settings attaches that target only to the selected section row and first entry requests
+        # exactly it; the previous generic first-entry request is gone.
+        self.assertIn(
+            "entryFocusRequester = entryFocusRequester?.takeIf { section == selected }",
+            settings,
+        )
+        self.assertIn(".then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)", settings)
+        self.assertIn("runCatching { tvEntryFocusRequester.requestFocus() }", settings)
+        # The old separate first-entry request on the section requester is gone; the remaining
+        # request on that requester is the RIGHT/Back return-to-section-list path.
+        self.assertEqual(1, settings.count("focus.sectionRequester(selectedSection).requestFocus()"))
+
     def test_existing_destination_focus_memory_remains_in_place(self) -> None:
         source = self.read(MAIN_SHELL)
         home = self.section(

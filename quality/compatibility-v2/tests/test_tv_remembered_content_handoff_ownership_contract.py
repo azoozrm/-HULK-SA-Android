@@ -90,9 +90,11 @@ class TvRememberedContentHandoffOwnershipContractTest(unittest.TestCase):
         self.assertIn("rememberedKey.isNotBlank()", decision)
         self.assertIn("state.searchQuery.isBlank()", decision)
         self.assertIn(
-            "tvCatalogAllFocusRequesters[state.destination] ?: currentTvContentFocusRequester",
+            "tvCatalogAllFocusRequesters[state.destination]\n"
+            "        ?: if (state.destination == MainDestination.SETTINGS)",
             shell,
         )
+        self.assertIn("tvSettingsEntryFocusRequester", shell)
         self.assertIn("initialAllFocusRequester = tvCatalogAllFocusRequesters[state.destination]", shell)
         self.assertIn("initialAllFocusPending = currentTvCatalogInitialFocusPending", shell)
         catalog_bar = self.section(

@@ -199,6 +199,7 @@ internal fun SettingsProScreen(
     onClearHistory: () -> Unit,
     onOpenDownloads: () -> Unit,
     downloadsEnabled: Boolean,
+    tvEntryFocusRequester: FocusRequester,
     onToggleWifiOnly: () -> Unit,
     onToggleDownloadSchedule: () -> Unit,
     onCycleConcurrentDownloads: () -> Unit,
@@ -342,13 +343,14 @@ internal fun SettingsProScreen(
         }.getOrDefault(false)
         if (focused) pendingSectionFocus = null
     }
-    // First Settings entry focuses the selected section row in the RIGHT section column; the
-    // detail callback is not invoked and no detail action is focused until OK/LEFT opens it.
-    LaunchedEffect(isTv) {
+    // First Settings entry focuses the selected section row in the RIGHT section column through the
+    // shell-provided explicit selected-section target; the detail callback is not invoked and no
+    // detail action is focused until OK/LEFT opens it.
+    LaunchedEffect(isTv, tvEntryFocusRequester) {
         if (!isTv) return@LaunchedEffect
         withFrameNanos { }
         withFrameNanos { }
-        runCatching { focus.sectionRequester(selectedSection).requestFocus() }
+        runCatching { tvEntryFocusRequester.requestFocus() }
     }
 
     val detailContent: @Composable () -> Unit = {
@@ -719,6 +721,7 @@ internal fun SettingsProScreen(
                         selected = selectedSection,
                         focus = focus,
                         expanded = true,
+                        entryFocusRequester = tvEntryFocusRequester,
                         onOpen = openSection,
                     )
                 }
@@ -869,6 +872,7 @@ private fun SettingsSectionList(
     focus: SettingsFocusGraph,
     expanded: Boolean,
     onOpen: (SettingsSection) -> Unit,
+    entryFocusRequester: FocusRequester? = null,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         sections.forEachIndexed { index, section ->
@@ -877,6 +881,7 @@ private fun SettingsSectionList(
                 selected = section == selected,
                 expanded = expanded,
                 focusRequester = focus.sectionRequester(section),
+                entryFocusRequester = entryFocusRequester?.takeIf { section == selected },
                 upRequester = sections.getOrNull(index - 1)?.let(focus::sectionRequester),
                 downRequester = sections.getOrNull(index + 1)?.let(focus::sectionRequester),
                 onOpen = { onOpen(section) },
@@ -897,6 +902,7 @@ private fun SettingsSectionRow(
     upRequester: FocusRequester?,
     downRequester: FocusRequester?,
     onOpen: () -> Unit,
+    entryFocusRequester: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -911,6 +917,7 @@ private fun SettingsSectionRow(
                 .weight(1f)
                 .heightIn(min = if (expanded) 58.dp else 50.dp)
                 .focusRequester(focusRequester)
+                .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
                 .focusProperties {
                     if (upRequester != null) up = upRequester
                     if (downRequester != null) down = downRequester
