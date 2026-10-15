@@ -53,6 +53,11 @@ import kotlinx.coroutines.withContext
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.MainDestination
+import sa.hulksa.player.ProfileRoutingRepair
+import sa.hulksa.player.ProfileStartupPresentation
+import sa.hulksa.player.ProfileStartupReadiness
+import sa.hulksa.player.withProfileSnapshot
+import sa.hulksa.player.withRoutingPreferences
 import sa.hulksa.player.data.AccountScopeStore
 import sa.hulksa.player.data.AuthenticatedSessionRegistry
 import sa.hulksa.player.data.HulkRepository
@@ -66,7 +71,6 @@ import sa.hulksa.player.data.ProfileContentSearchHistoryStore
 import sa.hulksa.player.data.ProfilePreferencesStore
 import sa.hulksa.player.data.ProfileRoutingPreferences
 import sa.hulksa.player.data.ProfileStore
-import sa.hulksa.player.data.ProfileStoreSnapshot
 import sa.hulksa.player.data.VerifiedKidsCatalogSnapshot
 import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
@@ -129,6 +133,21 @@ fun ProfileAwareHulkApp(
     val profilePinCredentialStore = remember(context) { ProfilePinCredentialStore(context) }
     val parentalCodeCredentialStore = remember(context) { ParentalCodeCredentialStore(context) }
     val hulkRepository = remember(context) { HulkRepository(context) }
+    val profileStartupReadiness = remember(profileStore, profilePreferencesStore, accountScopeStore) {
+        ProfileStartupReadiness(
+            loadSnapshot = profileStore::load,
+            loadRouting = profilePreferencesStore::routingForAccount,
+            isSessionOwnerCurrent = AuthenticatedSessionRegistry::isCurrent,
+            activeAccountId = accountScopeStore::activeAccountId,
+        )
+    }
+    val profileRoutingRepair = remember(profilePreferencesStore, accountScopeStore) {
+        ProfileRoutingRepair(
+            loadRouting = profilePreferencesStore::routingForAccount,
+            isSessionOwnerCurrent = AuthenticatedSessionRegistry::isCurrent,
+            activeAccountId = accountScopeStore::activeAccountId,
+        )
+    }
     val authenticated = state.account != null && state.screen != HulkScreen.LOGIN
     val activeAccountId = if (authenticated) accountScopeStore.activeAccountId() else null
     val authenticatedSessionOwner = if (authenticated) {
@@ -153,14 +172,17 @@ fun ProfileAwareHulkApp(
     var pinUnlockTargetId by remember(activeAccountId) { mutableStateOf<String?>(null) }
     var pinUnlockCredentialProfileId by remember(activeAccountId) { mutableStateOf<String?>(null) }
     var pinSecurityProfileId by remember(activeAccountId) { mutableStateOf<String?>(null) }
-    var profileSnapshot by remember(activeAccountId) {
-        mutableStateOf<ProfileStoreSnapshot?>(null)
+    // One coherent startup presentation: published scope + ready snapshot/routing + recoverable
+    // failure. A session-owner rotation inside the same scope revalidates in place instead of
+    // clearing it, so a successful refresh never disposes the mounted Settings/HulkApp subtree,
+    // its navigation memory, focus or scoped notices.
+    var profileStartup by remember(activeAccountId) {
+        mutableStateOf(ProfileStartupPresentation.Cleared)
     }
-    var profileLoadFailed by remember(activeAccountId) { mutableStateOf(false) }
+    val profileSnapshot = profileStartup.snapshot
+    val routingPreferences = profileStartup.routing
+    val profileLoadFailed = profileStartup.failed
     var profileLoadRequest by rememberSaveable(activeAccountId) { mutableIntStateOf(0) }
-    var routingPreferences by remember(activeAccountId) {
-        mutableStateOf<ProfileRoutingPreferences?>(null)
-    }
     var profileMutationInProgress by remember(activeAccountId) { mutableStateOf(false) }
     val profileMutationScope = rememberCoroutineScope()
     var pinRevision by rememberSaveable(activeAccountId) { mutableIntStateOf(0) }
@@ -248,74 +270,25 @@ fun ProfileAwareHulkApp(
             parentalCodeMigrationResolvedAccountId == activeAccountId
     )
 
+    // One ordered, cancellation-aware operation owns the whole profile-startup presentation. A
+    // same-account/provider session rotation (manual or resume reauthentication) revalidates in
+    // place; only cold startup, unresolved owners or a genuine account/provider transition clear
+    // the mounted presentation and use the startup loading/failure surface. The R01 race
+    // correction (equal-content reload cannot suppress routing readiness) lives in the operation.
     LaunchedEffect(
         authenticated,
         activeAccountId,
         authenticatedSessionOwner,
-        profileStore,
+        profileStartupReadiness,
         profileLoadRequest,
     ) {
-        profileSnapshot = null
-        profileLoadFailed = false
-        val sessionOwner = authenticatedSessionOwner
-        if (!authenticated) return@LaunchedEffect
-        if (activeAccountId == null || sessionOwner == null) {
-            if (activeAccountId == null) {
-                profileLoadFailed = true
-            }
-            return@LaunchedEffect
-        }
-        val accountId = activeAccountId
-        val loaded = try {
-            profileStore.load(accountId)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            null
-        }
-        if (
-            AuthenticatedSessionRegistry.isCurrent(sessionOwner) &&
-            accountScopeStore.activeAccountId() == accountId
-        ) {
-            profileSnapshot = loaded
-            profileLoadFailed = loaded == null
-        }
-    }
-
-    LaunchedEffect(
-        authenticated,
-        activeAccountId,
-        authenticatedSessionOwner,
-        profileSnapshot,
-        profilePreferencesStore,
-    ) {
-        routingPreferences = null
-        val accountId = activeAccountId
-        val sessionOwner = authenticatedSessionOwner
-        val snapshot = profileSnapshot
-        if (!authenticated || accountId == null || sessionOwner == null || snapshot == null) {
-            return@LaunchedEffect
-        }
-
-        val loaded = try {
-            profilePreferencesStore.routingForAccount(
-                expectedAccountId = accountId,
-                profileIds = snapshot.profiles.mapTo(linkedSetOf(), UserProfile::id),
-            )
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            ProfileRoutingPreferences()
-        }
-        if (
-            AuthenticatedSessionRegistry.isCurrent(sessionOwner) &&
-            accountScopeStore.activeAccountId() == accountId &&
-            profileSnapshot == snapshot
-        ) {
-            // Never reuse routing data across account/profile snapshots. A
-            // failed load uses the safe picker path instead.
-            routingPreferences = loaded ?: ProfileRoutingPreferences()
-        }
+        profileStartupReadiness.run(
+            authenticated = authenticated,
+            accountId = activeAccountId,
+            sessionOwner = authenticatedSessionOwner,
+            presentation = { profileStartup },
+            onPublish = { presentation -> profileStartup = presentation },
+        )
     }
 
     LaunchedEffect(
@@ -544,7 +517,7 @@ fun ProfileAwareHulkApp(
                 return@launch
             }
 
-            profileSnapshot = updatedSnapshot
+            profileStartup = profileStartup.withProfileSnapshot(updatedSnapshot)
             viewModel.selectDestination(targetDestination)
             if (profile.kind != ProfileKind.KIDS && targetDestination.isProfileCatalogDestination()) {
                 viewModel.updateSearch(targetCatalogMemory.query(targetDestination))
@@ -558,6 +531,25 @@ fun ProfileAwareHulkApp(
             switching = false
             resolvedForSession = true
             pickerRequestedFromApp = false
+        }
+    }
+
+    // A deleted profile is the only profile mutation that can invalidate the persisted routing
+    // default; repair it off-main from the live presentation while the captured session owner,
+    // account scope and presentation are all still current. Startup publication stays the single
+    // owner of the initial routing load.
+    fun repairRoutingAfterProfileDeletion(expectedAccountId: String) {
+        val sessionOwner = AuthenticatedSessionRegistry.currentOwner()
+            ?.takeIf { owner -> owner.accountId == expectedAccountId } ?: return
+        profileMutationScope.launch {
+            profileRoutingRepair.repair(
+                expectedAccountId = expectedAccountId,
+                sessionOwner = sessionOwner,
+                presentation = { profileStartup },
+                publish = { repaired ->
+                    profileStartup = profileStartup.withRoutingPreferences(repaired)
+                },
+            )
         }
     }
 
@@ -764,7 +756,7 @@ fun ProfileAwareHulkApp(
                         }
                         if (accountScopeStore.activeAccountId() != expectedAccountId) return@launch
                         if (created != null) {
-                            profileSnapshot = created.snapshot
+                            profileStartup = profileStartup.withProfileSnapshot(created.snapshot)
                             createProfileRequested = false
                         } else {
                             switchError =
@@ -1191,8 +1183,8 @@ fun ProfileAwareHulkApp(
                     )
                     val success = created != null &&
                         accountScopeStore.activeAccountId() == expectedAccountId
-                    if (success) {
-                        profileSnapshot = created?.snapshot
+                    if (success && created != null) {
+                        profileStartup = profileStartup.withProfileSnapshot(created.snapshot)
                         createProfileRequested = false
                     }
                     success
@@ -1210,7 +1202,9 @@ fun ProfileAwareHulkApp(
                 }
                 val success = expectedAccountId != null && updated != null &&
                     accountScopeStore.activeAccountId() == expectedAccountId
-                if (success) profileSnapshot = updated?.snapshot
+                if (success && updated != null) {
+                    profileStartup = profileStartup.withProfileSnapshot(updated.snapshot)
+                }
                 success
             },
             onDelete = { profileId ->
@@ -1224,8 +1218,9 @@ fun ProfileAwareHulkApp(
                     )
                     val deleted = deletion != null &&
                         accountScopeStore.activeAccountId() == expectedAccountId
-                    if (deleted) {
-                        profileSnapshot = deletion?.snapshot
+                    if (deleted && deletion != null) {
+                        profileStartup = profileStartup.withProfileSnapshot(deletion.snapshot)
+                        repairRoutingAfterProfileDeletion(expectedAccountId)
                         withContext(Dispatchers.IO) {
                             ProfileContentSearchHistoryStore(context)
                                 .removeProfileHistory(expectedAccountId, profileId)
@@ -1280,8 +1275,8 @@ fun ProfileAwareHulkApp(
             onManageProfiles = {
                 requestProfileManagement(startCreating = false)
             },
-            routingPreferences = routingPreferences ?: ProfileRoutingPreferences(),
-            onRoutingChanged = { updated -> routingPreferences = updated },
+            routingPreferences = profileStartup.routing ?: ProfileRoutingPreferences(),
+            onRoutingChanged = { updated -> profileStartup = profileStartup.withRoutingPreferences(updated) },
         )
 
             authenticated && !state.isProfileLibraryReady -> Box(

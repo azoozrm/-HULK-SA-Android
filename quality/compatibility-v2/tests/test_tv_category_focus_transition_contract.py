@@ -267,9 +267,12 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
         for target in ("MainDestination.LIVE", "MainDestination.MOVIES", "MainDestination.SERIES"):
             self.assertIn(f"{target} to FocusRequester()", shell)
         self.assertIn(
-            "tvCatalogAllFocusRequesters[state.destination] ?: currentTvContentFocusRequester",
+            "tvCatalogAllFocusRequesters[state.destination]\n"
+            "        ?: if (state.destination == MainDestination.SETTINGS)",
             shell,
         )
+        self.assertIn("tvSettingsEntryFocusRequester", shell)
+        self.assertIn("currentTvContentFocusRequester", shell)
         self.assertIn("currentTvDestinationFocusRequester.requestFocus()", shell)
         self.assertNotIn("currentTvContentFocusRequester.requestFocus()", shell)
         self.assertIn("initialAllFocusRequester = tvCatalogAllFocusRequesters[state.destination]", shell)

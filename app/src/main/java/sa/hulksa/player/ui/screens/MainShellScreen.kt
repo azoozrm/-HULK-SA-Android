@@ -1074,6 +1074,9 @@ fun MainShellScreen(
             MainDestination.SERIES to FocusRequester(),
         )
     }
+    // Shell-owned entry target for Settings: SettingsProScreen attaches it to the selected section
+    // row only, so the first focus request never lands on an unrelated detail action.
+    val tvSettingsEntryFocusRequester = remember { FocusRequester() }
     var tvContentFocusRequestId by remember { mutableLongStateOf(0L) }
     var pendingTvContentFocusHandoff by remember {
         mutableStateOf<TvContentFocusHandoffRequest?>(null)
@@ -1206,8 +1209,12 @@ fun MainShellScreen(
         navigationEntries.associate { entry -> entry.destination to FocusRequester() }
     }
     val currentTvContentFocusRequester = tvContentFocusRequesters.getValue(state.destination)
-    val currentTvDestinationFocusRequester =
-        tvCatalogAllFocusRequesters[state.destination] ?: currentTvContentFocusRequester
+    val currentTvDestinationFocusRequester = tvCatalogAllFocusRequesters[state.destination]
+        ?: if (state.destination == MainDestination.SETTINGS) {
+            tvSettingsEntryFocusRequester
+        } else {
+            currentTvContentFocusRequester
+        }
     val currentTvCatalogInitialFocusPending =
         pendingTvContentFocusHandoff?.destination == state.destination &&
             state.destination in tvCatalogAllFocusRequesters
@@ -1285,6 +1292,7 @@ fun MainShellScreen(
                         initialAllFocusRequester = tvCatalogAllFocusRequesters[state.destination],
                         initialAllFocusPending = currentTvCatalogInitialFocusPending,
                         downloadsExitFocusRequester = tvRailFocusRequesters[MainDestination.DOWNLOADS],
+                        tvSettingsEntryFocusRequester = tvSettingsEntryFocusRequester,
                     )
                 }
             }
@@ -1524,7 +1532,11 @@ private fun DestinationContent(
     initialAllFocusRequester: FocusRequester? = null,
     initialAllFocusPending: Boolean = false,
     downloadsExitFocusRequester: FocusRequester? = null,
+    tvSettingsEntryFocusRequester: FocusRequester? = null,
 ) {
+    val ownedSettingsEntryFocusRequester = remember { FocusRequester() }
+    val settingsEntryFocusRequester =
+        tvSettingsEntryFocusRequester ?: ownedSettingsEntryFocusRequester
     when (state.destination) {
         MainDestination.HOME -> CinemaHomeScreen(
             state = state,
@@ -1629,6 +1641,7 @@ private fun DestinationContent(
             onClearHistory = onClearHistory,
             onOpenDownloads = { onSelectDestination(MainDestination.DOWNLOADS) },
             downloadsEnabled = state.operations.features.downloadsEnabled,
+            tvEntryFocusRequester = settingsEntryFocusRequester,
             onToggleWifiOnly = onToggleWifiOnly,
             onToggleDownloadSchedule = onToggleDownloadSchedule,
             onCycleConcurrentDownloads = onCycleConcurrentDownloads,
