@@ -32,6 +32,16 @@ internal data class ProfileStartupPresentation(
     }
 }
 
+/** Production mutation rule for profile mutations published inside one presentation owner. */
+internal fun ProfileStartupPresentation.withProfileSnapshot(
+    snapshot: ProfileStoreSnapshot,
+): ProfileStartupPresentation = copy(snapshot = snapshot)
+
+/** Production mutation rule for routing mutations published inside one presentation owner. */
+internal fun ProfileStartupPresentation.withRoutingPreferences(
+    routing: ProfileRoutingPreferences,
+): ProfileStartupPresentation = copy(routing = routing)
+
 /**
  * Ordered, cancellation-aware startup readiness for the current authenticated session owner.
  *
@@ -102,12 +112,17 @@ internal class ProfileStartupReadiness(
      * startup, a different account/provider scope and unresolved owners clear the presentation and
      * use the startup loading/failure surface; a failed continuation load keeps the mounted
      * presentation and leaves recovery to the existing refresh notice path.
+     *
+     * A current session and account are necessary but not sufficient: the load only publishes
+     * while the presentation it started from is still the one mounted. A profile or routing
+     * mutation published through the production mutation rules during the load supersedes this
+     * attempt, so an obsolete completion can never roll the newer presentation back.
      */
     suspend fun run(
         authenticated: Boolean,
         accountId: String?,
         sessionOwner: AuthenticatedSessionOwner?,
-        current: ProfileStartupPresentation,
+        presentation: () -> ProfileStartupPresentation,
         onPublish: (ProfileStartupPresentation) -> Unit,
     ) {
         if (!authenticated) {
@@ -124,24 +139,30 @@ internal class ProfileStartupReadiness(
         }
 
         val scope = ProfileStartupScope(accountId, sessionOwner.providerId)
-        val continuation = current.scope == scope &&
-            current.snapshot != null &&
-            current.routing != null
+        val startedFrom = presentation()
+        val continuation = startedFrom.scope == scope &&
+            startedFrom.snapshot != null &&
+            startedFrom.routing != null
         if (!continuation) {
             onPublish(ProfileStartupPresentation.Cleared)
         }
+        // The presentation the load must still own at completion: the mounted one for a
+        // continuation, the just-published cleared one for a cold/transitional start.
+        val publicationBaseline = if (continuation) startedFrom else presentation()
 
         when (val readiness = load(accountId, sessionOwner)) {
             Result.Abandoned -> Unit
             Result.Failed -> if (!continuation) onPublish(ProfileStartupPresentation.Failed)
-            is Result.Ready -> onPublish(
-                ProfileStartupPresentation(
-                    scope = scope,
-                    snapshot = readiness.snapshot,
-                    routing = readiness.routing,
-                    failed = false,
-                ),
-            )
+            is Result.Ready -> if (presentation() === publicationBaseline) {
+                onPublish(
+                    ProfileStartupPresentation(
+                        scope = scope,
+                        snapshot = readiness.snapshot,
+                        routing = readiness.routing,
+                        failed = false,
+                    ),
+                )
+            }
         }
     }
 

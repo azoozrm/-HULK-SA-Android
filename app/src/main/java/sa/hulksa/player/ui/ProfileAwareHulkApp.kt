@@ -56,6 +56,8 @@ import sa.hulksa.player.MainDestination
 import sa.hulksa.player.ProfileRoutingRepair
 import sa.hulksa.player.ProfileStartupPresentation
 import sa.hulksa.player.ProfileStartupReadiness
+import sa.hulksa.player.withProfileSnapshot
+import sa.hulksa.player.withRoutingPreferences
 import sa.hulksa.player.data.AccountScopeStore
 import sa.hulksa.player.data.AuthenticatedSessionRegistry
 import sa.hulksa.player.data.HulkRepository
@@ -284,7 +286,7 @@ fun ProfileAwareHulkApp(
             authenticated = authenticated,
             accountId = activeAccountId,
             sessionOwner = authenticatedSessionOwner,
-            current = profileStartup,
+            presentation = { profileStartup },
             onPublish = { presentation -> profileStartup = presentation },
         )
     }
@@ -515,7 +517,7 @@ fun ProfileAwareHulkApp(
                 return@launch
             }
 
-            profileStartup = profileStartup.copy(snapshot = updatedSnapshot)
+            profileStartup = profileStartup.withProfileSnapshot(updatedSnapshot)
             viewModel.selectDestination(targetDestination)
             if (profile.kind != ProfileKind.KIDS && targetDestination.isProfileCatalogDestination()) {
                 viewModel.updateSearch(targetCatalogMemory.query(targetDestination))
@@ -533,25 +535,19 @@ fun ProfileAwareHulkApp(
     }
 
     // A deleted profile is the only profile mutation that can invalidate the persisted routing
-    // default; repair it off-main from the newly published snapshot while the captured session
-    // owner, account scope and published snapshot/routing are all still current. Startup
-    // publication stays the single owner of the initial routing load.
+    // default; repair it off-main from the live presentation while the captured session owner,
+    // account scope and presentation are all still current. Startup publication stays the single
+    // owner of the initial routing load.
     fun repairRoutingAfterProfileDeletion(expectedAccountId: String) {
-        val deletedSnapshot = profileStartup.snapshot ?: return
-        if (profileStartup.routing == null) return
         val sessionOwner = AuthenticatedSessionRegistry.currentOwner()
             ?.takeIf { owner -> owner.accountId == expectedAccountId } ?: return
         profileMutationScope.launch {
             profileRoutingRepair.repair(
                 expectedAccountId = expectedAccountId,
                 sessionOwner = sessionOwner,
-                snapshot = deletedSnapshot,
-                isStillCurrent = {
-                    profileStartup.snapshot === deletedSnapshot &&
-                        profileStartup.routing != null
-                },
+                presentation = { profileStartup },
                 publish = { repaired ->
-                    profileStartup = profileStartup.copy(routing = repaired)
+                    profileStartup = profileStartup.withRoutingPreferences(repaired)
                 },
             )
         }
@@ -760,7 +756,7 @@ fun ProfileAwareHulkApp(
                         }
                         if (accountScopeStore.activeAccountId() != expectedAccountId) return@launch
                         if (created != null) {
-                            profileStartup = profileStartup.copy(snapshot = created.snapshot)
+                            profileStartup = profileStartup.withProfileSnapshot(created.snapshot)
                             createProfileRequested = false
                         } else {
                             switchError =
@@ -1187,8 +1183,8 @@ fun ProfileAwareHulkApp(
                     )
                     val success = created != null &&
                         accountScopeStore.activeAccountId() == expectedAccountId
-                    if (success) {
-                        profileStartup = profileStartup.copy(snapshot = created?.snapshot)
+                    if (success && created != null) {
+                        profileStartup = profileStartup.withProfileSnapshot(created.snapshot)
                         createProfileRequested = false
                     }
                     success
@@ -1206,7 +1202,9 @@ fun ProfileAwareHulkApp(
                 }
                 val success = expectedAccountId != null && updated != null &&
                     accountScopeStore.activeAccountId() == expectedAccountId
-                if (success) profileStartup = profileStartup.copy(snapshot = updated?.snapshot)
+                if (success && updated != null) {
+                    profileStartup = profileStartup.withProfileSnapshot(updated.snapshot)
+                }
                 success
             },
             onDelete = { profileId ->
@@ -1220,8 +1218,8 @@ fun ProfileAwareHulkApp(
                     )
                     val deleted = deletion != null &&
                         accountScopeStore.activeAccountId() == expectedAccountId
-                    if (deleted) {
-                        profileStartup = profileStartup.copy(snapshot = deletion?.snapshot)
+                    if (deleted && deletion != null) {
+                        profileStartup = profileStartup.withProfileSnapshot(deletion.snapshot)
                         repairRoutingAfterProfileDeletion(expectedAccountId)
                         withContext(Dispatchers.IO) {
                             ProfileContentSearchHistoryStore(context)
@@ -1278,7 +1276,7 @@ fun ProfileAwareHulkApp(
                 requestProfileManagement(startCreating = false)
             },
             routingPreferences = profileStartup.routing ?: ProfileRoutingPreferences(),
-            onRoutingChanged = { updated -> profileStartup = profileStartup.copy(routing = updated) },
+            onRoutingChanged = { updated -> profileStartup = profileStartup.withRoutingPreferences(updated) },
         )
 
             authenticated && !state.isProfileLibraryReady -> Box(

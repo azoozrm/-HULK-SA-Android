@@ -51,7 +51,7 @@ class ProfileStartupContinuityTest {
                 authenticated = true,
                 accountId = accountId,
                 sessionOwner = owner("session-2"),
-                current = published,
+                presentation = { published },
             ) { presentation ->
                 emissions += presentation
                 published = presentation
@@ -75,7 +75,7 @@ class ProfileStartupContinuityTest {
                 authenticated = true,
                 accountId = accountId,
                 sessionOwner = owner("session-$session"),
-                current = published,
+                presentation = { published },
             ) { presentation ->
                 emissions += presentation
                 published = presentation
@@ -100,7 +100,7 @@ class ProfileStartupContinuityTest {
             loadRouting = { _, _ -> equalReloadRouting },
         )
 
-        readiness.run(true, accountId, owner("session-2"), published) { presentation ->
+        readiness.run(true, accountId, owner("session-2"), { published }) { presentation ->
             emissions += presentation
             published = presentation
         }
@@ -121,7 +121,7 @@ class ProfileStartupContinuityTest {
         )
 
         val attempt = async {
-            readiness.run(true, accountId, owner("session-2"), published) { presentation ->
+            readiness.run(true, accountId, owner("session-2"), { published }) { presentation ->
                 emissions += presentation
                 published = presentation
             }
@@ -146,7 +146,7 @@ class ProfileStartupContinuityTest {
         )
 
         val attempt = async {
-            readiness.run(true, accountId, owner("session-1"), published) { presentation ->
+            readiness.run(true, accountId, owner("session-1"), { published }) { presentation ->
                 emissions += presentation
                 published = presentation
             }
@@ -166,7 +166,7 @@ class ProfileStartupContinuityTest {
         val emissions = mutableListOf<ProfileStartupPresentation>()
         val readiness = readiness(loadSnapshot = { null })
 
-        readiness.run(true, accountId, owner("session-1"), ProfileStartupPresentation.Cleared) {
+        readiness.run(true, accountId, owner("session-1"), { ProfileStartupPresentation.Cleared }) {
             emissions += it
         }
 
@@ -182,7 +182,7 @@ class ProfileStartupContinuityTest {
         val emissions = mutableListOf<ProfileStartupPresentation>()
         val readiness = readiness(loadSnapshot = { null })
 
-        readiness.run(true, accountId, owner("session-2"), published) { presentation ->
+        readiness.run(true, accountId, owner("session-2"), { published }) { presentation ->
             emissions += presentation
             published = presentation
         }
@@ -199,7 +199,7 @@ class ProfileStartupContinuityTest {
         val otherAccountId = "account-b"
         val readiness = readiness(activeAccountId = { otherAccountId })
 
-        readiness.run(true, otherAccountId, owner("session-2"), published) { presentation ->
+        readiness.run(true, otherAccountId, owner("session-2"), { published }) { presentation ->
             emissions += presentation
             published = presentation
         }
@@ -215,7 +215,7 @@ class ProfileStartupContinuityTest {
         var published = readyPresentation()
         val readiness = readiness()
 
-        readiness.run(true, accountId, owner("session-2", providerId = "provider-b"), published) { presentation ->
+        readiness.run(true, accountId, owner("session-2", providerId = "provider-b"), { published }) { presentation ->
             emissions += presentation
             published = presentation
         }
@@ -236,7 +236,7 @@ class ProfileStartupContinuityTest {
         )
 
         val obsolete = async {
-            readiness.run(true, accountId, owner("session-1"), published) { presentation ->
+            readiness.run(true, accountId, owner("session-1"), { published }) { presentation ->
                 emissions += presentation
                 published = presentation
             }
@@ -255,7 +255,7 @@ class ProfileStartupContinuityTest {
         val emissions = mutableListOf<ProfileStartupPresentation>()
         val readiness = readiness()
 
-        readiness.run(false, accountId, null, readyPresentation()) { emissions += it }
+        readiness.run(false, accountId, null, { readyPresentation() }) { emissions += it }
 
         assertEquals(listOf(ProfileStartupPresentation.Cleared), emissions)
     }
@@ -268,7 +268,7 @@ class ProfileStartupContinuityTest {
         )
 
         try {
-            readiness.run(true, accountId, owner("session-1"), ProfileStartupPresentation.Cleared) {
+            readiness.run(true, accountId, owner("session-1"), { ProfileStartupPresentation.Cleared }) {
                 emissions += it
             }
             fail("CancellationException must be rethrown")
@@ -288,7 +288,7 @@ class ProfileStartupContinuityTest {
         )
 
         val attempt = async {
-            readiness.run(true, accountId, owner("session-2"), readyPresentation()) { emissions += it }
+            readiness.run(true, accountId, owner("session-2"), { readyPresentation() }) { emissions += it }
         }
         yield()
         attempt.cancel()
@@ -301,8 +301,8 @@ class ProfileStartupContinuityTest {
     // ---------- post-deletion routing repair ----------
 
     @Test
-    fun `routing repair publishes while the owner account and snapshot remain current`() = runBlocking {
-        val deleted = snapshot()
+    fun `routing repair publishes while the owner account and presentation remain current`() = runBlocking {
+        var presentation = readyPresentation()
         val repaired = routing(directEntry = false, defaultProfileId = null)
         var published: ProfileRoutingPreferences? = null
         val repair = ProfileRoutingRepair(
@@ -314,8 +314,7 @@ class ProfileStartupContinuityTest {
         repair.repair(
             expectedAccountId = accountId,
             sessionOwner = owner("session-1"),
-            snapshot = deleted,
-            isStillCurrent = { true },
+            presentation = { presentation },
         ) { published = it }
 
         assertEquals(repaired, published)
@@ -323,7 +322,7 @@ class ProfileStartupContinuityTest {
 
     @Test
     fun `routing repair cannot overwrite newer routing after a same-account relogin`() = runBlocking {
-        val deleted = snapshot()
+        var presentation = readyPresentation()
         val capturedOwner = owner("session-1")
         var currentOwner = capturedOwner
         var published: ProfileRoutingPreferences? = null
@@ -337,8 +336,7 @@ class ProfileStartupContinuityTest {
         repair.repair(
             expectedAccountId = accountId,
             sessionOwner = capturedOwner,
-            snapshot = deleted,
-            isStillCurrent = { true },
+            presentation = { presentation },
         ) { published = it }
 
         assertNull(published)
@@ -346,8 +344,7 @@ class ProfileStartupContinuityTest {
 
     @Test
     fun `routing repair is suppressed when a newer snapshot is published while loading`() = runBlocking {
-        val deleted = snapshot()
-        var currentSnapshot: ProfileStoreSnapshot? = deleted
+        var presentation = readyPresentation()
         val gate = CompletableDeferred<Unit>()
         var published: ProfileRoutingPreferences? = null
         val repair = ProfileRoutingRepair(
@@ -360,12 +357,11 @@ class ProfileStartupContinuityTest {
             repair.repair(
                 expectedAccountId = accountId,
                 sessionOwner = owner("session-1"),
-                snapshot = deleted,
-                isStillCurrent = { currentSnapshot === deleted },
+                presentation = { presentation },
             ) { published = it }
         }
         yield()
-        currentSnapshot = snapshot()
+        presentation = presentation.withProfileSnapshot(snapshot())
         gate.complete(Unit)
         attempt.await()
 
@@ -374,6 +370,7 @@ class ProfileStartupContinuityTest {
 
     @Test
     fun `routing repair is suppressed after the account scope changed`() = runBlocking {
+        var presentation = readyPresentation()
         var scopeAccount: String? = accountId
         var published: ProfileRoutingPreferences? = null
         val repair = ProfileRoutingRepair(
@@ -387,8 +384,7 @@ class ProfileStartupContinuityTest {
         repair.repair(
             expectedAccountId = accountId,
             sessionOwner = owner("session-1"),
-            snapshot = snapshot(),
-            isStillCurrent = { true },
+            presentation = { presentation },
         ) { published = it }
 
         assertNull(published)
@@ -396,6 +392,7 @@ class ProfileStartupContinuityTest {
 
     @Test
     fun `routing repair failure falls back to safe defaults only while still current`() = runBlocking {
+        var presentation = readyPresentation()
         var published: ProfileRoutingPreferences? = null
         val repair = ProfileRoutingRepair(
             loadRouting = { _, _ -> throw IllegalStateException("routing unavailable") },
@@ -406,8 +403,7 @@ class ProfileStartupContinuityTest {
         repair.repair(
             expectedAccountId = accountId,
             sessionOwner = owner("session-1"),
-            snapshot = snapshot(),
-            isStillCurrent = { true },
+            presentation = { presentation },
         ) { published = it }
 
         assertEquals(ProfileRoutingPreferences(), published)
@@ -415,6 +411,7 @@ class ProfileStartupContinuityTest {
 
     @Test
     fun `routing repair cancellation is never converted into a publication`() = runBlocking {
+        var presentation = readyPresentation()
         var published: ProfileRoutingPreferences? = null
         val repair = ProfileRoutingRepair(
             loadRouting = { _, _ -> throw CancellationException("stale repair") },
@@ -426,8 +423,7 @@ class ProfileStartupContinuityTest {
             repair.repair(
                 expectedAccountId = accountId,
                 sessionOwner = owner("session-1"),
-                snapshot = snapshot(),
-                isStillCurrent = { true },
+                presentation = { presentation },
             ) { published = it }
             fail("CancellationException must be rethrown")
         } catch (_: CancellationException) {
