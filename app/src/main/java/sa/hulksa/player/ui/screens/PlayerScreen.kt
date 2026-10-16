@@ -1953,6 +1953,16 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
         )
 
+        // A pending Resume decision is presented over the player's black backdrop only. The eager
+        // preparation above can present the first decoded frame while the decision is still
+        // undecided, and that picture must not composite beneath the scoped-alpha decision surface
+        // (it changes the accepted dark card's appearance as soon as readiness/duration arrives).
+        // This layer is scoped to the exact Resume presentation; the video is visible again the
+        // moment the decision is made.
+        if (moviePresentation == VodPlayerPresentation.RESUME) {
+            Box(Modifier.fillMaxSize().background(Color.Black))
+        }
+
         if (controlsVisible && nextCountdown < 0 && finalError == null && !movieModalActive && !browserVisible && activePanel == null && !controlsLocked) {
             PlayerTopBar(
                 title = playerDisplayTitle,
