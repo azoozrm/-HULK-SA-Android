@@ -1,35 +1,44 @@
-# HULK SA Android Icon System v1.4
+# HULK SA Icon System — Flat Gold R03
 
-This corrected package preserves the **same visual composition as the supplied official references** for the square badge and horizontal lockup. The square badge master uses the exact shield, wordmark, border, and spacing from the provided badge reference. The TV banner and lockup masters use the exact shield, wordmark, and spacing from the provided horizontal reference, so the banner is no longer cropped.
+Based on official PR #351 merge 4b54dfd91bde501ba545245e4690f08fe0881eff.
+This is a local Codex candidate, not a published commit or installed APK.
+R02 is retained in the earlier archive. R03 preserves its original HS/wordmark paths,
+flat gold, banner spacing, legacy densities and master artwork.
 
-## Included
+## Colour authority
 
-- SVG / PDF / EPS / PNG masters
-- Adaptive icon foreground / background / monochrome
-- Legacy launcher icons mdpi through xxxhdpi
-- Round launcher icons mdpi through xxxhdpi
-- Android TV / Google TV launcher icons
-- TV banners 160x90 through 640x360
-- 1080p and 4K TV banner masters
-- Play Store 512x512 icon
-- White notification icons
-- Android Studio resource structure under `android-res/`
-- Visual previews and QA reports
+HulkTheme.kt primary gold: #E6C352. Opaque brand background: #030402.
+Every coloured brand asset uses this flat gold, without gradients or substitute tints.
+Notification and themed-icon masks are white/transparent: Android supplies their colour.
+Antialiased edges use alpha coverage; this is not an artwork gradient.
+Third-party channel logos, real posters, semantic UI states and decorative watermarks
+retain their existing rendering rules; this is not a global theme recolour.
 
-## Important design note
+## Android and in-app anatomy
 
-- **Badge master, Play Store icon, and TV banner** follow the supplied references closely.
-- **Adaptive / launcher / notification icons** remain shield-only for runtime clarity and mask safety.
+- Adaptive foreground/monochrome: 108dp canvas, centered 65.5dp-high original shield,
+  entirely inside the central radius-33dp safe circle. Transparent foreground, solid background.
+- Explicit television-anydpi-v26 adaptive resource wins over the v21 legacy vector;
+  oversized television foreground override removed. Existing TV application aliases retained.
+- API 33 phone/round resources include monochrome. TV does not require themed icons.
+- TV banner remains a density-complete static 16:9 asset, not an adaptive banner.
+- In-app framed marks reuse hulk_sa_mark_reference with Fit, no launcher Crop or recolour.
+  Runtime loading placeholders fit the shortest side independently of real poster Crop.
+- Real successful remote channel logos retain their pale backing and Fit.
+- Launcher 48/72/96/144/192px; TV 80/120/160/240/320px; banner
+  160x90/240x135/320x180/480x270/640x360; notification 24/36/48/72/96px;
+  Store 512px; SVG/PDF/EPS/4096 masters and 1080p/4K banner exports.
 
-## Android integration note
+## Reproduction
 
-This package is staged for review only. Integrate only after approval and repository verification.
+From repository root: python3 brand/HULK-SA-Android-Icon-System-v1.4/export_assets.py
+Authoring dependencies: Inkscape, Pillow, pypdf. No new Android dependency.
+Then run validate_assets.py --repo-root . --output /tmp/hulk-icon-checks.json.
+The generated android-res directory mirrors real runtime resource names/qualifiers.
+Use the complete source patch for integration; see INTEGRATION.md.
 
-## Final v1.4 technical audit
+## Qualification
 
-- Genuine vector masters: SVG/PDF/EPS contain no embedded raster artwork.
-- Badge reference geometry fidelity IoU: **0.9545**.
-- Horizontal lockup reference geometry fidelity IoU: **0.9531**.
-- Full-background PNG exports are opaque RGB with an embedded sRGB profile.
-- TV banner content margins are validated at every density and at 1080p/4K master sizes.
-- Android SDK/aapt2/Gradle compilation was not available in this environment and is therefore not claimed.
+Asset/source checks are separate from Android compilation, device behaviour and owner acceptance.
+Current evidence is in the accompanying R03 delivery packet. No universal runtime PASS is claimed.
+Owner review PENDING; device capture OFF. DeepSeek is limited to exact-candidate build/install.

@@ -1,1074 +1,1372 @@
 {
+  "candidate": "icon-system-flat-gold-20261016-r03",
   "status": "PASS",
-  "version": "v1.4",
   "checks": [
     {
-      "asset": "master/hulk_sa_badge_master.svg",
-      "check": "reference geometry fidelity IoU >= 0.94",
+      "name": "live theme gold",
       "pass": true,
-      "iou": 0.954486,
-      "recall": 0.962027,
-      "precision": 0.991855
+      "detail": ""
     },
     {
-      "asset": "master/hulk_sa_lockup_master.svg",
-      "check": "reference geometry fidelity IoU >= 0.94",
+      "name": "flat gold/background",
       "pass": true,
-      "iou": 0.953132,
-      "recall": 0.962379,
-      "precision": 0.99002
+      "detail": ""
     },
     {
-      "asset": "adaptive/ic_launcher_background.svg",
-      "check": "genuine vector SVG - no embedded raster",
+      "name": "SVG palette notification/ic_stat_hulk_sa.svg",
       "pass": true,
-      "embedded_raster": false
-    },
-    {
-      "asset": "adaptive/ic_launcher_background.svg",
-      "check": "SVG paint references resolved",
-      "pass": true,
-      "missing_ids": []
-    },
-    {
-      "asset": "adaptive/ic_launcher_background.svg",
-      "check": "SVG renders successfully",
-      "pass": true,
-      "error": ""
-    },
-    {
-      "asset": "adaptive/ic_launcher_foreground.svg",
-      "check": "genuine vector SVG - no embedded raster",
-      "pass": true,
-      "embedded_raster": false
-    },
-    {
-      "asset": "adaptive/ic_launcher_foreground.svg",
-      "check": "SVG paint references resolved",
-      "pass": true,
-      "missing_ids": []
-    },
-    {
-      "asset": "adaptive/ic_launcher_foreground.svg",
-      "check": "SVG renders successfully",
-      "pass": true,
-      "error": ""
-    },
-    {
-      "asset": "adaptive/ic_launcher_monochrome.svg",
-      "check": "genuine vector SVG - no embedded raster",
-      "pass": true,
-      "embedded_raster": false
-    },
-    {
-      "asset": "adaptive/ic_launcher_monochrome.svg",
-      "check": "SVG paint references resolved",
-      "pass": true,
-      "missing_ids": []
-    },
-    {
-      "asset": "adaptive/ic_launcher_monochrome.svg",
-      "check": "SVG renders successfully",
-      "pass": true,
-      "error": ""
-    },
-    {
-      "asset": "master/hulk_sa_badge_master.svg",
-      "check": "genuine vector SVG - no embedded raster",
-      "pass": true,
-      "embedded_raster": false
-    },
-    {
-      "asset": "master/hulk_sa_badge_master.svg",
-      "check": "SVG paint references resolved",
-      "pass": true,
-      "missing_ids": []
-    },
-    {
-      "asset": "master/hulk_sa_badge_master.svg",
-      "check": "SVG renders successfully",
-      "pass": true,
-      "error": ""
-    },
-    {
-      "asset": "master/hulk_sa_lockup_master.svg",
-      "check": "genuine vector SVG - no embedded raster",
-      "pass": true,
-      "embedded_raster": false
-    },
-    {
-      "asset": "master/hulk_sa_lockup_master.svg",
-      "check": "SVG paint references resolved",
-      "pass": true,
-      "missing_ids": []
-    },
-    {
-      "asset": "master/hulk_sa_lockup_master.svg",
-      "check": "SVG renders successfully",
-      "pass": true,
-      "error": ""
-    },
-    {
-      "asset": "master/hulk_sa_mark_master.svg",
-      "check": "genuine vector SVG - no embedded raster",
-      "pass": true,
-      "embedded_raster": false
-    },
-    {
-      "asset": "master/hulk_sa_mark_master.svg",
-      "check": "SVG paint references resolved",
-      "pass": true,
-      "missing_ids": []
-    },
-    {
-      "asset": "master/hulk_sa_mark_master.svg",
-      "check": "SVG renders successfully",
-      "pass": true,
-      "error": ""
-    },
-    {
-      "asset": "master/hulk_sa_monochrome_master.svg",
-      "check": "genuine vector SVG - no embedded raster",
-      "pass": true,
-      "embedded_raster": false
-    },
-    {
-      "asset": "master/hulk_sa_monochrome_master.svg",
-      "check": "SVG paint references resolved",
-      "pass": true,
-      "missing_ids": []
-    },
-    {
-      "asset": "master/hulk_sa_monochrome_master.svg",
-      "check": "SVG renders successfully",
-      "pass": true,
-      "error": ""
-    },
-    {
-      "asset": "notification/ic_stat_hulk_sa.svg",
-      "check": "genuine vector SVG - no embedded raster",
-      "pass": true,
-      "embedded_raster": false
-    },
-    {
-      "asset": "notification/ic_stat_hulk_sa.svg",
-      "check": "SVG paint references resolved",
-      "pass": true,
-      "missing_ids": []
-    },
-    {
-      "asset": "notification/ic_stat_hulk_sa.svg",
-      "check": "SVG renders successfully",
-      "pass": true,
-      "error": ""
-    },
-    {
-      "asset": "tv/tv_banner_master.svg",
-      "check": "genuine vector SVG - no embedded raster",
-      "pass": true,
-      "embedded_raster": false
-    },
-    {
-      "asset": "tv/tv_banner_master.svg",
-      "check": "SVG paint references resolved",
-      "pass": true,
-      "missing_ids": []
-    },
-    {
-      "asset": "tv/tv_banner_master.svg",
-      "check": "SVG renders successfully",
-      "pass": true,
-      "error": ""
-    },
-    {
-      "asset": "master/hulk_sa_badge_master.pdf",
-      "check": "PDF contains no embedded bitmap images",
-      "pass": true,
-      "embedded_image_rows": 0
-    },
-    {
-      "asset": "master/hulk_sa_badge_master.pdf",
-      "check": "PDF wordmark is vector paths, not font dependency",
-      "pass": true,
-      "font_rows": 0
-    },
-    {
-      "asset": "master/hulk_sa_badge_master.pdf",
-      "check": "PDF renders at 200dpi",
-      "pass": true,
-      "render_count": 1
-    },
-    {
-      "asset": "master/hulk_sa_lockup_master.pdf",
-      "check": "PDF contains no embedded bitmap images",
-      "pass": true,
-      "embedded_image_rows": 0
-    },
-    {
-      "asset": "master/hulk_sa_lockup_master.pdf",
-      "check": "PDF wordmark is vector paths, not font dependency",
-      "pass": true,
-      "font_rows": 0
-    },
-    {
-      "asset": "master/hulk_sa_lockup_master.pdf",
-      "check": "PDF renders at 200dpi",
-      "pass": true,
-      "render_count": 1
-    },
-    {
-      "asset": "master/hulk_sa_mark_master.pdf",
-      "check": "PDF contains no embedded bitmap images",
-      "pass": true,
-      "embedded_image_rows": 0
-    },
-    {
-      "asset": "master/hulk_sa_mark_master.pdf",
-      "check": "PDF wordmark is vector paths, not font dependency",
-      "pass": true,
-      "font_rows": 0
-    },
-    {
-      "asset": "master/hulk_sa_mark_master.pdf",
-      "check": "PDF renders at 200dpi",
-      "pass": true,
-      "render_count": 1
-    },
-    {
-      "asset": "master/hulk_sa_badge_master.eps",
-      "check": "EPS contains no invoked bitmap image operator",
-      "pass": true,
-      "bitmap_invocations": 0
-    },
-    {
-      "asset": "master/hulk_sa_badge_master.eps",
-      "check": "EPS renders through Ghostscript",
-      "pass": true,
-      "returncode": 0,
-      "stderr": ""
-    },
-    {
-      "asset": "master/hulk_sa_lockup_master.eps",
-      "check": "EPS contains no invoked bitmap image operator",
-      "pass": true,
-      "bitmap_invocations": 0
-    },
-    {
-      "asset": "master/hulk_sa_lockup_master.eps",
-      "check": "EPS renders through Ghostscript",
-      "pass": true,
-      "returncode": 0,
-      "stderr": ""
-    },
-    {
-      "asset": "master/hulk_sa_mark_master.eps",
-      "check": "EPS contains no invoked bitmap image operator",
-      "pass": true,
-      "bitmap_invocations": 0
-    },
-    {
-      "asset": "master/hulk_sa_mark_master.eps",
-      "check": "EPS renders through Ghostscript",
-      "pass": true,
-      "returncode": 0,
-      "stderr": ""
-    },
-    {
-      "asset": "master/hulk_sa_badge_master_4096.png",
-      "check": "exact expected dimensions",
-      "pass": true,
-      "expected": [
-        4096,
-        4096
-      ],
-      "actual": [
-        4096,
-        4096
+      "detail": [
+        "#FFFFFF"
       ]
     },
     {
-      "asset": "master/hulk_sa_lockup_master_4096x2304.png",
-      "check": "exact expected dimensions",
+      "name": "SVG palette round/ic_launcher_round.svg",
       "pass": true,
-      "expected": [
-        4096,
-        2304
-      ],
-      "actual": [
-        4096,
-        2304
+      "detail": [
+        "#030402",
+        "#E6C352"
       ]
     },
     {
-      "asset": "master/hulk_sa_mark_master_4096.png",
-      "check": "exact expected dimensions",
+      "name": "SVG palette adaptive/ic_launcher_foreground.svg",
       "pass": true,
-      "expected": [
-        4096,
-        4096
-      ],
-      "actual": [
-        4096,
-        4096
+      "detail": [
+        "#E6C352"
       ]
     },
     {
-      "asset": "play-store/hulk_sa_play_store_512.png",
-      "check": "exact expected dimensions",
+      "name": "SVG palette adaptive/ic_launcher_monochrome.svg",
       "pass": true,
-      "expected": [
-        512,
-        512
-      ],
-      "actual": [
-        512,
-        512
+      "detail": [
+        "#FFFFFF"
       ]
     },
     {
-      "asset": "tv/tv_banner_master_1920x1080.png",
-      "check": "exact expected dimensions",
+      "name": "SVG palette adaptive/ic_launcher_background.svg",
       "pass": true,
-      "expected": [
-        1920,
-        1080
-      ],
-      "actual": [
-        1920,
-        1080
+      "detail": [
+        "#030402"
       ]
     },
     {
-      "asset": "tv/tv_banner_master_3840x2160.png",
-      "check": "exact expected dimensions",
+      "name": "SVG palette master/hulk_sa_badge_master.svg",
       "pass": true,
-      "expected": [
-        3840,
-        2160
-      ],
-      "actual": [
-        3840,
-        2160
+      "detail": [
+        "#030402",
+        "#E6C352"
       ]
     },
     {
-      "asset": "legacy/ic_launcher_mdpi_48.png",
-      "check": "exact expected dimensions",
+      "name": "SVG palette master/hulk_sa_lockup_master.svg",
       "pass": true,
-      "expected": [
-        48,
-        48
-      ],
-      "actual": [
-        48,
-        48
+      "detail": [
+        "#030402",
+        "#E6C352"
       ]
     },
     {
-      "asset": "round/ic_launcher_round_mdpi_48.png",
-      "check": "exact expected dimensions",
+      "name": "SVG palette master/hulk_sa_monochrome_master.svg",
       "pass": true,
-      "expected": [
-        48,
-        48
-      ],
-      "actual": [
-        48,
-        48
+      "detail": [
+        "#FFFFFF"
       ]
     },
     {
-      "asset": "legacy/ic_launcher_hdpi_72.png",
-      "check": "exact expected dimensions",
+      "name": "SVG palette master/hulk_sa_mark_master.svg",
       "pass": true,
-      "expected": [
-        72,
-        72
-      ],
-      "actual": [
-        72,
-        72
+      "detail": [
+        "#E6C352"
       ]
     },
     {
-      "asset": "round/ic_launcher_round_hdpi_72.png",
-      "check": "exact expected dimensions",
+      "name": "SVG palette legacy/ic_launcher.svg",
       "pass": true,
-      "expected": [
-        72,
-        72
-      ],
-      "actual": [
-        72,
-        72
+      "detail": [
+        "#030402",
+        "#E6C352"
       ]
     },
     {
-      "asset": "legacy/ic_launcher_xhdpi_96.png",
-      "check": "exact expected dimensions",
+      "name": "SVG palette tv/tv_banner_master.svg",
       "pass": true,
-      "expected": [
-        96,
-        96
-      ],
-      "actual": [
-        96,
-        96
+      "detail": [
+        "#030402",
+        "#E6C352"
       ]
     },
     {
-      "asset": "round/ic_launcher_round_xhdpi_96.png",
-      "check": "exact expected dimensions",
+      "name": "PNG decode/profile notification/ic_stat_hulk_sa_xxhdpi_72.png",
       "pass": true,
-      "expected": [
-        96,
-        96
-      ],
-      "actual": [
-        96,
-        96
-      ]
+      "detail": ""
     },
     {
-      "asset": "legacy/ic_launcher_xxhdpi_144.png",
-      "check": "exact expected dimensions",
+      "name": "PNG palette notification/ic_stat_hulk_sa_xxhdpi_72.png",
       "pass": true,
-      "expected": [
-        144,
-        144
-      ],
-      "actual": [
-        144,
-        144
-      ]
+      "detail": []
     },
     {
-      "asset": "round/ic_launcher_round_xxhdpi_144.png",
-      "check": "exact expected dimensions",
+      "name": "PNG decode/profile notification/ic_stat_hulk_sa_xxxhdpi_96.png",
       "pass": true,
-      "expected": [
-        144,
-        144
-      ],
-      "actual": [
-        144,
-        144
-      ]
+      "detail": ""
     },
     {
-      "asset": "legacy/ic_launcher_xxxhdpi_192.png",
-      "check": "exact expected dimensions",
+      "name": "PNG palette notification/ic_stat_hulk_sa_xxxhdpi_96.png",
       "pass": true,
-      "expected": [
-        192,
-        192
-      ],
-      "actual": [
-        192,
-        192
-      ]
+      "detail": []
     },
     {
-      "asset": "round/ic_launcher_round_xxxhdpi_192.png",
-      "check": "exact expected dimensions",
+      "name": "PNG decode/profile notification/ic_stat_hulk_sa_hdpi_36.png",
       "pass": true,
-      "expected": [
-        192,
-        192
-      ],
-      "actual": [
-        192,
-        192
-      ]
+      "detail": ""
     },
     {
-      "asset": "tv/tv_launcher_mdpi_80.png",
-      "check": "exact expected dimensions",
+      "name": "PNG palette notification/ic_stat_hulk_sa_hdpi_36.png",
       "pass": true,
-      "expected": [
-        80,
-        80
-      ],
-      "actual": [
-        80,
-        80
-      ]
+      "detail": []
     },
     {
-      "asset": "tv/tv_launcher_hdpi_120.png",
-      "check": "exact expected dimensions",
+      "name": "PNG decode/profile notification/ic_stat_hulk_sa_xhdpi_48.png",
       "pass": true,
-      "expected": [
-        120,
-        120
-      ],
-      "actual": [
-        120,
-        120
-      ]
+      "detail": ""
     },
     {
-      "asset": "tv/tv_launcher_xhdpi_160.png",
-      "check": "exact expected dimensions",
+      "name": "PNG palette notification/ic_stat_hulk_sa_xhdpi_48.png",
       "pass": true,
-      "expected": [
-        160,
-        160
-      ],
-      "actual": [
-        160,
-        160
-      ]
+      "detail": []
     },
     {
-      "asset": "tv/tv_launcher_xxhdpi_240.png",
-      "check": "exact expected dimensions",
+      "name": "PNG decode/profile notification/ic_stat_hulk_sa_mdpi_24.png",
       "pass": true,
-      "expected": [
-        240,
-        240
-      ],
-      "actual": [
-        240,
-        240
-      ]
+      "detail": ""
     },
     {
-      "asset": "tv/tv_launcher_xxxhdpi_320.png",
-      "check": "exact expected dimensions",
+      "name": "PNG palette notification/ic_stat_hulk_sa_mdpi_24.png",
       "pass": true,
-      "expected": [
-        320,
-        320
-      ],
-      "actual": [
-        320,
-        320
-      ]
+      "detail": []
     },
     {
-      "asset": "tv/tv_banner_mdpi_160x90.png",
-      "check": "exact expected dimensions",
+      "name": "PNG decode/profile round/ic_launcher_round_hdpi_72.png",
       "pass": true,
-      "expected": [
-        160,
-        90
-      ],
-      "actual": [
-        160,
-        90
-      ]
+      "detail": ""
     },
     {
-      "asset": "tv/tv_banner_hdpi_240x135.png",
-      "check": "exact expected dimensions",
+      "name": "PNG palette round/ic_launcher_round_hdpi_72.png",
       "pass": true,
-      "expected": [
-        240,
-        135
-      ],
-      "actual": [
-        240,
-        135
-      ]
+      "detail": []
     },
     {
-      "asset": "tv/tv_banner_xhdpi_320x180.png",
-      "check": "exact expected dimensions",
+      "name": "PNG decode/profile round/ic_launcher_round_xxhdpi_144.png",
       "pass": true,
-      "expected": [
-        320,
-        180
-      ],
-      "actual": [
-        320,
-        180
-      ]
+      "detail": ""
     },
     {
-      "asset": "tv/tv_banner_xxhdpi_480x270.png",
-      "check": "exact expected dimensions",
+      "name": "PNG palette round/ic_launcher_round_xxhdpi_144.png",
       "pass": true,
-      "expected": [
-        480,
-        270
-      ],
-      "actual": [
-        480,
-        270
-      ]
+      "detail": []
     },
     {
-      "asset": "tv/tv_banner_xxxhdpi_640x360.png",
-      "check": "exact expected dimensions",
+      "name": "PNG decode/profile round/ic_launcher_round_xhdpi_96.png",
       "pass": true,
-      "expected": [
-        640,
-        360
-      ],
-      "actual": [
-        640,
-        360
-      ]
+      "detail": ""
     },
     {
-      "asset": "notification/ic_stat_hulk_sa_mdpi_24.png",
-      "check": "exact expected dimensions",
+      "name": "PNG palette round/ic_launcher_round_xhdpi_96.png",
       "pass": true,
-      "expected": [
-        24,
-        24
-      ],
-      "actual": [
-        24,
-        24
-      ]
+      "detail": []
     },
     {
-      "asset": "notification/ic_stat_hulk_sa_hdpi_36.png",
-      "check": "exact expected dimensions",
+      "name": "PNG decode/profile round/ic_launcher_round_xxxhdpi_192.png",
       "pass": true,
-      "expected": [
-        36,
-        36
-      ],
-      "actual": [
-        36,
-        36
-      ]
+      "detail": ""
     },
     {
-      "asset": "notification/ic_stat_hulk_sa_xhdpi_48.png",
-      "check": "exact expected dimensions",
+      "name": "PNG palette round/ic_launcher_round_xxxhdpi_192.png",
       "pass": true,
-      "expected": [
-        48,
-        48
-      ],
-      "actual": [
-        48,
-        48
-      ]
+      "detail": []
     },
     {
-      "asset": "notification/ic_stat_hulk_sa_xxhdpi_72.png",
-      "check": "exact expected dimensions",
+      "name": "PNG decode/profile round/ic_launcher_round_mdpi_48.png",
       "pass": true,
-      "expected": [
-        72,
-        72
-      ],
-      "actual": [
-        72,
-        72
-      ]
+      "detail": ""
     },
     {
-      "asset": "notification/ic_stat_hulk_sa_xxxhdpi_96.png",
-      "check": "exact expected dimensions",
+      "name": "PNG palette round/ic_launcher_round_mdpi_48.png",
       "pass": true,
-      "expected": [
-        96,
-        96
-      ],
-      "actual": [
-        96,
-        96
-      ]
+      "detail": []
     },
     {
-      "asset": "adaptive/ic_launcher_background_432.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG decode/profile adaptive/ic_launcher_background_432.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": ""
     },
     {
-      "asset": "android-res/drawable-hdpi/tv_banner.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG palette adaptive/ic_launcher_background_432.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": []
     },
     {
-      "asset": "android-res/drawable-mdpi/tv_banner.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG decode/profile adaptive/ic_launcher_foreground_432.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": ""
     },
     {
-      "asset": "android-res/drawable-xhdpi/tv_banner.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG palette adaptive/ic_launcher_foreground_432.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": []
     },
     {
-      "asset": "android-res/drawable-xxhdpi/tv_banner.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG decode/profile adaptive/ic_launcher_monochrome_432.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": ""
     },
     {
-      "asset": "android-res/drawable-xxxhdpi/tv_banner.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG palette adaptive/ic_launcher_monochrome_432.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": []
     },
     {
-      "asset": "android-res/mipmap-hdpi/tv_launcher.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG decode/profile play-store/hulk_sa_play_store_512.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": ""
     },
     {
-      "asset": "android-res/mipmap-mdpi/tv_launcher.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG palette play-store/hulk_sa_play_store_512.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": []
     },
     {
-      "asset": "android-res/mipmap-xhdpi/tv_launcher.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG decode/profile master/hulk_sa_lockup_master_4096x2304.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": ""
     },
     {
-      "asset": "android-res/mipmap-xxhdpi/tv_launcher.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG palette master/hulk_sa_lockup_master_4096x2304.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": []
     },
     {
-      "asset": "android-res/mipmap-xxxhdpi/tv_launcher.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG decode/profile master/hulk_sa_badge_master_4096.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": ""
     },
     {
-      "asset": "master/hulk_sa_badge_master_4096.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG palette master/hulk_sa_badge_master_4096.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": []
     },
     {
-      "asset": "master/hulk_sa_lockup_master_4096x2304.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG decode/profile master/hulk_sa_mark_master_4096.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": ""
     },
     {
-      "asset": "play-store/hulk_sa_play_store_512.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG palette master/hulk_sa_mark_master_4096.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": []
     },
     {
-      "asset": "tv/tv_banner_hdpi_240x135.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG decode/profile legacy/ic_launcher_mdpi_48.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": ""
     },
     {
-      "asset": "tv/tv_banner_master_1920x1080.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG palette legacy/ic_launcher_mdpi_48.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": []
     },
     {
-      "asset": "tv/tv_banner_master_3840x2160.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG decode/profile legacy/ic_launcher_hdpi_72.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": ""
     },
     {
-      "asset": "tv/tv_banner_mdpi_160x90.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG palette legacy/ic_launcher_hdpi_72.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": []
     },
     {
-      "asset": "tv/tv_banner_xhdpi_320x180.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG decode/profile legacy/ic_launcher_xxhdpi_144.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": ""
     },
     {
-      "asset": "tv/tv_banner_xxhdpi_480x270.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG palette legacy/ic_launcher_xxhdpi_144.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": []
     },
     {
-      "asset": "tv/tv_banner_xxxhdpi_640x360.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG decode/profile legacy/ic_launcher_xxxhdpi_192.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": ""
     },
     {
-      "asset": "tv/tv_launcher_hdpi_120.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG palette legacy/ic_launcher_xxxhdpi_192.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": []
     },
     {
-      "asset": "tv/tv_launcher_mdpi_80.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG decode/profile legacy/ic_launcher_xhdpi_96.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": ""
     },
     {
-      "asset": "tv/tv_launcher_xhdpi_160.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG palette legacy/ic_launcher_xhdpi_96.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": []
     },
     {
-      "asset": "tv/tv_launcher_xxhdpi_240.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG decode/profile tv/tv_launcher_xxhdpi_240.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": ""
     },
     {
-      "asset": "tv/tv_launcher_xxxhdpi_320.png",
-      "check": "opaque RGB with embedded sRGB profile",
+      "name": "PNG palette tv/tv_launcher_xxhdpi_240.png",
       "pass": true,
-      "mode": "RGB",
-      "icc_bytes": 588
+      "detail": []
     },
     {
-      "asset": "play-store/hulk_sa_play_store_512.png",
-      "check": "Play Store <= 1MB",
+      "name": "PNG decode/profile tv/tv_banner_xhdpi_320x180.png",
       "pass": true,
-      "bytes": 40926
+      "detail": ""
     },
     {
-      "asset": "tv/tv_banner_hdpi_240x135.png",
-      "check": "TV banner visible gold content not cropped",
+      "name": "PNG palette tv/tv_banner_xhdpi_320x180.png",
       "pass": true,
-      "margins": [
-        36,
-        39,
-        32,
-        41
-      ]
+      "detail": []
     },
     {
-      "asset": "tv/tv_banner_master_1920x1080.png",
-      "check": "TV banner visible gold content not cropped",
+      "name": "PNG decode/profile tv/tv_launcher_xxxhdpi_320.png",
       "pass": true,
-      "margins": [
-        288,
-        316,
-        255,
-        332
-      ]
+      "detail": ""
     },
     {
-      "asset": "tv/tv_banner_master_3840x2160.png",
-      "check": "TV banner visible gold content not cropped",
+      "name": "PNG palette tv/tv_launcher_xxxhdpi_320.png",
       "pass": true,
-      "margins": [
-        577,
-        631,
-        511,
-        663
-      ]
+      "detail": []
     },
     {
-      "asset": "tv/tv_banner_mdpi_160x90.png",
-      "check": "TV banner visible gold content not cropped",
+      "name": "PNG decode/profile tv/tv_banner_xxhdpi_480x270.png",
       "pass": true,
-      "margins": [
-        24,
-        26,
-        21,
-        28
-      ]
+      "detail": ""
     },
     {
-      "asset": "tv/tv_banner_xhdpi_320x180.png",
-      "check": "TV banner visible gold content not cropped",
+      "name": "PNG palette tv/tv_banner_xxhdpi_480x270.png",
       "pass": true,
-      "margins": [
-        48,
-        52,
-        43,
-        55
-      ]
+      "detail": []
     },
     {
-      "asset": "tv/tv_banner_xxhdpi_480x270.png",
-      "check": "TV banner visible gold content not cropped",
+      "name": "PNG decode/profile tv/tv_launcher_mdpi_80.png",
       "pass": true,
-      "margins": [
-        72,
-        79,
-        64,
-        83
-      ]
+      "detail": ""
     },
     {
-      "asset": "tv/tv_banner_xxxhdpi_640x360.png",
-      "check": "TV banner visible gold content not cropped",
+      "name": "PNG palette tv/tv_launcher_mdpi_80.png",
       "pass": true,
-      "margins": [
-        96,
-        105,
-        85,
-        110
-      ]
+      "detail": []
     },
     {
-      "asset": "adaptive/ic_launcher_foreground_432.png",
-      "check": "Adaptive artwork inside 66dp safe zone and >=48dp wide",
+      "name": "PNG decode/profile tv/tv_banner_hdpi_240x135.png",
       "pass": true,
-      "bbox_dp": [
-        50.5,
-        66.0
-      ]
+      "detail": ""
     },
     {
-      "asset": "adaptive/ic_launcher_monochrome_432.png",
-      "check": "visible pixels are white-only",
-      "pass": true
-    },
-    {
-      "asset": "notification/ic_stat_hulk_sa_hdpi_36.png",
-      "check": "visible pixels are white-only",
-      "pass": true
-    },
-    {
-      "asset": "notification/ic_stat_hulk_sa_mdpi_24.png",
-      "check": "visible pixels are white-only",
-      "pass": true
-    },
-    {
-      "asset": "notification/ic_stat_hulk_sa_xhdpi_48.png",
-      "check": "visible pixels are white-only",
-      "pass": true
-    },
-    {
-      "asset": "notification/ic_stat_hulk_sa_xxhdpi_72.png",
-      "check": "visible pixels are white-only",
-      "pass": true
-    },
-    {
-      "asset": "notification/ic_stat_hulk_sa_xxxhdpi_96.png",
-      "check": "visible pixels are white-only",
-      "pass": true
-    },
-    {
-      "asset": "android-res/drawable/ic_launcher_foreground.xml",
-      "check": "Android XML well-formed",
+      "name": "PNG palette tv/tv_banner_hdpi_240x135.png",
       "pass": true,
-      "error": ""
+      "detail": []
     },
     {
-      "asset": "android-res/drawable/ic_launcher_monochrome.xml",
-      "check": "Android XML well-formed",
+      "name": "PNG decode/profile tv/tv_launcher_xhdpi_160.png",
       "pass": true,
-      "error": ""
+      "detail": ""
     },
     {
-      "asset": "android-res/drawable/ic_stat_hulk_sa.xml",
-      "check": "Android XML well-formed",
+      "name": "PNG palette tv/tv_launcher_xhdpi_160.png",
       "pass": true,
-      "error": ""
+      "detail": []
     },
     {
-      "asset": "android-res/mipmap-anydpi-v26/ic_launcher.xml",
-      "check": "Android XML well-formed",
+      "name": "PNG decode/profile tv/tv_banner_master_3840x2160.png",
       "pass": true,
-      "error": ""
+      "detail": ""
     },
     {
-      "asset": "android-res/mipmap-anydpi-v26/ic_launcher_round.xml",
-      "check": "Android XML well-formed",
+      "name": "PNG palette tv/tv_banner_master_3840x2160.png",
       "pass": true,
-      "error": ""
+      "detail": []
     },
     {
-      "asset": "android-res/mipmap-anydpi-v33/ic_launcher.xml",
-      "check": "Android XML well-formed",
+      "name": "PNG decode/profile tv/tv_launcher_hdpi_120.png",
       "pass": true,
-      "error": ""
+      "detail": ""
     },
     {
-      "asset": "android-res/mipmap-anydpi-v33/ic_launcher_round.xml",
-      "check": "Android XML well-formed",
+      "name": "PNG palette tv/tv_launcher_hdpi_120.png",
       "pass": true,
-      "error": ""
+      "detail": []
     },
     {
-      "asset": "android-res/values/colors.xml",
-      "check": "Android XML well-formed",
+      "name": "PNG decode/profile tv/tv_banner_mdpi_160x90.png",
       "pass": true,
-      "error": ""
+      "detail": ""
     },
     {
-      "asset": "android-res/mipmap-anydpi-v33/ic_launcher.xml",
-      "check": "Android 13+ monochrome reference present",
-      "pass": true
+      "name": "PNG palette tv/tv_banner_mdpi_160x90.png",
+      "pass": true,
+      "detail": []
     },
     {
-      "asset": "android-res/mipmap-anydpi-v33/ic_launcher_round.xml",
-      "check": "Android 13+ monochrome reference present",
-      "pass": true
+      "name": "PNG decode/profile tv/tv_banner_xxxhdpi_640x360.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette tv/tv_banner_xxxhdpi_640x360.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile tv/tv_banner_master_1920x1080.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette tv/tv_banner_master_1920x1080.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile previews/adaptive_mask_qa.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG decode/profile previews/phone_tablet_preview.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG decode/profile previews/tv_preview_1920x1080.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG decode/profile previews/tv_preview_3840x2160.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG decode/profile previews/qa_contact_sheet.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG decode/profile android-res/drawable-hdpi/ic_stat_hulk.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/drawable-hdpi/ic_stat_hulk.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-mdpi/ic_launcher.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-mdpi/ic_launcher.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-mdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-mdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-mdpi/tv_banner.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-mdpi/tv_banner.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-mdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-mdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-xhdpi/ic_launcher.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-xhdpi/ic_launcher.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-xhdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-xhdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-xhdpi/tv_banner.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-xhdpi/tv_banner.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-xhdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-xhdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/drawable-xxxhdpi/ic_stat_hulk.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/drawable-xxxhdpi/ic_stat_hulk.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/drawable-mdpi/ic_stat_hulk.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/drawable-mdpi/ic_stat_hulk.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-hdpi/ic_launcher.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-hdpi/ic_launcher.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-hdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-hdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-hdpi/tv_banner.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-hdpi/tv_banner.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-hdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-hdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/drawable-xxhdpi/ic_stat_hulk.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/drawable-xxhdpi/ic_stat_hulk.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-xxxhdpi/ic_launcher.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-xxxhdpi/ic_launcher.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-xxxhdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-xxxhdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-xxxhdpi/tv_banner.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-xxxhdpi/tv_banner.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-xxxhdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-xxxhdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/drawable-xhdpi/ic_stat_hulk.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/drawable-xhdpi/ic_stat_hulk.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-xxhdpi/ic_launcher.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-xxhdpi/ic_launcher.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-xxhdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-xxhdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-xxhdpi/tv_banner.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-xxhdpi/tv_banner.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-xxhdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-xxhdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/mipmap-nodpi/hulk_sa_tv_launcher_v14.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/mipmap-nodpi/hulk_sa_tv_launcher_v14.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "PNG decode/profile android-res/drawable-nodpi/hulk_sa_logo.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "PNG palette android-res/drawable-nodpi/hulk_sa_logo.png",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "density mipmap-mdpi/ic_launcher.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-mdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-mdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-mdpi/tv_banner.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "notification density mdpi",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-hdpi/ic_launcher.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-hdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-hdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-hdpi/tv_banner.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "notification density hdpi",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-xhdpi/ic_launcher.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-xhdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-xhdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-xhdpi/tv_banner.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "notification density xhdpi",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-xxhdpi/ic_launcher.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-xxhdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-xxhdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-xxhdpi/tv_banner.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "notification density xxhdpi",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-xxxhdpi/ic_launcher.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-xxxhdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-xxxhdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "density mipmap-xxxhdpi/tv_banner.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "notification density xxxhdpi",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror drawable-hdpi/ic_stat_hulk.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-mdpi/ic_launcher.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-mdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-mdpi/tv_banner.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-mdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "mirror colors subset",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror drawable/hulk_sa_mark_reference.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror drawable/hulk_sa_channel_placeholder.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror drawable/ic_stat_hulk.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror drawable/ic_launcher_foreground.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror drawable-television/hulk_sa_logo.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-xhdpi/ic_launcher.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-xhdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-xhdpi/tv_banner.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-xhdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror drawable-xxxhdpi/ic_stat_hulk.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror values-television/hulk_tv_launcher_aliases.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror drawable-v33/ic_launcher_monochrome.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror drawable-mdpi/ic_stat_hulk.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-anydpi-v26/ic_launcher_round.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-anydpi-v26/ic_launcher_tv.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-anydpi-v26/ic_launcher.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-hdpi/ic_launcher.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-hdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-hdpi/tv_banner.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-hdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror drawable-xxhdpi/ic_stat_hulk.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-xxxhdpi/ic_launcher.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-xxxhdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-xxxhdpi/tv_banner.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-xxxhdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror drawable-xhdpi/ic_stat_hulk.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-xxhdpi/ic_launcher.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-xxhdpi/ic_launcher_round.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-xxhdpi/tv_banner.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-xxhdpi/ic_launcher_tv.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-nodpi/hulk_sa_tv_launcher_v14.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror drawable-nodpi/hulk_sa_logo.png",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-television-anydpi-v26/ic_launcher_tv.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-anydpi-v33/ic_launcher_round.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-anydpi-v33/ic_launcher.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "runtime mirror mipmap-television-anydpi-v21/ic_launcher_tv.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "obsolete integration names removed",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "XML flat android-res/values/colors.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "XML flat android-res/drawable/hulk_sa_mark_reference.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/drawable/hulk_sa_mark_reference.xml:hulk_icon_gold",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "XML flat android-res/drawable/hulk_sa_channel_placeholder.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/drawable/hulk_sa_channel_placeholder.xml:ic_launcher_background",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/drawable/hulk_sa_channel_placeholder.xml:hulk_icon_gold",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "XML flat android-res/drawable/ic_stat_hulk.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "XML flat android-res/drawable/ic_launcher_foreground.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/drawable/ic_launcher_foreground.xml:hulk_icon_gold",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "XML flat android-res/drawable-television/hulk_sa_logo.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/drawable-television/hulk_sa_logo.xml:hulk_icon_gold",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "XML flat android-res/values-television/hulk_tv_launcher_aliases.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/values-television/hulk_tv_launcher_aliases.xml:ic_launcher_tv",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/values-television/hulk_tv_launcher_aliases.xml:ic_launcher_tv",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "XML flat android-res/drawable-v33/ic_launcher_monochrome.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "XML flat android-res/mipmap-anydpi-v26/ic_launcher_round.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/mipmap-anydpi-v26/ic_launcher_round.xml:ic_launcher_background",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/mipmap-anydpi-v26/ic_launcher_round.xml:ic_launcher_foreground",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "XML flat android-res/mipmap-anydpi-v26/ic_launcher_tv.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/mipmap-anydpi-v26/ic_launcher_tv.xml:ic_launcher_background",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/mipmap-anydpi-v26/ic_launcher_tv.xml:ic_launcher_foreground",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "XML flat android-res/mipmap-anydpi-v26/ic_launcher.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/mipmap-anydpi-v26/ic_launcher.xml:ic_launcher_background",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/mipmap-anydpi-v26/ic_launcher.xml:ic_launcher_foreground",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "XML flat android-res/mipmap-television-anydpi-v26/ic_launcher_tv.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/mipmap-television-anydpi-v26/ic_launcher_tv.xml:ic_launcher_background",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/mipmap-television-anydpi-v26/ic_launcher_tv.xml:ic_launcher_foreground",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "XML flat android-res/mipmap-anydpi-v33/ic_launcher_round.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/mipmap-anydpi-v33/ic_launcher_round.xml:ic_launcher_background",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/mipmap-anydpi-v33/ic_launcher_round.xml:ic_launcher_foreground",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/mipmap-anydpi-v33/ic_launcher_round.xml:ic_launcher_monochrome",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "XML flat android-res/mipmap-anydpi-v33/ic_launcher.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/mipmap-anydpi-v33/ic_launcher.xml:ic_launcher_background",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/mipmap-anydpi-v33/ic_launcher.xml:ic_launcher_foreground",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/mipmap-anydpi-v33/ic_launcher.xml:ic_launcher_monochrome",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "XML flat android-res/mipmap-television-anydpi-v21/ic_launcher_tv.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/mipmap-television-anydpi-v21/ic_launcher_tv.xml:ic_launcher_background",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resource reference android-res/mipmap-television-anydpi-v21/ic_launcher_tv.xml:hulk_icon_gold",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "adaptive layers mipmap-anydpi-v26/ic_launcher.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "adaptive layers mipmap-anydpi-v26/ic_launcher_round.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "adaptive layers mipmap-anydpi-v26/ic_launcher_tv.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "adaptive layers mipmap-television-anydpi-v26/ic_launcher_tv.xml",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "no oversized TV foreground override",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "themed ic_launcher",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "themed ic_launcher_round",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "adaptive safe circle drawable/ic_launcher_foreground.xml",
+      "pass": true,
+      "detail": {
+        "radius_dp": 32.750460825662245,
+        "height_dp": 65.49999998100002
+      }
+    },
+    {
+      "name": "adaptive safe circle drawable-v33/ic_launcher_monochrome.xml",
+      "pass": true,
+      "detail": {
+        "radius_dp": 32.750460825662245,
+        "height_dp": 65.49999998100002
+      }
+    },
+    {
+      "name": "fitted brand bounds (16, 16)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "fitted brand bounds (18, 18)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "fitted brand bounds (24, 24)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "fitted brand bounds (48, 48)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "fitted brand bounds (82, 82)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "fitted brand bounds (132, 132)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "fitted brand bounds (320, 180)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "fitted brand bounds (180, 270)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "fitted brand bounds (270, 180)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "R02 banner composition",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "placeholder contains independently of Crop",
+      "pass": true,
+      "detail": ""
     }
   ],
-  "reference_fidelity": {
-    "badge": {
-      "iou": 0.9544862665310274,
-      "source_recall": 0.9620268739201985,
-      "generated_precision": 0.991854878351736
-    },
-    "lockup": {
-      "iou": 0.9531324032640168,
-      "source_recall": 0.9623787375415283,
-      "generated_precision": 0.99002036938304
-    }
-  },
-  "pdf_vector_audit": {
-    "hulk_sa_badge_master.pdf": {
-      "embedded_images": 0,
-      "fonts": 0,
-      "renders": 1
-    },
-    "hulk_sa_lockup_master.pdf": {
-      "embedded_images": 0,
-      "fonts": 0,
-      "renders": 1
-    },
-    "hulk_sa_mark_master.pdf": {
-      "embedded_images": 0,
-      "fonts": 0,
-      "renders": 1
-    }
-  },
-  "limitations": [
-    "Android SDK/aapt2/Gradle compilation was not available in this environment; Android resource compilation is not claimed."
-  ]
+  "count": 266,
+  "failed": [],
+  "scope": "source/assets only; Android build and runtime separately recorded"
 }

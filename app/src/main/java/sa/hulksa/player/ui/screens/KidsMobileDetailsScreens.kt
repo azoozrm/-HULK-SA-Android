@@ -572,7 +572,7 @@ private fun KidsMobileHero(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BrandBadge(Modifier.size(46.dp))
+            BrandBadge(Modifier.size(46.dp), light = true)
             Spacer(Modifier.weight(1f))
             FocusButton("رجوع", onBack, primary = false, compact = true)
         }

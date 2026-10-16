@@ -482,7 +482,7 @@ private fun MovieDetailsProTvPolished(
                             },
                     )
                     Spacer(Modifier.weight(1f))
-                    BrandBadge(Modifier.size(52.dp))
+                    BrandBadge(Modifier.size(52.dp), light = true)
                 }
 
                 Column(
@@ -1330,7 +1330,7 @@ private fun SeriesDetailsProTvPolished(
                             },
                     )
                     Spacer(Modifier.weight(1f))
-                    BrandBadge(Modifier.size(52.dp))
+                    BrandBadge(Modifier.size(52.dp), light = true)
                 }
 
                 Column(

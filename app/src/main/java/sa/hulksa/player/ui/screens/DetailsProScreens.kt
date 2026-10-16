@@ -371,7 +371,7 @@ fun MovieDetailsProScreen(
                         ),
                     )
                     Spacer(Modifier.weight(1f))
-                    BrandBadge(Modifier.size(if (isTv) 52.dp else 44.dp))
+                    BrandBadge(Modifier.size(if (isTv) 52.dp else 44.dp), light = true)
                 }
 
                 Column(
@@ -976,7 +976,7 @@ fun SeriesDetailsProScreen(
                             ),
                         )
                         Spacer(Modifier.weight(1f))
-                        BrandBadge(Modifier.size(if (isTv) 52.dp else 44.dp))
+                        BrandBadge(Modifier.size(if (isTv) 52.dp else 44.dp), light = true)
                     }
 
                     Column(

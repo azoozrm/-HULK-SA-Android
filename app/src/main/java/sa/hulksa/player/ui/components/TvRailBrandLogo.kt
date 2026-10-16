@@ -12,8 +12,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -43,17 +41,10 @@ fun BrandLogo(modifier: Modifier) {
             abs(maxHeight.value - expectedRailLogoSizeDp) <= 0.5f
 
         if (!isTvRailLogo) {
-            val compactCategoryMark = maxWidth <= 24.dp && maxHeight <= 24.dp
             Image(
                 painter = painterResource(R.drawable.hulk_sa_mark_reference),
                 contentDescription = "HULK SA",
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val compactScale = if (compactCategoryMark) 1.00f else 1f
-                        scaleX = compactScale
-                        scaleY = compactScale
-                    },
+                modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit,
             )
             return@BoxWithConstraints
@@ -68,20 +59,15 @@ fun BrandLogo(modifier: Modifier) {
             modifier = Modifier
                 .fillMaxSize()
                 .clip(shape)
-                .background(Color.Black)
-                .border(1.5.dp, colors.goldBright.copy(alpha = .72f), shape)
+                .background(colors.background)
+                .border(1.5.dp, colors.gold.copy(alpha = .72f), shape)
                 .padding(3.dp),
             contentAlignment = Alignment.Center,
         ) {
             Image(
                 painter = painterResource(R.drawable.hulk_sa_mark_reference),
                 contentDescription = "HULK SA",
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = 1.12f
-                        scaleY = 1.12f
-                    },
+                modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit,
             )
         }

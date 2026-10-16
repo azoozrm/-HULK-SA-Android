@@ -1,32 +1,6 @@
 {
-  "status": "PASS",
-  "reference_fidelity": {
-    "badge": {
-      "iou": 0.9544862665310274,
-      "source_recall": 0.9620268739201985,
-      "generated_precision": 0.991854878351736
-    },
-    "lockup": {
-      "iou": 0.9531324032640168,
-      "source_recall": 0.9623787375415283,
-      "generated_precision": 0.99002036938304
-    }
-  },
-  "pdf": {
-    "hulk_sa_badge_master.pdf": {
-      "embedded_images": 0,
-      "fonts": 0,
-      "renders": 1
-    },
-    "hulk_sa_lockup_master.pdf": {
-      "embedded_images": 0,
-      "fonts": 0,
-      "renders": 1
-    },
-    "hulk_sa_mark_master.pdf": {
-      "embedded_images": 0,
-      "fonts": 0,
-      "renders": 1
-    }
-  }
+  "round": "R03",
+  "masters": "original vector paths; flat R02 paints",
+  "adaptive": "centered 65.5dp height inside 66dp safe circle",
+  "owner_acceptance": "PENDING"
 }

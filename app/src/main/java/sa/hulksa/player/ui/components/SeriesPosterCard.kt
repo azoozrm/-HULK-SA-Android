@@ -39,7 +39,6 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,7 +46,6 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import sa.hulksa.player.R
 import sa.hulksa.player.data.SeriesCardMetadataStore
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
@@ -148,11 +146,11 @@ fun SeriesPosterCard(
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
-                placeholder = painterResource(R.drawable.ic_launcher_foreground),
+                placeholder = rememberHulkPlaceholderPainter(),
                 onError = { artworkFailed = true },
             )
         } else {
-            BrandLogo(Modifier.fillMaxSize().padding(22.dp))
+            HulkFallbackArtwork(Modifier.fillMaxSize(), HulkArtworkSurface.POSTER)
         }
 
         Box(

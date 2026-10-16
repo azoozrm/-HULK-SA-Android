@@ -2627,7 +2627,7 @@ private fun PlayerTopBar(
                 if (!isLive && speed != 1f) Text(speedLabel(speed), color = colors.textMuted, fontSize = 11.sp)
             }
         }
-        BrandBadge(Modifier.size(48.dp))
+        BrandBadge(Modifier.size(48.dp), light = true)
     }
 }
 

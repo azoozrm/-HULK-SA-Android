@@ -18,7 +18,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -61,6 +60,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -188,16 +190,33 @@ fun BrandLogo(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
 ) {
-    BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
-        val compactFallback = maxWidth <= 24.dp && maxHeight <= 24.dp
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Image(
-            painter = painterResource(
-                if (compactFallback) R.drawable.ic_launcher_foreground else R.drawable.hulk_sa_logo,
-            ),
+            painter = painterResource(R.drawable.hulk_sa_mark_reference),
             contentDescription = "HULK SA",
             modifier = Modifier.fillMaxSize(),
             contentScale = contentScale,
         )
+    }
+}
+
+/** Draw the original mark centered in any frame, independently of a remote image's crop policy. */
+@Composable
+internal fun rememberHulkPlaceholderPainter(): Painter {
+    val mark = painterResource(R.drawable.hulk_sa_mark_reference)
+    val background = LocalHulkColors.current.background
+    return remember(mark, background) {
+        object : Painter() {
+            override val intrinsicSize: Size = Size.Unspecified
+
+            override fun DrawScope.onDraw() {
+                drawRect(background)
+                val side = minOf(size.width, size.height)
+                translate((size.width - side) / 2f, (size.height - side) / 2f) {
+                    with(mark) { draw(Size(side, side)) }
+                }
+            }
+        }
     }
 }
 
@@ -217,49 +236,50 @@ fun HulkFallbackArtwork(
     Box(
         modifier = modifier
             .clip(shape)
-            .background(
-                Brush.linearGradient(
-                    listOf(Color(0xFF080906), Color(0xFF171912)),
-                ),
-            )
+            .background(colors.background)
             .border(1.dp, colors.gold.copy(alpha = .24f), shape),
         contentAlignment = Alignment.Center,
     ) {
-        when (surface) {
-            HulkArtworkSurface.SQUARE -> AsyncImage(
-                model = R.mipmap.ic_launcher_tv,
-                contentDescription = "HULK SA",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
-            HulkArtworkSurface.POSTER -> BrandLogo(
-                Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 34.dp),
-            )
-            HulkArtworkSurface.WIDE -> BrandLogo(
-                Modifier.fillMaxSize().padding(horizontal = 44.dp, vertical = 14.dp),
-            )
-        }
+        Image(
+            painter = rememberHulkPlaceholderPainter(),
+            contentDescription = "HULK SA",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Fit,
+        )
     }
 }
 
 @Composable
 fun BrandBadge(
     modifier: Modifier = Modifier,
+    light: Boolean = false,
 ) {
     val shape = RoundedCornerShape(16.dp)
+    val background = if (light) Color(0xFFF0EEE7) else LocalHulkColors.current.background
+    val borderColor =
+        if (light) Color.White.copy(alpha = .72f) else LocalHulkColors.current.gold.copy(alpha = .72f)
     Box(
         modifier = modifier
             .clip(shape)
-            .background(Color(0xFFF0EEE7))
-            .border(1.dp, Color.White.copy(alpha = .72f), shape),
+            .background(background)
+            .border(1.dp, borderColor, shape),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            painter = painterResource(R.drawable.ic_launcher_foreground),
-            contentDescription = "HULK SA",
-            tint = Color(0xFF171912),
-            modifier = Modifier.fillMaxSize().padding(2.dp),
-        )
+        if (light) {
+            Icon(
+                painter = painterResource(R.drawable.hulk_sa_badge_light),
+                contentDescription = "HULK SA",
+                tint = Color(0xFF171912),
+                modifier = Modifier.fillMaxSize().padding(2.dp),
+            )
+        } else {
+            Image(
+                painter = painterResource(R.drawable.hulk_sa_mark_reference),
+                contentDescription = "HULK SA",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize().padding(2.dp),
+            )
+        }
     }
 }
 
@@ -666,7 +686,7 @@ fun CompactPosterCard(
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
-                placeholder = painterResource(R.drawable.ic_launcher_foreground),
+                placeholder = rememberHulkPlaceholderPainter(),
                 onError = { artworkFailed = true },
             )
         } else {
@@ -1008,7 +1028,7 @@ internal fun BoxedCatalogCard(
                     contentDescription = item.name,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
-                    placeholder = painterResource(R.drawable.ic_launcher_foreground),
+                    placeholder = rememberHulkPlaceholderPainter(),
                     onError = { artworkFailed = true },
                 )
             } else {
@@ -1858,15 +1878,15 @@ fun LiveChannelHomeCard(
                     contentDescription = name,
                     modifier = Modifier.fillMaxSize().padding(8.dp),
                     contentScale = ContentScale.Fit,
-                    placeholder = painterResource(R.drawable.hulk_sa_channel_placeholder),
+                    placeholder = rememberHulkPlaceholderPainter(),
                     onError = { artworkFailed = true },
                 )
             } else {
-                BrandLogo(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 30.dp, vertical = 10.dp)
-                        .graphicsLayer { alpha = .5f },
+                Image(
+                    painter = rememberHulkPlaceholderPainter(),
+                    contentDescription = "HULK SA",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
                 )
             }
             if (isFavorite) {
@@ -2027,49 +2047,30 @@ fun ChannelLogo(
     modifier: Modifier = Modifier,
 ) {
     var imageFailed by remember(item.posterUrl) { mutableStateOf(false) }
-    BoxWithConstraints(
+    var imageLoaded by remember(item.posterUrl) { mutableStateOf(false) }
+    val colors = LocalHulkColors.current
+    Box(
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xFFF0EEE7))
+            .background(if (imageLoaded && !imageFailed) Color(0xFFF0EEE7) else colors.background)
             .border(1.dp, Color.White.copy(alpha = .18f), RoundedCornerShape(10.dp)),
         contentAlignment = Alignment.Center,
     ) {
-        val compactCategoryFallback = maxWidth <= 24.dp && maxHeight <= 24.dp
-
         if (!item.posterUrl.isNullOrBlank() && !imageFailed) {
             AsyncImage(
                 model = item.posterUrl,
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize().padding(4.dp),
                 contentScale = ContentScale.Fit,
-                placeholder = painterResource(
-                    if (compactCategoryFallback) {
-                        R.drawable.hulk_sa_mark_reference
-                    } else {
-                        R.drawable.hulk_sa_channel_placeholder
-                    },
-                ),
+                placeholder = rememberHulkPlaceholderPainter(),
+                onSuccess = { imageLoaded = true },
                 onError = { imageFailed = true },
             )
-        } else if (compactCategoryFallback) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF10110D)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Image(
-                    painter = painterResource(R.drawable.hulk_sa_mark_reference),
-                    contentDescription = "HULK SA",
-                    modifier = Modifier.fillMaxSize().padding(4.dp),
-                    contentScale = ContentScale.Fit,
-                )
-            }
         } else {
             Image(
-                painter = painterResource(R.drawable.hulk_sa_channel_placeholder),
+                painter = rememberHulkPlaceholderPainter(),
                 contentDescription = "HULK SA",
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().padding(4.dp),
                 contentScale = ContentScale.Fit,
             )
         }
