@@ -1,1 +1,1 @@
-Square and horizontal official references were traced into vector paths. v1.3 restores the original composition for the badge and banner and removes the previous crop/regression.
+R03: original vector paths retained; R02 gold and TV spacing retained. Adaptive transform intentionally revised to 65.5dp safe-circle fit. UI mark uses the existing reference footprint. No claimed photo similarity score.

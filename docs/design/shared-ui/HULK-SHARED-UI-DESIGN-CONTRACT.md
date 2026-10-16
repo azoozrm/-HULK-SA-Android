@@ -1423,3 +1423,16 @@ mismatch stays editable for retry, matching confirmation saves once, cancel neve
 keypad row reaches the visible Back, direct PinPanel stage change completes both stages, and the
 QR Back receives focus and dismisses once. R01–R03 records are preserved; this record supersedes
 only the conflicting R03 logo-slot wording and adds the confirmed PIN stage-input cause.
+
+## 18. Owner-directed icon-system R03 candidate (2026-10-16)
+
+The owner authorized Codex to complete the icon package and in-app framed brand fallbacks
+from the PR #351 merge, preserving R02 flat gold and increased TV banner spacing.
+For this bounded brand scope, historical original-colour/immutable-byte wording is superseded:
+HS/wordmark path identity remains; coloured brand fills use theme gold #E6C352, opaque brand
+backdrops use #030402. System monochrome/notification masks remain system-tinted.
+Adaptive icon padding is independent of in-app mark padding. Framed brand artwork is centered
+and aspect-preserving, without launcher Crop, extra graphics scaling or dark Icon tint.
+Actual media/channel images, outer frame geometry, semantic state colours, navigation and
+PR #351 heart/focus corrections remain unchanged. R03 owner acceptance is PENDING; source
+verification and static artwork inspection are not Android runtime or device visual acceptance.

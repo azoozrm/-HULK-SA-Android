@@ -393,7 +393,7 @@ private fun SeriesHeroV2(
                 .padding(horizontal = if (isTv) 26.dp else 15.dp, vertical = if (isTv) 18.dp else 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BrandBadge(Modifier.size(if (isTv) 56.dp else 48.dp))
+            BrandBadge(Modifier.size(if (isTv) 56.dp else 48.dp), light = true)
             Spacer(Modifier.weight(1f))
             FocusButton("رجوع", onBack, primary = false, compact = true)
         }

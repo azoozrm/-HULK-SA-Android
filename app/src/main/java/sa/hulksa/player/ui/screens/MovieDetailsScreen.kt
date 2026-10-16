@@ -167,7 +167,7 @@ fun MovieDetailsScreen(
                         .padding(horizontal = if (isTv) 30.dp else 12.dp, vertical = if (isTv) 24.dp else 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    BrandBadge(Modifier.size(if (isTv) 54.dp else 49.dp))
+                    BrandBadge(Modifier.size(if (isTv) 54.dp else 49.dp), light = true)
                     Spacer(Modifier.weight(1f))
                     FocusButton("رجوع", onBack, primary = false, compact = true)
                 }

@@ -1,10 +1,22 @@
-# HULK SA Android Icon System v1.4 — Repository Integration
+# R03 integration
 
-- Transport package SHA-256: `82926ba0b8ec7173eef073e851adf8d7f3c6b97be72015d374da27c7ded86660`
-- Package QA: **PASS — 126 checks, 0 failures**
-- Runtime lockup SHA-256: `013326d5a7989d173626fe020d99a0e26394d1f8329360c18fc7f9103619c584`
-- xhdpi TV banner SHA-256: `1e303a68a7d7811a20e0fd7804953fdf447a7ccf52f8d6b76d5011fb702db786`
-- xhdpi TV launcher SHA-256: `8f0eef91260fdf74cad020cdc48a1f17ff432dcc14783e7f79e591ee3f79a16b`
-- Manifest contract remains `@mipmap/ic_launcher`, `@mipmap/ic_launcher_round`, `@mipmap/ic_launcher_tv`, `@mipmap/tv_banner`.
-- Notification runtime contract remains `@drawable/ic_stat_hulk`.
-- Full audited source/master/previews/QA package is retained in this directory.
+Apply the enclosing source.patch to a clean isolated checkout at
+4b54dfd91bde501ba545245e4690f08fe0881eff. Verify the enclosing manifest first.
+Run git apply --check before git apply. The patch includes binary assets, new files,
+resource deletions, Kotlin consumers and scoped validation-pin updates.
+Do not copy the old R02 overlay over the new official tree.
+
+android-res is a brand-only mirror using the runtime names:
+ic_launcher, ic_launcher_round, ic_launcher_tv, tv_banner, ic_stat_hulk,
+hulk_sa_mark_reference, hulk_sa_channel_placeholder and hulk_sa_logo.
+Its values/colors.xml is a subset to merge, never a replacement for application colors.xml.
+The complete patch performs the required merges and deletes the oversized TV foreground;
+copying android-res alone cannot remove stale qualifiers or update Kotlin consumers.
+
+The explicit television v26 adaptive definition is required despite the generic v26 definition,
+because UI-mode qualification has precedence over platform-version qualification.
+Retain television v21 as the pre-26 fallback and retain application TV aliases.
+
+Frozen source/artifact evidence identifies the dirty candidate. Build/install only through
+current engineering contracts. No commit, push, PR, merge, signing change, tag or release
+is authorized in the build/install handoff. Do not redesign or recolour assets on the executor.
