@@ -46,6 +46,7 @@ import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.QrCode2
+import androidx.compose.material.icons.rounded.ShoppingCart
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
@@ -444,6 +445,7 @@ fun LoginScreen(
                     onRememberChange = { rememberAccount = !rememberAccount },
                     isLoading = isLoading,
                     isTv = isTv,
+                    subscriptionUsesQr = subscriptionUsesQr,
                     pairingOffered = pairingOffered,
                     pairingVisible = pairing.visible,
                     pairingReturnFocusSuspended = pairingReturnFocusSuspended,
@@ -559,6 +561,7 @@ private fun LoginPanel(
     onRememberChange: () -> Unit,
     isLoading: Boolean,
     isTv: Boolean,
+    subscriptionUsesQr: Boolean,
     pairingOffered: Boolean,
     pairingVisible: Boolean,
     pairingReturnFocusSuspended: Boolean,
@@ -853,7 +856,7 @@ private fun LoginPanel(
             text = "اشتراك جديد",
             onClick = onOpenSubscription,
             outlined = true,
-            glyph = Icons.Rounded.QrCode2,
+            glyph = if (subscriptionUsesQr) Icons.Rounded.QrCode2 else Icons.Rounded.ShoppingCart,
             minHeightDp = actionFloorDp,
             captionGlyphGap = actionCaptionGap,
             onFocused = {
