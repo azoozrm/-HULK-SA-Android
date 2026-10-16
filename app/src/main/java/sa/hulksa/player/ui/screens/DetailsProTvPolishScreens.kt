@@ -36,6 +36,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -115,6 +116,23 @@ private data class DetailsTvLazyFocusRequest(
     val sourceItemKey: String,
     val targetItemKey: String,
     val targetRequester: FocusRequester,
+    val token: Int = 0,
+)
+
+/**
+ * One Series season/row focus handoff in the polished TV route. The target is identified by its
+ * page slot and structural row offset, and its absolute page index is resolved from the current
+ * layout when the handoff executes, so an error notice insertion/removal or a removed row can never
+ * focus the wrong item. The token ties the request to the direction/selection generation that
+ * created it; a newer command invalidates it before it can focus.
+ */
+private data class DetailsTvSeasonFocusRequest(
+    val targetSeasonIndex: Int?,
+    val targetItemKey: String,
+    val targetSlot: SeriesLazyTargetSlot,
+    val targetRowIndex: Int,
+    val targetRequester: FocusRequester,
+    val token: Int,
 )
 
 private fun detailsTvPolishMetrics(widthDp: Int, heightDp: Int): DetailsTvPolishMetrics {
@@ -869,7 +887,6 @@ private fun SeriesDetailsProTvPolished(
     val relatedKeys = relatedItems.map { "${it.type}:${it.id}" }
     val relatedRequesters = remember(series.id, relatedKeys) { List(relatedItems.size) { FocusRequester() } }
     val firstEpisodeRequester = episodeCardRequesters.firstOrNull()
-    val firstSeasonRequester = seasonRequesters.firstOrNull()
     val tabRequesters = remember(series.id) {
         SeriesDetailsTab.entries.associateWith { FocusRequester() }
     }
@@ -897,21 +914,142 @@ private fun SeriesDetailsProTvPolished(
     var pendingLazyFocus by remember(series.id, selectedSeason) {
         mutableStateOf<DetailsTvLazyFocusRequest?>(null)
     }
+    val seasonListState = rememberLazyListState()
+    val seriesTabsIndex = seriesDetailsTabsItemIndex(errorMessage != null)
+    val currentErrorMessage by rememberUpdatedState(errorMessage)
+    val selectedSeasonFocusIndex = seriesSelectedSeasonFocusIndex(selectedSeason, seasons)
+    val selectedSeasonRequester = selectedSeasonFocusIndex?.let(seasonRequesters::getOrNull)
+    val lazyFocusOwner = remember(series.id) { SeriesFocusRestorationOwner() }
+    var pendingSeasonFocus by remember(series.id) {
+        mutableStateOf<DetailsTvSeasonFocusRequest?>(null)
+    }
+    val lastEpisodeFocusBySeason = remember(series.id) { mutableMapOf<Int, Int>() }
+
+    fun cancelPendingLazyTransfer() {
+        lazyFocusOwner.invalidate()
+        pendingLazyFocus = null
+        pendingSeasonFocus = null
+    }
+
+    fun beginLazyTransfer(request: DetailsTvLazyFocusRequest) {
+        pendingSeasonFocus = null
+        pendingLazyFocus = request.copy(token = lazyFocusOwner.begin())
+    }
+
+    fun beginSeasonFocusHandoff(): Boolean {
+        val index = seriesSelectedSeasonFocusIndex(selectedSeason, seasons)
+        val requester = index?.let(seasonRequesters::getOrNull)
+        if (index == null || requester == null) {
+            cancelPendingLazyTransfer()
+            return false
+        }
+        pendingLazyFocus = null
+        pendingSeasonFocus = DetailsTvSeasonFocusRequest(
+            targetSeasonIndex = index,
+            targetItemKey = "series_tv_polished_header",
+            targetSlot = SeriesLazyTargetSlot.EPISODES_HEADER,
+            targetRowIndex = 0,
+            targetRequester = requester,
+            token = lazyFocusOwner.begin(),
+        )
+        return true
+    }
+
+    fun beginEpisodesTabHandoff() {
+        pendingLazyFocus = null
+        pendingSeasonFocus = DetailsTvSeasonFocusRequest(
+            targetSeasonIndex = null,
+            targetItemKey = "series_tv_polished_tabs",
+            targetSlot = SeriesLazyTargetSlot.TABS,
+            targetRowIndex = 0,
+            targetRequester = tabRequesters.getValue(SeriesDetailsTab.EPISODES),
+            token = lazyFocusOwner.begin(),
+        )
+    }
+
+    fun beginEpisodeFocusHandoff(episodeIndex: Int): Boolean {
+        if (episodeIndex !in visibleEpisodes.indices) {
+            cancelPendingLazyTransfer()
+            return false
+        }
+        val requester = episodeCardRequesters.getOrNull(episodeIndex)
+        if (requester == null) {
+            cancelPendingLazyTransfer()
+            return false
+        }
+        val rowIndex = episodeIndex / metrics.episodeColumns
+        pendingLazyFocus = null
+        pendingSeasonFocus = DetailsTvSeasonFocusRequest(
+            targetSeasonIndex = null,
+            targetItemKey = "series_tv_polished_episode_row_${selectedSeason}_$rowIndex",
+            targetSlot = SeriesLazyTargetSlot.EPISODE_ROW,
+            targetRowIndex = rowIndex,
+            targetRequester = requester,
+            token = lazyFocusOwner.begin(),
+        )
+        return true
+    }
+
+    fun beginEpisodesDownHandoff(): Boolean {
+        if (beginSeasonFocusHandoff()) return true
+        if (beginEpisodeFocusHandoff(0)) return true
+        pendingLazyFocus = null
+        pendingSeasonFocus = DetailsTvSeasonFocusRequest(
+            targetSeasonIndex = null,
+            targetItemKey = "series_tv_polished_hero",
+            targetSlot = SeriesLazyTargetSlot.HERO,
+            targetRowIndex = 0,
+            targetRequester = playRequester,
+            token = lazyFocusOwner.begin(),
+        )
+        return true
+    }
+
+    fun seasonDownEpisodeIndex(): Int? =
+        seriesSeasonDownEpisodeIndex(episodeKeys, lastEpisodeFocusBySeason[selectedSeason])
 
     LaunchedEffect(pendingLazyFocus, listState) {
         val request = pendingLazyFocus ?: return@LaunchedEffect
         try {
-            if (listState.layoutInfo.visibleItemsInfo.none { it.key == request.targetItemKey }) {
-                val sourceIndex = listState.layoutInfo.visibleItemsInfo
-                    .firstOrNull { it.key == request.sourceItemKey }
-                    ?.index
-                    ?: return@LaunchedEffect
-                listState.scrollToItem(sourceIndex + 1)
-                snapshotFlow {
-                    listState.layoutInfo.visibleItemsInfo.any { it.key == request.targetItemKey }
-                }.first { it }
+            val granted = seriesLazyRevealFocus(
+                isCurrent = { lazyFocusOwner.isCurrent(request.token) },
+                reveal = reveal@{
+                    if (listState.layoutInfo.visibleItemsInfo.any { it.key == request.targetItemKey }) {
+                        true
+                    } else {
+                        val sourceIndex = listState.layoutInfo.visibleItemsInfo
+                            .firstOrNull { it.key == request.sourceItemKey }
+                            ?.index
+                        if (
+                            sourceIndex == null ||
+                            sourceIndex + 1 >= listState.layoutInfo.totalItemsCount
+                        ) {
+                            false
+                        } else {
+                            listState.scrollToItem(sourceIndex + 1)
+                            val revealed = snapshotFlow {
+                                !lazyFocusOwner.isCurrent(request.token) ||
+                                    listState.layoutInfo.visibleItemsInfo.any { it.key == request.targetItemKey }
+                            }.first { it }
+                            revealed &&
+                                lazyFocusOwner.isCurrent(request.token) &&
+                                listState.layoutInfo.visibleItemsInfo.any { it.key == request.targetItemKey }
+                        }
+                    }
+                },
+                requestFocus = { request.targetRequester.requestFocus() },
+                onTargetMissing = {
+                    if (lazyFocusOwner.isCurrent(request.token)) cancelPendingLazyTransfer()
+                },
+            )
+            if (granted == false && lazyFocusOwner.isCurrent(request.token)) {
+                withFrameNanos { }
+                if (lazyFocusOwner.isCurrent(request.token)) {
+                    val grantedAfterFrame = runCatching { request.targetRequester.requestFocus() }
+                        .getOrDefault(false)
+                    if (!grantedAfterFrame) cancelPendingLazyTransfer()
+                }
             }
-            runCatching { request.targetRequester.requestFocus() }
         } finally {
             if (pendingLazyFocus == request) pendingLazyFocus = null
         }
@@ -969,8 +1107,8 @@ private fun SeriesDetailsProTvPolished(
         if (selectedTab != SeriesDetailsTab.EPISODES) return@LaunchedEffect
         val targetIndex = visibleEpisodes.indexOfFirst { it.id == targetEpisode?.id }
         if (targetIndex >= 0) {
-            val seriesTabsIndex = seriesDetailsTabsItemIndex(errorMessage != null)
-            listState.scrollToItem(seriesTabsIndex + 2 + targetIndex / metrics.episodeColumns)
+            val targetTabsIndex = seriesDetailsTabsItemIndex(errorMessage != null)
+            listState.scrollToItem(targetTabsIndex + 2 + targetIndex / metrics.episodeColumns)
             delay(DETAILS_TV_POLISH_FOCUS_DELAY_MS)
             episodeCardRequesters.getOrNull(targetIndex)?.let { requester ->
                 runCatching { requester.requestFocus() }
@@ -978,7 +1116,74 @@ private fun SeriesDetailsProTvPolished(
         }
     }
 
-    val seriesTabsIndex = seriesDetailsTabsItemIndex(errorMessage != null)
+    LaunchedEffect(pendingSeasonFocus, listState, seasonListState) {
+        val request = pendingSeasonFocus ?: return@LaunchedEffect
+        try {
+            val granted = seriesLazyRevealFocus(
+                isCurrent = { lazyFocusOwner.isCurrent(request.token) },
+                reveal = reveal@{
+                    val targetIndex = seriesLazyTargetIndex(
+                        slot = request.targetSlot,
+                        tabsIndex = seriesDetailsTabsItemIndex(currentErrorMessage != null),
+                        rowIndex = request.targetRowIndex,
+                        totalItemsCount = listState.layoutInfo.totalItemsCount,
+                    ) ?: return@reveal false
+                    if (listState.layoutInfo.visibleItemsInfo.none { it.key == request.targetItemKey }) {
+                        listState.scrollToItem(targetIndex)
+                        val revealed = snapshotFlow {
+                            !lazyFocusOwner.isCurrent(request.token) ||
+                                listState.layoutInfo.visibleItemsInfo.any { it.key == request.targetItemKey }
+                        }.first { it }
+                        if (!revealed || !lazyFocusOwner.isCurrent(request.token)) return@reveal false
+                        if (listState.layoutInfo.visibleItemsInfo.none { it.key == request.targetItemKey }) {
+                            return@reveal false
+                        }
+                    }
+                    request.targetSeasonIndex?.let { seasonIndex ->
+                        if (seasonListState.layoutInfo.visibleItemsInfo.none { it.index == seasonIndex }) {
+                            seasonListState.scrollToItem(seasonIndex)
+                            val seasonRevealed = snapshotFlow {
+                                !lazyFocusOwner.isCurrent(request.token) ||
+                                    seasonListState.layoutInfo.visibleItemsInfo.any { it.index == seasonIndex }
+                            }.first { it }
+                            if (!seasonRevealed || !lazyFocusOwner.isCurrent(request.token)) return@reveal false
+                            if (seasonListState.layoutInfo.visibleItemsInfo.none { it.index == seasonIndex }) {
+                                return@reveal false
+                            }
+                        }
+                    }
+                    true
+                },
+                requestFocus = { request.targetRequester.requestFocus() },
+                onTargetMissing = {
+                    if (lazyFocusOwner.isCurrent(request.token)) cancelPendingLazyTransfer()
+                },
+            )
+            if (granted == false && lazyFocusOwner.isCurrent(request.token)) {
+                withFrameNanos { }
+                if (lazyFocusOwner.isCurrent(request.token)) {
+                    val grantedAfterFrame = runCatching { request.targetRequester.requestFocus() }
+                        .getOrDefault(false)
+                    if (!grantedAfterFrame) cancelPendingLazyTransfer()
+                }
+            }
+        } finally {
+            if (pendingSeasonFocus == request) pendingSeasonFocus = null
+        }
+    }
+
+    LaunchedEffect(series.id, seasons, episodeKeys, errorMessage, metrics.episodeColumns) {
+        cancelPendingLazyTransfer()
+    }
+    LaunchedEffect(series.id, selectedTab, selectedSeason) {
+        cancelPendingLazyTransfer()
+        if (selectedTab == SeriesDetailsTab.EPISODES) {
+            seriesSelectedSeasonFocusIndex(selectedSeason, seasons)?.let { index ->
+                seasonListState.scrollToItem(index)
+            }
+        }
+    }
+
     // One parent reveal owner for an explicit tab selection; obsolete rapid selections cancel the
     // previous animation and metadata refresh never re-triggers it.
     LaunchedEffect(tabRevealRequestId) {
@@ -1007,12 +1212,14 @@ private fun SeriesDetailsProTvPolished(
         } else {
             // A newer user key invalidates any pending restore/handoff before it can focus.
             focusRestoration.invalidate()
+            cancelPendingLazyTransfer()
             val layout = listState.layoutInfo
             val viewportHeight = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(1)
             val step = (viewportHeight * 3 / 4).coerceAtLeast(1)
             when (event.key) {
                 Key.DirectionDown -> when (selectedTab) {
-                    SeriesDetailsTab.EPISODES, SeriesDetailsTab.RELATED -> false
+                    SeriesDetailsTab.EPISODES -> beginEpisodesDownHandoff()
+                    SeriesDetailsTab.RELATED -> false
                     else -> {
                         val sectionKey = seriesDetailsSectionItemKey(selectedTab, tvPolished = true)
                         val section = layout.visibleItemsInfo.firstOrNull { it.key == sectionKey }
@@ -1246,7 +1453,7 @@ private fun SeriesDetailsProTvPolished(
                     requesters = tabRequesters,
                     upTarget = if (errorMessage != null) detailsErrorRetryRequester else heroReturnRequester,
                     downTargets = mapOf(
-                        SeriesDetailsTab.EPISODES to (firstSeasonRequester ?: firstEpisodeRequester ?: playRequester),
+                        SeriesDetailsTab.EPISODES to (selectedSeasonRequester ?: firstEpisodeRequester ?: playRequester),
                         SeriesDetailsTab.RELATED to relatedRequesters.firstOrNull(),
                     ),
                     isTv = true,
@@ -1341,12 +1548,12 @@ private fun SeriesDetailsProTvPolished(
                         }
                         if (seasons.isNotEmpty()) {
                             Spacer(Modifier.height(8.dp))
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            LazyRow(
+                                state = seasonListState,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
                                 itemsIndexed(seasons, key = { _, season -> season }) { index, season ->
                                     val requester = seasonRequesters[index]
-                                    val episodeDown = firstEpisodeRequester?.let {
-                                        episodeCardRequesters.getOrNull(index.coerceAtMost((metrics.episodeColumns - 1).coerceAtLeast(0))) ?: it
-                                    }
                                     FocusButton(
                                         text = "الموسم $season",
                                         onClick = { selectedSeason = season },
@@ -1359,10 +1566,32 @@ private fun SeriesDetailsProTvPolished(
                                         modifier = Modifier
                                             .focusRequester(requester)
                                             .focusProperties {
-                                                up = FocusRequester.Default
-                                                down = episodeDown ?: FocusRequester.Default
+                                                up = FocusRequester.Cancel
+                                                down = FocusRequester.Cancel
                                                 right = if (index > 0) seasonRequesters[index - 1] else FocusRequester.Cancel
                                                 left = if (index < seasonRequesters.lastIndex) seasonRequesters[index + 1] else FocusRequester.Cancel
+                                            }
+                                            .onPreviewKeyEvent { event ->
+                                                when {
+                                                    event.type != KeyEventType.KeyDown -> false
+                                                    event.key == Key.DirectionUp -> {
+                                                        beginEpisodesTabHandoff()
+                                                        true
+                                                    }
+                                                    event.key == Key.DirectionDown -> {
+                                                        val target = seasonDownEpisodeIndex()
+                                                        if (target == null) {
+                                                            cancelPendingLazyTransfer()
+                                                            false
+                                                        } else {
+                                                            beginEpisodeFocusHandoff(target)
+                                                        }
+                                                    }
+                                                    else -> {
+                                                        cancelPendingLazyTransfer()
+                                                        false
+                                                    }
+                                                }
                                             },
                                     )
                                 }
@@ -1393,11 +1622,16 @@ private fun SeriesDetailsProTvPolished(
                                 val leftAction = if (columnIndex < rowEpisodes.lastIndex) episodeActionRequesters.getOrNull(absoluteIndex + 1) else null
                                 val upCard = if (rowIndex > 0) {
                                     episodeCardRequesters.getOrNull(absoluteIndex - metrics.episodeColumns)
-                                        ?: seasonRequesters.getOrNull(columnIndex.coerceAtMost(seasonRequesters.lastIndex.coerceAtLeast(0)))
+                                        ?: selectedSeasonRequester
                                         ?: playRequester
                                 } else {
-                                    seasonRequesters.getOrNull(columnIndex.coerceAtMost(seasonRequesters.lastIndex.coerceAtLeast(0)))
-                                        ?: playRequester
+                                    selectedSeasonRequester ?: playRequester
+                                }
+                                val onCardMoveUp: (() -> Boolean)? = if (rowIndex > 0) {
+                                    seriesEpisodeUpTargetIndex(absoluteIndex, metrics.episodeColumns)
+                                        ?.let { targetIndex -> { beginEpisodeFocusHandoff(targetIndex) } }
+                                } else {
+                                    { beginSeasonFocusHandoff() }
                                 }
                                 val nextRow = rows.getOrNull(rowIndex + 1)
                                 val nextRowCard = nextRow?.let { nextEpisodes ->
@@ -1420,7 +1654,7 @@ private fun SeriesDetailsProTvPolished(
                                     null
                                 }
                                 val moveDown: (() -> Unit)? = lazyDownRequest?.let { request ->
-                                    { pendingLazyFocus = request }
+                                    { beginLazyTransfer(request) }
                                 }
                                 DetailsTvEpisodeUnit(
                                     episode = episode,
@@ -1438,7 +1672,11 @@ private fun SeriesDetailsProTvPolished(
                                     upCard = upCard,
                                     downCard = null,
                                     onMoveDown = moveDown,
-                                    onCancelPendingMove = { pendingLazyFocus = null },
+                                    onCardMoveUp = onCardMoveUp,
+                                    onCardFocusChanged = { focused ->
+                                        if (focused) lastEpisodeFocusBySeason[episode.season] = episode.id
+                                    },
+                                    onCancelPendingMove = { cancelPendingLazyTransfer() },
                                     onPlay = { onPlay(episode) },
                                     onDownload = { onDownload(episode) },
                                     onCancelDownload = { onCancelDownload(episode) },
@@ -1472,6 +1710,8 @@ private fun DetailsTvEpisodeUnit(
     upCard: FocusRequester,
     downCard: FocusRequester?,
     onMoveDown: (() -> Unit)?,
+    onCardMoveUp: (() -> Boolean)?,
+    onCardFocusChanged: (Boolean) -> Unit,
     onCancelPendingMove: () -> Unit,
     onPlay: () -> Unit,
     onDownload: () -> Unit,
@@ -1536,6 +1776,8 @@ private fun DetailsTvEpisodeUnit(
             right = rightAction,
         ),
         onMoveDown = onMoveDown,
+        onMoveUp = onCardMoveUp,
+        onCardFocusChanged = onCardFocusChanged,
         onCancelPendingMove = onCancelPendingMove,
         onPlay = onPlay,
         onDownload = onDownload,

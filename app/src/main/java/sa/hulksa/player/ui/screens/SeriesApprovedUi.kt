@@ -222,6 +222,39 @@ internal fun seriesDetailsTabSelectionNeedsReveal(tab: SeriesDetailsTab): Boolea
     tab == SeriesDetailsTab.INFORMATION || tab == SeriesDetailsTab.RELATED
 
 /**
+ * Index of the selected season inside the ordered season list. A valid selection keeps its own
+ * index; an absent/invalid selection deterministically falls back to the first available season.
+ * Null when there are no seasons.
+ */
+internal fun seriesSelectedSeasonFocusIndex(selectedSeason: Int, seasons: List<Int>): Int? {
+    if (seasons.isEmpty()) return null
+    val index = seasons.indexOf(selectedSeason)
+    return if (index >= 0) index else 0
+}
+
+/**
+ * Episode index reached by one season-DOWN press inside the visible season: the remembered valid
+ * episode focus when it still exists, otherwise the first episode. Null when there are no episodes.
+ */
+internal fun seriesSeasonDownEpisodeIndex(
+    visibleEpisodeIds: List<Int>,
+    rememberedEpisodeId: Int?,
+): Int? {
+    if (visibleEpisodeIds.isEmpty()) return null
+    val remembered = rememberedEpisodeId?.let(visibleEpisodeIds::indexOf) ?: -1
+    return if (remembered >= 0) remembered else 0
+}
+
+/**
+ * Episode index reached by one UP press from an episode card. Null on the first row, where the
+ * next UP target is the selected season instead of another episode column.
+ */
+internal fun seriesEpisodeUpTargetIndex(episodeIndex: Int, columns: Int): Int? {
+    if (columns <= 0 || episodeIndex < columns) return null
+    return episodeIndex - columns
+}
+
+/**
  * Accepts the first focus request that is actually granted, in the supplied priority order. A
  * `false` result or an unavailable (not attached) target continues to the next request instead of
  * being treated as restored, and the first granted request stops the chain so no competing focus
@@ -277,6 +310,60 @@ internal suspend fun seriesDetailsRestoreFocus(
     reveal()
     if (!isCurrent()) return null
     return seriesDetailsFirstGrantedFocus(requests)
+}
+
+/**
+ * Structural page slot of a Series lazy focus target. The absolute page item index is derived from
+ * the current structure at execution time so an error notice insertion/removal can never leave a
+ * request pointing at the wrong item.
+ */
+internal enum class SeriesLazyTargetSlot {
+    HERO,
+    TABS,
+    EPISODES_HEADER,
+    EPISODE_ROW,
+}
+
+/**
+ * Current absolute page index of a Series lazy target, or null when the current structure cannot
+ * contain it. `tabsIndex` already includes the optional error notice; `rowIndex` is the episode
+ * row offset inside the Episodes section.
+ */
+internal fun seriesLazyTargetIndex(
+    slot: SeriesLazyTargetSlot,
+    tabsIndex: Int,
+    rowIndex: Int,
+    totalItemsCount: Int,
+): Int? {
+    val index = when (slot) {
+        SeriesLazyTargetSlot.HERO -> 0
+        SeriesLazyTargetSlot.TABS -> tabsIndex
+        SeriesLazyTargetSlot.EPISODES_HEADER -> tabsIndex + 1
+        SeriesLazyTargetSlot.EPISODE_ROW -> tabsIndex + 2 + rowIndex
+    }
+    return index.takeIf { it in 0 until totalItemsCount }
+}
+
+/**
+ * Executes one lazy reveal/focus handoff. A stale request (a newer directional key, selection or
+ * structural change invalidated its token) performs no focus and reports null; a target that
+ * cannot attach is reported through [onTargetMissing] (deterministic cancellation) instead of
+ * being retried or reported as success. Returns the focus Boolean when the attached target was
+ * requested, null when the request was invalidated or the target could not attach.
+ */
+internal suspend fun seriesLazyRevealFocus(
+    isCurrent: () -> Boolean,
+    reveal: suspend () -> Boolean,
+    requestFocus: () -> Boolean,
+    onTargetMissing: () -> Unit,
+): Boolean? {
+    val attached = reveal()
+    if (!isCurrent()) return null
+    if (!attached) {
+        onTargetMissing()
+        return null
+    }
+    return runCatching(requestFocus).getOrDefault(false)
 }
 
 /**
@@ -610,6 +697,8 @@ internal fun EpisodeBoxedCard(
     cancelLinks: EpisodeFocusLinks = EpisodeFocusLinks(),
     onActionDown: () -> Boolean = { false },
     onMoveDown: (() -> Unit)? = null,
+    onMoveUp: (() -> Boolean)? = null,
+    onCardFocusChanged: ((Boolean) -> Unit)? = null,
     onCancelPendingMove: () -> Unit = {},
     onPlay: () -> Unit,
     onDownload: () -> Unit,
@@ -659,7 +748,24 @@ internal fun EpisodeBoxedCard(
                 left = cardLinks.left ?: FocusRequester.Cancel
                 right = cardLinks.right ?: FocusRequester.Cancel
             }
-            .onFocusChanged { cardFocused = it.isFocused }
+            .onFocusChanged {
+                cardFocused = it.isFocused
+                onCardFocusChanged?.invoke(it.isFocused)
+            }
+            .onPreviewKeyEvent { event ->
+                when {
+                    event.type != KeyEventType.KeyDown -> false
+                    !cardFocused -> false
+                    event.key == Key.DirectionUp && onMoveUp != null -> {
+                        onCancelPendingMove()
+                        onMoveUp()
+                    }
+                    else -> {
+                        onCancelPendingMove()
+                        false
+                    }
+                }
+            }
             .clickable(role = Role.Button, onClick = onPlay),
     ) {
         Box(
@@ -829,16 +935,23 @@ internal fun EpisodeBoxedCard(
                         right = actionLinks.right ?: FocusRequester.Cancel
                     }
                     .onPreviewKeyEvent { event ->
-                        if (event.type != KeyEventType.KeyDown || event.key != Key.DirectionDown) {
+                        if (event.type != KeyEventType.KeyDown) {
+                            false
+                        } else if (event.key != Key.DirectionDown) {
+                            // A newer directional command cancels any pending lazy transfer before
+                            // the internal card/action navigation continues normally.
+                            onCancelPendingMove()
                             false
                         } else if (cancelVisible) {
                             // Let the focus graph move DOWN into the cancel control.
+                            onCancelPendingMove()
                             false
                         } else if (onMoveDown != null) {
                             onCancelPendingMove()
                             onMoveDown()
                             true
                         } else {
+                            onCancelPendingMove()
                             onActionDown()
                         }
                     },
@@ -869,13 +982,17 @@ internal fun EpisodeBoxedCard(
                             right = cancelLinks.right ?: FocusRequester.Cancel
                         }
                         .onPreviewKeyEvent { event ->
-                            if (event.type != KeyEventType.KeyDown || event.key != Key.DirectionDown) {
+                            if (event.type != KeyEventType.KeyDown) {
+                                false
+                            } else if (event.key != Key.DirectionDown) {
+                                onCancelPendingMove()
                                 false
                             } else if (onMoveDown != null) {
                                 onCancelPendingMove()
                                 onMoveDown()
                                 true
                             } else {
+                                onCancelPendingMove()
                                 onActionDown()
                             }
                         },

@@ -190,7 +190,7 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
         self.assertIn("CatalogCategoryBar(", poster)
         self.assertIn("rememberLiveCategoryStripMetrics()", movies)
         self.assertIn("textSizeSp = itemMetrics.textSizeSp", movies)
-        self.assertIn("trailingIcon = Icons.Outlined.StarBorder", movies)
+        self.assertIn("trailingIcon = Icons.Rounded.Favorite", movies)
         self.assertIn("trailingIcon = Icons.Outlined.Schedule", movies)
         self.assertIn('"اخر مشاهدة"', movies)
         self.assertIn("framedBrandBadge = true", movies)
