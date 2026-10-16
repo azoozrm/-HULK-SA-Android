@@ -188,6 +188,11 @@ fun HulkApp(
             state.screen != HulkScreen.PLAYER &&
             state.screen != HulkScreen.LOGIN &&
             state.screen != HulkScreen.NOTIFICATION_CENTER
+    // The compact phone action bars share the same normal MAIN bottom-navigation boundary.
+    val showMobileMainChrome =
+        state.screen == HulkScreen.MAIN &&
+            !isTv &&
+            adaptiveUi.navigationType != HulkNavigationType.RAIL
     ApplyAdaptiveWindowPresentation(
         isTelevisionDevice = isTv,
         isPlayer = state.screen == HulkScreen.PLAYER,
@@ -256,6 +261,12 @@ fun HulkApp(
             query = query,
         )
         viewModel.updateSearch(query)
+    }
+    // ONE Notifications opener for every header host: records the logical Home hero anchor so
+    // returning from the center restores one deterministic target.
+    val openNotificationCenter: () -> Unit = {
+        navigationMemory.save(MainDestination.HOME, "", 0, "hero", 0)
+        viewModel.openNotificationCenter()
     }
 
     BackHandler(
@@ -408,13 +419,7 @@ fun HulkApp(
                                     },
                                     onToggleFavorite = viewModel::toggleFavorite,
                                     onRefresh = viewModel::refresh,
-                                    onOpenNotifications = {
-                                        // Record the logical Home hero anchor so returning from the
-                                        // center restores one deterministic target through the
-                                        // existing NavigationMemory/hero restore owner.
-                                        navigationMemory.save(MainDestination.HOME, "", 0, "hero", 0)
-                                        viewModel.openNotificationCenter()
-                                    },
+                                    onOpenNotifications = openNotificationCenter,
                                     onClearHistory = viewModel::clearHistory,
                                     onPlayDownload = viewModel::playDownload,
                                     onDeleteDownload = { item ->
@@ -660,16 +665,11 @@ fun HulkApp(
                     }
                 }
 
-                if (
-                    state.screen == HulkScreen.MAIN &&
-                    !isTv &&
-                    adaptiveUi.navigationType != HulkNavigationType.RAIL
-                ) {
+                if (showMobileMainChrome) {
                     StableMobileBottomNavigation(
                         selected = state.destination,
                         downloadsEnabled = state.operations.features.downloadsEnabled,
                         onSelectDestination = selectDestinationWithProfileContext,
-                        onSwitchProfile = requestProfileSwitch,
                         modifier = Modifier.align(Alignment.BottomCenter),
                     )
                 }
@@ -683,7 +683,10 @@ fun HulkApp(
                                 bottom = if (isTv) {
                                     28.dp
                                 } else {
-                                    MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT + 12.dp
+                                    stableMobileNavigationReservedHeight(
+                                        windowWidthDp = adaptiveUi.screenWidthDp,
+                                        downloadsEnabled = state.operations.features.downloadsEnabled,
+                                    ) + 12.dp
                                 },
                             ),
                     )

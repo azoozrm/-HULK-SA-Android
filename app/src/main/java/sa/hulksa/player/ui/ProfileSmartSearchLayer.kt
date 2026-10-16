@@ -481,7 +481,12 @@ internal fun ProfileSmartSearchLayer(
                     Spacer(
                         Modifier
                             .navigationBarsPadding()
-                            .height(MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT),
+                            .height(
+                                stableMobileNavigationReservedHeight(
+                                    windowWidthDp = adaptiveUi.screenWidthDp,
+                                    downloadsEnabled = state.operations.features.downloadsEnabled,
+                                ),
+                            ),
                     )
                 }
             }

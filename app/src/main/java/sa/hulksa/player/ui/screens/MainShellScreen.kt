@@ -219,7 +219,10 @@ import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.model.ServerDiagnosticsReport
 import sa.hulksa.player.ui.HomeMessagePresentationState
-import sa.hulksa.player.ui.MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT
+import sa.hulksa.player.ui.LocalProfileSwitchRequester
+import sa.hulksa.player.ui.MobileInlineTopActions
+import sa.hulksa.player.ui.mobileInlineTopActionsFitSingleRow
+import sa.hulksa.player.ui.stableMobileNavigationReservedHeight
 import sa.hulksa.player.ui.adaptive.HulkNavigationType
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.components.BrandLogo
@@ -1347,7 +1350,12 @@ fun MainShellScreen(
                 Spacer(
                     Modifier
                         .navigationBarsPadding()
-                        .height(MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT),
+                        .height(
+                            stableMobileNavigationReservedHeight(
+                                windowWidthDp = adaptiveUi.screenWidthDp,
+                                downloadsEnabled = downloadsEnabled,
+                            ),
+                        ),
                 )
             }
         }
@@ -1742,6 +1750,21 @@ private fun CinemaHomeScreen(
             .toList()
     }
     val loading = ContentType.MOVIE in state.loadingTypes || ContentType.SERIES in state.loadingTypes
+    // R02: ONE compact five-action group in the original Home header slot for both the hero and
+    // the placeholder/loading/empty/error paths; the existing callbacks and owners are reused.
+    val requestProfileSwitch = LocalProfileSwitchRequester.current
+    val homeTopActions: @Composable () -> Unit = {
+        MobileInlineTopActions(
+            selected = state.destination,
+            unreadNotificationCount = state.unreadNotificationCount,
+            refreshing = loading,
+            onOpenSearch = { onSelectDestination(MainDestination.SEARCH) },
+            onOpenFavorites = { onSelectDestination(MainDestination.FAVORITES) },
+            onSwitchProfile = requestProfileSwitch,
+            onOpenNotifications = onOpenNotifications,
+            onRefresh = onRefresh,
+        )
+    }
     // Truthful Home error classification reuses the accepted Movies connectivity owner: only a
     // confirmed offline state gets the WifiOff wording; other failures keep the real message.
     val homeNetworkUsable by rememberUsableNetworkState()
@@ -1827,6 +1850,7 @@ private fun CinemaHomeScreen(
                     { onToggleFavorite(featured) }, onRefresh, loading,
                     unreadNotificationCount = state.unreadNotificationCount,
                     onOpenNotifications = onOpenNotifications,
+                    topActions = homeTopActions,
                     watchModifier = Modifier.focusRequester(homeHeroFocusRequester),
                     onFocused = { navigationMemory.save(MainDestination.HOME, "${featured.type}:${featured.id}", 0, "hero", 0) },
                 )
@@ -1841,6 +1865,7 @@ private fun CinemaHomeScreen(
                     errorBody = homeErrorCopy?.body,
                     networkFailure = !homeNetworkUsable,
                     refreshModifier = Modifier.focusRequester(homeHeroFocusRequester),
+                    topActions = homeTopActions,
                 )
             }
         }
@@ -2387,6 +2412,16 @@ private fun HomeSectionPadding(isTv: Boolean, content: @Composable () -> Unit) {
 /** First list index that holds a Home content row: only the Hero/placeholder occupies index 0. */
 internal fun homeRowCursorStart(isTv: Boolean): Int = 1
 
+/** Original Home hero title/subtitle block, shared by every header variant. */
+@Composable
+private fun CinemaHeroTitle(modifier: Modifier = Modifier) {
+    val colors = LocalHulkColors.current
+    Column(modifier) {
+        Text("الرئيسية", color = colors.text, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+        Text("توصيات ومحتوى جديد", color = colors.textMuted, fontSize = 11.sp)
+    }
+}
+
 @Composable
 private fun CinemaHero(
     item: ContentItem,
@@ -2398,12 +2433,23 @@ private fun CinemaHero(
     isLoading: Boolean,
     unreadNotificationCount: Int,
     onOpenNotifications: () -> Unit,
+    topActions: @Composable () -> Unit,
     watchModifier: Modifier = Modifier,
     onFocused: () -> Unit = {},
 ) {
     val colors = LocalHulkColors.current
     val configuration = LocalConfiguration.current
     val context = LocalContext.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val density = LocalDensity.current
+    // R02: the compact phone Home header group follows the same boundary as the compact bottom
+    // navigation. TV and expanded/rail layouts keep the original full-size header controls.
+    val compactHeaderActions = !isTv && adaptiveUi.navigationType != HulkNavigationType.RAIL
+    // Measured header content height (status-bar inset excluded) so the phone artwork window
+    // stays below the header only in the genuinely constrained single-row fallback.
+    var measuredHeaderContentHeightDp by remember {
+        mutableStateOf(HERO_PHONE_HEADER_OFFSET_DP.dp)
+    }
     val isPortraitPhone = !isTv && configuration.screenWidthDp < 600 && configuration.screenHeightDp > configuration.screenWidthDp
     // Model 1 derives the wide hero from the actual viewport (about two thirds, bounded) instead
     // of the old fixed 410dp; phone/short windows keep their accepted adaptive heights.
@@ -2434,17 +2480,57 @@ private fun CinemaHero(
     val heroPlot = (heroMetadata.plot ?: item.plot)
         ?.trim()
         ?.takeIf(String::isNotBlank)
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
             .height(heroHeight)
             .background(Color(0xFF0A0B08)),
     ) {
+        // One-row fit resolved from the real title/subtitle at the current font scale and the
+        // natural-width action group, minus the header's own horizontal padding.
+        val compactHeaderSingleRow = if (!compactHeaderActions) {
+            true
+        } else {
+            val baseTextStyle = LocalTextStyle.current
+            val textMeasurer = rememberTextMeasurer()
+            val titleWidth = remember(textMeasurer, baseTextStyle, density) {
+                with(density) {
+                    textMeasurer.measure(
+                        text = AnnotatedString("الرئيسية"),
+                        style = baseTextStyle.copy(
+                            fontSize = 21.sp,
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        maxLines = 1,
+                    ).size.width.toDp()
+                }
+            }
+            val subtitleWidth = remember(textMeasurer, baseTextStyle, density) {
+                with(density) {
+                    textMeasurer.measure(
+                        text = AnnotatedString("توصيات ومحتوى جديد"),
+                        style = baseTextStyle.copy(fontSize = 11.sp),
+                        maxLines = 1,
+                    ).size.width.toDp()
+                }
+            }
+            mobileInlineTopActionsFitSingleRow(
+                titleWidth = titleWidth,
+                subtitleWidth = subtitleWidth,
+                availableWidth =
+                    maxWidth - HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp * 2,
+            )
+        }
         HeroArtwork(
             candidates = artworkCandidates,
             contentDescription = item.name,
             phonePortrait = isPortraitPhone,
             phoneWindowHeightDp = (configuration.screenWidthDp * 9f / 16f).dp,
+            phoneWindowTopOffsetDp = if (compactHeaderActions && !compactHeaderSingleRow) {
+                maxOf(HERO_PHONE_HEADER_OFFSET_DP.dp, measuredHeaderContentHeightDp)
+            } else {
+                HERO_PHONE_HEADER_OFFSET_DP.dp
+            },
         )
         if (isTv) {
             Box(
@@ -2487,30 +2573,62 @@ private fun CinemaHero(
             )
         }
 
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .then(if (isTv) Modifier else Modifier.statusBarsPadding())
-                .padding(
-                    horizontal = if (isTv) 26.dp else 18.dp,
-                    vertical = if (isTv) 18.dp else 10.dp,
-                ),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("الرئيسية", color = colors.text, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                Text("توصيات ومحتوى جديد", color = colors.textMuted, fontSize = 11.sp)
+        if (compactHeaderActions) {
+            // R02: one compact five-action group in the original header slot, natural content
+            // width beside the title; the measured fit keeps the title/subtitle readable and the
+            // constrained reflow stays inside the header.
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .onGloballyPositioned { coordinates ->
+                        measuredHeaderContentHeightDp =
+                            with(density) { coordinates.size.height.toDp() }
+                    }
+                    .padding(
+                        horizontal = HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp,
+                        vertical = 10.dp,
+                    ),
+            ) {
+                if (compactHeaderSingleRow) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CinemaHeroTitle(Modifier.weight(1f))
+                        topActions()
+                    }
+                } else {
+                    Column(Modifier.fillMaxWidth()) {
+                        CinemaHeroTitle(Modifier.align(Alignment.Start))
+                        Box(Modifier.align(Alignment.End)) { topActions() }
+                    }
+                }
             }
-            if (isLoading) LoadingRing()
-            Spacer(Modifier.width(10.dp))
-            NotificationBellButton(
-                unreadCount = unreadNotificationCount,
-                isTv = isTv,
-                onClick = onOpenNotifications,
-            )
-            Spacer(Modifier.width(8.dp))
-            RoundAction(Icons.Rounded.Refresh, "تحديث المحتوى", onRefresh)
+        } else {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .then(if (isTv) Modifier else Modifier.statusBarsPadding())
+                    .padding(
+                        horizontal = if (isTv) 26.dp else HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp,
+                        vertical = if (isTv) 18.dp else 10.dp,
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CinemaHeroTitle(Modifier.weight(1f))
+                if (isLoading) LoadingRing()
+                Spacer(Modifier.width(10.dp))
+                NotificationBellButton(
+                    unreadCount = unreadNotificationCount,
+                    isTv = isTv,
+                    onClick = onOpenNotifications,
+                )
+                Spacer(Modifier.width(8.dp))
+                RoundAction(Icons.Rounded.Refresh, "تحديث المحتوى", onRefresh)
+            }
         }
 
         Column(
@@ -2557,6 +2675,7 @@ private fun CinemaHero(
 private const val HERO_WIDE_COPY_WIDTH_FRACTION = .46f
 private const val HERO_PORTRAIT_TV_ARTWORK_WIDTH_FRACTION = .56f
 private const val HERO_PHONE_HEADER_OFFSET_DP = 64
+private const val HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP = 18
 
 /**
  * Physical-left alignment for hero artwork. Absolute (not start/end relative), so the app's RTL
@@ -2652,6 +2771,7 @@ private fun BoxScope.HeroArtwork(
     contentDescription: String,
     phonePortrait: Boolean,
     phoneWindowHeightDp: Dp,
+    phoneWindowTopOffsetDp: Dp,
 ) {
     var selection by remember(candidates) { mutableStateOf(HeroArtworkSelectionState()) }
     val painters = remember(candidates) { mutableStateMapOf<Int, Painter>() }
@@ -2691,7 +2811,7 @@ private fun BoxScope.HeroArtwork(
         if (phonePortrait) {
             // Phone: the brand fallback stays inside the same reserved 16:9 window.
             Box(
-                modifier = heroPhoneArtworkWindow(phoneWindowHeightDp),
+                modifier = heroPhoneArtworkWindow(phoneWindowHeightDp, phoneWindowTopOffsetDp),
                 contentAlignment = Alignment.Center,
             ) {
                 BrandLogo(Modifier.size(120.dp).graphicsLayer { alpha = .40f })
@@ -2716,7 +2836,7 @@ private fun BoxScope.HeroArtwork(
             contentDescription = contentDescription,
             contentScale = ContentScale.Crop,
             alignment = Alignment.Center,
-            modifier = heroPhoneArtworkWindow(phoneWindowHeightDp),
+            modifier = heroPhoneArtworkWindow(phoneWindowHeightDp, phoneWindowTopOffsetDp),
         )
         return
     }
@@ -2745,10 +2865,10 @@ private fun BoxScope.HeroArtwork(
 }
 
 /** Reserved phone artwork window: below the measured header/safe inset, full content width. */
-private fun BoxScope.heroPhoneArtworkWindow(height: Dp): Modifier = Modifier
+private fun BoxScope.heroPhoneArtworkWindow(height: Dp, topOffsetDp: Dp): Modifier = Modifier
     .align(Alignment.TopCenter)
     .statusBarsPadding()
-    .padding(top = HERO_PHONE_HEADER_OFFSET_DP.dp)
+    .padding(top = topOffsetDp)
     .fillMaxWidth()
     .height(height)
 
@@ -2913,24 +3033,44 @@ private fun HomePlaceholder(
     errorBody: String? = null,
     networkFailure: Boolean = true,
     refreshModifier: Modifier = Modifier,
+    topActions: @Composable () -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    // Same compact boundary as the bottom navigation: TV and expanded/rail keep the original bell.
+    val compactHeaderActions = !isTv && adaptiveUi.navigationType != HulkNavigationType.RAIL
     Box(
         Modifier.fillMaxWidth().height(if (isTv) 360.dp else 270.dp).background(colors.surface),
         contentAlignment = Alignment.Center,
     ) {
-        NotificationBellButton(
-            unreadCount = unreadNotificationCount,
-            isTv = isTv,
-            onClick = onOpenNotifications,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .then(if (isTv) Modifier else Modifier.statusBarsPadding())
-                .padding(
-                    horizontal = if (isTv) 26.dp else 18.dp,
-                    vertical = if (isTv) 18.dp else 10.dp,
-                ),
-        )
+        if (compactHeaderActions) {
+            // R02: the same compact group at the original in-content top action position, so the
+            // actions stay reachable while Home artwork/content is missing.
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(
+                        horizontal = HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp,
+                        vertical = 10.dp,
+                    ),
+            ) {
+                topActions()
+            }
+        } else {
+            NotificationBellButton(
+                unreadCount = unreadNotificationCount,
+                isTv = isTv,
+                onClick = onOpenNotifications,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .then(if (isTv) Modifier else Modifier.statusBarsPadding())
+                    .padding(
+                        horizontal = if (isTv) 26.dp else HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp,
+                        vertical = if (isTv) 18.dp else 10.dp,
+                    ),
+            )
+        }
         when {
             // One honest error/empty presentation without content; the artwork fallback above the
             // hero owns its own safe logo, never a fake movie or endless spinner.
@@ -7687,52 +7827,6 @@ private fun PageTitle(
                 color = colors.textMuted,
                 fontSize = if (isTv) 11.sp else MOBILE_SECTION_COUNT_SIZE,
             )
-        }
-    }
-}
-
-@Composable
-private fun RoundAction(
-    icon: ImageVector,
-    description: String,
-    onClick: () -> Unit,
-    loading: Boolean = false,
-    iconTint: Color? = null,
-    requester: FocusRequester? = null,
-) {
-    val colors = LocalHulkColors.current
-    var focused by remember { mutableStateOf(false) }
-    Box(
-        modifier = Modifier
-            .size(homeHeaderActionTouchSizeDp().dp)
-            .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(role = Role.Button, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(homeHeaderActionVisualSizeDp().dp)
-                .clip(CircleShape)
-                .background(if (focused) colors.gold else Color.Black.copy(alpha = .46f))
-                .goldFocusEdge(shape = CircleShape, visible = focused)
-                .border(
-                    if (focused) 0.dp else 1.dp,
-                    if (focused) Color.Transparent else colors.line,
-                    CircleShape,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (loading) {
-                LoadingRing(Modifier.size(20.dp))
-            } else {
-                Icon(
-                    icon,
-                    description,
-                    tint = if (focused) Color.Black else (iconTint ?: colors.text),
-                    modifier = Modifier.size(21.dp),
-                )
-            }
         }
     }
 }

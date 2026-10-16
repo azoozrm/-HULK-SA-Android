@@ -89,6 +89,7 @@ import kotlinx.coroutines.launch
 import sa.hulksa.player.data.EpisodeNotificationPopup
 import sa.hulksa.player.data.LocalNotificationItem
 import sa.hulksa.player.ui.components.BrandLogo
+import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import kotlin.math.roundToInt
@@ -371,6 +372,17 @@ internal fun notificationTvFocusFallback(
 
 internal fun homeHeaderActionVisualSizeDp(): Int = 44
 internal fun homeHeaderActionTouchSizeDp(): Int = 48
+
+/**
+ * Opt-in compact presentation for the phone Home header group, resolved from the accepted compact
+ * family in live source: the 36dp circular control in `VoiceSearchFoundation.kt` and the 17dp
+ * compact simple-action glyph slot in `EntryUiAtoms.kt`/home hero atoms. The 48dp touch container
+ * and the badge metrics are unchanged.
+ */
+internal fun homeHeaderActionCompactVisualSizeDp(): Int = 36
+internal fun homeHeaderActionCompactGlyphSizeDp(): Int = 17
+private const val HOME_HEADER_ACTION_COMPACT_SPINNER_SIZE_DP = 16
+
 @Suppress("UNUSED_PARAMETER")
 internal fun notificationBellSizeDp(isTv: Boolean): Int = homeHeaderActionVisualSizeDp()
 
@@ -397,16 +409,101 @@ internal fun notificationBadgeMetrics(unreadCount: Int): NotificationBadgeMetric
     )
 }
 
+/**
+ * Shared circular header action atom. `selected` marks a persistent navigation destination
+ * (committed gold backing with a goldBright glyph) separately from keyboard focus (solid gold
+ * circle), matching the accepted stable mobile navigation selection treatment. `compact` selects
+ * the opt-in smaller presentation used by the phone Home header group; every default caller keeps
+ * the existing 44dp/21dp pair.
+ */
+@Composable
+internal fun RoundAction(
+    icon: ImageVector,
+    description: String,
+    onClick: () -> Unit,
+    loading: Boolean = false,
+    iconTint: Color? = null,
+    selected: Boolean = false,
+    compact: Boolean = false,
+    requester: FocusRequester? = null,
+) {
+    val colors = LocalHulkColors.current
+    var focused by remember { mutableStateOf(false) }
+    val visualSize = (
+        if (compact) homeHeaderActionCompactVisualSizeDp() else homeHeaderActionVisualSizeDp()
+        ).dp
+    val glyphSize = (
+        if (compact) homeHeaderActionCompactGlyphSizeDp() else 21
+        ).dp
+    Box(
+        modifier = Modifier
+            .size(homeHeaderActionTouchSizeDp().dp)
+            .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(visualSize)
+                .clip(CircleShape)
+                .background(
+                    when {
+                        focused -> colors.gold
+                        selected -> colors.gold.copy(alpha = .16f)
+                        else -> Color.Black.copy(alpha = .46f)
+                    },
+                )
+                .goldFocusEdge(shape = CircleShape, visible = focused)
+                .border(
+                    if (focused) 0.dp else 1.dp,
+                    if (focused) Color.Transparent else colors.line,
+                    CircleShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (loading) {
+                LoadingRing(
+                    Modifier.size(
+                        if (compact) {
+                            HOME_HEADER_ACTION_COMPACT_SPINNER_SIZE_DP.dp
+                        } else {
+                            20.dp
+                        },
+                    ),
+                )
+            } else {
+                Icon(
+                    icon,
+                    description,
+                    tint = when {
+                        focused -> Color.Black
+                        selected -> colors.goldBright
+                        else -> iconTint ?: colors.text
+                    },
+                    modifier = Modifier.size(glyphSize),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 fun NotificationBellButton(
     unreadCount: Int,
     isTv: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
-    val visualSize = notificationBellSizeDp(isTv).dp
+    val visualSize = (
+        if (compact) homeHeaderActionCompactVisualSizeDp() else notificationBellSizeDp(isTv)
+        ).dp
+    val glyphSize = (
+        if (compact) homeHeaderActionCompactGlyphSizeDp() else 21
+        ).dp
     val badgeMetrics = notificationBadgeMetrics(unreadCount)
     Box(
         modifier = modifier
@@ -432,7 +529,7 @@ fun NotificationBellButton(
                 imageVector = Icons.Rounded.Notifications,
                 contentDescription = "الاشعارات",
                 tint = if (focused) Color.Black else colors.text,
-                modifier = Modifier.size(21.dp),
+                modifier = Modifier.size(glyphSize),
             )
         }
         if (badgeMetrics != null) {

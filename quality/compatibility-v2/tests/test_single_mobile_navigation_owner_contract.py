@@ -14,9 +14,10 @@ OUTER_OWNER_GUARD = re.compile(
     r"state\.screen == HulkScreen\.MAIN\s*&&\s*!isTv\s*&&\s*"
     r"adaptiveUi\.navigationType != HulkNavigationType\.RAIL",
 )
-RESERVED_SPACER = re.compile(
-    r"Spacer\(\s*Modifier\s*\.navigationBarsPadding\(\)\s*"
-    r"\.height\(MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT\),?\s*\)",
+RESERVED_CLEARANCE = re.compile(
+    r"\.height\(\s*stableMobileNavigationReservedHeight\(\s*"
+    r"windowWidthDp = adaptiveUi\.screenWidthDp,\s*"
+    r"downloadsEnabled = [\w.]+,?\s*\),\s*\)",
 )
 
 
@@ -52,26 +53,24 @@ class SingleMobileNavigationOwnerContractTest(unittest.TestCase):
         shell = self.read(MAIN_SHELL)
         search = self.read(SMART_SEARCH)
 
-        self.assertIn("internal val MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT =", nav)
+        self.assertIn(
+            "internal fun stableMobileNavigationReservedHeight(windowWidthDp: Int, downloadsEnabled: Boolean): Dp =",
+            nav,
+        )
         self.assertRegex(
             nav,
-            r"MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT =\s*\n\s*"
-            r"MOBILE_BOTTOM_NAVIGATION_ITEM_HEIGHT \+ "
+            r"MOBILE_BOTTOM_NAVIGATION_ITEM_HEIGHT \* stableMobileNavigationRows\("
+            r"windowWidthDp, downloadsEnabled\) \+\s*\n\s*"
             r"MOBILE_BOTTOM_NAVIGATION_VERTICAL_PADDING \* 2",
         )
         self.assertIn(".height(MOBILE_BOTTOM_NAVIGATION_ITEM_HEIGHT)", nav)
-        self.assertIn(".padding(vertical = MOBILE_BOTTOM_NAVIGATION_VERTICAL_PADDING)", nav)
-        self.assertRegex(shell, RESERVED_SPACER)
-        self.assertRegex(search, RESERVED_SPACER)
-        # Exactly one reserved clearance spacer/import in the shell; other semantic uses of the
-        # constant (for example lifting a transient in-app notice above the bar) are not a second
-        # navigation owner.
-        self.assertEqual(
-            1,
-            shell.count("import sa.hulksa.player.ui.MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT"),
-        )
-        self.assertEqual(1, shell.count(".height(MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT)"))
-        self.assertEqual(1, search.count("MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT"))
+        self.assertIn("vertical = MOBILE_BOTTOM_NAVIGATION_VERTICAL_PADDING", nav)
+        self.assertRegex(shell, RESERVED_CLEARANCE)
+        self.assertRegex(search, RESERVED_CLEARANCE)
+        # Exactly one reserved clearance per path; other semantic uses (for example lifting a
+        # transient in-app notice above the bar in the app host) are not a second navigation owner.
+        self.assertEqual(1, shell.count("stableMobileNavigationReservedHeight("))
+        self.assertEqual(1, search.count("stableMobileNavigationReservedHeight("))
 
     def test_ime_visibility_contract_remains_intentional_on_both_paths(self) -> None:
         nav = self.read(BOTTOM_NAV)
@@ -87,7 +86,7 @@ class SingleMobileNavigationOwnerContractTest(unittest.TestCase):
         search = self.read(SMART_SEARCH)
 
         rail = shell.index("CinematicNavigationRail(")
-        shell_spacer = shell.index("height(MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT)")
+        shell_spacer = shell.index("stableMobileNavigationReservedHeight(")
         self.assertLess(rail, shell_spacer)
         self.assertIn("if (useNavigationRail) {", shell)
         self.assertIn("initialAllFocusRequester = tvCatalogAllFocusRequesters[state.destination]", shell)
@@ -95,7 +94,7 @@ class SingleMobileNavigationOwnerContractTest(unittest.TestCase):
 
         use_rail = search.index("if (useRail) {")
         smart_rail = search.index("SmartSearchRail(")
-        search_spacer = search.index("height(MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT)")
+        search_spacer = search.index("stableMobileNavigationReservedHeight(")
         self.assertLess(use_rail, smart_rail)
         self.assertLess(smart_rail, search_spacer)
 
