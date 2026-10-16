@@ -307,3 +307,153 @@ class SeriesR06ReviewContractTest(unittest.TestCase):
             # unrelated hero action (favorite/notification) is never a fallback.
             self.assertNotIn("heroReturnRequester.requestFocus()", up_block)
             self.assertNotIn("delay(", up_block)
+
+
+class SeriesSelectedSeasonFocusContractTest(unittest.TestCase):
+    @staticmethod
+    def series() -> str:
+        text = DETAILS.read_text(encoding="utf-8")
+        return text[text.index("private fun SeriesDetailsProTvPolished("):]
+
+    @classmethod
+    def series_ui_section(cls, start: str, end: str) -> str:
+        text = SERIES_UI.read_text(encoding="utf-8")
+        start_index = text.index(start)
+        return text[start_index : text.index(end, start_index)]
+
+    def test_tab_down_and_season_up_use_the_selected_season_owner(self) -> None:
+        series = self.series()
+        self.assertIn("seriesSelectedSeasonFocusIndex(selectedSeason, seasons)", series)
+        self.assertIn(
+            "SeriesDetailsTab.EPISODES to (selectedSeasonRequester ?: firstEpisodeRequester ?: playRequester)",
+            series,
+        )
+        self.assertNotIn("firstSeasonRequester", series)
+        self.assertIn(
+            "SeriesDetailsTab.EPISODES -> beginEpisodesDownHandoff()",
+            series,
+        )
+        self.assertIn("fun beginEpisodesTabHandoff()", series)
+        self.assertIn("targetRequester = tabRequesters.getValue(SeriesDetailsTab.EPISODES)", series)
+        self.assertNotIn("up = FocusRequester.Default", series)
+
+    def test_first_episode_row_up_is_selected_season_and_column_independent(self) -> None:
+        series = self.series()
+        self.assertIn("onCardMoveUp = onCardMoveUp", series)
+        self.assertIn("{ beginSeasonFocusHandoff() }", series)
+        self.assertIn("seriesEpisodeUpTargetIndex(absoluteIndex, metrics.episodeColumns)", series)
+        self.assertNotIn("seasonRequesters.getOrNull(columnIndex", series)
+        self.assertIn("selectedSeasonRequester ?: playRequester", series)
+
+    def test_season_strip_reveals_the_target_before_requesting_focus(self) -> None:
+        series = self.series()
+        self.assertIn("val seasonListState = rememberLazyListState()", series)
+        self.assertIn("state = seasonListState", series)
+        effect_start = series.index("LaunchedEffect(pendingSeasonFocus, listState, seasonListState)")
+        effect_end = series.index(
+            "LaunchedEffect(series.id, seasons, episodeKeys, errorMessage, metrics.episodeColumns)",
+            effect_start,
+        )
+        effect = series[effect_start:effect_end]
+        resolve = effect.index("seriesLazyTargetIndex(")
+        scroll = effect.index("listState.scrollToItem(targetIndex)", resolve)
+        signal = effect.index("snapshotFlow", scroll)
+        visibility = effect.index("it.key == request.targetItemKey", signal)
+        wait = effect.index(".first { it }", visibility)
+        stale_guard = effect.index("!lazyFocusOwner.isCurrent(request.token)", signal)
+        season_scroll = effect.index("seasonListState.scrollToItem(seasonIndex)", wait)
+        focus = effect.index("requestFocus = { request.targetRequester.requestFocus() }", season_scroll)
+        missing = effect.index("onTargetMissing = {", focus)
+        cancel = effect.index("cancelPendingLazyTransfer()", missing)
+        self.assertLess(resolve, scroll)
+        self.assertLess(scroll, signal)
+        self.assertLess(signal, visibility)
+        self.assertLess(visibility, wait)
+        self.assertLess(signal, stale_guard)
+        self.assertLess(wait, season_scroll)
+        self.assertLess(season_scroll, focus)
+        self.assertLess(focus, missing)
+        self.assertLess(missing, cancel)
+        self.assertIn("slot = request.targetSlot", effect)
+        self.assertIn("rowIndex = request.targetRowIndex", effect)
+        self.assertIn("totalItemsCount = listState.layoutInfo.totalItemsCount", effect)
+        self.assertNotIn("delay(", effect)
+        self.assertNotIn("while (", effect)
+
+    def test_lazy_transfer_requests_are_mutually_exclusive_with_one_owner(self) -> None:
+        series = self.series()
+        # One shared generation owner; every begin invalidates the other family before focusing.
+        self.assertIn("val lazyFocusOwner = remember(series.id) { SeriesFocusRestorationOwner() }", series)
+        self.assertIn("fun cancelPendingLazyTransfer()", series)
+        self.assertIn("fun beginLazyTransfer(request: DetailsTvLazyFocusRequest)", series)
+        begin = series.index("fun beginLazyTransfer(request: DetailsTvLazyFocusRequest)")
+        begin_block = series[begin : series.index("fun beginSeasonFocusHandoff()", begin)]
+        self.assertIn("pendingSeasonFocus = null", begin_block)
+        self.assertIn("pendingLazyFocus = request.copy(token = lazyFocusOwner.begin())", begin_block)
+        season_begin = series.index("fun beginSeasonFocusHandoff()")
+        season_begin_block = series[season_begin : series.index("fun beginEpisodesTabHandoff()", season_begin)]
+        self.assertIn("pendingLazyFocus = null", season_begin_block)
+        self.assertIn("token = lazyFocusOwner.begin()", season_begin_block)
+        episode_begin = series.index("fun beginEpisodeFocusHandoff(")
+        episode_begin_block = series[episode_begin : series.index("fun beginEpisodesDownHandoff()", episode_begin)]
+        self.assertIn("pendingLazyFocus = null", episode_begin_block)
+        self.assertIn("token = lazyFocusOwner.begin()", episode_begin_block)
+        # The old DOWN effect verifies the shared token before and after its reveal, not only
+        # when replaced.
+        lazy_effect = series[
+            series.index("LaunchedEffect(pendingLazyFocus, listState)") :
+                series.index("LaunchedEffect(errorMessage)", series.index("LaunchedEffect(pendingLazyFocus, listState)"))
+        ]
+        self.assertIn("seriesLazyRevealFocus(", lazy_effect)
+        self.assertIn("isCurrent = { lazyFocusOwner.isCurrent(request.token) }", lazy_effect)
+        self.assertIn("!lazyFocusOwner.isCurrent(request.token)", lazy_effect)
+        self.assertIn("if (granted == false && lazyFocusOwner.isCurrent(request.token))", lazy_effect)
+        self.assertNotIn("delay(", lazy_effect)
+        self.assertNotIn("while (", lazy_effect)
+
+    def test_pending_transfer_cancels_on_structural_selection_and_key_changes(self) -> None:
+        series = self.series()
+        self.assertIn(
+            "LaunchedEffect(series.id, seasons, episodeKeys, errorMessage, metrics.episodeColumns) {",
+            series,
+        )
+        self.assertIn("LaunchedEffect(series.id, selectedTab, selectedSeason) {", series)
+        self.assertIn("cancelPendingLazyTransfer()", series)
+        self.assertIn("focusRestoration.invalidate()\n            cancelPendingLazyTransfer()", series)
+        # A failed attach cancels instead of being retried as success.
+        self.assertIn("if (!grantedAfterFrame) cancelPendingLazyTransfer()", series)
+        self.assertIn("if (lazyFocusOwner.isCurrent(request.token)) cancelPendingLazyTransfer()", series)
+
+    def test_season_down_restores_remembered_episode_with_safe_fallback(self) -> None:
+        series = self.series()
+        self.assertIn(
+            "seriesSeasonDownEpisodeIndex(episodeKeys, lastEpisodeFocusBySeason[selectedSeason])",
+            series,
+        )
+        self.assertIn("lastEpisodeFocusBySeason[episode.season] = episode.id", series)
+        self.assertIn("if (focused) lastEpisodeFocusBySeason[episode.season] = episode.id", series)
+
+    def test_shared_episode_card_cancels_pending_transfer_on_every_newer_key(self) -> None:
+        card = self.series_ui_section(
+            "internal fun EpisodeBoxedCard(",
+            "private fun EpisodeArtworkBadge(",
+        )
+        self.assertIn("onMoveUp: (() -> Boolean)? = null", card)
+        self.assertIn("onCardFocusChanged: ((Boolean) -> Unit)? = null", card)
+        self.assertIn("event.key == Key.DirectionUp && onMoveUp != null -> {", card)
+        up_block = card[card.index("event.key == Key.DirectionUp && onMoveUp != null -> {") :]
+        up_block = up_block[: up_block.index("}")]
+        self.assertIn("onCancelPendingMove()", up_block)
+        self.assertIn("onMoveUp()", up_block)
+        self.assertIn("!cardFocused -> false", card)
+        # The action and cancel controls cancel a pending lazy DOWN on any newer key, while their
+        # own DOWN-to-lazy-move handling stays exactly where it was.
+        self.assertGreaterEqual(card.count("event.key != Key.DirectionDown"), 2)
+        self.assertGreaterEqual(card.count("onCancelPendingMove()"), 6)
+        self.assertIn("} else if (onMoveDown != null) {", card)
+        self.assertIn("onCancelPendingMove()\n                            onMoveDown()", card)
+        self.assertIn("fun seriesSelectedSeasonFocusIndex(", SERIES_UI.read_text(encoding="utf-8"))
+        self.assertIn("fun seriesSeasonDownEpisodeIndex(", SERIES_UI.read_text(encoding="utf-8"))
+        self.assertIn("fun seriesEpisodeUpTargetIndex(", SERIES_UI.read_text(encoding="utf-8"))
+        self.assertIn("fun seriesLazyTargetIndex(", SERIES_UI.read_text(encoding="utf-8"))
+        self.assertIn("suspend fun seriesLazyRevealFocus(", SERIES_UI.read_text(encoding="utf-8"))

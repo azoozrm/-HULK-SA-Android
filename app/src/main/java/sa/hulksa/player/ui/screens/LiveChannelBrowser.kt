@@ -32,7 +32,6 @@ import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -685,7 +684,7 @@ internal fun LiveChannelBrowser(
                 item("favorites") {
                     BrowserCategoryRow(
                         text = "المفضلة",
-                        icon = Icons.Rounded.Star,
+                        icon = Icons.Rounded.Favorite,
                         selected = selectedCategory == LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY && searchQuery.isBlank(),
                         onClick = { selectCategory(LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY) },
                         focusRequester = favoritesCategoryFocus,

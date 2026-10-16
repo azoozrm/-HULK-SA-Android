@@ -66,7 +66,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.rounded.Check
@@ -6899,7 +6898,7 @@ private fun CatalogCategoryBar(
                 compact = true,
                 scaleOnFocus = false,
                 textSizeSp = itemMetrics.textSizeSp,
-                trailingIcon = Icons.Outlined.StarBorder,
+                trailingIcon = Icons.Rounded.Favorite,
                 trailingIconTint = if (selectedId == FAVORITES_CATEGORY_ID) Color.Black else colors.gold,
                 modifier = Modifier
                     .categoryChipFocus(
@@ -7095,7 +7094,7 @@ private fun LiveCategoryBar(
                 compact = true,
                 scaleOnFocus = false,
                 textSizeSp = itemMetrics.textSizeSp,
-                trailingIcon = Icons.Outlined.StarBorder,
+                trailingIcon = Icons.Rounded.Favorite,
                 trailingIconTint = if (selectedId == FAVORITES_CATEGORY_ID) Color.Black else colors.gold,
                 modifier = Modifier
                     .categoryChipFocus(
