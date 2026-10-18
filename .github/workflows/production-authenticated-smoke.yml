@@ -46,6 +46,20 @@ jobs:
           cache-cleanup: on-success
 
       - uses: android-actions/setup-android@v4
+        if: inputs.runtime != 'lab-device'
+
+      - name: Use lab Android SDK
+        if: inputs.runtime == 'lab-device'
+        shell: bash
+        env:
+          HULK_LAB_ANDROID_SDK: ${{ vars.HULK_LAB_ANDROID_SDK }}
+        run: |
+          set -euo pipefail
+          [[ -n "$HULK_LAB_ANDROID_SDK" ]] || { echo 'STOP: HULK_LAB_ANDROID_SDK environment variable is missing' >&2; exit 2; }
+          [[ -x "$HULK_LAB_ANDROID_SDK/platform-tools/adb" ]] || { echo 'STOP: lab Android SDK is incomplete' >&2; exit 2; }
+          echo "ANDROID_SDK_ROOT=$HULK_LAB_ANDROID_SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$HULK_LAB_ANDROID_SDK" >> "$GITHUB_ENV"
+          echo "$HULK_LAB_ANDROID_SDK/platform-tools" >> "$GITHUB_PATH"
 
       - name: Validate protected E2E inputs
         shell: bash
