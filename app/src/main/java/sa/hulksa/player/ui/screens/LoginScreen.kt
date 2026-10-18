@@ -36,8 +36,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.KeyboardActionHandler
+import androidx.compose.foundation.text.input.OutputTransformation
+import androidx.compose.foundation.text.input.TextFieldDecorator
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Login
@@ -60,6 +65,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,8 +99,6 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.Dp
@@ -396,14 +400,6 @@ fun LoginScreen(
         }
     }
 
-    // Keep the TV keyboard settled while Compose's focus-triggered IME show is still
-    // arriving; once the viewer interacts, normal focus transitions own the keyboard.
-    val tvStartupImeVisible =
-        isTv && !viewerEngaged && WindowInsets.ime.getBottom(LocalDensity.current) > 0
-    LaunchedEffect(tvStartupImeVisible) {
-        if (tvStartupImeVisible) hideKeyboard()
-    }
-
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         BoxWithConstraints(
             modifier = Modifier
@@ -462,6 +458,7 @@ fun LoginScreen(
                     onRememberChange = { rememberAccount = !rememberAccount },
                     isLoading = isLoading,
                     isTv = isTv,
+                    showKeyboardOnFocus = !isTv || viewerEngaged,
                     subscriptionUsesQr = subscriptionUsesQr,
                     pairingOffered = pairingOffered,
                     pairingVisible = pairing.visible,
@@ -578,6 +575,7 @@ private fun LoginPanel(
     onRememberChange: () -> Unit,
     isLoading: Boolean,
     isTv: Boolean,
+    showKeyboardOnFocus: Boolean,
     subscriptionUsesQr: Boolean,
     pairingOffered: Boolean,
     pairingVisible: Boolean,
@@ -721,10 +719,9 @@ private fun LoginPanel(
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Ascii,
                 imeAction = ImeAction.Next,
+                showKeyboardOnFocus = showKeyboardOnFocus,
             ),
-            keyboardActions = KeyboardActions(
-                onNext = { runCatching { usernameRequester.requestFocus() } },
-            ),
+            onImeAction = { runCatching { usernameRequester.requestFocus() } },
         )
         Spacer(Modifier.height(if (policy.compact) 2.dp else 10.dp))
 
@@ -752,10 +749,9 @@ private fun LoginPanel(
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Ascii,
                 imeAction = ImeAction.Next,
+                showKeyboardOnFocus = showKeyboardOnFocus,
             ),
-            keyboardActions = KeyboardActions(
-                onNext = { runCatching { passwordRequester.requestFocus() } },
-            ),
+            onImeAction = { runCatching { passwordRequester.requestFocus() } },
         )
         Spacer(Modifier.height(if (policy.compact) 2.dp else 10.dp))
 
@@ -780,17 +776,19 @@ private fun LoginPanel(
                 }
                 .fillMaxWidth()
                 .heightIn(min = policy.fieldHeight),
-            visualTransformation =
+            outputTransformation =
                 if (showPassword) {
-                    VisualTransformation.None
+                    null
                 } else {
-                    PasswordVisualTransformation()
+                    LoginPasswordOutputTransformation
                 },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Password,
                 imeAction = ImeAction.Done,
+                showKeyboardOnFocus = showKeyboardOnFocus,
             ),
-            keyboardActions = KeyboardActions(onDone = { onSubmit() }),
+            onImeAction = { onSubmit() },
+            saveable = false,
         )
 
         Spacer(
@@ -931,13 +929,24 @@ private fun LoginCredentialTextField(
     bringIntoViewOnFocus: Boolean = true,
     onFocused: () -> Unit = {},
     modifier: Modifier = Modifier,
-    visualTransformation: VisualTransformation = VisualTransformation.None,
+    outputTransformation: OutputTransformation? = null,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
-    keyboardActions: KeyboardActions = KeyboardActions.Default,
+    onImeAction: (() -> Unit)? = null,
+    saveable: Boolean = true,
 ) {
+    // Access code and username stay saveable across recreation; the password is
+    // intentionally non-saveable, matching its pre-migration remember lifetime.
+    val textFieldState = if (saveable) {
+        rememberTextFieldState(state.value)
+    } else {
+        remember { TextFieldState(state.value) }
+    }
+    LaunchedEffect(textFieldState) {
+        snapshotFlow { textFieldState.text.toString() }
+            .collect { latest -> if (state.value != latest) state.value = latest }
+    }
     LoginTextField(
-        value = state.value,
-        onValueChange = { state.value = it },
+        state = textFieldState,
         label = label,
         icon = icon,
         iconBase = iconBase,
@@ -945,16 +954,15 @@ private fun LoginCredentialTextField(
         bringIntoViewOnFocus = bringIntoViewOnFocus,
         onFocused = onFocused,
         modifier = modifier,
-        visualTransformation = visualTransformation,
+        outputTransformation = outputTransformation,
         keyboardOptions = keyboardOptions,
-        keyboardActions = keyboardActions,
+        onImeAction = onImeAction,
     )
 }
 
 @Composable
 private fun LoginTextField(
-    value: String,
-    onValueChange: (String) -> Unit,
+    state: TextFieldState,
     label: String,
     icon: ImageVector,
     iconBase: Color,
@@ -962,9 +970,9 @@ private fun LoginTextField(
     bringIntoViewOnFocus: Boolean = true,
     onFocused: () -> Unit = {},
     modifier: Modifier = Modifier,
-    visualTransformation: VisualTransformation = VisualTransformation.None,
+    outputTransformation: OutputTransformation? = null,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
-    keyboardActions: KeyboardActions = KeyboardActions.Default,
+    onImeAction: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
@@ -994,8 +1002,7 @@ private fun LoginTextField(
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
+            state = state,
             modifier = modifier
                 .then(
                     if (bringIntoViewOnFocus) {
@@ -1013,7 +1020,6 @@ private fun LoginTextField(
                 .border(if (focused) 2.dp else 1.dp, border, shape)
                 .padding(horizontal = 17.dp)
                 .semantics { contentDescription = label },
-            singleLine = true,
             textStyle = TextStyle(
                 color = colors.text,
                 fontSize = textSizeSp.sp,
@@ -1021,11 +1027,12 @@ private fun LoginTextField(
                 textAlign = TextAlign.End,
                 textDirection = TextDirection.ContentOrLtr,
             ),
-            cursorBrush = Brush.verticalGradient(listOf(colors.goldBright, colors.goldBright)),
-            visualTransformation = visualTransformation,
             keyboardOptions = keyboardOptions,
-            keyboardActions = keyboardActions,
-            decorationBox = { innerField ->
+            onKeyboardAction = onImeAction?.let { action -> KeyboardActionHandler { action() } },
+            lineLimits = TextFieldLineLimits.SingleLine,
+            cursorBrush = Brush.verticalGradient(listOf(colors.goldBright, colors.goldBright)),
+            outputTransformation = outputTransformation,
+            decorator = TextFieldDecorator { innerField ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1042,7 +1049,7 @@ private fun LoginTextField(
                         modifier = Modifier.weight(1f),
                         contentAlignment = Alignment.CenterEnd,
                     ) {
-                        if (value.isEmpty()) {
+                        if (state.text.isEmpty()) {
                             Text(
                                 text = label,
                                 color = colors.textMuted,
@@ -1063,6 +1070,15 @@ private fun LoginTextField(
                 }
             },
         )
+    }
+}
+
+// Masks the password through the state-based text pipeline with an equal-length
+// replacement, so selection and cursor placement behave like the previous
+// PasswordVisualTransformation.
+private val LoginPasswordOutputTransformation = OutputTransformation {
+    for (index in 0 until length) {
+        replace(index, index + 1, "\u2022")
     }
 }
 
