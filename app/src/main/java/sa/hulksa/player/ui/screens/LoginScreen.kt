@@ -72,7 +72,6 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onPlaced
@@ -298,7 +297,6 @@ fun LoginScreen(
     }
     val keyboardFocusTransitionController = remember { LoginKeyboardFocusTransitionController() }
     var initialTvFocusRequested by remember { mutableStateOf(false) }
-    var viewerEngaged by remember { mutableStateOf(false) }
     var showSubscriptionQr by rememberSaveable { mutableStateOf(false) }
     val loginRenewalLink = remember {
         OperationsGrowthLinkConfig(
@@ -395,25 +393,13 @@ fun LoginScreen(
             hideKeyboard()
         }
     }
-    val tvStartupImeVisible =
-        isTv && !viewerEngaged && WindowInsets.ime.getBottom(LocalDensity.current) > 0
-    LaunchedEffect(tvStartupImeVisible) {
-        if (tvStartupImeVisible) hideKeyboard()
-    }
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .onPreviewKeyEvent {
-                    viewerEngaged = true
-                    false
-                }
                 .pointerInput(Unit) {
-                    detectTapGestures(
-                        onPress = { viewerEngaged = true },
-                        onTap = { dismissKeyboard() },
-                    )
+                    detectTapGestures(onTap = { dismissKeyboard() })
                 },
         ) {
             val policy = resolveLoginLayoutPolicy(
