@@ -14,6 +14,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import sa.hulksa.player.data.HulkRepository
+import sa.hulksa.player.data.XtreamException
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.Credentials
@@ -41,14 +42,22 @@ class ProductionAuthenticatedSmokeTest {
 
         try {
             withTimeout(180_000L) {
-                val session = repository.login(
-                    credentials = Credentials(
-                        accessCode = accessCode,
-                        username = username,
-                        password = password,
-                    ),
-                    remember = false,
-                )
+                val session = try {
+                    repository.login(
+                        credentials = Credentials(
+                            accessCode = accessCode,
+                            username = username,
+                            password = password,
+                        ),
+                        remember = false,
+                    )
+                } catch (blocked: XtreamException.ServiceBlocked) {
+                    throw AssertionError(
+                        "Production login was blocked by the provider " +
+                            "(status=${blocked.statusCode}, category=${blocked.category ?: "unknown"})",
+                        blocked,
+                    )
+                }
 
                 assertTrue(session.account.status.equals("Active", ignoreCase = true))
                 assertEquals(PortalConfig.Source.ACCESS_CODE, session.portal.source)

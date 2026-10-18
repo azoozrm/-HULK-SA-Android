@@ -339,10 +339,10 @@ class XtreamClient {
                     throw XtreamException.InvalidResponse
                 }
                 if (!response.isSuccessful) {
-                    if (body.looksLikeChallenge()) throw XtreamException.ServiceBlocked
+                    body.challengeCategory()?.let { throw XtreamException.ServiceBlocked(response.code, it) }
                     throw XtreamException.Http(response.code)
                 }
-                if (body.looksLikeChallenge()) throw XtreamException.ServiceBlocked
+                body.challengeCategory()?.let { throw XtreamException.ServiceBlocked(response.code, it) }
                 body
             }
         } catch (error: CancellationException) {
@@ -429,10 +429,15 @@ class XtreamClient {
 
     private fun JSONObject.firstImageUrl(key: String): String? = xtreamFirstImageUrl(key)
 
-    private fun String.looksLikeChallenge(): Boolean {
+    private fun String.challengeCategory(): String? {
         val prefix = trimStart().take(512).lowercase()
-        return prefix.startsWith("<!doctype html") || prefix.startsWith("<html") ||
-            "cloudflare" in prefix || "sorry, you have been blocked" in prefix
+        return when {
+            prefix.startsWith("<!doctype html") -> "html-doctype"
+            prefix.startsWith("<html") -> "html"
+            "cloudflare" in prefix -> "cloudflare"
+            "sorry, you have been blocked" in prefix -> "blocked-page"
+            else -> null
+        }
     }
 
     private companion object {
@@ -544,7 +549,8 @@ sealed class XtreamException(message: String, cause: Throwable? = null) : Except
     data object SubscriptionInactive : XtreamException("الاشتراك منتهي او غير فعال. تواصل مع الدعم للتجديد.")
     data object InvalidResponse : XtreamException("وصل رد غير صالح من الخدمة.")
     data object PayloadLimitExceeded : XtreamException("رد الخدمة تجاوز حدود الأمان المدعومة.")
-    data object ServiceBlocked : XtreamException("الخدمة رفضت الاتصال مؤقتا. جرب من شبكة اخرى او تواصل مع الدعم.")
+    data class ServiceBlocked(val statusCode: Int, val category: String?) :
+        XtreamException("الخدمة رفضت الاتصال مؤقتا. جرب من شبكة اخرى او تواصل مع الدعم.")
     data class Http(val statusCode: Int) : XtreamException("تعذر الاتصال بالخدمة (رمز $statusCode).")
     data class Network(val error: IOException) : XtreamException("تحقق من اتصال الانترنت ثم حاول مرة اخرى.", error)
 }

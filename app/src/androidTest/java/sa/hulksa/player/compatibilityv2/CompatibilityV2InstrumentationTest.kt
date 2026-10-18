@@ -465,9 +465,20 @@ class CompatibilityV2InstrumentationTest {
         }
         if (block.isEmpty()) return false
         if (!block.contains("mViewVisibility=0x0")) return false
-        return block.contains("mHasSurface=true") ||
+        val windowFlagsVisible = block.contains("mHasSurface=true") ||
             block.contains("isOnScreen=true") ||
             block.contains("isVisible=true")
+        if (!windowFlagsVisible) return false
+        return imeInsetsProviderReportsShowing()
+    }
+
+    private fun imeInsetsProviderReportsShowing(): Boolean {
+        // After an aborted post-layout IME show (tv-720p, run 39081036855) the window node can keep
+        // stale visibility flags while the insets provider already reports the IME as not showing.
+        // Only treat the keyboard as occupying the screen when both authorities agree on visibility.
+        val dump = device.executeShellCommand("dumpsys window displays")
+        if (!dump.contains("mImeShowing=")) return true
+        return dump.contains("mImeShowing=true")
     }
 
     private fun waitForTelevisionImeHiddenSettled(
@@ -604,7 +615,7 @@ class CompatibilityV2InstrumentationTest {
             device.dumpWindowHierarchy(File(output, "portrait-login-ime-stable.xml"))
 
             val (loginReachable, subscribeReachable) = resolveImeLoginActionReachability(
-                resolveLogin = { resolvedVisibleBounds(By.text("دخول الى HULK"), 500L) },
+                resolveLogin = { resolvedVisibleBounds(By.text("تسجيل الدخول").clickable(true), 500L) },
                 resolveSubscribe = { resolvedVisibleBounds(By.text("اشتراك جديد"), 500L) },
                 semanticScroll = {
                     val direction =
