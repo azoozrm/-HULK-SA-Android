@@ -788,6 +788,7 @@ private fun LoginPanel(
                 showKeyboardOnFocus = showKeyboardOnFocus,
             ),
             onImeAction = { onSubmit() },
+            saveable = false,
         )
 
         Spacer(
@@ -931,8 +932,15 @@ private fun LoginCredentialTextField(
     outputTransformation: OutputTransformation? = null,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     onImeAction: (() -> Unit)? = null,
+    saveable: Boolean = true,
 ) {
-    val textFieldState = rememberTextFieldState(state.value)
+    // Access code and username stay saveable across recreation; the password is
+    // intentionally non-saveable, matching its pre-migration remember lifetime.
+    val textFieldState = if (saveable) {
+        rememberTextFieldState(state.value)
+    } else {
+        remember { TextFieldState(state.value) }
+    }
     LaunchedEffect(textFieldState) {
         snapshotFlow { textFieldState.text.toString() }
             .collect { latest -> if (state.value != latest) state.value = latest }

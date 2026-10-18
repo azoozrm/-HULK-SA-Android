@@ -265,11 +265,15 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertNotIn("var password by", screen)
         # Revision 3: the remembered parent state stays the single owner; the
         # state-based field receives one bridged TextFieldState and reports
-        # changes back instead of writing through the editable subtree.
-        self.assertIn("val textFieldState = rememberTextFieldState(state.value)", credential_field)
+        # changes back instead of writing through the editable subtree. The
+        # password field stays non-saveable so recreation cannot restore it.
+        self.assertIn("val textFieldState = if (saveable)", credential_field)
+        self.assertIn("rememberTextFieldState(state.value)", credential_field)
+        self.assertIn("remember { TextFieldState(state.value) }", credential_field)
         self.assertIn("snapshotFlow { textFieldState.text.toString() }", credential_field)
         self.assertIn("state.value = latest", credential_field)
         self.assertIn("state = textFieldState", credential_field)
+        self.assertIn("saveable = false", panel)
         self.assertIn("state: TextFieldState", login_field)
         self.assertNotIn("MutableState", login_field)
         self.assertNotIn("onValueChange", login_field)
