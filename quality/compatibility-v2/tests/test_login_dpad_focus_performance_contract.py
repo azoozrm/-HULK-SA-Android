@@ -207,13 +207,22 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertNotIn("fun loginFieldsAppearInRequiredResellerOrder()", self.instrumentation_source)
         self.assertNotIn("must appear before", reachability)
 
-    def test_tv_login_does_not_observe_ime_inset_state(self) -> None:
+    def test_tv_login_ime_observation_is_engagement_scoped_and_hide_only(self) -> None:
         screen = self.screen_section()
 
-        # R03 removed the IME inset read entirely; the phone IME padding stays in
-        # the non-TV branch only, so TV cannot observe inset-state changes.
-        self.assertEqual(0, screen.count("WindowInsets.ime.getBottom"))
-        self.assertNotIn("val imeVisible", screen)
+        # R03 removed the composition-time IME inset read so TV login would not
+        # churn on inset-state changes. The tv-1080p stuck-IME startup race
+        # (matrix run 39095127782) required one owner-authorized exception: TV
+        # login may observe IME visibility only until the viewer first
+        # interacts, and only to hide the keyboard again. It must stay a single
+        # read feeding one hide-only effect with no timers or polling.
+        self.assertEqual(1, screen.count("WindowInsets.ime.getBottom"))
+        self.assertIn("val tvStartupImeVisible =", screen)
+        self.assertIn("isTv && !viewerEngaged", screen)
+        self.assertIn("if (tvStartupImeVisible) hideKeyboard()", screen)
+        self.assertIn("var viewerEngaged by remember { mutableStateOf(false) }", screen)
+        self.assertIn("onPreviewKeyEvent", screen)
+        self.assertIn("onPress = { viewerEngaged = true }", screen)
         self.assertIn("if (isTv)", screen)
         self.assertIn(".imePadding()", screen)
 
