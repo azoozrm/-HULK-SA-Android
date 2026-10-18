@@ -2,6 +2,15 @@ name: HULK SA Production Authenticated Smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      runtime:
+        description: 'Smoke runtime: GitHub-hosted emulator or the lab physical device'
+        required: true
+        default: github-emulator
+        type: choice
+        options:
+          - github-emulator
+          - lab-device
 
 permissions:
   contents: read
@@ -13,13 +22,14 @@ concurrency:
 jobs:
   authenticated-smoke:
     name: Authenticated catalog/details/stream smoke
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runtime == 'lab-device' && 'hulk-lab-smoke' || 'ubuntu-latest' }}
     environment: production-e2e
     timeout-minutes: 60
     env:
       HULK_E2E_ACCESS_CODE: ${{ secrets.HULK_E2E_ACCESS_CODE }}
       HULK_E2E_USERNAME: ${{ secrets.HULK_E2E_USERNAME }}
       HULK_E2E_PASSWORD: ${{ secrets.HULK_E2E_PASSWORD }}
+      HULK_SMOKE_RUNTIME: ${{ inputs.runtime == 'lab-device' && 'lab physical device' || 'Android API 35 / x86_64 emulator' }}
 
     steps:
       - uses: actions/checkout@v7
@@ -47,6 +57,7 @@ jobs:
           echo 'PASS: protected production E2E credentials are available'
 
       - name: Configure Linux KVM when available
+        if: inputs.runtime != 'lab-device'
         shell: bash
         run: |
           set -euo pipefail
@@ -54,7 +65,8 @@ jobs:
             sudo chmod a+rw /dev/kvm || true
           fi
 
-      - name: Run protected production instrumentation
+      - name: Run protected production instrumentation (emulator)
+        if: inputs.runtime != 'lab-device'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -73,6 +85,35 @@ jobs:
             -Pandroid.testInstrumentationRunnerArguments.hulkE2eUsername="$HULK_E2E_USERNAME"
             -Pandroid.testInstrumentationRunnerArguments.hulkE2ePassword="$HULK_E2E_PASSWORD"
 
+      - name: Run protected production instrumentation (lab physical device)
+        if: inputs.runtime == 'lab-device'
+        shell: bash
+        env:
+          HULK_LAB_SERIAL: ${{ vars.HULK_LAB_SMOKE_SERIAL }}
+          HULK_LAB_MODEL: SM-A065F
+          HULK_TV_SERIAL: ${{ vars.HULK_LAB_TV_SERIAL }}
+        run: |
+          set -euo pipefail
+          [[ -n "$HULK_LAB_SERIAL" ]] || { echo 'STOP: HULK_LAB_SMOKE_SERIAL environment variable is missing' >&2; exit 2; }
+          adb connect "$HULK_LAB_SERIAL" >/dev/null 2>&1 || true
+          timeout 60 adb -s "$HULK_LAB_SERIAL" wait-for-device || { echo 'STOP: lab smoke device is not online' >&2; exit 4; }
+          model=$(adb -s "$HULK_LAB_SERIAL" shell getprop ro.product.model | tr -d '\r')
+          [[ "$model" == "$HULK_LAB_MODEL" ]] || { echo "STOP: unexpected lab device model '$model'" >&2; exit 3; }
+          api=$(adb -s "$HULK_LAB_SERIAL" shell getprop ro.build.version.sdk | tr -d '\r')
+          echo "Lab smoke device: $HULK_LAB_MODEL (API $api)"
+          adb -s "$HULK_LAB_SERIAL" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+          if [[ -n "${HULK_TV_SERIAL:-}" ]]; then
+            # The TV engineering transport must not join this connected test run.
+            adb disconnect "$HULK_TV_SERIAL" >/dev/null 2>&1 || true
+            trap 'adb connect "$HULK_TV_SERIAL" >/dev/null 2>&1 || true' EXIT
+          fi
+          ANDROID_SERIAL="$HULK_LAB_SERIAL" ./gradlew --no-daemon --console=plain :app:connectedDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.class=sa.hulksa.player.ProductionAuthenticatedSmokeTest \
+            -Pandroid.testInstrumentationRunnerArguments.hulkProductionE2e=true \
+            -Pandroid.testInstrumentationRunnerArguments.hulkE2eAccessCode="$HULK_E2E_ACCESS_CODE" \
+            -Pandroid.testInstrumentationRunnerArguments.hulkE2eUsername="$HULK_E2E_USERNAME" \
+            -Pandroid.testInstrumentationRunnerArguments.hulkE2ePassword="$HULK_E2E_PASSWORD"
+
       - name: Publish sanitized evidence
         if: success()
         shell: bash
@@ -84,7 +125,7 @@ jobs:
 
           - Source SHA: \`${GITHUB_SHA}\`
           - Workflow run: \`${GITHUB_RUN_ID}\`
-          - Runtime: Android API 35 / x86_64 emulator
+          - Runtime: ${HULK_SMOKE_RUNTIME}
           - Production login: PASS
           - Live catalog: PASS
           - Movie catalog and details: PASS
