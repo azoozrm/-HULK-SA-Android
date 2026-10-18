@@ -615,7 +615,7 @@ class CompatibilityV2InstrumentationTest {
             device.dumpWindowHierarchy(File(output, "portrait-login-ime-stable.xml"))
 
             val (loginReachable, subscribeReachable) = resolveImeLoginActionReachability(
-                resolveLogin = { resolvedVisibleBounds(By.text("تسجيل الدخول").clickable(true), 500L) },
+                resolveLogin = { resolvedVisibleBounds(By.desc("تسجيل الدخول"), 500L) },
                 resolveSubscribe = { resolvedVisibleBounds(By.text("اشتراك جديد"), 500L) },
                 semanticScroll = {
                     val direction =
