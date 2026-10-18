@@ -210,16 +210,23 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
     def test_tv_login_startup_ime_is_suppressed_at_the_field_level(self) -> None:
         screen = self.screen_section()
         panel = self.panel_section()
+        login_field = self.section(
+            self.source,
+            "private fun LoginTextField(",
+            "private fun rememberActionCaptionSpace(",
+        )
 
         # R03 removed the composition-time IME inset read so TV login would not
         # churn on inset-state changes. The owner-authorized engagement-scoped
         # hide (matrix run 39095127782) still lost the startup race on tv-1080p
         # and regressed tv-logical-960x540 (matrix run 39100373599): hiding
         # after Compose's focus-triggered show can re-arm the window manager's
-        # CONTROLS_CHANGED re-show. The contract now suppresses the startup
-        # show request at its source instead: TV credential fields keep
-        # showKeyboardOnFocus disabled until the viewer engages, and the screen
-        # must not observe IME inset state anywhere.
+        # CONTROLS_CHANGED re-show. Revision 3 (PR #355) moves the field to the
+        # state-based BasicTextField pipeline, whose decorator does not start
+        # an input session while showKeyboardOnFocus is disabled, so the
+        # startup IME show request is suppressed at its source instead: TV
+        # credential fields keep showKeyboardOnFocus disabled until the viewer
+        # engages, and the screen must not observe IME inset state anywhere.
         self.assertNotIn("WindowInsets.ime.getBottom", screen)
         self.assertIn("showKeyboardOnFocus = !isTv || viewerEngaged", screen)
         self.assertIn("var viewerEngaged by remember { mutableStateOf(false) }", screen)
@@ -228,6 +235,12 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertEqual(3, panel.count("showKeyboardOnFocus = showKeyboardOnFocus"))
         self.assertIn("if (isTv)", screen)
         self.assertIn(".imePadding()", screen)
+        self.assertIn("state: TextFieldState", login_field)
+        self.assertIn("state = state", login_field)
+        self.assertIn("lineLimits = TextFieldLineLimits.SingleLine", login_field)
+        self.assertIn("TextFieldDecorator", login_field)
+        self.assertNotIn("onValueChange", login_field)
+        self.assertNotIn("visualTransformation", login_field)
 
     def test_character_input_state_is_read_only_in_editable_subtree_or_submit(self) -> None:
         screen = self.screen_section()
@@ -237,6 +250,11 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
             "private fun LoginCredentialTextField(",
             "private fun LoginTextField(",
         )
+        login_field = self.section(
+            self.source,
+            "private fun LoginTextField(",
+            "private fun rememberActionCaptionSpace(",
+        )
 
         for state_name in ("accessCodeState", "usernameState", "passwordState"):
             self.assertIn(f"val {state_name} =", screen)
@@ -245,8 +263,16 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertNotIn("var accessCode by", screen)
         self.assertNotIn("var username by", screen)
         self.assertNotIn("var password by", screen)
-        self.assertIn("value = state.value", credential_field)
-        self.assertIn("onValueChange = { state.value = it }", credential_field)
+        # Revision 3: the remembered parent state stays the single owner; the
+        # state-based field receives one bridged TextFieldState and reports
+        # changes back instead of writing through the editable subtree.
+        self.assertIn("val textFieldState = rememberTextFieldState(state.value)", credential_field)
+        self.assertIn("snapshotFlow { textFieldState.text.toString() }", credential_field)
+        self.assertIn("state.value = latest", credential_field)
+        self.assertIn("state = textFieldState", credential_field)
+        self.assertIn("state: TextFieldState", login_field)
+        self.assertNotIn("MutableState", login_field)
+        self.assertNotIn("onValueChange", login_field)
 
     def test_static_cinematic_visuals_do_not_depend_on_credential_values(self) -> None:
         background = self.section(
