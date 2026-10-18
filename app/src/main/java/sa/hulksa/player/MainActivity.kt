@@ -170,6 +170,11 @@ class MainActivity : ComponentActivity() {
     @Suppress("DEPRECATION")
     private fun configurePhoneWindow() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            // Pre-R edge-to-edge windows receive no IME insets and the IME overlays the
+            // page; resize so scrollable login content stays reachable above the keyboard.
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

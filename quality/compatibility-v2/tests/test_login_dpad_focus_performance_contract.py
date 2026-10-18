@@ -207,22 +207,25 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertNotIn("fun loginFieldsAppearInRequiredResellerOrder()", self.instrumentation_source)
         self.assertNotIn("must appear before", reachability)
 
-    def test_tv_login_ime_observation_is_engagement_scoped_and_hide_only(self) -> None:
+    def test_tv_login_startup_ime_is_suppressed_at_the_field_level(self) -> None:
         screen = self.screen_section()
+        panel = self.panel_section()
 
         # R03 removed the composition-time IME inset read so TV login would not
-        # churn on inset-state changes. The tv-1080p stuck-IME startup race
-        # (matrix run 39095127782) required one owner-authorized exception: TV
-        # login may observe IME visibility only until the viewer first
-        # interacts, and only to hide the keyboard again. It must stay a single
-        # read feeding one hide-only effect with no timers or polling.
-        self.assertEqual(1, screen.count("WindowInsets.ime.getBottom"))
-        self.assertIn("val tvStartupImeVisible =", screen)
-        self.assertIn("isTv && !viewerEngaged", screen)
-        self.assertIn("if (tvStartupImeVisible) hideKeyboard()", screen)
+        # churn on inset-state changes. The owner-authorized engagement-scoped
+        # hide (matrix run 39095127782) still lost the startup race on tv-1080p
+        # and regressed tv-logical-960x540 (matrix run 39100373599): hiding
+        # after Compose's focus-triggered show can re-arm the window manager's
+        # CONTROLS_CHANGED re-show. The contract now suppresses the startup
+        # show request at its source instead: TV credential fields keep
+        # showKeyboardOnFocus disabled until the viewer engages, and the screen
+        # must not observe IME inset state anywhere.
+        self.assertNotIn("WindowInsets.ime.getBottom", screen)
+        self.assertIn("showKeyboardOnFocus = !isTv || viewerEngaged", screen)
         self.assertIn("var viewerEngaged by remember { mutableStateOf(false) }", screen)
         self.assertIn("onPreviewKeyEvent", screen)
         self.assertIn("onPress = { viewerEngaged = true }", screen)
+        self.assertEqual(3, panel.count("showKeyboardOnFocus = showKeyboardOnFocus"))
         self.assertIn("if (isTv)", screen)
         self.assertIn(".imePadding()", screen)
 

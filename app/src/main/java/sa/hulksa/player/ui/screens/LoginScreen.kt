@@ -396,14 +396,6 @@ fun LoginScreen(
         }
     }
 
-    // Keep the TV keyboard settled while Compose's focus-triggered IME show is still
-    // arriving; once the viewer interacts, normal focus transitions own the keyboard.
-    val tvStartupImeVisible =
-        isTv && !viewerEngaged && WindowInsets.ime.getBottom(LocalDensity.current) > 0
-    LaunchedEffect(tvStartupImeVisible) {
-        if (tvStartupImeVisible) hideKeyboard()
-    }
-
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         BoxWithConstraints(
             modifier = Modifier
@@ -462,6 +454,7 @@ fun LoginScreen(
                     onRememberChange = { rememberAccount = !rememberAccount },
                     isLoading = isLoading,
                     isTv = isTv,
+                    showKeyboardOnFocus = !isTv || viewerEngaged,
                     subscriptionUsesQr = subscriptionUsesQr,
                     pairingOffered = pairingOffered,
                     pairingVisible = pairing.visible,
@@ -578,6 +571,7 @@ private fun LoginPanel(
     onRememberChange: () -> Unit,
     isLoading: Boolean,
     isTv: Boolean,
+    showKeyboardOnFocus: Boolean,
     subscriptionUsesQr: Boolean,
     pairingOffered: Boolean,
     pairingVisible: Boolean,
@@ -721,6 +715,7 @@ private fun LoginPanel(
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Ascii,
                 imeAction = ImeAction.Next,
+                showKeyboardOnFocus = showKeyboardOnFocus,
             ),
             keyboardActions = KeyboardActions(
                 onNext = { runCatching { usernameRequester.requestFocus() } },
@@ -752,6 +747,7 @@ private fun LoginPanel(
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Ascii,
                 imeAction = ImeAction.Next,
+                showKeyboardOnFocus = showKeyboardOnFocus,
             ),
             keyboardActions = KeyboardActions(
                 onNext = { runCatching { passwordRequester.requestFocus() } },
@@ -789,6 +785,7 @@ private fun LoginPanel(
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Password,
                 imeAction = ImeAction.Done,
+                showKeyboardOnFocus = showKeyboardOnFocus,
             ),
             keyboardActions = KeyboardActions(onDone = { onSubmit() }),
         )
