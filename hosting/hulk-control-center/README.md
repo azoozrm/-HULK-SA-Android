@@ -53,6 +53,8 @@ Its independent session cookie is scoped to `/control-center/`, uses `Secure`, `
 
 The allow-list is defined in `lib/routes.php`. Apache rewrites friendly module URLs such as `/control-center/live-users/` to the single authenticated shell. Unknown routes render a safe 404 state and never select files dynamically.
 
+The authenticated shell exposes exactly four horizontal primary tabs beneath the brand header: المتصلون الآن (the default landing page), الإعلانات, الهوست والأكواد and تحديث التطبيق. On narrow phones the tab strip scrolls horizontally while the page itself does not clip. A compact header settings control keeps service status/maintenance, support/renewal, center settings and every existing module reachable without deleting the older routes; logout remains a compact header action. The hosts tab retains in-page access to current hosts, access codes and resellers.
+
 Operations, reseller, access-code, host, audit, Live Users, Sessions, Devices, Host Health, Diagnostics and Analytics modules are connected to their authoritative databases. Settings reads only allow-listed values from the installed private configuration. No screen substitutes a failed authority with zero or demo production records.
 
 ## Phase 8 administration completeness
@@ -90,12 +92,18 @@ Dashboard reads Operations, reseller and Presence authorities independently and 
 
 ## Phase 6 owner read models
 
-- `/live-users/` defaults to fresh non-ended sessions and can also show Offline/all states. Search, status, app-version, reseller, host and platform filters, sorting and stable pagination are server-side and retained in query parameters.
-- `/sessions/` renders immutable credential, host, device, app-version and lifecycle snapshots. A later code/host rotation never rewrites an older session.
+- `/live-users/` is the Online Now landing page. It groups non-ended sessions inside the configured Online TTL by exact reseller ID, normalized host and IPTV username, never by username alone; case-distinct and accent-distinct usernames remain separate identities. Each subscription shows a prominent active-connection total, active subscriptions, unique devices, TV and phone/tablet breakdown, concurrent-device warning, the latest authoritative access code/IPTV username/password/host directly in the authenticated card, and a bounded device list with an explicit partial-list note when more devices exist. Aggregate counts remain complete. Pagination is stable over subscription groups. A control-row failure renders the unavailable state instead of zero; a reseller-name failure keeps the authoritative control data visible with an explicit partial-data warning.
+- `/sessions/` remains the full filterable history and can show Offline/all states. Search, status, app-version, reseller, host and platform filters, sorting and stable row pagination are server-side and retained in query parameters. It renders immutable credential, host, device, app-version and lifecycle snapshots. A later code/host rotation never rewrites an older session.
 - `/devices/` uses `installation_id` as stable identity and displays the latest schema-owned device/app facts. Inventory existence is never treated as proof that a device is Online.
 - Each session page resolves its page of reseller IDs with one bounded reseller query. A reseller lookup failure leaves the authoritative control rows visible with an explicit partial-data warning.
 - Reseller, current access-code and current-host screens include read-only Presence usage. Current-code/current-host usage matches the current reseller value exactly, so rotated historical snapshots remain history rather than being silently reassigned.
-- ACCESS CODE, IPTV USERNAME and IPTV PASSWORD are displayed directly to the authenticated owner as required. They are not copied to logs, errors, audit JSON, analytics, screenshots or source fixtures with real values.
+- ACCESS CODE, IPTV USERNAME and IPTV PASSWORD are displayed directly only inside the authenticated Online Now/session owner context, as approved. Access-code administration uses a masked value with explicit reveal. They are not copied to logs, errors, audit JSON, analytics, screenshots or source fixtures with real values.
+
+### Subscriber checks and private notes
+
+The authenticated owner can run one bounded Xtream-compatible provider check for a selected subscription. The server resolves the latest online session from the exact reseller ID + stored normalized host + exact IPTV username and uses that session's stored host/username/password; posted credentials are never trusted. The reused provider transport enforces a 3-second connect timeout, 8-second total timeout, 64 KiB body ceiling, public-IP pinning, no redirects and HTTP/S only. Results distinguish active, provider-inactive, authentication rejection, timeout, network failure, invalid response and unavailable provider; expiration is shown only for a valid numeric timestamp and is otherwise "غير متاح". No provider request runs automatically for visible cards.
+
+Private notes persist in `cc_subscriber_notes`, keyed by reseller ID + SHA-256 of the exact host + SHA-256 of the exact username. Case-distinct and accent-distinct identities remain separate, and password/access-code rotation does not detach a note. Notes are loaded only for the visible subscription page, saved with prepared statements and non-secret audit fields, and rendered escaped. A missing notes table disables note persistence without breaking Online Now. Apply `migrations/2026-10-19-subscriber-notes-v1.sql` to the control database; it is additive and repeatable.
 
 Phase 6 adds no table, migration or index. No production query-plan measurement established a need for another index; measured production evidence remains the gate for any future schema change.
 
@@ -205,6 +213,8 @@ HULK_CONTROL_CENTER_CONFIG=/absolute/private/config.php \
 
 Each invocation deletes at most the configured batch from each category: ended or stale sessions beyond retention, unreferenced inactive devices beyond retention, and expired rate-limit windows. Cleanup does not define Online state.
 
+For subscriber notes, apply `migrations/2026-10-19-subscriber-notes-v1.sql` to the same control/Operations database before enabling note saves. The page remains usable if the table is absent; note saves fail explicitly without hiding the entered text.
+
 For Phase 7, apply both additive migrations to the Operations/control database before exposing its endpoint or pages:
 
 ```text
@@ -223,19 +233,35 @@ The command performs the bounded current-host probes, bounded 90-day Host Health
 
 Operations config supports an optional schema-v1 `presence` discovery object with `enabled`, `baseUrl`, `heartbeatSeconds`, and `onlineTtlSeconds`. It is omitted when disabled or absent. The Phase 5 Android integration consumes this object independently of IPTV authentication success.
 
+## Releases page and permanent download link
+
+The Releases module follows the owner-approved R06 composition: one official-link panel, a collapsed
+inline upload form, an exact staged-release review, and a compact expandable release library. Upload
+still stores an inactive release through `ops_upload_release`; only the explicit review action calls
+`ops_activate_release`. The page displays only validated public facts (basename, SHA-256 and the
+Operations public URL), never a raw filesystem path.
+
+The permanent `https://hulksa.com/app/` route is a read-only 302 resolver. Its versioned source is
+`hosting/app/index.php`; it requires the trusted Operations bootstrap, resolves
+`ops_active_release()`, validates the shared `ops_release_public_apk_url()` and
+`ops_release_artifact_is_readable()` helpers, and sends `Cache-Control: no-store`. It accepts only
+GET/HEAD, takes no destination input, and returns a small 404/503 on unavailable authority, missing
+or disabled release, or invalid artifact.
+
 ## Shared mutation paths
 
 - Control Center loads the existing `hulk-operations/admin/actions.php` domain functions. The legacy Operations panel uses those same functions, so release, service, announcement, feature and Growth rules are not copied.
 - Reseller-owner mutations live in `.hulk-reseller-app/admin-domain.php` and are used by both the version-controlled legacy owner adapter and Control Center.
 - Successful Control Center reseller mutations write a non-secret event to `app_admin_audit`. Passwords and access-code values are never placed in audit details.
 - The two databases remain physically separate. No current mutable state is duplicated.
+- The real release-upload APK input intentionally has no client-side `accept` filter so iOS Files can select an APK. Server-side extension, size, MIME and APK/archive-header validation remains authoritative. Uploading creates an inactive release; activation remains a separate explicit owner action.
 
 ## Deployment preflight
 
 1. Confirm the deployment target maps this directory to `/control-center/`.
 2. Confirm HTTPS and `.htaccess` are active.
 3. Keep `config.php` untracked, or use `HULK_CONTROL_CENTER_CONFIG` outside the web root.
-4. Apply the reviewed additive Presence and Phase 7 migrations with a deployment-only schema account, then keep the runtime control connection limited to existing Operations access plus required CRUD on `cc_devices`, `cc_app_sessions`, `cc_api_rate_limits`, `cc_diagnostic_events`, and `cc_host_health_checks`.
+4. Apply the reviewed additive Presence and Phase 7 migrations with a deployment-only schema account, then keep the runtime control connection limited to existing Operations access plus required CRUD on `cc_devices`, `cc_app_sessions`, `cc_api_rate_limits`, `cc_subscriber_notes`, `cc_diagnostic_events`, and `cc_host_health_checks`.
 5. Grant the reseller connection only the existing reseller-owner reads and mutations used by Phase 2.
 6. Confirm `php -r 'exit(function_exists("proc_open") ? 0 : 1);'` succeeds in the production CLI, configure the bounded `diagnostics` and `host_health` values from `config.example.php`, then run PHP lint and `tests/run.php` with the production PHP version. If `proc_open` is disabled, DNS probing fails closed until hosting enables it; do not replace it with synchronous page-request DNS.
 7. Verify unauthenticated module requests redirect to `/control-center/login.php`.
@@ -254,8 +280,12 @@ php hosting/hulk-control-center/tests/run.php
 python3 -m unittest hosting/hulk-control-center/tests/test_presence_contract.py
 python3 -m unittest hosting/hulk-control-center/tests/test_phase6_contract.py
 python3 -m unittest hosting/hulk-control-center/tests/test_phase7_contract.py
+python3 -m unittest hosting/hulk-control-center/tests/test_control_center_shell_contract.py
+python3 -m unittest hosting/hulk-control-center/tests/test_release_r06_contract.py
 node --check hosting/hulk-control-center/assets/app.js
 node hosting/hulk-control-center/tests/navigation.test.js
+node hosting/hulk-control-center/tests/release-page.test.js
+php hosting/hulk-control-center/tests/release-page.php
 ```
 
 Manual rendered review should cover at least 1440×1000, 834×1112, and 390×844, including navigation, long Arabic labels, keyboard focus, table overflow, login, unavailable, empty, recoverable error, and loading/skeleton primitives.

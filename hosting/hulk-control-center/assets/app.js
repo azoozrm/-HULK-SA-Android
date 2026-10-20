@@ -3,105 +3,19 @@
 (() => {
     const MAX_SAVED_FILTERS = 10;
 
-    const initializeNavigation = () => {
-        const sidebar = document.querySelector('[data-sidebar]');
-        const openButton = document.querySelector('[data-nav-open]');
-        const closeButton = document.querySelector('[data-nav-close]');
-        const backdrop = document.querySelector('[data-nav-backdrop]');
-        const workspace = document.querySelector('[data-workspace]');
-        const mobileQuery = window.matchMedia('(max-width: 860px)');
-
-        if (!sidebar || !openButton || !closeButton || !backdrop || !workspace) {
+    const initializePrimaryTabs = () => {
+        const track = document.querySelector('[data-primary-tabs]');
+        if (!track) {
             return;
         }
-
-        let lastFocused = null;
-        const focusableSelector = [
-            'a[href]',
-            'button:not([disabled])',
-            'input:not([disabled])',
-            'select:not([disabled])',
-            'textarea:not([disabled])',
-            '[tabindex]:not([tabindex="-1"])',
-        ].join(',');
-
-        const setOpen = (open, restoreFocus = true) => {
-            const mobile = mobileQuery.matches;
-            open = mobile && open;
-            if (open) {
-                lastFocused = document.activeElement;
-            }
-
-            sidebar.classList.toggle('is-open', open);
-            backdrop.hidden = !open;
-            document.body.classList.toggle('nav-is-open', open);
-            openButton.setAttribute('aria-expanded', open ? 'true' : 'false');
-
-            if (mobile) {
-                if (open) {
-                    sidebar.removeAttribute('inert');
-                    sidebar.setAttribute('aria-hidden', 'false');
-                    sidebar.setAttribute('role', 'dialog');
-                    sidebar.setAttribute('aria-modal', 'true');
-                    closeButton.focus();
-                    workspace.setAttribute('inert', '');
-                    workspace.setAttribute('aria-hidden', 'true');
-                } else {
-                    workspace.removeAttribute('aria-hidden');
-                    workspace.removeAttribute('inert');
-                    sidebar.setAttribute('inert', '');
-                    sidebar.setAttribute('aria-hidden', 'true');
-                    sidebar.removeAttribute('role');
-                    sidebar.removeAttribute('aria-modal');
-                }
-            } else {
-                sidebar.removeAttribute('inert');
-                sidebar.removeAttribute('aria-hidden');
-                sidebar.removeAttribute('role');
-                sidebar.removeAttribute('aria-modal');
-                workspace.removeAttribute('inert');
-                workspace.removeAttribute('aria-hidden');
-            }
-
-            if (!open && restoreFocus && lastFocused instanceof HTMLElement) {
-                lastFocused.focus();
-            }
-        };
-
-        openButton.addEventListener('click', () => setOpen(true));
-        closeButton.addEventListener('click', () => setOpen(false));
-        backdrop.addEventListener('click', () => setOpen(false));
-        sidebar.addEventListener('click', (event) => {
-            if (mobileQuery.matches && event.target.closest('a')) {
-                setOpen(false);
-            }
-        });
-        document.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape' && sidebar.classList.contains('is-open')) {
-                setOpen(false);
-                return;
-            }
-            if (event.key !== 'Tab' || !mobileQuery.matches || !sidebar.classList.contains('is-open')) {
-                return;
-            }
-            const focusable = Array.from(sidebar.querySelectorAll(focusableSelector));
-            if (focusable.length === 0) {
-                event.preventDefault();
-                closeButton.focus();
-                return;
-            }
-            const first = focusable[0];
-            const last = focusable[focusable.length - 1];
-            if (event.shiftKey && document.activeElement === first) {
-                event.preventDefault();
-                last.focus();
-            } else if (!event.shiftKey && document.activeElement === last) {
-                event.preventDefault();
-                first.focus();
-            }
-        });
-        mobileQuery.addEventListener('change', () => setOpen(false, false));
-        setOpen(false, false);
+        const active = track.querySelector('.primary-tab.is-active');
+        if (
+            active
+            && track.scrollWidth > track.clientWidth
+            && typeof active.scrollIntoView === 'function'
+        ) {
+            active.scrollIntoView({block: 'nearest', inline: 'center'});
+        }
     };
 
     const initializeConfirmations = () => {
@@ -111,6 +25,20 @@
                 if (!window.confirm(message)) {
                     event.preventDefault();
                 }
+            });
+        });
+    };
+
+    const initializeSubmitOnce = () => {
+        document.querySelectorAll('form[data-submit-once]').forEach((form) => {
+            form.addEventListener('submit', (event) => {
+                if (event.defaultPrevented) {
+                    return;
+                }
+                form.querySelectorAll('button[type="submit"]').forEach((button) => {
+                    button.disabled = true;
+                    button.setAttribute('aria-disabled', 'true');
+                });
             });
         });
     };
@@ -259,8 +187,139 @@
         });
     };
 
-    initializeNavigation();
+    const initializeReleaseUpload = () => {
+        const panel = document.getElementById('release-upload-panel');
+        if (!panel) {
+            return;
+        }
+        const openers = Array.from(document.querySelectorAll('[data-r6-open-upload]'));
+        const closers = Array.from(document.querySelectorAll('[data-r6-close-upload]'));
+        const fileInput = document.getElementById('r6-apk-file');
+        const fileHint = document.getElementById('r6-file-hint');
+        const required = document.querySelector('[data-r6-required]');
+        const versionCode = document.getElementById('r6-version-code');
+        const minimumCode = document.getElementById('r6-min-code');
+        const policyHelp = document.getElementById('r6-policy-help');
+
+        const open = (event) => {
+            if (event) {
+                event.preventDefault();
+            }
+            panel.hidden = false;
+            if (fileInput && typeof fileInput.focus === 'function') {
+                fileInput.focus({preventScroll: true});
+            }
+            if (typeof panel.scrollIntoView === 'function') {
+                panel.scrollIntoView({block: 'start'});
+            }
+        };
+        const close = (event) => {
+            if (event) {
+                event.preventDefault();
+            }
+            panel.hidden = true;
+            const opener = openers[0];
+            if (opener && typeof opener.focus === 'function') {
+                opener.focus({preventScroll: true});
+            }
+        };
+        openers.forEach((opener) => opener.addEventListener('click', open));
+        closers.forEach((closer) => closer.addEventListener('click', close));
+
+        if (fileInput && fileHint) {
+            fileInput.addEventListener('change', () => {
+                const file = fileInput.files && fileInput.files[0];
+                fileHint.textContent = file
+                    ? `${file.name} · ${(file.size / 1000000).toFixed(1)} MB`
+                    : 'اختر ملفًا بامتداد .apk — لا يُنشر بمجرد اختياره.';
+            });
+        }
+
+        if (required && versionCode && minimumCode) {
+            const syncPolicy = () => {
+                minimumCode.readOnly = required.checked;
+                if (required.checked && versionCode.value !== '') {
+                    minimumCode.value = versionCode.value;
+                }
+                if (policyHelp) {
+                    policyHelp.textContent = required.checked
+                        ? 'يجب على المستخدم تحديث التطبيق للمتابعة.'
+                        : 'يمكن للمستخدم تأجيل هذا التحديث، ما لم يكن أقل من الحد الأدنى المدعوم.';
+                }
+            };
+            required.addEventListener('change', syncPolicy);
+            versionCode.addEventListener('input', syncPolicy);
+            syncPolicy();
+        }
+    };
+
+    const initializeReleaseCopy = () => {
+        const copyText = async (button) => {
+            const value = button.getAttribute('data-copy-value') || '';
+            if (value === '') {
+                return;
+            }
+            const fallbackId = button.getAttribute('data-copy-fallback') || '';
+            const statusId = button.getAttribute('data-copy-status') || '';
+            const fallback = fallbackId ? document.getElementById(fallbackId) : null;
+            const status = statusId ? document.getElementById(statusId) : null;
+            const setStatus = (message, state) => {
+                if (!status) {
+                    return;
+                }
+                status.textContent = message;
+                if (state) {
+                    status.setAttribute('data-copy-state', state);
+                } else {
+                    status.removeAttribute('data-copy-state');
+                }
+            };
+
+            try {
+                if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+                    throw new Error('clipboard unavailable');
+                }
+                await navigator.clipboard.writeText(value);
+                setStatus('تم نسخ الرابط.', 'success');
+            } catch (_error) {
+                if (fallback) {
+                    fallback.hidden = false;
+                    fallback.value = value;
+                    fallback.focus();
+                    if (typeof fallback.select === 'function') {
+                        fallback.select();
+                    }
+                }
+                setStatus('تعذر النسخ التلقائي. الرابط محدد وجاهز للنسخ اليدوي.', 'fallback');
+            }
+        };
+
+        document.querySelectorAll('[data-copy-value]').forEach((button) => {
+            button.addEventListener('click', () => {
+                void copyText(button);
+            });
+        });
+    };
+
+    const initializeReleaseRiskConfirmation = () => {
+        const confirmation = document.querySelector('[data-r6-min-confirm]');
+        const publish = document.querySelector('[data-r6-publish]');
+        if (!confirmation || !publish) {
+            return;
+        }
+        const sync = () => {
+            publish.disabled = !confirmation.checked;
+        };
+        confirmation.addEventListener('change', sync);
+        sync();
+    };
+
+    initializePrimaryTabs();
     initializeConfirmations();
+    initializeSubmitOnce();
     initializeResponsiveTables();
     initializeSavedFilters();
+    initializeReleaseUpload();
+    initializeReleaseCopy();
+    initializeReleaseRiskConfirmation();
 })();

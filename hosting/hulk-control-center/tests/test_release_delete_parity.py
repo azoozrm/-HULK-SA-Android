@@ -91,6 +91,7 @@ class ReleaseDeleteParityTests(unittest.TestCase):
                 "2026-09-19-diagnostics-v1.sql",
                 "2026-09-19-host-health-v1.sql",
                 "2026-10-14-pairing-v1.sql",
+                "2026-10-19-subscriber-notes-v1.sql",
             ],
         )
         for name in migrations:

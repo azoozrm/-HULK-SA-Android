@@ -109,10 +109,10 @@ function cc_apply_security_headers(): void
 
 function cc_start_admin_session(): void
 {
-    cc_apply_security_headers();
     if (session_status() === PHP_SESSION_ACTIVE) {
         return;
     }
+    cc_apply_security_headers();
 
     $app = cc_load_config()['app'];
     ini_set('session.use_strict_mode', '1');
@@ -138,10 +138,10 @@ function cc_base_path(): string
     return $path === '' ? '' : $path;
 }
 
-function cc_url(string $module = 'dashboard'): string
+function cc_url(string $module = 'live-users'): string
 {
     $base = cc_base_path();
-    return $module === 'dashboard' ? $base . '/' : $base . '/' . rawurlencode($module) . '/';
+    return $module === 'live-users' ? $base . '/' : $base . '/' . rawurlencode($module) . '/';
 }
 
 function cc_context_url(string $module, array $query): string

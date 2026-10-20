@@ -93,10 +93,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex,nofollow">
     <meta name="color-scheme" content="dark">
-    <meta name="theme-color" content="#07090b">
+    <meta name="theme-color" content="#030402">
     <title>تسجيل الدخول — HULK SA Control Center</title>
     <link rel="icon" href="<?= cc_e(cc_asset_url('hulk-sa-mark.svg')) ?>" type="image/svg+xml">
-    <link rel="stylesheet" href="<?= cc_e(cc_asset_url('app.css?v=5.0.2')) ?>">
+    <link rel="stylesheet" href="<?= cc_e(cc_asset_url('app.css?v=6.2.0')) ?>">
 </head>
 <body class="login-page">
 <main class="login-layout">

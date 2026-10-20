@@ -18,6 +18,12 @@ function cc_icon(string $name, string $class = ''): string
         'users' => '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
         'clock' => '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
         'device' => '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/>',
+        'phone' => '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
+        'tablet' => '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M11 18h2"/>',
+        'tv' => '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/>',
+        'wifi' => '<path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 19.5h.01"/>',
+        'refresh' => '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>',
+        'alert' => '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/>',
         'briefcase' => '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18M10 12v2h4v-2"/>',
         'key' => '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l3 3"/>',
         'server' => '<rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/>',
@@ -38,6 +44,14 @@ function cc_icon(string $name, string $class = ''): string
         'filter' => '<path d="M4 5h16l-6 7v5l-4 2v-7L4 5Z"/>',
         'shield' => '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
         'arrow-left' => '<path d="M19 12H5M11 18l-6-6 6-6"/>',
+        'link' => '<path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 20.1l1.1-1.1"/>',
+        'copy' => '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+        'upload' => '<path d="M12 16V3M7 8l5-5 5 5"/><path d="M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/>',
+        'lock' => '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+        'check' => '<path d="m20 6-11 11-5-5"/>',
+        'send' => '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
+        'plus' => '<path d="M12 5v14M5 12h14"/>',
+        'chevron-down' => '<path d="m6 9 6 6 6-6"/>',
         default => '<circle cx="12" cy="12" r="9"/>',
     };
 
@@ -120,6 +134,33 @@ function cc_page_summary(
             </dl>
         <?php endif; ?>
     </section>
+    <?php
+}
+
+function cc_subnav(string $label, array $items, string $activeKey): void
+{
+    ?>
+    <nav class="subnav" aria-label="<?= cc_e($label) ?>">
+        <?php foreach ($items as $key => $itemLabel): ?>
+            <a href="<?= cc_e(cc_url($key)) ?>" class="<?= $key === $activeKey ? 'is-active' : '' ?>"<?= $key === $activeKey ? ' aria-current="page"' : '' ?>><?= cc_e($itemLabel) ?></a>
+        <?php endforeach; ?>
+    </nav>
+    <?php
+}
+
+function cc_metric_card(string $label, string $value, string $hint, string $icon, string $tone = 'neutral'): void
+{
+    $allowed = ['neutral', 'success', 'warning', 'danger'];
+    $tone = in_array($tone, $allowed, true) ? $tone : 'neutral';
+    ?>
+    <article class="online-metric online-metric--<?= cc_e($tone) ?>">
+        <div class="online-metric__head">
+            <span class="online-metric__icon"><?= cc_icon($icon) ?></span>
+            <span class="online-metric__label"><?= cc_e($label) ?></span>
+        </div>
+        <p class="online-metric__value"><?= cc_e($value) ?></p>
+        <p class="online-metric__hint"><?= cc_e($hint) ?></p>
+    </article>
     <?php
 }
 

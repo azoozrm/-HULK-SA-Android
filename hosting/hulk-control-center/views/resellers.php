@@ -41,6 +41,11 @@ $hasFilters = trim((string) ($pageData['search'] ?? '')) !== ''
     || trim((string) ($pageData['reseller'] ?? '')) !== '';
 ?>
 <section class="module-stack reseller-management <?= cc_e($modeClass) ?>">
+    <?php cc_subnav('الهوست والأكواد', [
+        'hosts' => 'الهوستات',
+        'access-codes' => 'أكواد الدخول',
+        'resellers' => 'الموزعون',
+    ], $moduleKey); ?>
     <?php cc_page_summary(
         $summary['eyebrow'],
         $summary['title'],
@@ -112,7 +117,14 @@ $hasFilters = trim((string) ($pageData['search'] ?? '')) !== ''
                         <?php if ($moduleKey === 'access-codes'): ?>
                             <div class="credential-block">
                                 <span>الكود الحالي</span>
-                        <code class="credential-value" dir="ltr"><?= cc_e($row['access_code'] !== '' ? $row['access_code'] : 'غير محدد') ?></code>
+                                <?php if ($row['access_code'] !== ''): ?>
+                                    <details class="code-reveal">
+                                        <summary><span class="code-mask" aria-hidden="true">••••••••</span><span>إظهار الكود</span></summary>
+                                        <code class="credential-value" dir="ltr"><?= cc_e($row['access_code']) ?></code>
+                                    </details>
+                                <?php else: ?>
+                                    <code class="credential-value" dir="ltr">غير محدد</code>
+                                <?php endif; ?>
                             </div>
                             <dl class="record-card__highlights record-card__highlights--three">
                                 <div><dt>الجاهزية</dt><dd><?= $active && $row['access_code'] !== '' ? 'الكود مرتبط بحساب نشط' : 'يحتاج إلى مراجعة' ?></dd></div>
@@ -140,7 +152,7 @@ $hasFilters = trim((string) ($pageData['search'] ?? '')) !== ''
                         <?php else: ?>
                             <dl class="record-card__highlights">
                                 <div><dt>الهوست</dt><dd class="break-value"><bdi dir="ltr"><?= cc_e($row['host'] !== '' ? $row['host'] : 'غير محدد') ?></bdi></dd></div>
-                                <div><dt>كود الدخول</dt><dd><bdi dir="ltr"><?= cc_e($row['access_code'] !== '' ? $row['access_code'] : 'غير محدد') ?></bdi></dd></div>
+                                <div><dt>كود الدخول</dt><dd><?php if ($row['access_code'] !== ''): ?><details class="code-reveal"><summary><span class="code-mask" aria-hidden="true">••••••••</span><span>إظهار</span></summary><bdi dir="ltr"><?= cc_e($row['access_code']) ?></bdi></details><?php else: ?>غير محدد<?php endif; ?></dd></div>
                                 <div><dt>النشاط</dt><dd><?= cc_e($usageValue) ?></dd></div>
                                 <div><dt>آخر استخدام</dt><dd><?= is_array($usage) ? cc_e(cc_presence_display_time($usage['last_used_at'])) : 'غير متاح' ?></dd></div>
                             </dl>
