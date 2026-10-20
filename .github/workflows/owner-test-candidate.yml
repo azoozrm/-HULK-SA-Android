@@ -1,0 +1,204 @@
+name: HULK SA Owner Test Candidate
+
+on:
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - '.github/workflows/owner-test-candidate.yml'
+      - 'app/src/main/java/sa/hulksa/player/security/CredentialVault.kt'
+      - 'app/src/test/java/sa/hulksa/player/security/CredentialVaultKeyRecoveryTest.kt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hulk-owner-test-candidate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  signed-owner-test:
+    name: Signed owner-test release APK
+    if: >
+      github.repository == 'azoozrm/-HULK-SA-Android' &&
+      github.event.pull_request.number == 357 &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'fix/login-pairing-reliability-20261020' &&
+      github.event.pull_request.base.ref == 'phase-3-v0.9.3.0-adaptive-foundation'
+    runs-on: ubuntu-latest
+    environment: production-signing
+    timeout-minutes: 60
+    env:
+      PRODUCT_SHA: 6f9caf7ab884412680a4e9a2d6b0e4f1e463937c
+      WORKFLOW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      WORKFLOW_MERGE_SHA: ${{ github.sha }}
+      EXPECTED_PACKAGE: sa.hulksa.player
+      EXPECTED_VERSION_CODE: '68'
+      EXPECTED_VERSION_NAME: 1.0.0
+      EXPECTED_INSTALLED_CERT_SHA256: 144e0548da502aa8bd060a9a280a98bb9dc6763387bf8b20ea100b5fed652fe0
+      HULK_RELEASE_KEYSTORE_BASE64: ${{ secrets.HULK_RELEASE_KEYSTORE_BASE64 }}
+      ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_ALIAS: ${{ secrets.HULK_RELEASE_KEY_ALIAS }}
+      ORG_GRADLE_PROJECT_HULK_RELEASE_STORE_PASSWORD: ${{ secrets.HULK_RELEASE_STORE_PASSWORD }}
+      ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_PASSWORD: ${{ secrets.HULK_RELEASE_KEY_PASSWORD }}
+      EXPECTED_CERT_SHA256: ${{ secrets.HULK_RELEASE_CERT_SHA256 }}
+
+    steps:
+      - name: Checkout exact reviewed product source
+        uses: actions/checkout@v7
+        with:
+          ref: 6f9caf7ab884412680a4e9a2d6b0e4f1e463937c
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify product source identity
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$PRODUCT_SHA"
+          test -f app/src/main/java/sa/hulksa/player/security/CredentialVault.kt
+          mkdir -p owner-test-artifacts
+          {
+            echo "product_source_sha=$PRODUCT_SHA"
+            echo "product_checkout_sha=$actual"
+            echo "workflow_head_sha=$WORKFLOW_HEAD_SHA"
+            echo "workflow_merge_ref_sha=$WORKFLOW_MERGE_SHA"
+            echo "workflow_ref=${GITHUB_REF}"
+            echo "workflow_run_id=${GITHUB_RUN_ID}"
+            echo "pull_request=#357"
+          } > owner-test-artifacts/SOURCE-PROVENANCE.txt
+          cat owner-test-artifacts/SOURCE-PROVENANCE.txt
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/wrapper-validation@v4
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Install Android build SDK
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+          echo "$ANDROID_SDK_ROOT/build-tools/36.0.0" >> "$GITHUB_PATH"
+
+      - name: Validate required signing inputs
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "$HULK_RELEASE_KEYSTORE_BASE64" ]] || missing+=(HULK_RELEASE_KEYSTORE_BASE64)
+          [[ -n "$ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_ALIAS" ]] || missing+=(HULK_RELEASE_KEY_ALIAS)
+          [[ -n "$ORG_GRADLE_PROJECT_HULK_RELEASE_STORE_PASSWORD" ]] || missing+=(HULK_RELEASE_STORE_PASSWORD)
+          [[ -n "$ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_PASSWORD" ]] || missing+=(HULK_RELEASE_KEY_PASSWORD)
+          [[ -n "$EXPECTED_CERT_SHA256" ]] || missing+=(HULK_RELEASE_CERT_SHA256)
+          if [[ "${#missing[@]}" -ne 0 ]]; then
+            printf 'Missing required signing inputs: %s\n' "${missing[*]}" >&2
+            exit 2
+          fi
+          normalized="$(printf '%s' "$EXPECTED_CERT_SHA256" | tr '[:lower:]' '[:upper:]' | tr -d ':[:space:]')"
+          installed="$(printf '%s' "$EXPECTED_INSTALLED_CERT_SHA256" | tr '[:lower:]' '[:upper:]' | tr -d ':[:space:]')"
+          test "$normalized" = "$installed"
+          echo 'PASS: signing inputs present and certificate matches the installed production signer'
+
+      - name: Materialize ephemeral keystore
+        run: |
+          set -euo pipefail
+          keystore="$RUNNER_TEMP/hulk-sa-release.jks"
+          printf '%s' "$HULK_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          chmod 600 "$keystore"
+          test -s "$keystore"
+          echo "ORG_GRADLE_PROJECT_HULK_RELEASE_KEYSTORE_FILE=$keystore" >> "$GITHUB_ENV"
+          echo 'PASS: signing keystore materialized only in runner temporary storage'
+
+      - name: Build signed Release APK
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain \
+            -PHULK_QUALIFICATION_VERSION_CODE="$EXPECTED_VERSION_CODE" \
+            -PHULK_QUALIFICATION_VERSION_NAME="$EXPECTED_VERSION_NAME" \
+            clean :app:assembleRelease
+          test -f app/build/outputs/apk/release/app-release.apk
+          test ! -e app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Verify package, version and non-debuggable release
+        run: |
+          set -euo pipefail
+          apk='app/build/outputs/apk/release/app-release.apk'
+          package_id="$(apkanalyzer manifest application-id "$apk")"
+          version_code="$(apkanalyzer manifest version-code "$apk")"
+          version_name="$(apkanalyzer manifest version-name "$apk")"
+          test "$package_id" = "$EXPECTED_PACKAGE"
+          test "$version_code" = "$EXPECTED_VERSION_CODE"
+          test "$version_name" = "$EXPECTED_VERSION_NAME"
+          if aapt dump badging "$apk" | grep -q 'application-debuggable'; then
+            echo 'Owner-test APK must not be debuggable' >&2
+            exit 1
+          fi
+          {
+            echo "Application ID: $package_id"
+            echo "Version code: $version_code"
+            echo "Version name: $version_name"
+            echo 'Debuggable: false'
+            echo 'Package identity: PASS'
+          } > owner-test-artifacts/PACKAGE-IDENTITY.txt
+          cat owner-test-artifacts/PACKAGE-IDENTITY.txt
+
+      - name: Verify signer continuity and signature schemes
+        run: |
+          set -euo pipefail
+          bash tools/verify-apk-signing.sh \
+            app/build/outputs/apk/release/app-release.apk \
+            "$EXPECTED_CERT_SHA256" \
+            owner-test-artifacts/APK-SIGNING.txt
+
+      - name: Verify compiled production runtime configuration
+        run: |
+          set -euo pipefail
+          build_config="$(find app/build/generated/source/buildConfig/release -type f -name BuildConfig.java -print -quit)"
+          test -n "$build_config"
+          python3 tools/verify-runtime-config.py \
+            app/build/outputs/apk/release/app-release.apk \
+            --build-config "$build_config" \
+            --report owner-test-artifacts/APK-RUNTIME-CONFIG.md
+
+      - name: Verify release APK architectures
+        run: |
+          set -euo pipefail
+          python3 tools/verify-android-architectures.py \
+            app/build/outputs/apk/release/app-release.apk \
+            --require-native-libs \
+            --report owner-test-artifacts/APK-ARCHITECTURES.md
+
+      - name: Package owner-test APK and sanitized evidence
+        run: |
+          set -euo pipefail
+          cp app/build/outputs/apk/release/app-release.apk \
+            owner-test-artifacts/HULK-SA-OWNER-TEST-68-1.0.0.apk
+          (
+            cd owner-test-artifacts
+            sha256sum HULK-SA-OWNER-TEST-68-1.0.0.apk > APK-SHA256.txt
+            find . -type f ! -name SHA256SUMS.txt ! -name APK-SHA256.txt -print0 \
+              | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+            cat APK-SHA256.txt
+          )
+
+      - name: Upload only signed owner-test APK and sanitized evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-OWNER-TEST-6f9caf7a-${{ github.run_id }}
+          path: owner-test-artifacts/
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Remove ephemeral signing material
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/hulk-sa-release.jks"
