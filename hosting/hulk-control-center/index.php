@@ -6,6 +6,7 @@ require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/views/components.php';
 require_once __DIR__ . '/views/layout.php';
 require_once __DIR__ . '/lib/operations-adapter.php';
+require_once __DIR__ . '/lib/subscriber.php';
 require_once __DIR__ . '/lib/reseller-adapter.php';
 require_once __DIR__ . '/lib/presence-read-model.php';
 require_once __DIR__ . '/lib/phase7-read-model.php';
@@ -33,6 +34,8 @@ if ($resolved['valid'] && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             $message = cc_operations_handle_post($moduleKey, $admin);
         } elseif (in_array($moduleKey, cc_reseller_modules(), true)) {
             $message = cc_reseller_handle_post($moduleKey, $admin);
+        } elseif ($moduleKey === 'live-users') {
+            $message = cc_subscriber_handle_post($moduleKey, $admin);
         } else {
             throw new InvalidArgumentException('هذه الوحدة لا تقبل تعديلات في المرحلة الثانية.');
         }
@@ -51,7 +54,14 @@ if ($resolved['valid'] && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         error_log('HULK Control Center mutation failed.');
         cc_flash('danger', 'تعذر تنفيذ العملية بأمان.');
     }
-    cc_redirect(cc_url($moduleKey));
+    $redirect = cc_url($moduleKey);
+    if ($moduleKey === 'live-users') {
+        $redirectPage = cc_presence_page_number($_POST['page'] ?? 1);
+        if ($redirectPage > 1) {
+            $redirect .= '?page=' . $redirectPage;
+        }
+    }
+    cc_redirect($redirect);
 }
 
 $flash = cc_take_flash();
@@ -60,7 +70,10 @@ if ($resolved['valid']) {
     try {
         if ($moduleKey === 'dashboard') {
             $pageData = cc_dashboard_data();
-        } elseif (in_array($moduleKey, ['live-users', 'sessions', 'devices'], true)) {
+        } elseif ($moduleKey === 'live-users') {
+            $pageData = cc_presence_online_now_data($_GET);
+            $pageData = cc_subscriber_attach_session_state($pageData);
+        } elseif (in_array($moduleKey, ['sessions', 'devices'], true)) {
             $pageData = cc_presence_page_data($moduleKey, $_GET);
         } elseif (in_array($moduleKey, ['host-health', 'diagnostics', 'analytics'], true)) {
             $pageData = cc_phase7_page_data($moduleKey);
@@ -77,6 +90,16 @@ if ($resolved['valid']) {
     }
 }
 
+if ($resolved['valid'] && $moduleKey === 'releases') {
+    $reviewReleaseId = cc_operations_take_review_release_id();
+    if ($reviewReleaseId !== null) {
+        $pageData['review_release_id'] = $reviewReleaseId;
+    }
+    if ($flash !== null && (string) ($flash['type'] ?? '') === 'danger') {
+        $pageData['open_upload'] = true;
+    }
+}
+
 cc_page_start($resolved, $admin);
 if ($flash !== null) {
     cc_alert(
@@ -89,7 +112,9 @@ if (!$resolved['valid']) {
     require __DIR__ . '/views/not-found.php';
 } elseif ($resolved['key'] === 'dashboard') {
     require __DIR__ . '/views/dashboard.php';
-} elseif (in_array($moduleKey, ['live-users', 'sessions'], true)) {
+} elseif ($moduleKey === 'live-users') {
+    require __DIR__ . '/views/online-now.php';
+} elseif ($moduleKey === 'sessions') {
     require __DIR__ . '/views/sessions.php';
 } elseif ($moduleKey === 'devices') {
     require __DIR__ . '/views/devices.php';

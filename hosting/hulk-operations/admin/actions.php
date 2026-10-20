@@ -386,7 +386,6 @@ function ops_upload_release(PDO $db, array $admin): void
         throw new InvalidArgumentException('رمز الإصدار مستخدم مسبقًا.');
     }
 
-    $metadata = ops_uploaded_apk_metadata($_FILES['apk'] ?? []);
     $safeVersion = preg_replace('/[^0-9A-Za-z._-]/', '-', $versionName) ?: 'release';
     $fileName = sprintf(
         'hulk-sa-v%s-%d-%s.apk',
@@ -395,6 +394,11 @@ function ops_upload_release(PDO $db, array $admin): void
         bin2hex(random_bytes(4))
     );
     $relativePath = 'releases/' . $fileName;
+    if (ops_release_relative_apk_path(['apk_path' => $relativePath]) === null) {
+        throw new InvalidArgumentException('اسم الإصدار ينتج مسار APK غير صالح. غيّر اسم الإصدار.');
+    }
+
+    $metadata = ops_uploaded_apk_metadata($_FILES['apk'] ?? []);
     $destination = dirname(__DIR__) . '/releases/' . $fileName;
     if (!move_uploaded_file((string) $metadata['temporary_path'], $destination)) {
         throw new RuntimeException('تعذر حفظ ملف APK في مجلد الإصدارات.');
@@ -446,6 +450,14 @@ function ops_activate_release(PDO $db, array $admin): void
         $release = $statement->fetch();
         if (!is_array($release)) {
             throw new InvalidArgumentException('الإصدار غير موجود.');
+        }
+        $sha256 = strtolower(trim((string) ($release['apk_sha256'] ?? '')));
+        if (
+            ops_release_public_apk_url($release) === null
+            || !ops_is_sha256($sha256)
+            || !ops_release_artifact_is_readable($release)
+        ) {
+            throw new InvalidArgumentException('لا يمكن تفعيل الإصدار لأن ملف APK أو بياناته غير صالحة.');
         }
         $db->exec('UPDATE app_releases SET is_active = 0');
         $activate = $db->prepare('UPDATE app_releases SET enabled = 1, is_active = 1 WHERE id = :id');
@@ -605,15 +617,8 @@ function ops_delete_release(PDO $db, array $admin): string
     return 'تم حذف الإصدار وملف APK. يمكنك الآن رفع نفس رمز الإصدار من جديد.';
 }
 
-function ops_create_announcement(PDO $db, array $admin): void
+function ops_announcement_fields_from_post(): array
 {
-    $messageKeyInput = trim((string) ($_POST['message_key'] ?? ''));
-    $messageKey = $messageKeyInput === ''
-        ? 'MSG-' . date('Ymd-His') . '-' . strtoupper(bin2hex(random_bytes(3)))
-        : ops_safe_message_key($messageKeyInput);
-    if ($messageKey === null) {
-        throw new InvalidArgumentException('معرف الرسالة غير صالح.');
-    }
     $title = trim((string) ($_POST['title'] ?? ''));
     $message = trim((string) ($_POST['message'] ?? ''));
     if ($title === '' || ops_text_length($title) > 160 || $message === '' || ops_text_length($message) > 10000) {
@@ -645,16 +650,7 @@ function ops_create_announcement(PDO $db, array $admin): void
     if ($minimum !== null && $maximum !== null && $minimum > $maximum) {
         throw new InvalidArgumentException('نطاق الإصدارات غير صالح.');
     }
-
-    $statement = $db->prepare(
-        'INSERT INTO app_announcements '
-        . '(message_key, title, message, severity, target, show_once, persistent, '
-        . 'minimum_version_code, maximum_version_code, starts_at, ends_at, enabled) '
-        . 'VALUES (:message_key, :title, :message, :severity, :target, :show_once, :persistent, '
-        . ':minimum_version_code, :maximum_version_code, :starts_at, :ends_at, :enabled)'
-    );
-    $statement->execute([
-        'message_key' => $messageKey,
+    return [
         'title' => $title,
         'message' => $message,
         'severity' => $severity,
@@ -666,12 +662,84 @@ function ops_create_announcement(PDO $db, array $admin): void
         'starts_at' => $startsAt,
         'ends_at' => $endsAt,
         'enabled' => ops_post_bool('enabled') ? 1 : 0,
+    ];
+}
+
+function ops_create_announcement(PDO $db, array $admin): void
+{
+    $messageKeyInput = trim((string) ($_POST['message_key'] ?? ''));
+    $messageKey = $messageKeyInput === ''
+        ? 'MSG-' . date('Ymd-His') . '-' . strtoupper(bin2hex(random_bytes(3)))
+        : ops_safe_message_key($messageKeyInput);
+    if ($messageKey === null) {
+        throw new InvalidArgumentException('معرف الرسالة غير صالح.');
+    }
+    $fields = ops_announcement_fields_from_post();
+
+    $statement = $db->prepare(
+        'INSERT INTO app_announcements '
+        . '(message_key, title, message, severity, target, show_once, persistent, '
+        . 'minimum_version_code, maximum_version_code, starts_at, ends_at, enabled) '
+        . 'VALUES (:message_key, :title, :message, :severity, :target, :show_once, :persistent, '
+        . ':minimum_version_code, :maximum_version_code, :starts_at, :ends_at, :enabled)'
+    );
+    $statement->execute([
+        'message_key' => $messageKey,
+        'title' => $fields['title'],
+        'message' => $fields['message'],
+        'severity' => $fields['severity'],
+        'target' => $fields['target'],
+        'show_once' => $fields['show_once'],
+        'persistent' => $fields['persistent'],
+        'minimum_version_code' => $fields['minimum_version_code'],
+        'maximum_version_code' => $fields['maximum_version_code'],
+        'starts_at' => $fields['starts_at'],
+        'ends_at' => $fields['ends_at'],
+        'enabled' => $fields['enabled'],
     ]);
     ops_audit($db, (int) $admin['id'], 'ANNOUNCEMENT_CREATED', [
         'message_key' => $messageKey,
-        'severity' => $severity,
-        'target' => $target,
-        'enabled' => ops_post_bool('enabled'),
+        'severity' => $fields['severity'],
+        'target' => $fields['target'],
+        'enabled' => (bool) $fields['enabled'],
+    ]);
+}
+
+function ops_update_announcement(PDO $db, array $admin): void
+{
+    $announcementId = ops_post_positive_int('announcement_id');
+    $statement = $db->prepare('SELECT message_key FROM app_announcements WHERE id = :id LIMIT 1');
+    $statement->execute(['id' => $announcementId]);
+    $messageKey = $statement->fetchColumn();
+    if ($messageKey === false) {
+        throw new InvalidArgumentException('الرسالة غير موجودة.');
+    }
+    $fields = ops_announcement_fields_from_post();
+    $update = $db->prepare(
+        'UPDATE app_announcements SET title = :title, message = :message, severity = :severity, '
+        . 'target = :target, show_once = :show_once, persistent = :persistent, '
+        . 'minimum_version_code = :minimum_version_code, maximum_version_code = :maximum_version_code, '
+        . 'starts_at = :starts_at, ends_at = :ends_at, enabled = :enabled WHERE id = :id'
+    );
+    $update->execute([
+        'title' => $fields['title'],
+        'message' => $fields['message'],
+        'severity' => $fields['severity'],
+        'target' => $fields['target'],
+        'show_once' => $fields['show_once'],
+        'persistent' => $fields['persistent'],
+        'minimum_version_code' => $fields['minimum_version_code'],
+        'maximum_version_code' => $fields['maximum_version_code'],
+        'starts_at' => $fields['starts_at'],
+        'ends_at' => $fields['ends_at'],
+        'enabled' => $fields['enabled'],
+        'id' => $announcementId,
+    ]);
+    ops_audit($db, (int) $admin['id'], 'ANNOUNCEMENT_UPDATED', [
+        'message_key' => (string) $messageKey,
+        'severity' => $fields['severity'],
+        'target' => $fields['target'],
+        'enabled' => (bool) $fields['enabled'],
     ]);
 }
 

@@ -79,7 +79,7 @@ class PhaseEightContractTests(unittest.TestCase):
         css = self.read(ROOT / "assets" / "app.css")
         for label in ("النشاط المباشر", "الموزعون والوصول", "إدارة التطبيق", "المتابعة والتحليل", "إدارة المركز"):
             self.assertIn(label, routes)
-        self.assertIn("navigation__group-title", layout)
+        self.assertIn("settings-menu__group-title", layout)
         for forbidden_heading in ("Presence", "Diagnostics", "Host Health", "Single-owner boundaries"):
             self.assertNotIn(f'>{forbidden_heading}<', settings)
         self.assertIn("إعدادات مركز التحكم", settings)
@@ -132,57 +132,24 @@ class PhaseEightContractTests(unittest.TestCase):
         self.assertIn("summary:focus-visible", css)
         self.assertIn("min-height: 44px", css)
         self.assertIn("@media (max-width: 700px)", css)
-        self.assertIn("app.css?v=5.0.2", login)
+        self.assertIn("app.css?v=6.2.0", login)
 
-    def test_closed_rtl_mobile_drawer_is_fully_outside_the_viewport(self) -> None:
+    def test_primary_tabs_stay_accessible_without_page_clipping(self) -> None:
         css = self.read(ROOT / "assets" / "app.css")
-        mobile_css = css.split("@media (max-width: 860px)", 1)[1].split(
-            "@media (max-width: 700px)", 1
-        )[0]
-        sidebar_match = re.search(r"\.sidebar\s*\{([^}]*)\}", mobile_css)
-        self.assertIsNotNone(sidebar_match)
+        layout = self.read(ROOT / "views" / "layout.php")
+        track = re.search(r"\.primary-tabs__track\s*\{([^}]*)\}", css)
+        self.assertIsNotNone(track)
         declarations = {
             name.strip(): value.strip()
-            for name, value in re.findall(
-                r"([\w-]+)\s*:\s*([^;]+);", sidebar_match.group(1)
-            )
+            for name, value in re.findall(r"([\w-]+)\s*:\s*([^;]+);", track.group(1))
         }
-
-        viewport_width = 390.0
-        width_match = re.fullmatch(
-            r"min\(([\d.]+)vw,\s*([\d.]+)px\)", declarations.get("width", "")
-        )
-        self.assertIsNotNone(width_match)
-        drawer_width = min(
-            viewport_width * float(width_match.group(1)) / 100.0,
-            float(width_match.group(2)),
-        )
-
-        if "right" in declarations:
-            closed_left = viewport_width - drawer_width - float(
-                declarations["right"].removesuffix("px")
-            )
-        elif declarations.get("inset-inline-end") == "0":
-            # In an RTL document, inline-end resolves to the physical left edge.
-            closed_left = 0.0
-        else:
-            self.fail("mobile drawer has no supported physical anchor")
-
-        translation_match = re.search(
-            r"translate(?:X|3d)\(\s*([\d.]+)%", declarations.get("transform", "")
-        )
-        self.assertIsNotNone(translation_match)
-        closed_left += drawer_width * float(translation_match.group(1)) / 100.0
-        visible_width = max(
-            0.0,
-            min(viewport_width, closed_left + drawer_width) - max(0.0, closed_left),
-        )
-
-        self.assertEqual(
-            visible_width,
-            0.0,
-            "the closed RTL mobile drawer must not cover or block any page content",
-        )
+        self.assertEqual(declarations.get("overflow-x"), "auto")
+        self.assertIn("white-space: nowrap", css)
+        self.assertIn(".primary-tab.is-active", css)
+        self.assertIn("data-primary-tabs", layout)
+        self.assertNotIn("data-sidebar", layout)
+        self.assertNotIn("nav-backdrop", layout)
+        self.assertNotIn("data-nav-open", layout)
 
     def test_login_layout_fits_a_390px_viewport(self) -> None:
         css = self.read(ROOT / "assets" / "app.css")
@@ -287,7 +254,8 @@ class PhaseEightContractTests(unittest.TestCase):
         analytics = self.read(ROOT / "views" / "analytics.php")
 
         self.assertIn('class="form-section"', operations)
-        self.assertIn("release-current", operations)
+        self.assertIn("r6-link-panel", operations)
+        self.assertIn("r6-release-list", operations)
         self.assertIn("service-message-preview", operations)
         self.assertIn("feature-state-group", operations)
         self.assertIn("growth-channel", operations)

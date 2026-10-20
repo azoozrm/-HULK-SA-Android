@@ -317,4 +317,7 @@ ops_test(
     'an absent If-None-Match condition does not match'
 );
 
+require __DIR__ . '/release-resolver.php';
+require __DIR__ . '/release-activation.php';
+
 fwrite(STDOUT, "PASS: {$tests} HULK Operations backend policy checks.\n");

@@ -20,78 +20,209 @@ $csrf = cc_csrf_token();
             break;
         }
     }
-    ?>
-    <section class="module-stack release-management-page">
-        <?php cc_page_summary(
-            'إدارة التحديث',
-            $activeRelease === null ? 'لا يوجد إصدار APK نشط' : 'الإصدار النشط ' . (string) $activeRelease['version_name'],
-            $activeRelease === null
-                ? 'فعّل إصدارًا جاهزًا أو ارفع ملفًا جديدًا قبل تغيير سياسة التحديث.'
-                : 'حالة الإصدار الحالي وسياسة وصوله للمستخدمين تظهر هنا قبل أي إجراء.',
-            'package',
-            ['label' => $activeRelease === null ? 'يحتاج إلى انتباه' : 'نشط الآن', 'tone' => $activeRelease === null ? 'warning' : 'success'],
-            [
-                ['label' => 'الإصدار الحالي', 'value' => $activeRelease === null ? 'غير متاح' : (string) $activeRelease['version_name'], 'ltr' => true],
-                ['label' => 'نوع التحديث', 'value' => $activeRelease === null ? 'غير متاح' : (!empty($activeRelease['required']) ? 'إلزامي' : 'اختياري')],
-                ['label' => 'الحد الأدنى', 'value' => $activeRelease === null ? 'غير متاح' : (string) ((int) $activeRelease['minimum_supported_version_code']), 'ltr' => true],
-                ['label' => 'سجل الإصدارات', 'value' => count($releases) . ' إصدار'],
-            ]
-        ); ?>
 
-        <?php if ($activeRelease !== null): ?>
-            <section class="release-current panel">
-                <header class="panel__header"><div><span class="eyebrow">النسخة المنشورة</span><h2><bdi dir="ltr"><?= cc_e($activeRelease['version_name']) ?></bdi></h2></div><?php cc_status_badge(!empty($activeRelease['required']) ? 'تحديث إلزامي' : 'تحديث اختياري', !empty($activeRelease['required']) ? 'warning' : 'info'); ?></header>
-                <?php cc_fact_list([
-                    ['label' => 'رمز الإصدار', 'value' => (string) ((int) $activeRelease['version_code']), 'ltr' => true],
-                    ['label' => 'الحد الأدنى المدعوم', 'value' => (string) ((int) $activeRelease['minimum_supported_version_code']), 'ltr' => true],
-                    ['label' => 'الحالة', 'value' => !empty($activeRelease['enabled']) ? 'متاح للمستخدمين' : 'غير متاح'],
-                ], 'fact-list--summary'); ?>
+    $reviewId = filter_var($_GET['review'] ?? ($pageData['review_release_id'] ?? null), FILTER_VALIDATE_INT);
+    $reviewRelease = null;
+    if ($reviewId !== false && $reviewId > 0) {
+        foreach ($releases as $candidate) {
+            if ((int) $candidate['id'] === (int) $reviewId && empty($candidate['is_active'])) {
+                $reviewRelease = $candidate;
+                break;
+            }
+        }
+    }
+
+    $uploadOpen = !empty($pageData['open_upload']) || (($_GET['upload'] ?? '') === '1');
+    $shortUrl = 'https://hulksa.com/app/';
+    $shortLabel = 'hulksa.com/app/';
+    $downloaderCode = '5672332';
+    $activeMinimum = $activeRelease === null
+        ? 0
+        : max(1, (int) $activeRelease['minimum_supported_version_code']);
+    $requiredDefault = $activeRelease !== null && !empty($activeRelease['required']);
+    $minimumDefault = $activeRelease === null ? 1 : $activeMinimum;
+
+    $releaseState = static function (array $release): array {
+        if (!empty($release['is_active'])) {
+            return ['المنشور الآن', 'success'];
+        }
+        if (!empty($release['enabled'])) {
+            return ['متاح', 'info'];
+        }
+        if (!empty($release['is_newer'])) {
+            return ['جاهز للنشر', 'warning'];
+        }
+        return ['محفوظ', 'neutral'];
+    };
+    $releaseStateDetail = static function (array $release): string {
+        if (!empty($release['is_active'])) {
+            return 'متاح عبر الرابط المختصر';
+        }
+        if (!empty($release['enabled'])) {
+            return 'مفعّل وغير منشور';
+        }
+        if (!empty($release['is_newer'])) {
+            return 'لم يُنشر للمستخدمين بعد';
+        }
+        return 'أقدم من النسخة المنشورة';
+    };
+    $formatSize = static function (int $bytes): string {
+        return $bytes > 0 ? number_format($bytes / 1048576, 1) . ' MB' : '';
+    };
+    $formatDate = static function (string $value): string {
+        $timestamp = strtotime($value);
+        return $timestamp === false ? '' : date('Y-m-d', $timestamp);
+    };
+    ?>
+    <section class="release-management-page" aria-label="تحديث التطبيق">
+        <div class="r6-top-grid">
+            <section class="r6-panel r6-link-panel" aria-labelledby="r6-link-title">
+                <div class="r6-section-heading">
+                    <h2 id="r6-link-title" class="r6-label"><?= cc_icon('link', 'r6-gold-icon') ?>رابط التحميل الرسمي</h2>
+                    <?php if ($activeRelease !== null): ?>
+                        <span class="r6-badge r6-badge--success"><span class="r6-dot"></span>منشور</span>
+                    <?php else: ?>
+                        <span class="r6-badge r6-badge--neutral">غير متاح</span>
+                    <?php endif; ?>
+                </div>
+                <div class="r6-link-line">
+                    <a class="r6-short-url" href="<?= cc_e($shortUrl) ?>" dir="ltr"><?= cc_e($shortLabel) ?></a>
+                    <button class="r6-btn r6-icon-btn" type="button" data-copy-value="<?= cc_e($shortUrl) ?>" data-copy-fallback="r6-short-fallback" data-copy-status="r6-short-copy-status" aria-label="نسخ رابط التحميل الرسمي"><?= cc_icon('copy') ?></button>
+                </div>
+                <input class="r6-copy-fallback" id="r6-short-fallback" type="text" value="<?= cc_e($shortUrl) ?>" readonly hidden aria-label="رابط التحميل الرسمي للنسخ اليدوي">
+                <p class="r6-copy-status" id="r6-short-copy-status" role="status" aria-live="polite"></p>
+                <div class="r6-current-line">
+                    <span class="r6-current-label">النسخة المنشورة</span>
+                    <?php if ($activeRelease !== null): ?>
+                        <strong class="r6-version" dir="ltr"><?= cc_e($activeRelease['version_name']) ?></strong>
+                        <span class="r6-code">رمز <bdi dir="ltr"><?= (int) $activeRelease['version_code'] ?></bdi></span>
+                        <span class="r6-badge <?= !empty($activeRelease['required']) ? 'r6-badge--gold' : 'r6-badge--neutral' ?>"><?= !empty($activeRelease['required']) ? 'إجباري' : 'اختياري' ?></span>
+                    <?php else: ?>
+                        <span class="r6-unavailable">لا يوجد إصدار منشور</span>
+                    <?php endif; ?>
+                </div>
+                <div class="r6-download-code">
+                    <span><bdi>Downloader</bdi><strong><?= cc_e($downloaderCode) ?></strong></span>
+                    <span class="r6-stable-note"><?= cc_icon('lock') ?>الرابط والكود ثابتان مع كل تحديث</span>
+                </div>
+                <?php if ($activeRelease !== null && empty($activeRelease['artifact_ready'])): ?>
+                    <p class="r6-warning">ملف الإصدار المنشور غير متاح على الخادم. قد لا يعمل رابط التحميل حتى تُصلح المشكلة.</p>
+                <?php endif; ?>
+            </section>
+
+            <section class="r6-panel r6-upload-intro" aria-labelledby="r6-upload-intro-title">
+                <div class="r6-upload-symbol"><?= cc_icon('upload') ?></div>
+                <h2 id="r6-upload-intro-title">جاهز للتحديث القادم؟</h2>
+                <p><?= $activeRelease === null ? 'ارفع أول ملف APK ثم راجعه وانشره على الرابط الثابت.' : 'ارفع ملف APK جديدًا. النسخة الحالية تبقى منشورة حتى تؤكد النشر.' ?></p>
+                <a class="r6-btn r6-btn--primary" href="<?= cc_e(cc_url('releases') . '?upload=1#release-upload-panel') ?>" data-r6-open-upload><?= cc_icon('plus') ?>رفع تحديث جديد</a>
+            </section>
+        </div>
+
+        <section class="r6-panel r6-editor" id="release-upload-panel" aria-labelledby="r6-upload-title" <?= $uploadOpen ? '' : 'hidden' ?>>
+            <div class="r6-editor-heading">
+                <div><div class="r6-eyebrow">١ / ٢ · الملف والبيانات</div><h2 id="r6-upload-title">رفع تحديث جديد</h2></div>
+                <a class="r6-btn r6-btn--quiet r6-icon-btn" href="<?= cc_e(cc_url('releases') . '#release-library') ?>" data-r6-close-upload aria-label="إغلاق نموذج الرفع"><?= cc_icon('close') ?></a>
+            </div>
+            <form class="r6-form" method="post" enctype="multipart/form-data" data-r6-upload-form data-submit-once>
+                <input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>">
+                <input type="hidden" name="action" value="upload_release">
+                <label class="r6-field r6-span"><span class="r6-field-label">ملف التطبيق <bdi>APK</bdi></span><input class="r6-file-input" type="file" name="apk" id="r6-apk-file" required><span class="r6-field-hint" id="r6-file-hint">اختر ملفًا بامتداد .apk — لا يُنشر بمجرد اختياره.</span></label>
+                <label class="r6-field"><span class="r6-field-label">اسم الإصدار</span><input class="r6-input" type="text" name="version_name" id="r6-version-name" dir="ltr" placeholder="مثال: 1.0.1" maxlength="32" required></label>
+                <label class="r6-field"><span class="r6-field-label">رمز الإصدار</span><input class="r6-input" type="number" name="version_code" id="r6-version-code" dir="ltr" min="1" step="1" placeholder="مثال: 69" required></label>
+                <label class="r6-field r6-span"><span class="r6-field-label">ما الجديد في التحديث؟</span><textarea class="r6-input" name="release_notes" maxlength="10000" placeholder="اكتب المميزات والتحسينات التي ستظهر للمستخدم." required></textarea></label>
+                <label class="r6-policy-choice r6-span"><input type="checkbox" name="required" value="1" id="r6-required" data-r6-required <?= $requiredDefault ? 'checked' : '' ?>><span class="r6-policy-copy"><strong>اجعل التحديث إجباريًا</strong><span id="r6-policy-help"><?= $requiredDefault ? 'يجب على المستخدم تحديث التطبيق للمتابعة.' : 'يمكن للمستخدم تأجيل هذا التحديث، ما لم يكن أقل من الحد الأدنى المدعوم.' ?></span></span></label>
+                <details class="r6-advanced r6-span" data-r6-advanced><summary>إعداد متقدم · الحد الأدنى المدعوم</summary><div class="r6-advanced-content"><label class="r6-field"><span class="r6-field-label">أقل رمز إصدار مسموح</span><input class="r6-input" type="number" name="minimum_supported_version_code" id="r6-min-code" min="1" step="1" value="<?= (int) $minimumDefault ?>" dir="ltr" required></label><p class="r6-field-hint">الإصدارات الأقل من هذا الرقم تحتاج إلى تحديث. لا يتغير تلقائيًا دون مراجعتك. عند اختيار تحديث إجباري يُضبط على رمز الإصدار.</p></div></details>
+                <div class="r6-form-footer">
+                    <p><?= cc_icon('shield') ?>ستراجع النسخة قبل إتاحتها للمستخدمين.</p>
+                    <div class="r6-actions"><button class="r6-btn r6-btn--primary" type="submit">مراجعة التحديث<?= cc_icon('arrow-left') ?></button><a class="r6-btn r6-btn--quiet" href="<?= cc_e(cc_url('releases') . '#release-library') ?>" data-r6-close-upload>إلغاء</a></div>
+                </div>
+            </form>
+        </section>
+
+        <?php if ($reviewRelease !== null): ?>
+            <section class="r6-panel r6-editor r6-review" id="release-review-panel" aria-labelledby="r6-review-title">
+                <div class="r6-editor-heading">
+                    <div><div class="r6-eyebrow">٢ / ٢ · المراجعة والنشر</div><h2 id="r6-review-title">راجع التحديث قبل النشر</h2></div>
+                    <span class="r6-badge r6-badge--neutral">غير منشور</span>
+                </div>
+                <p class="r6-review-lead">عند التأكيد، يصبح هذا هو إصدار التطبيق المنشور والملف المتاح على رابطك المختصر.</p>
+                <div class="r6-review-facts">
+                    <div class="r6-fact"><span>الإصدار</span><strong dir="ltr"><?= cc_e($reviewRelease['version_name']) ?> / <?= (int) $reviewRelease['version_code'] ?></strong></div>
+                    <div class="r6-fact"><span>سياسة التحديث</span><strong><?= !empty($reviewRelease['required']) ? 'إجباري' : 'اختياري' ?></strong></div>
+                    <div class="r6-fact"><span>الحد الأدنى</span><strong dir="ltr"><?= (int) $reviewRelease['minimum_supported_version_code'] ?></strong></div>
+                </div>
+                <div class="r6-label">الملف المرفوع</div>
+                <div class="r6-review-file" dir="ltr"><?= $reviewRelease['file_name'] !== '' ? cc_e($reviewRelease['file_name']) : 'ملف غير صالح' ?></div>
+                <?php if ($reviewRelease['size_bytes'] > 0): ?><p class="r6-field-hint"><?= cc_e($formatSize((int) $reviewRelease['size_bytes'])) ?></p><?php endif; ?>
+                <?php if ($reviewRelease['sha256'] !== ''): ?><div class="r6-review-hash"><span>SHA-256</span><code dir="ltr"><?= cc_e($reviewRelease['sha256']) ?></code></div><?php endif; ?>
+                <p class="r6-review-notes"><?= nl2br(cc_e($reviewRelease['release_notes'])) ?></p>
+                <div class="r6-publish-destination"><span>رابط التحميل بعد النشر</span><b dir="ltr"><?= cc_e($shortUrl) ?></b></div>
+                <?php if (!empty($reviewRelease['is_older'])): ?>
+                    <p class="r6-warning">هذا الإصدار أقدم من النسخة المنشورة، ولن يُنشر من هذه الصفحة.</p>
+                <?php elseif (empty($reviewRelease['is_newer'])): ?>
+                    <p class="r6-warning">هذا الإصدار ليس أحدث من النسخة المنشورة، ولن يُنشر من هذه الصفحة.</p>
+                <?php endif; ?>
+                <?php if (!empty($reviewRelease['below_active_minimum'])): ?>
+                    <p class="r6-warning">الحد الأدنى لهذا الإصدار أقل من الحد الأدنى المنشور. لن يُتاح النشر حتى تؤكد أن هذا التخفيض مقصود أو تعدّل السياسة.</p>
+                <?php endif; ?>
+                <div class="r6-form-footer">
+                    <p><?= cc_icon('check') ?>كود داونلودر <?= cc_e($downloaderCode) ?> لن يتغير.</p>
+                    <div class="r6-actions">
+                        <?php if (!empty($reviewRelease['is_newer'])): ?>
+                            <form method="post" data-confirm="نشر الإصدار <?= cc_e($reviewRelease['version_name']) ?> (رمز <?= (int) $reviewRelease['version_code'] ?>) على الرابط المختصر الآن؟">
+                                <input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="activate_release"><input type="hidden" name="release_id" value="<?= (int) $reviewRelease['id'] ?>">
+                                <?php if (!empty($reviewRelease['below_active_minimum'])): ?><label class="r6-risk-confirm"><input type="checkbox" data-r6-min-confirm> أؤكد أن خفض الحد الأدنى مقصود.</label><?php endif; ?>
+                                <button class="r6-btn r6-btn--primary" type="submit" <?= !empty($reviewRelease['below_active_minimum']) ? 'disabled data-r6-publish' : '' ?>><?= cc_icon('send') ?>نشر على الرابط المختصر</button>
+                            </form>
+                        <?php endif; ?>
+                        <a class="r6-btn" href="<?= cc_e(cc_url('releases') . '#release-library') ?>">حفظ دون نشر</a>
+                    </div>
+                </div>
+                <details class="r6-inline-edit"><summary>تعديل السياسة قبل النشر</summary><form method="post"><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="update_release_policy"><input type="hidden" name="release_id" value="<?= (int) $reviewRelease['id'] ?>"><input type="hidden" name="return_to_review" value="1"><label class="r6-field"><span class="r6-field-label">الحد الأدنى المدعوم</span><input class="r6-input" type="number" name="minimum_supported_version_code" min="1" value="<?= (int) $reviewRelease['minimum_supported_version_code'] ?>" dir="ltr" required></label><label class="r6-policy-choice"><input type="checkbox" name="required" value="1" <?= !empty($reviewRelease['required']) ? 'checked' : '' ?>><span class="r6-policy-copy"><strong>اجعل التحديث إجباريًا</strong><span>عند التفعيل يُضبط الحد الأدنى على رمز الإصدار.</span></span></label><button class="r6-btn r6-btn--secondary" type="submit">حفظ السياسة</button></form></details>
             </section>
         <?php endif; ?>
 
-        <details class="form-section">
-            <summary><span><?= cc_icon('package') ?></span><span><strong>رفع إصدار جديد</strong><small>أدخل بيانات النسخة وارفع ملف APK بعد مراجعة سياسة التحديث.</small></span></summary>
-            <form class="admin-form admin-form--grid" method="post" enctype="multipart/form-data">
-                <input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="upload_release">
-                <label class="form-field"><span>اسم الإصدار</span><input name="version_name" maxlength="32" dir="ltr" required></label>
-                <label class="form-field"><span>رمز الإصدار</span><input name="version_code" type="number" min="1" required></label>
-                <label class="form-field"><span>الحد الأدنى المدعوم</span><input name="minimum_supported_version_code" type="number" min="1" required></label>
-                <label class="form-field"><span>ملف APK</span><input name="apk" type="file" accept=".apk,application/vnd.android.package-archive" required></label>
-                <label class="form-field form-field--wide"><span>ملاحظات الإصدار</span><textarea name="release_notes" maxlength="10000" required></textarea></label>
-                <label class="check-control"><input name="required" type="checkbox" value="1"> اجعل التحديث إلزاميًا</label>
-                <div class="form-submit"><button class="button button--primary" type="submit">رفع الإصدار</button></div>
-            </form>
-        </details>
-
-        <section class="records-section">
-            <header class="section-heading"><div><span class="eyebrow">السجل</span><h2>كل الإصدارات</h2></div><span class="record-count"><?= count($releases) ?> إصدار</span></header>
+        <section class="r6-library" id="release-library" aria-labelledby="r6-library-title">
+            <div class="r6-library-heading"><h2 id="r6-library-title">الإصدارات</h2><span class="r6-counter"><?= count($releases) ?> إصدار</span></div>
             <?php if ($releases === []): ?>
                 <?php cc_empty_state('لا توجد إصدارات', 'ارفع أول APK لتكوين سجل الإصدارات.'); ?>
             <?php else: ?>
-                <div class="release-records">
-                    <?php foreach ($releases as $release): ?>
-                        <article class="record-card release-record<?= !empty($release['is_active']) ? ' release-record--active' : '' ?>">
-                            <header class="record-card__header">
-                                <div class="record-identity"><span class="record-identity__icon"><?= cc_icon('package') ?></span><span><strong><bdi dir="ltr"><?= cc_e($release['version_name']) ?></bdi></strong><small>رمز <bdi dir="ltr"><?= (int) $release['version_code'] ?></bdi></small></span></div>
-                                <?php cc_status_badge(!empty($release['is_active']) ? 'النشط حاليًا' : (!empty($release['enabled']) ? 'جاهز' : 'معطّل'), !empty($release['is_active']) ? 'success' : (!empty($release['enabled']) ? 'info' : 'neutral')); ?>
-                            </header>
-                            <dl class="record-card__highlights record-card__highlights--three">
-                                <div><dt>السياسة</dt><dd><?= !empty($release['required']) ? 'إلزامي' : 'اختياري' ?></dd></div>
-                                <div><dt>الحد الأدنى</dt><dd><bdi dir="ltr"><?= (int) $release['minimum_supported_version_code'] ?></bdi></dd></div>
-                                <div><dt>الجاهزية</dt><dd><?= !empty($release['enabled']) ? 'متاح' : 'متوقف' ?></dd></div>
-                            </dl>
-                            <div class="record-actions">
-                                <?php if (empty($release['is_active'])): ?><form method="post" data-confirm="تفعيل هذا الإصدار؟"><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="activate_release"><input type="hidden" name="release_id" value="<?= (int) $release['id'] ?>"><button class="button button--primary" type="submit">تفعيل الإصدار</button></form><?php endif; ?>
-                                <details class="inline-editor"><summary>تعديل السياسة</summary><form method="post"><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="update_release_policy"><input type="hidden" name="release_id" value="<?= (int) $release['id'] ?>"><label class="form-field"><span>الحد الأدنى</span><input name="minimum_supported_version_code" type="number" min="1" value="<?= (int) $release['minimum_supported_version_code'] ?>" required></label><label class="check-control"><input name="required" type="checkbox" value="1" <?= !empty($release['required']) ? 'checked' : '' ?>> تحديث إلزامي</label><button class="button button--secondary" type="submit">حفظ السياسة</button></form></details>
-                                <?php if (!empty($release['enabled']) || !empty($release['is_active'])): ?><form method="post" data-confirm="تعطيل هذا الإصدار؟"><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="disable_release"><input type="hidden" name="release_id" value="<?= (int) $release['id'] ?>"><button class="button button--danger" type="submit">تعطيل</button></form><?php endif; ?>
-                            </div>
-                            <section class="destructive-zone">
-                                <div><strong>حذف الإصدار نهائيًا</strong><small>يحذف سجل الإصدار وملف APK المرتبط به من الاستضافة. لا يمكن التراجع عن هذا الإجراء.</small></div>
-                                <div class="record-actions">
-                                    <form method="post" data-confirm="حذف هذا الإصدار نهائيًا؟ سيُحذف سجل الإصدار وملف APK، وإذا كان الإصدار منشورًا فستعود سياسة التحديث إلى الوضع الآمن."><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="delete_release"><input type="hidden" name="release_id" value="<?= (int) $release['id'] ?>"><button class="button button--danger" type="submit">حذف الإصدار</button></form>
+                <div class="r6-release-list">
+                    <?php foreach ($releases as $release): $state = $releaseState($release); ?>
+                        <details class="r6-release<?= !empty($release['is_active']) ? ' is-live' : '' ?>" <?= $reviewRelease !== null && (int) $reviewRelease['id'] === (int) $release['id'] ? 'open' : '' ?>>
+                            <summary class="r6-release-row">
+                                <span class="r6-release-icon"><?= cc_icon('package') ?></span>
+                                <span class="r6-release-info">
+                                    <span class="r6-release-name"><strong dir="ltr"><?= cc_e($release['version_name']) ?></strong><span class="r6-badge r6-badge--<?= cc_e($state[1]) ?>"><?= cc_e($state[0]) ?></span></span>
+                                    <span class="r6-release-meta">رمز <bdi dir="ltr"><?= (int) $release['version_code'] ?></bdi> · <?= !empty($release['required']) ? 'تحديث إجباري' : 'تحديث اختياري' ?></span>
+                                </span>
+                                <span class="r6-release-buttons"><?= cc_icon('chevron-down', 'r6-chevron') ?></span>
+                            </summary>
+                            <div class="r6-release-details">
+                                <div class="r6-release-detail-facts">
+                                    <span>الحد الأدنى المدعوم: <bdi dir="ltr"><?= (int) $release['minimum_supported_version_code'] ?></bdi></span>
+                                    <span><?= cc_e($releaseStateDetail($release)) ?></span>
+                                    <?php $created = $formatDate($release['created_at']); if ($created !== ''): ?><span>أضيف: <bdi dir="ltr"><?= cc_e($created) ?></bdi></span><?php endif; ?>
                                 </div>
-                            </section>
-                        </article>
+                                <?php if ($release['file_name'] !== ''): ?><div class="r6-review-file" dir="ltr"><?= cc_e($release['file_name']) ?></div><?php endif; ?>
+                                <?php if ($release['sha256'] !== ''): ?><div class="r6-review-hash"><span>SHA-256</span><code dir="ltr"><?= cc_e($release['sha256']) ?></code></div><?php endif; ?>
+                                <?php if ($release['public_apk_url'] !== null): ?>
+                                    <code class="r6-public-url" dir="ltr"><?= cc_e($release['public_apk_url']) ?></code>
+                                    <div class="r6-copy-row"><button class="r6-btn" type="button" data-copy-value="<?= cc_e($release['public_apk_url']) ?>" data-copy-fallback="r6-apk-fallback-<?= (int) $release['id'] ?>" data-copy-status="r6-apk-status-<?= (int) $release['id'] ?>"><?= cc_icon('copy') ?>نسخ رابط APK المباشر</button></div>
+                                    <input class="r6-copy-fallback" id="r6-apk-fallback-<?= (int) $release['id'] ?>" type="text" value="<?= cc_e($release['public_apk_url']) ?>" readonly hidden aria-label="رابط APK المباشر للنسخ اليدوي">
+                                    <p class="r6-copy-status" id="r6-apk-status-<?= (int) $release['id'] ?>" role="status" aria-live="polite"></p>
+                                <?php else: ?>
+                                    <p class="r6-warning">لا يوجد رابط APK مباشر صالح لهذا السجل.</p>
+                                <?php endif; ?>
+                                <?php if ($release['release_notes'] !== ''): ?><p class="r6-review-notes"><?= nl2br(cc_e($release['release_notes'])) ?></p><?php endif; ?>
+                                <div class="r6-row-actions">
+                                    <?php if (empty($release['is_active']) && !empty($release['is_newer'])): ?><a class="r6-btn r6-btn--primary" href="<?= cc_e(cc_url('releases') . '?review=' . (int) $release['id'] . '#release-review-panel') ?>">مراجعة ونشر</a><?php endif; ?>
+                                    <details class="r6-inline-edit"><summary>تعديل السياسة</summary><form method="post"><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="update_release_policy"><input type="hidden" name="release_id" value="<?= (int) $release['id'] ?>"><label class="r6-field"><span class="r6-field-label">الحد الأدنى</span><input class="r6-input" type="number" name="minimum_supported_version_code" min="1" value="<?= (int) $release['minimum_supported_version_code'] ?>" dir="ltr" required></label><label class="r6-policy-choice"><input type="checkbox" name="required" value="1" <?= !empty($release['required']) ? 'checked' : '' ?>><span class="r6-policy-copy"><strong>تحديث إجباري</strong></span></label><button class="r6-btn r6-btn--secondary" type="submit">حفظ السياسة</button></form></details>
+                                    <?php if (!empty($release['enabled']) || !empty($release['is_active'])): ?><form method="post" data-confirm="تعطيل هذا الإصدار؟"><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="disable_release"><input type="hidden" name="release_id" value="<?= (int) $release['id'] ?>"><button class="button button--danger r6-btn r6-btn--danger" type="submit">تعطيل</button></form><?php endif; ?>
+                                </div>
+                                <details class="r6-destructive"><summary>خيارات متقدمة</summary><div class="destructive-zone r6-destructive-zone"><strong>حذف الإصدار نهائيًا</strong><small>يحذف سجل الإصدار وملف APK المرتبط به من الاستضافة. لا يمكن التراجع عن هذا الإجراء.</small><form method="post" data-confirm="حذف هذا الإصدار نهائيًا؟ سيُحذف سجل الإصدار وملف APK، وإذا كان الإصدار منشورًا فستعود سياسة التحديث إلى الوضع الآمن."><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="delete_release"><input type="hidden" name="release_id" value="<?= (int) $release['id'] ?>"><button class="button button--danger r6-btn r6-btn--danger" type="submit">حذف الإصدار</button></form></div></details>
+                            </div>
+                        </details>
                     <?php endforeach; ?>
                 </div>
             <?php endif; ?>
@@ -164,7 +295,23 @@ $csrf = cc_csrf_token();
                         <article class="record-card announcement-record">
                             <header class="record-card__header"><div class="record-identity"><span class="record-identity__icon"><?= cc_icon('bell') ?></span><span><strong><?= cc_e($row['title']) ?></strong><small><?= cc_e((string) $row['severity']) ?> · <?= cc_e((string) $row['target']) ?></small></span></div><?php cc_status_badge(!empty($row['enabled']) ? 'مفعّل' : 'معطّل', !empty($row['enabled']) ? 'success' : 'neutral'); ?></header>
                             <dl class="record-card__highlights record-card__highlights--three"><div><dt>الجمهور</dt><dd><?= cc_e((string) $row['target']) ?></dd></div><div><dt>البداية</dt><dd><?= cc_e((string) $row['starts_at']) ?></dd></div><div><dt>النهاية</dt><dd><?= cc_e((string) ($row['ends_at'] ?: 'بدون انتهاء')) ?></dd></div></dl>
-                            <details class="technical-disclosure"><summary>الاستهداف التقني</summary><div class="technical-disclosure__body"><?php cc_fact_list([['label' => 'معرّف الرسالة', 'value' => (string) $row['message_key'], 'ltr' => true]], 'fact-list--technical'); ?></div></details>
+                            <details class="technical-disclosure"><summary>الاستهداف التقني</summary><div class="technical-disclosure__body"><?php cc_fact_list([['label' => 'معرّف الرسالة', 'value' => (string) $row['message_key'], 'ltr' => true]], 'fact-list--technical'); ?></div></details>                            <details class="inline-editor">
+                                <summary>تعديل الإعلان</summary>
+                                <form method="post" class="admin-form admin-form--grid">
+                                    <input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="update_announcement"><input type="hidden" name="announcement_id" value="<?= (int) $row['id'] ?>">
+                                    <label class="form-field"><span>العنوان</span><input name="title" maxlength="160" value="<?= cc_e((string) $row['title']) ?>" required></label>
+                                    <label class="form-field form-field--wide"><span>نص الإعلان</span><textarea name="message" maxlength="10000" required><?= cc_e((string) $row['message']) ?></textarea></label>
+                                    <label class="form-field"><span>الأهمية</span><select name="severity"><option value="INFO" <?= $row['severity'] === 'INFO' ? 'selected' : '' ?>>معلومات</option><option value="WARNING" <?= $row['severity'] === 'WARNING' ? 'selected' : '' ?>>تحذير</option><option value="IMPORTANT" <?= $row['severity'] === 'IMPORTANT' ? 'selected' : '' ?>>مهم</option></select></label>
+                                    <label class="form-field"><span>الجمهور</span><select name="target"><option value="ALL" <?= $row['target'] === 'ALL' ? 'selected' : '' ?>>الجميع</option><option value="MOBILE" <?= $row['target'] === 'MOBILE' ? 'selected' : '' ?>>الجوال والتابلت</option><option value="TV" <?= $row['target'] === 'TV' ? 'selected' : '' ?>>التلفزيون</option></select></label>
+                                    <label class="form-field"><span>البداية</span><input name="starts_at" type="datetime-local" value="<?= cc_e(ops_datetime_local_value($row['starts_at'])) ?>" required></label>
+                                    <label class="form-field"><span>النهاية <small>اختياري</small></span><input name="ends_at" type="datetime-local" value="<?= cc_e(ops_datetime_local_value($row['ends_at'])) ?>"></label>
+                                    <label class="form-field"><span>أدنى إصدار <small>اختياري</small></span><input name="minimum_version_code" type="number" min="1" value="<?= $row['minimum_version_code'] === null ? '' : (int) $row['minimum_version_code'] ?>"></label>
+                                    <label class="form-field"><span>أعلى إصدار <small>اختياري</small></span><input name="maximum_version_code" type="number" min="1" value="<?= $row['maximum_version_code'] === null ? '' : (int) $row['maximum_version_code'] ?>"></label>
+                                    <div class="check-list form-field--wide"><label class="check-control"><input name="show_once" type="checkbox" value="1" <?= !empty($row['show_once']) ? 'checked' : '' ?>> يظهر مرة واحدة</label><label class="check-control"><input name="persistent" type="checkbox" value="1" <?= !empty($row['persistent']) ? 'checked' : '' ?>> يبقى ظاهرًا</label><label class="check-control"><input name="enabled" type="checkbox" value="1" <?= !empty($row['enabled']) ? 'checked' : '' ?>> مفعّل</label></div>
+                                    <div class="form-submit form-field--wide"><button class="button button--secondary" type="submit">حفظ التعديل</button></div>
+                                </form>
+                            </details>
+
                             <?php if (!empty($row['enabled'])): ?><div class="record-actions"><form method="post" data-confirm="تعطيل هذا الإعلان؟"><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="disable_announcement"><input type="hidden" name="announcement_id" value="<?= (int) $row['id'] ?>"><button class="button button--danger" type="submit">تعطيل الإعلان</button></form></div><?php endif; ?>
                         </article>
                     <?php endforeach; ?>

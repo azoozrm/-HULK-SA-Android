@@ -6,16 +6,16 @@ function cc_modules(): array
 {
     return [
         'dashboard' => [
-            'label' => 'الرئيسية',
+            'label' => 'النظرة العامة',
             'title' => 'مركز العمليات',
             'description' => 'الحالة الحالية للتطبيق وما يحتاج إلى انتباهك.',
             'icon' => 'dashboard',
             'group' => 'overview',
         ],
         'live-users' => [
-            'label' => 'النشطون الآن',
-            'title' => 'المستخدمون النشطون الآن',
-            'description' => 'الجلسات التي أرسلت نشاطًا حديثًا إلى الخادم.',
+            'label' => 'المتصلون الآن',
+            'title' => 'المتصلون الآن',
+            'description' => 'الاشتراكات والأجهزة التي أرسلت نشاطًا حديثًا إلى الخادم.',
             'icon' => 'users',
             'group' => 'audience',
         ],
@@ -48,16 +48,16 @@ function cc_modules(): array
             'group' => 'reseller',
         ],
         'hosts' => [
-            'label' => 'الهوستات',
-            'title' => 'الهوستات',
-            'description' => 'الهوستات الحالية وعلاقاتها بالموزعين.',
+            'label' => 'الهوست والأكواد',
+            'title' => 'الهوست والأكواد',
+            'description' => 'الهوستات وأكواد الدخول الحالية وعلاقتها بالموزعين.',
             'icon' => 'server',
             'group' => 'reseller',
         ],
         'releases' => [
-            'label' => 'الإصدارات',
-            'title' => 'الإصدارات والتحديثات',
-            'description' => 'رفع الإصدارات وتفعيلها وضبط سياسة التحديث.',
+            'label' => 'تحديث التطبيق',
+            'title' => 'تحديث التطبيق',
+            'description' => 'ارفع النسخة، راجعها، وانشرها على رابطك الثابت.',
             'icon' => 'package',
             'group' => 'operations',
         ],
@@ -139,12 +139,68 @@ function cc_navigation_groups(): array
     ];
 }
 
+function cc_main_navigation(): array
+{
+    return [
+        'live-users' => [
+            'label' => 'المتصلون الآن',
+            'icon' => 'users',
+        ],
+        'announcements' => [
+            'label' => 'الإعلانات',
+            'icon' => 'bell',
+        ],
+        'hosts' => [
+            'label' => 'الهوست والأكواد',
+            'icon' => 'server',
+        ],
+        'releases' => [
+            'label' => 'تحديث التطبيق',
+            'icon' => 'package',
+        ],
+    ];
+}
+
+function cc_active_main_navigation(string $moduleKey): ?string
+{
+    return match ($moduleKey) {
+        'live-users', 'sessions', 'devices' => 'live-users',
+        'announcements' => 'announcements',
+        'hosts', 'access-codes', 'resellers' => 'hosts',
+        'releases', 'features' => 'releases',
+        default => null,
+    };
+}
+
+function cc_secondary_navigation_groups(): array
+{
+    $mainKeys = array_keys(cc_main_navigation());
+    $serviceKeys = ['service', 'growth', 'settings'];
+    $groups = [];
+    foreach (cc_navigation_groups() as $groupKey => $groupLabel) {
+        $items = [];
+        foreach (cc_modules() as $moduleKey => $module) {
+            if ($module['group'] !== $groupKey) {
+                continue;
+            }
+            if (in_array($moduleKey, $mainKeys, true) || in_array($moduleKey, $serviceKeys, true)) {
+                continue;
+            }
+            $items[$moduleKey] = $module['label'];
+        }
+        if ($items !== []) {
+            $groups[$groupKey] = ['label' => $groupLabel, 'items' => $items];
+        }
+    }
+    return $groups;
+}
+
 function cc_resolve_module(?string $requested): array
 {
     $modules = cc_modules();
     $key = trim((string) $requested);
     if ($key === '') {
-        $key = 'dashboard';
+        $key = 'live-users';
     }
 
     if (!array_key_exists($key, $modules)) {

@@ -12,6 +12,115 @@ function ops_active_release(PDO $db): ?array
     return is_array($row) ? $row : null;
 }
 
+/**
+ * Return the only relative APK path shape the public resolver may serve.
+ *
+ * The stored path is never used as a URL or filesystem path until it passes
+ * this exact allow-list. Encoded separators, query/fragment markers, traversal
+ * and non-release paths fail closed.
+ */
+function ops_release_relative_apk_path(array $release): ?string
+{
+    $path = trim((string) ($release['apk_path'] ?? ''));
+    if ($path === '' || strlen($path) > 240) {
+        return null;
+    }
+    if (
+        str_contains($path, '\\')
+        || str_contains($path, '..')
+        || str_contains($path, '%')
+        || str_contains($path, '?')
+        || str_contains($path, '#')
+    ) {
+        return null;
+    }
+    if (preg_match('#^releases/[A-Za-z0-9][A-Za-z0-9._-]*\.apk$#D', $path) !== 1) {
+        return null;
+    }
+
+    return $path;
+}
+
+/**
+ * Build the public APK URL from the trusted Operations base URL and a valid
+ * release row. This is shared by the update API, the Control Center and /app/.
+ */
+function ops_release_public_apk_url(array $release): ?string
+{
+    $path = ops_release_relative_apk_path($release);
+    $sha = strtolower(trim((string) ($release['apk_sha256'] ?? '')));
+    if ($path === null || !ops_is_sha256($sha)) {
+        return null;
+    }
+
+    $baseUrl = rtrim((string) (ops_load_config()['app']['base_url'] ?? ''), '/');
+    $baseParts = parse_url($baseUrl);
+    if (
+        !is_array($baseParts)
+        || ($baseParts['scheme'] ?? '') !== 'https'
+        || empty($baseParts['host'])
+    ) {
+        return null;
+    }
+
+    $url = $baseUrl . '/' . $path;
+    $parts = parse_url($url);
+    if (
+        !is_array($parts)
+        || !filter_var($url, FILTER_VALIDATE_URL)
+        || ($parts['scheme'] ?? '') !== 'https'
+        || ($parts['host'] ?? '') !== $baseParts['host']
+        || ($parts['port'] ?? null) !== ($baseParts['port'] ?? null)
+        || isset($parts['user'])
+        || isset($parts['pass'])
+        || isset($parts['query'])
+        || isset($parts['fragment'])
+    ) {
+        return null;
+    }
+
+    $basePath = rtrim((string) ($baseParts['path'] ?? ''), '/');
+    $expectedPrefix = ($basePath === '' ? '' : $basePath) . '/releases/';
+    if (!str_starts_with((string) ($parts['path'] ?? ''), $expectedPrefix)) {
+        return null;
+    }
+
+    return $url;
+}
+
+/**
+ * Verify that the active release points at an existing, readable APK inside
+ * the Operations releases directory and that its byte count matches metadata.
+ * The resolver performs this check without hashing the file on every request.
+ */
+function ops_release_artifact_is_readable(array $release): bool
+{
+    $path = ops_release_relative_apk_path($release);
+    if ($path === null) {
+        return false;
+    }
+
+    $releasesRoot = realpath(dirname(__DIR__) . '/releases');
+    $absolutePath = realpath(dirname(__DIR__) . '/' . $path);
+    if (
+        $releasesRoot === false
+        || $absolutePath === false
+        || !str_starts_with($absolutePath, $releasesRoot . DIRECTORY_SEPARATOR)
+        || !is_file($absolutePath)
+        || !is_readable($absolutePath)
+    ) {
+        return false;
+    }
+
+    $size = filesize($absolutePath);
+    $expectedSize = (int) ($release['apk_size_bytes'] ?? 0);
+    if ($size === false || $size < 1 || $expectedSize < 1 || $size !== $expectedSize) {
+        return false;
+    }
+
+    return true;
+}
+
 function ops_active_announcements(PDO $db, DateTimeImmutable $now): array
 {
     $statement = $db->prepare(
@@ -72,7 +181,7 @@ function ops_update_snapshot(PDO $db): array
         $required = (bool) $release['required'];
     }
 
-    $apkUrl = $release === null ? null : ops_public_url((string) $release['apk_path']);
+    $apkUrl = $release === null ? null : ops_release_public_apk_url($release);
     $sha = $release === null ? null : strtolower((string) $release['apk_sha256']);
     if ($sha !== null && !ops_is_sha256($sha)) {
         $sha = null;

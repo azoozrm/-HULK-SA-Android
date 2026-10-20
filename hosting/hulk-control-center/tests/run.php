@@ -141,9 +141,25 @@ $dashboardSource = file_get_contents($root . '/lib/dashboard.php');
 $dashboardView = file_get_contents($root . '/views/dashboard.php');
 cc_test(is_string($layout) && str_contains($layout, '<html lang="ar" dir="rtl">'), 'layout is Arabic and RTL');
 cc_test(is_string($css) && str_contains($css, ':focus-visible'), 'visible keyboard focus styles exist');
-cc_test(is_string($css) && str_contains($css, '@media (max-width: 860px)'), 'mobile navigation breakpoint exists');
-cc_test(is_string($css) && str_contains($css, '@media (max-width: 1180px)'), 'tablet navigation breakpoint exists');
-cc_test(is_string($javascript) && str_contains($javascript, "setAttribute('inert'") && str_contains($javascript, "event.key !== 'Tab'"), 'mobile drawer hides inactive navigation and traps keyboard focus');
+cc_test(is_string($css) && str_contains($css, '@media (max-width: 860px)'), 'mobile responsive breakpoint exists');
+cc_test(is_string($css) && str_contains($css, '@media (max-width: 1180px)'), 'tablet responsive breakpoint exists');
+cc_test(count(cc_main_navigation()) === 4, 'four primary tabs are configured');
+cc_test(
+    array_keys(cc_main_navigation()) === ['live-users', 'announcements', 'hosts', 'releases'],
+    'primary tabs are exactly the approved four routes'
+);
+cc_test(
+    is_string($layout) && str_contains($layout, 'primary-tabs__track')
+        && str_contains($layout, 'data-primary-tabs')
+        && !str_contains($layout, 'data-sidebar')
+        && !str_contains($layout, 'nav-backdrop'),
+    'shell uses visible primary tabs instead of a sidebar or drawer'
+);
+cc_test(
+    is_string($javascript) && str_contains($javascript, 'data-primary-tabs')
+        && !str_contains($javascript, 'data-nav-open'),
+    'primary tabs keep the active tab in view without drawer runtime'
+);
 cc_test(is_string($login) && str_contains($login, 'FOR UPDATE') && str_contains($login, 'beginTransaction()') && str_contains($login, 'commit()'), 'owner lockout updates are serialized in a database transaction');
 cc_test(is_string($login) && str_contains($login, 'cc_login_record_accepts_password(') && !str_contains($login, 'password_hash('), 'unknown-user login does not generate a request-specific password hash');
 cc_test(is_string($logout) && str_contains($logout, "REQUEST_METHOD") && str_contains($logout, 'cc_require_csrf()') && str_contains($logout, 'cc_destroy_admin_session()'), 'logout is POST-only, CSRF-protected, and destroys the session');
@@ -163,7 +179,7 @@ cc_test(
         !preg_match('/\$details\s*=\s*\[[^\]]*[\'\"](?:password|access_code)[\'\"]\s*=>/i', $resellerAdapter),
     'reseller audit details omit passwords and access-code values'
 );
-cc_test(is_string($resellerView) && str_contains($resellerView, "credential-value") && !str_contains($resellerView, 'reveal'), 'owner access codes are displayed directly without reveal UX');
+cc_test(is_string($resellerView) && str_contains($resellerView, 'code-reveal') && str_contains($resellerView, 'credential-value'), 'reseller access codes are masked with explicit reveal behavior');
 
 $definitions = cc_dashboard_metric_definitions();
 $expectedDashboardDefinitions = [
@@ -307,6 +323,8 @@ foreach ($iterator as $file) {
 cc_test(!is_file($root . '/config.php'), 'runtime config is not present in source');
 
 require __DIR__ . '/presence.php';
+require __DIR__ . '/online-now.php';
+require __DIR__ . '/subscriber.php';
 require __DIR__ . '/phase6.php';
 require __DIR__ . '/phase7.php';
 require __DIR__ . '/phase8.php';

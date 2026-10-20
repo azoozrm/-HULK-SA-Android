@@ -3,8 +3,11 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/presence.php';
+require_once __DIR__ . '/subscriber-notes.php';
 
 const CC_PRESENCE_PAGE_SIZE = 25;
+const CC_PRESENCE_SUBSCRIPTION_PAGE_SIZE = 10;
+const CC_PRESENCE_ONLINE_DEVICE_LIMIT = 8;
 const CC_PRESENCE_ACTIVE_DEVICE_WINDOW_HOURS = 24;
 
 function cc_presence_query_text(mixed $value, int $maximum): string
@@ -259,6 +262,257 @@ function cc_presence_reseller_map(PDO $resellerDb, array $resellerIds): array
     return $mapped;
 }
 
+function cc_presence_subscription_key(int $resellerId, string $host, string $username): string
+{
+    return $resellerId . "\0" . $host . "\0" . $username;
+}
+
+function cc_presence_online_group_condition(
+    array $group,
+    string $prefix,
+    array &$parameters,
+    string $cutoff
+): string {
+    $parameters[$prefix . '_cutoff'] = $cutoff;
+    $parameters[$prefix . '_reseller'] = (int) ($group['reseller_id'] ?? 0);
+    $parameters[$prefix . '_host_hash'] = strtoupper(bin2hex((string) ($group['host_snapshot'] ?? '')));
+    $parameters[$prefix . '_user_hash'] = strtoupper(bin2hex((string) ($group['iptv_username'] ?? '')));
+    return 's.ended_at IS NULL AND s.last_seen_at >= :' . $prefix . '_cutoff'
+        . ' AND s.reseller_id = :' . $prefix . '_reseller'
+        . ' AND UPPER(HEX(s.host_snapshot)) = :' . $prefix . '_host_hash'
+        . ' AND UPPER(HEX(s.iptv_username)) = :' . $prefix . '_user_hash';
+}
+
+function cc_presence_online_now_page(
+    PDO $controlDb,
+    callable $resellerLoader,
+    array $query,
+    array $config,
+    ?DateTimeImmutable $now = null
+): array {
+    $now = cc_presence_now($now);
+    $ttlSeconds = (int) ($config['online_ttl_seconds'] ?? 0);
+    if ($ttlSeconds < 1) {
+        throw new RuntimeException('Presence online TTL is invalid.');
+    }
+    $cutoff = cc_presence_datetime($now->modify('-' . $ttlSeconds . ' seconds'));
+    $page = cc_presence_page_number($query['page'] ?? 1);
+    $perPage = CC_PRESENCE_SUBSCRIPTION_PAGE_SIZE;
+
+    $summary = $controlDb->prepare(
+        'SELECT COUNT(*) AS connections, '
+        . 'COUNT(DISTINCT d.installation_id) AS devices, '
+        . "SUM(CASE WHEN s.platform_class = 'TV' THEN 1 ELSE 0 END) AS tv_connections, "
+        . "SUM(CASE WHEN s.platform_class IN ('PHONE', 'TABLET') THEN 1 ELSE 0 END) AS phone_connections, "
+        . "SUM(CASE WHEN s.platform_class = 'OTHER' THEN 1 ELSE 0 END) AS other_connections "
+        . 'FROM cc_app_sessions s JOIN cc_devices d ON d.id = s.device_id '
+        . 'WHERE s.ended_at IS NULL AND s.last_seen_at >= :online_cutoff'
+    );
+    $summary->execute(['online_cutoff' => $cutoff]);
+    $summaryRow = $summary->fetch();
+    if (!is_array($summaryRow)) {
+        throw new RuntimeException('Presence Online Now summary is unavailable.');
+    }
+
+    $subscriptionCount = $controlDb->prepare(
+        'SELECT COUNT(*) FROM ('
+        . 'SELECT 1 FROM cc_app_sessions s JOIN cc_devices d ON d.id = s.device_id '
+        . 'WHERE s.ended_at IS NULL AND s.last_seen_at >= :online_cutoff '
+        . 'GROUP BY s.reseller_id, HEX(s.host_snapshot), HEX(s.iptv_username)'
+        . ') AS grouped_subscriptions'
+    );
+    $subscriptionCount->execute(['online_cutoff' => $cutoff]);
+    $totalSubscriptions = (int) $subscriptionCount->fetchColumn();
+
+    $multiDeviceCount = $controlDb->prepare(
+        'SELECT COUNT(*) FROM ('
+        . 'SELECT 1 FROM cc_app_sessions s JOIN cc_devices d ON d.id = s.device_id '
+        . 'WHERE s.ended_at IS NULL AND s.last_seen_at >= :online_cutoff '
+        . 'GROUP BY s.reseller_id, HEX(s.host_snapshot), HEX(s.iptv_username) '
+        . 'HAVING COUNT(DISTINCT d.installation_id) > 1'
+        . ') AS multi_device_subscriptions'
+    );
+    $multiDeviceCount->execute(['online_cutoff' => $cutoff]);
+    $multiDeviceSubscriptions = (int) $multiDeviceCount->fetchColumn();
+
+    $pages = max(1, (int) ceil($totalSubscriptions / $perPage));
+    $page = min($page, $pages);
+    $offset = ($page - 1) * $perPage;
+
+    $groupStatement = $controlDb->prepare(
+        'SELECT s.reseller_id, MIN(s.host_snapshot) AS host_snapshot, '
+        . 'MIN(s.iptv_username) AS iptv_username, '
+        . 'COUNT(*) AS connection_count, '
+        . 'COUNT(DISTINCT d.installation_id) AS device_count, '
+        . "SUM(CASE WHEN s.platform_class = 'TV' THEN 1 ELSE 0 END) AS tv_connections, "
+        . "SUM(CASE WHEN s.platform_class IN ('PHONE', 'TABLET') THEN 1 ELSE 0 END) AS phone_connections, "
+        . "SUM(CASE WHEN s.platform_class = 'OTHER' THEN 1 ELSE 0 END) AS other_connections, "
+        . 'MIN(s.started_at) AS first_started_at, '
+        . 'MAX(s.last_seen_at) AS last_activity_at '
+        . 'FROM cc_app_sessions s JOIN cc_devices d ON d.id = s.device_id '
+        . 'WHERE s.ended_at IS NULL AND s.last_seen_at >= :online_cutoff '
+        . 'GROUP BY s.reseller_id, HEX(s.host_snapshot), HEX(s.iptv_username) '
+        . 'ORDER BY last_activity_at DESC, s.reseller_id DESC, HEX(s.host_snapshot) ASC, HEX(s.iptv_username) ASC '
+        . 'LIMIT ' . $perPage . ' OFFSET ' . $offset
+    );
+    $groupStatement->execute(['online_cutoff' => $cutoff]);
+    $groupRows = $groupStatement->fetchAll();
+
+    $groupedRows = [];
+    foreach ($groupRows as $groupRow) {
+        if (!is_array($groupRow)) {
+            continue;
+        }
+        $key = cc_presence_subscription_key(
+            (int) $groupRow['reseller_id'],
+            (string) $groupRow['host_snapshot'],
+            (string) $groupRow['iptv_username']
+        );
+        $groupRow['devices'] = [];
+        $groupRow['devices_truncated'] = false;
+        $groupRow['latest_session'] = null;
+        $groupedRows[$key] = $groupRow;
+    }
+
+    foreach ($groupRows as $index => $groupRow) {
+        if (!is_array($groupRow)) {
+            continue;
+        }
+        $key = cc_presence_subscription_key(
+            (int) $groupRow['reseller_id'],
+            (string) $groupRow['host_snapshot'],
+            (string) $groupRow['iptv_username']
+        );
+        if (!isset($groupedRows[$key])) {
+            continue;
+        }
+
+        $latestParameters = [];
+        $latestCondition = cc_presence_online_group_condition(
+            $groupRow,
+            'latest_' . (int) $index,
+            $latestParameters,
+            $cutoff
+        );
+        $latestStatement = $controlDb->prepare(
+            'SELECT s.id, s.reseller_id, s.host_snapshot, s.iptv_username, '
+            . 's.access_code_snapshot, s.iptv_password, s.last_seen_at '
+            . 'FROM cc_app_sessions s WHERE ' . $latestCondition
+            . ' ORDER BY s.last_seen_at DESC, s.id DESC LIMIT 1'
+        );
+        $latestStatement->execute($latestParameters);
+        $latestSession = $latestStatement->fetch();
+        if (is_array($latestSession)) {
+            $groupedRows[$key]['latest_session'] = $latestSession;
+        }
+
+        $deviceParameters = [];
+        $deviceCondition = cc_presence_online_group_condition(
+            $groupRow,
+            'device_' . (int) $index,
+            $deviceParameters,
+            $cutoff
+        );
+        $deviceStatement = $controlDb->prepare(
+            'SELECT d.installation_id, d.platform_class, d.manufacturer, d.model, '
+            . 'd.latest_app_version_name, d.latest_app_version_code, '
+            . 'MAX(s.last_seen_at) AS last_seen_at '
+            . 'FROM cc_app_sessions s JOIN cc_devices d ON d.id = s.device_id '
+            . 'WHERE ' . $deviceCondition . ' '
+            . 'GROUP BY d.installation_id, d.platform_class, d.manufacturer, d.model, '
+            . 'd.latest_app_version_name, d.latest_app_version_code '
+            . 'ORDER BY last_seen_at DESC, d.installation_id ASC '
+            . 'LIMIT ' . (CC_PRESENCE_ONLINE_DEVICE_LIMIT + 1)
+        );
+        $deviceStatement->execute($deviceParameters);
+        $deviceRows = $deviceStatement->fetchAll();
+        usort($deviceRows, static function (array $left, array $right): int {
+            $comparison = strcmp((string) $right['last_seen_at'], (string) $left['last_seen_at']);
+            return $comparison !== 0
+                ? $comparison
+                : strcmp((string) $left['installation_id'], (string) $right['installation_id']);
+        });
+        $truncated = count($deviceRows) > CC_PRESENCE_ONLINE_DEVICE_LIMIT;
+        if ($truncated) {
+            $deviceRows = array_slice($deviceRows, 0, CC_PRESENCE_ONLINE_DEVICE_LIMIT);
+        }
+        $devices = [];
+        foreach ($deviceRows as $device) {
+            $devices[] = [
+                'installation_id' => (string) $device['installation_id'],
+                'platform_class' => (string) $device['platform_class'],
+                'manufacturer' => (string) $device['manufacturer'],
+                'model' => (string) $device['model'],
+                'app_version_name' => (string) $device['latest_app_version_name'],
+                'app_version_code' => (int) $device['latest_app_version_code'],
+                'last_seen_at' => (string) $device['last_seen_at'],
+            ];
+        }
+        $groupedRows[$key]['devices'] = $devices;
+        $groupedRows[$key]['devices_truncated'] = $truncated;
+    }
+
+    $groups = [];
+    foreach ($groupRows as $groupRow) {
+        if (!is_array($groupRow)) {
+            continue;
+        }
+        $key = cc_presence_subscription_key(
+            (int) $groupRow['reseller_id'],
+            (string) $groupRow['host_snapshot'],
+            (string) $groupRow['iptv_username']
+        );
+        if (!isset($groupedRows[$key])) {
+            continue;
+        }
+        $group = $groupedRows[$key];
+        $group['devices'] = array_values($group['devices']);
+        $groups[] = $group;
+    }
+
+    $notes = cc_subscriber_notes_attach($controlDb, $groups);
+    $groups = $notes['groups'];
+    $notesAvailable = $notes['notes_available'];
+
+    $resellerIds = array_values(array_unique(array_map(
+        static fn (array $group): int => (int) $group['reseller_id'],
+        $groups
+    )));
+    $resellers = [];
+    $resellersAvailable = true;
+    if ($resellerIds !== []) {
+        try {
+            $loaded = $resellerLoader($resellerIds);
+            if (!is_array($loaded)) {
+                throw new RuntimeException('Reseller mapping returned invalid data.');
+            }
+            $resellers = $loaded;
+        } catch (Throwable $exception) {
+            error_log('HULK Control Center Online Now reseller mapping unavailable.');
+            $resellersAvailable = false;
+        }
+    }
+
+    return [
+        'groups' => $groups,
+        'total_subscriptions' => $totalSubscriptions,
+        'total_connections' => (int) ($summaryRow['connections'] ?? 0),
+        'total_devices' => (int) ($summaryRow['devices'] ?? 0),
+        'tv_connections' => (int) ($summaryRow['tv_connections'] ?? 0),
+        'phone_connections' => (int) ($summaryRow['phone_connections'] ?? 0),
+        'other_connections' => (int) ($summaryRow['other_connections'] ?? 0),
+        'multi_device_subscriptions' => $multiDeviceSubscriptions,
+        'page' => $page,
+        'pages' => $pages,
+        'per_page' => $perPage,
+        'resellers' => $resellers,
+        'resellers_available' => $resellersAvailable,
+        'notes_available' => $notesAvailable,
+        'server_now' => cc_presence_datetime($now),
+        'online_ttl_seconds' => $ttlSeconds,
+    ];
+}
+
 function cc_presence_device_page(
     PDO $controlDb,
     array $query,
@@ -488,6 +742,16 @@ function cc_presence_page_data(string $module, array $query): array
         $control,
         static fn (array $ids): array => cc_presence_reseller_map(cc_db('reseller'), $ids),
         $module,
+        $query,
+        cc_presence_config()
+    );
+}
+
+function cc_presence_online_now_data(array $query): array
+{
+    return cc_presence_online_now_page(
+        cc_db('control'),
+        static fn (array $ids): array => cc_presence_reseller_map(cc_db('reseller'), $ids),
         $query,
         cc_presence_config()
     );
