@@ -84,6 +84,7 @@ foreach ([
     '/releases/file.apk',
     'releases\\file.apk',
     'releases/.hidden.apk',
+    'releases/hulk-sa-v1..0-69-abcdef12.apk',
     '',
 ] as $unsafePath) {
     $candidate = $validRelease;
@@ -109,6 +110,8 @@ ops_test(file_put_contents($fixturePath, str_repeat('x', 1024)) !== false, 'isol
 $fixtureRelease = $validRelease;
 $fixtureRelease['apk_path'] = 'releases/' . $fixtureName;
 ops_test(ops_release_artifact_is_readable($fixtureRelease), 'an existing APK with the expected size is readable');
+$fixtureRelease['apk_size_bytes'] = 0;
+ops_test(!ops_release_artifact_is_readable($fixtureRelease), 'zero recorded size fails closed');
 $fixtureRelease['apk_size_bytes'] = 1023;
 ops_test(!ops_release_artifact_is_readable($fixtureRelease), 'a size mismatch fails closed');
 @unlink($fixturePath);

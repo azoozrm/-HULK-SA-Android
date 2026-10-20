@@ -318,5 +318,6 @@ ops_test(
 );
 
 require __DIR__ . '/release-resolver.php';
+require __DIR__ . '/release-activation.php';
 
 fwrite(STDOUT, "PASS: {$tests} HULK Operations backend policy checks.\n");

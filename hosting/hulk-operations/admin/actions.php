@@ -386,7 +386,6 @@ function ops_upload_release(PDO $db, array $admin): void
         throw new InvalidArgumentException('رمز الإصدار مستخدم مسبقًا.');
     }
 
-    $metadata = ops_uploaded_apk_metadata($_FILES['apk'] ?? []);
     $safeVersion = preg_replace('/[^0-9A-Za-z._-]/', '-', $versionName) ?: 'release';
     $fileName = sprintf(
         'hulk-sa-v%s-%d-%s.apk',
@@ -395,6 +394,11 @@ function ops_upload_release(PDO $db, array $admin): void
         bin2hex(random_bytes(4))
     );
     $relativePath = 'releases/' . $fileName;
+    if (ops_release_relative_apk_path(['apk_path' => $relativePath]) === null) {
+        throw new InvalidArgumentException('اسم الإصدار ينتج مسار APK غير صالح. غيّر اسم الإصدار.');
+    }
+
+    $metadata = ops_uploaded_apk_metadata($_FILES['apk'] ?? []);
     $destination = dirname(__DIR__) . '/releases/' . $fileName;
     if (!move_uploaded_file((string) $metadata['temporary_path'], $destination)) {
         throw new RuntimeException('تعذر حفظ ملف APK في مجلد الإصدارات.');
@@ -446,6 +450,14 @@ function ops_activate_release(PDO $db, array $admin): void
         $release = $statement->fetch();
         if (!is_array($release)) {
             throw new InvalidArgumentException('الإصدار غير موجود.');
+        }
+        $sha256 = strtolower(trim((string) ($release['apk_sha256'] ?? '')));
+        if (
+            ops_release_public_apk_url($release) === null
+            || !ops_is_sha256($sha256)
+            || !ops_release_artifact_is_readable($release)
+        ) {
+            throw new InvalidArgumentException('لا يمكن تفعيل الإصدار لأن ملف APK أو بياناته غير صالحة.');
         }
         $db->exec('UPDATE app_releases SET is_active = 0');
         $activate = $db->prepare('UPDATE app_releases SET enabled = 1, is_active = 1 WHERE id = :id');

@@ -114,10 +114,7 @@ function ops_release_artifact_is_readable(array $release): bool
 
     $size = filesize($absolutePath);
     $expectedSize = (int) ($release['apk_size_bytes'] ?? 0);
-    if ($size === false || $size < 1) {
-        return false;
-    }
-    if ($expectedSize > 0 && $size !== $expectedSize) {
+    if ($size === false || $size < 1 || $expectedSize < 1 || $size !== $expectedSize) {
         return false;
     }
 
