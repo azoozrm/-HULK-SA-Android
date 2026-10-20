@@ -280,9 +280,40 @@ function cc_host_health_public_ip(string $address): bool
     ) !== false;
 }
 
+/**
+ * The web SAPI can expose a non-CLI binary in PHP_BINARY (LiteSpeed uses lsphp). The DNS helper
+ * intentionally refuses non-CLI SAPIs, so select a real executable PHP CLI binary while preserving
+ * the bounded subprocess and its kill deadline.
+ */
+function cc_host_health_dns_cli_binary(): ?string
+{
+    $candidates = [
+        PHP_BINDIR . '/php',
+        '/usr/local/bin/php',
+        '/usr/bin/php',
+    ];
+    if (defined('PHP_BINARY') && PHP_SAPI === 'cli') {
+        $candidates[] = PHP_BINARY;
+    }
+    foreach ($candidates as $candidate) {
+        if (!is_string($candidate) || $candidate === '' || !is_executable($candidate)) {
+            continue;
+        }
+        if (in_array(strtolower(basename($candidate)), ['lsphp', 'php-fpm', 'php-cgi', 'cgi-fcgi'], true)) {
+            continue;
+        }
+        return $candidate;
+    }
+    return null;
+}
+
 function cc_host_health_dns_lookup(string $hostname, int $timeoutMs): array
 {
-    if (!function_exists('proc_open') || !defined('PHP_BINARY') || PHP_BINARY === '') {
+    if (!function_exists('proc_open')) {
+        return ['status' => 'unavailable', 'addresses' => []];
+    }
+    $cliBinary = cc_host_health_dns_cli_binary();
+    if ($cliBinary === null) {
         return ['status' => 'unavailable', 'addresses' => []];
     }
     $descriptors = [
@@ -292,7 +323,7 @@ function cc_host_health_dns_lookup(string $hostname, int $timeoutMs): array
     ];
     $pipes = [];
     $process = @proc_open(
-        [PHP_BINARY, dirname(__DIR__) . '/tools/host_health_dns.php'],
+        [$cliBinary, dirname(__DIR__) . '/tools/host_health_dns.php'],
         $descriptors,
         $pipes,
         null,

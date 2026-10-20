@@ -75,6 +75,14 @@ class PhaseSevenContractTests(unittest.TestCase):
         self.assertNotIn("$_GET", domain)
         self.assertNotIn("$_POST", domain)
 
+    def test_dns_helper_never_invokes_the_web_sapi_binary_directly(self) -> None:
+        domain = self.read(ROOT / "lib" / "host-health.php")
+        self.assertIn("function cc_host_health_dns_cli_binary", domain)
+        self.assertIn("PHP_BINDIR . '/php'", domain)
+        self.assertIn("PHP_SAPI === 'cli'", domain)
+        self.assertRegex(domain, re.compile(r"\[\$cliBinary,\s+dirname\(__DIR__\)"))
+        self.assertNotRegex(domain, re.compile(r"\[PHP_BINARY,\s+dirname\(__DIR__\)"))
+
     def test_diagnostics_accepts_only_typed_bounded_session_authorized_events(self) -> None:
         domain = self.read(ROOT / "lib" / "diagnostics.php")
         boundary = self.read(ROOT / "lib" / "diagnostics-http.php")
