@@ -86,29 +86,33 @@ class LivePlayerControlsPolicyTest {
     }
 
     @Test
-    fun `offline live entry never promises an automatic return`() {
+    fun `offline live entry uses the neutral outage copy`() {
         val entry = livePlayerErrorPresentation(
             offlineFailure = true,
             playbackStarted = false,
             autoResumeIntent = false,
-            failureMessage = "لا يوجد اتصال بالانترنت. سيتم استئناف التشغيل تلقائيا عند عودة الاتصال.",
+            failureMessage = "لا يوجد اتصال بالإنترنت. بانتظار عودة الاتصال.",
         )
 
         assertTrue(entry.offline)
-        assertEquals("لا يوجد اتصال بالانترنت", entry.title)
+        assertEquals("لا يوجد اتصال بالإنترنت", entry.title)
+        assertEquals("بانتظار عودة الاتصال.", entry.body)
         assertFalse(entry.body.contains("تلقائيا"))
+        assertFalse(entry.title.contains("مكان توقفك"))
+        assertFalse(entry.body.contains("مكان توقفك"))
     }
 
     @Test
-    fun `live interruption keeps automatic return only for the captured playing intent`() {
+    fun `live outage copy never promises automatic playback for paused intent`() {
         val playing = livePlayerErrorPresentation(
             offlineFailure = true,
             playbackStarted = true,
             autoResumeIntent = true,
             failureMessage = null,
         )
-        assertEquals("انقطع اتصال الانترنت", playing.title)
-        assertTrue(playing.body.contains("تلقائيا"))
+        assertEquals("لا يوجد اتصال بالإنترنت", playing.title)
+        assertEquals("بانتظار عودة الاتصال.", playing.body)
+        assertFalse(playing.body.contains("تلقائيا"))
 
         val paused = livePlayerErrorPresentation(
             offlineFailure = true,
@@ -116,7 +120,8 @@ class LivePlayerControlsPolicyTest {
             autoResumeIntent = false,
             failureMessage = null,
         )
-        assertEquals("انقطع اتصال الانترنت", paused.title)
+        assertEquals("لا يوجد اتصال بالإنترنت", paused.title)
+        assertEquals("بانتظار عودة الاتصال.", paused.body)
         assertFalse(paused.body.contains("تلقائيا"))
     }
 

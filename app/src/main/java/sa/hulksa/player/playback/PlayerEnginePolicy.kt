@@ -103,7 +103,7 @@ internal data class RecoveryCommand(
     val candidateIndex: Int,
     val audioTrack: AudioTrackRef? = null,
     val delayMs: Long = 0L,
-    /** True when this retry used the dedicated VOD outage budget, not the ordinary retry budget. */
+    /** True when this retry used the dedicated outage budget, not the ordinary retry budget. */
     val networkRestore: Boolean = false,
 )
 
@@ -194,7 +194,7 @@ internal class PlayerRecoveryCoordinator(
     val generation: PlaybackGeneration,
     private val sourcePlan: MediaSourcePlan,
     private val maxSameSourceRetries: Int = MAX_SAME_SOURCE_RETRIES,
-    private val vodNetworkRestoreRetryEnabled: Boolean = false,
+    private val networkRestoreRetryEnabled: Boolean = false,
 ) {
     init {
         require(maxSameSourceRetries >= 0)
@@ -224,15 +224,16 @@ internal class PlayerRecoveryCoordinator(
         get() = activeFailureClass
 
     /**
-     * Arms the single VOD same-source recovery allowed for this confirmed outage. Arming is
-     * idempotent and is consumed only by a dispatched [RecoveryTrigger.NETWORK_RESTORED] command, so
-     * duplicate offline/online callbacks cannot multiply the budget. A new confirmed outage re-arms
-     * it; recovery failure and duplicate online callbacks do not.
+     * Arms the single same-source recovery allowed for this confirmed outage across Live, Movie and
+     * Episode playback. Arming is idempotent and is consumed only by a dispatched
+     * [RecoveryTrigger.NETWORK_RESTORED] command, so duplicate offline/online callbacks cannot
+     * multiply the budget. A new confirmed outage re-arms it; recovery failure and duplicate online
+     * callbacks do not.
      */
     fun onNetworkUnavailable(generationId: Long): Boolean {
         if (!owns(generationId)) return false
         networkRestoreArmed = true
-        if (vodNetworkRestoreRetryEnabled && phase == RecoveryPhase.EXHAUSTED) {
+        if (phase == RecoveryPhase.EXHAUSTED) {
             phase = RecoveryPhase.STABILIZING
             activeFailureClass = null
         }
@@ -305,8 +306,8 @@ internal class PlayerRecoveryCoordinator(
         generationId: Long,
         trigger: RecoveryTrigger,
     ): RecoveryCommand? {
-        if (trigger == RecoveryTrigger.NETWORK_RESTORED && vodNetworkRestoreRetryEnabled) {
-            return requestVodNetworkRestore(generationId, trigger)
+        if (trigger == RecoveryTrigger.NETWORK_RESTORED && networkRestoreRetryEnabled) {
+            return requestDedicatedNetworkRestore(generationId, trigger)
         }
         if (trigger == RecoveryTrigger.NETWORK_RESTORED && !networkRestoreArmed) return null
         if (!canStart(generationId)) return null
@@ -356,12 +357,12 @@ internal class PlayerRecoveryCoordinator(
     }
 
     /**
-     * VOD has no ordinary same-source retry. A confirmed outage therefore owns one dedicated
-     * same-source recovery, consumed before dispatch. It does not touch [sourceRetries], so ordinary
-     * VOD failure policy and Live retry budgets are unchanged. Recovery failure falls back to the
-     * normal policy; only a new confirmed outage re-arms the dedicated budget.
+     * A confirmed outage owns one dedicated same-source recovery for Live, Movie and Episode
+     * playback, consumed before dispatch. It does not touch [sourceRetries], so ordinary Live retry
+     * and VOD failure policy are unchanged. Recovery failure falls back to the normal policy; only a
+     * new confirmed outage re-arms the dedicated budget.
      */
-    private fun requestVodNetworkRestore(
+    private fun requestDedicatedNetworkRestore(
         generationId: Long,
         trigger: RecoveryTrigger,
     ): RecoveryCommand? {
@@ -515,9 +516,9 @@ private val SAME_SOURCE_RETRY_TRIGGERS = setOf(
 )
 
 /**
- * One production recovery policy for a playback request. VOD has no ordinary same-source retry, so
- * it receives the dedicated one-per-confirmed-outage network-restore recovery; Live keeps its
- * existing retry/fallback budget.
+ * One production recovery policy for a playback request. Every mode receives the dedicated
+ * one-per-confirmed-outage network-restore recovery; ordinary Live retry/fallback budgets remain
+ * independent and unchanged.
  */
 internal fun createPlayerRecoveryCoordinator(
     generation: PlaybackGeneration,
@@ -527,7 +528,7 @@ internal fun createPlayerRecoveryCoordinator(
     generation = generation,
     sourcePlan = sourcePlan,
     maxSameSourceRetries = maxSameSourceRetriesFor(isLive),
-    vodNetworkRestoreRetryEnabled = !isLive,
+    networkRestoreRetryEnabled = true,
 )
 
 /** Direct source evidence may serially replace an applied audio recovery, never an in-flight one. */

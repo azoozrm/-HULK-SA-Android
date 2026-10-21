@@ -10,10 +10,10 @@ import org.junit.Test
 import sa.hulksa.player.model.PlaybackRequest
 
 /**
- * F01: a remote VOD with one source must recover the current source once after a confirmed outage,
- * even though ordinary VOD same-source retries are zero. These tests use the production recovery
- * configuration factory, so `maxSameSourceRetriesFor(false)` and the dedicated VOD restore policy are
- * both exercised rather than the coordinator's Live-oriented default.
+ * F01 correction tests: single-source remote VOD recovers after a confirmed outage, even though
+ * ordinary VOD same-source retries are zero. These tests use the production recovery configuration
+ * factory, so `maxSameSourceRetriesFor(...)` and the dedicated outage policy are exercised rather
+ * than a test-only default.
  */
 class VodNetworkRestoreRecoveryTest {
     private val movieGeneration = PlaybackGeneration(901L, "movie", 501, 1_501)
@@ -266,7 +266,7 @@ class VodNetworkRestoreRecoveryTest {
     }
 
     @Test
-    fun `live keeps its ordinary retry budget across a network restore`() {
+    fun `live network restore uses the dedicated outage budget without consuming ordinary retries`() {
         val coordinator = createPlayerRecoveryCoordinator(
             generation = liveGeneration,
             sourcePlan = livePlan(),
@@ -286,6 +286,7 @@ class VodNetworkRestoreRecoveryTest {
             RecoveryTrigger.NETWORK_RESTORED,
         )
         assertEquals(RecoveryCommandType.RETRY_CURRENT_SOURCE, restore?.type)
+        assertTrue(restore?.networkRestore == true)
         assertTrue(coordinator.markCommandApplied(liveGeneration.id, checkNotNull(restore).id))
         assertTrue(coordinator.beginCandidate(liveGeneration.id, 0, sourceChanged = false))
 
@@ -293,8 +294,8 @@ class VodNetworkRestoreRecoveryTest {
             liveGeneration.id,
             RecoveryTrigger.TRANSIENT_SOURCE_ERROR,
         )
-        assertEquals(RecoveryCommandType.MOVE_TO_NEXT_SOURCE, nextFailure?.type)
-        assertEquals(1, nextFailure?.candidateIndex)
+        assertEquals(RecoveryCommandType.RETRY_CURRENT_SOURCE, nextFailure?.type)
+        assertEquals(0, nextFailure?.candidateIndex)
     }
 
     @Test
