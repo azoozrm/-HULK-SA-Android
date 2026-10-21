@@ -103,6 +103,8 @@ internal data class RecoveryCommand(
     val candidateIndex: Int,
     val audioTrack: AudioTrackRef? = null,
     val delayMs: Long = 0L,
+    /** True when this retry used the dedicated VOD outage budget, not the ordinary retry budget. */
+    val networkRestore: Boolean = false,
 )
 
 internal data class RecoveryDispatchOwner(
@@ -192,6 +194,7 @@ internal class PlayerRecoveryCoordinator(
     val generation: PlaybackGeneration,
     private val sourcePlan: MediaSourcePlan,
     private val maxSameSourceRetries: Int = MAX_SAME_SOURCE_RETRIES,
+    private val vodNetworkRestoreRetryEnabled: Boolean = false,
 ) {
     init {
         require(maxSameSourceRetries >= 0)
@@ -206,6 +209,7 @@ internal class PlayerRecoveryCoordinator(
     private var nextCommandId = 0L
     private var invalidated = false
     private var activeFailureClass: RecoveryFailureClass? = null
+    private var networkRestoreArmed = false
 
     var phase: RecoveryPhase = RecoveryPhase.NORMAL
         private set
@@ -219,6 +223,22 @@ internal class PlayerRecoveryCoordinator(
     val activeFailure: RecoveryFailureClass?
         get() = activeFailureClass
 
+    /**
+     * Arms the single VOD same-source recovery allowed for this confirmed outage. Arming is
+     * idempotent and is consumed only by a dispatched [RecoveryTrigger.NETWORK_RESTORED] command, so
+     * duplicate offline/online callbacks cannot multiply the budget. A new confirmed outage re-arms
+     * it; recovery failure and duplicate online callbacks do not.
+     */
+    fun onNetworkUnavailable(generationId: Long): Boolean {
+        if (!owns(generationId)) return false
+        networkRestoreArmed = true
+        if (vodNetworkRestoreRetryEnabled && phase == RecoveryPhase.EXHAUSTED) {
+            phase = RecoveryPhase.STABILIZING
+            activeFailureClass = null
+        }
+        return true
+    }
+
     fun beginCandidate(
         generationId: Long,
         candidateIndex: Int,
@@ -226,6 +246,7 @@ internal class PlayerRecoveryCoordinator(
     ): Boolean {
         if (!owns(generationId) || sourcePlan.candidate(candidateIndex) == null) return false
         currentCandidateIndex = candidateIndex
+        networkRestoreArmed = false
         commandInFlight = false
         inFlightCommand = null
         phase = RecoveryPhase.STABILIZING
@@ -284,6 +305,10 @@ internal class PlayerRecoveryCoordinator(
         generationId: Long,
         trigger: RecoveryTrigger,
     ): RecoveryCommand? {
+        if (trigger == RecoveryTrigger.NETWORK_RESTORED && vodNetworkRestoreRetryEnabled) {
+            return requestVodNetworkRestore(generationId, trigger)
+        }
+        if (trigger == RecoveryTrigger.NETWORK_RESTORED && !networkRestoreArmed) return null
         if (!canStart(generationId)) return null
         if (
             activeFailureClass == RecoveryFailureClass.AUDIO &&
@@ -291,6 +316,9 @@ internal class PlayerRecoveryCoordinator(
             trigger !in SOURCE_RECOVERY_TAKEOVER_TRIGGERS
         ) {
             return null
+        }
+        if (trigger == RecoveryTrigger.NETWORK_RESTORED) {
+            networkRestoreArmed = false
         }
 
         val retriesUsed = sourceRetries[currentCandidateIndex] ?: 0
@@ -327,6 +355,32 @@ internal class PlayerRecoveryCoordinator(
         return command
     }
 
+    /**
+     * VOD has no ordinary same-source retry. A confirmed outage therefore owns one dedicated
+     * same-source recovery, consumed before dispatch. It does not touch [sourceRetries], so ordinary
+     * VOD failure policy and Live retry budgets are unchanged. Recovery failure falls back to the
+     * normal policy; only a new confirmed outage re-arms the dedicated budget.
+     */
+    private fun requestVodNetworkRestore(
+        generationId: Long,
+        trigger: RecoveryTrigger,
+    ): RecoveryCommand? {
+        if (!owns(generationId) || commandInFlight || !networkRestoreArmed) return null
+        networkRestoreArmed = false
+        val command = command(
+            type = RecoveryCommandType.RETRY_CURRENT_SOURCE,
+            trigger = trigger,
+            failureClass = RecoveryFailureClass.SOURCE,
+            delayMs = SOURCE_RETRY_BACKOFF_MS,
+            networkRestore = true,
+        )
+        activeFailureClass = RecoveryFailureClass.SOURCE
+        phase = RecoveryPhase.SOURCE_RECOVERY
+        commandInFlight = true
+        inFlightCommand = command
+        return command
+    }
+
     fun markCommandApplied(generationId: Long, commandId: Long): Boolean {
         if (!ownsInFlight(generationId, commandId)) return false
         commandInFlight = false
@@ -350,10 +404,12 @@ internal class PlayerRecoveryCoordinator(
             RecoveryCommandType.SELECT_ALTERNATE_AUDIO_TRACK -> alternateTrackAttempted = false
             RecoveryCommandType.RECREATE_WITH_SOFTWARE_AUDIO -> softwareAudioAttempted = false
             RecoveryCommandType.RETRY_CURRENT_SOURCE -> {
-                val retriesUsed = sourceRetries[command.candidateIndex] ?: 0
-                when {
-                    retriesUsed <= 1 -> sourceRetries.remove(command.candidateIndex)
-                    else -> sourceRetries[command.candidateIndex] = retriesUsed - 1
+                if (!command.networkRestore) {
+                    val retriesUsed = sourceRetries[command.candidateIndex] ?: 0
+                    when {
+                        retriesUsed <= 1 -> sourceRetries.remove(command.candidateIndex)
+                        else -> sourceRetries[command.candidateIndex] = retriesUsed - 1
+                    }
                 }
             }
             RecoveryCommandType.MOVE_TO_NEXT_SOURCE -> Unit
@@ -395,6 +451,7 @@ internal class PlayerRecoveryCoordinator(
         commandInFlight = false
         inFlightCommand = null
         activeFailureClass = null
+        networkRestoreArmed = false
         phase = RecoveryPhase.NORMAL
         return true
     }
@@ -404,6 +461,7 @@ internal class PlayerRecoveryCoordinator(
         commandInFlight = false
         inFlightCommand = null
         activeFailureClass = null
+        networkRestoreArmed = false
         phase = RecoveryPhase.INVALIDATED
     }
 
@@ -423,6 +481,7 @@ internal class PlayerRecoveryCoordinator(
         candidateIndex: Int = currentCandidateIndex,
         audioTrack: AudioTrackRef? = null,
         delayMs: Long = 0L,
+        networkRestore: Boolean = false,
     ): RecoveryCommand {
         nextCommandId += 1L
         return RecoveryCommand(
@@ -434,6 +493,7 @@ internal class PlayerRecoveryCoordinator(
             candidateIndex = candidateIndex,
             audioTrack = audioTrack,
             delayMs = delayMs,
+            networkRestore = networkRestore,
         )
     }
 
@@ -452,6 +512,22 @@ private val SAME_SOURCE_RETRY_TRIGGERS = setOf(
     RecoveryTrigger.STARTUP_TIMEOUT,
     RecoveryTrigger.REBUFFER_STALL,
     RecoveryTrigger.NETWORK_RESTORED,
+)
+
+/**
+ * One production recovery policy for a playback request. VOD has no ordinary same-source retry, so
+ * it receives the dedicated one-per-confirmed-outage network-restore recovery; Live keeps its
+ * existing retry/fallback budget.
+ */
+internal fun createPlayerRecoveryCoordinator(
+    generation: PlaybackGeneration,
+    sourcePlan: MediaSourcePlan,
+    isLive: Boolean,
+): PlayerRecoveryCoordinator = PlayerRecoveryCoordinator(
+    generation = generation,
+    sourcePlan = sourcePlan,
+    maxSameSourceRetries = maxSameSourceRetriesFor(isLive),
+    vodNetworkRestoreRetryEnabled = !isLive,
 )
 
 /** Direct source evidence may serially replace an applied audio recovery, never an in-flight one. */
@@ -556,7 +632,7 @@ internal class PlaybackHealthMonitor(
         if (progressed) lastProgressAtMs = nowMs
         lastPositionMs = snapshot.positionMs
 
-        if (isLive && !sourceHealthy) {
+        if (!sourceHealthy) {
             val usefulOutput = snapshot.firstFrameRendered || snapshot.audioPositionAdvanced
             if (usefulOutput && progressed && snapshot.playbackState == EnginePlaybackState.READY) {
                 sourceHealthy = true
@@ -565,7 +641,7 @@ internal class PlaybackHealthMonitor(
                     sourceHealthyReported = true
                     return PlaybackHealthSignal.SOURCE_HEALTHY
                 }
-            } else if (nowMs - preparedAtMs >= startupTimeoutMs) {
+            } else if (isLive && nowMs - preparedAtMs >= startupTimeoutMs) {
                 return PlaybackHealthSignal.STARTUP_TIMEOUT
             }
         }
@@ -630,6 +706,17 @@ internal class PlaybackHealthMonitor(
             PlaybackHealthSignal.NONE
         }
     }
+}
+
+/** Applies only the durable health signals to the existing recovery owner. */
+internal fun recordPlaybackHealthSignal(
+    signal: PlaybackHealthSignal,
+    recovery: PlayerRecoveryCoordinator,
+    generationId: Long,
+): Boolean = when (signal) {
+    PlaybackHealthSignal.SOURCE_HEALTHY -> recovery.markSourceHealthy(generationId)
+    PlaybackHealthSignal.AUDIO_HEALTHY -> recovery.markAudioHealthy(generationId)
+    else -> false
 }
 
 internal fun classifyPlaybackFailure(

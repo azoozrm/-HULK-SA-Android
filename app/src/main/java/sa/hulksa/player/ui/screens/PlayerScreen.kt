@@ -236,6 +236,19 @@ internal fun playerForegroundLifecycleAction(
         PlayerLifecyclePlaybackAction.NONE
     }
 
+/**
+ * Preparation is allowed only while foregrounded, with a usable source, and after a confirmed
+ * offline state has been resolved by the recovery owner. Local playback never waits on connectivity.
+ */
+internal fun playerPreparationReady(
+    appForeground: Boolean,
+    localPlayback: Boolean,
+    networkAvailable: Boolean,
+    offlineFailure: Boolean,
+): Boolean = appForeground &&
+    (localPlayback || networkAvailable) &&
+    (localPlayback || !offlineFailure)
+
 internal fun shouldAdvancePlayerAutoplayCountdown(
     appForeground: Boolean,
     countdown: Int,
@@ -362,6 +375,21 @@ internal fun movieOfflineRestoredPlayWhenReady(
     wasPlayingBeforeOffline: Boolean,
     resumePromptPending: Boolean,
 ): Boolean = wasPlayingBeforeOffline && !resumePromptPending
+
+/**
+ * Seek target for a retry/reprepare command. A preserved VOD position survives even when the
+ * transient player position has already collapsed to zero, while a pending Resume decision keeps
+ * preparation at zero behind the prompt and Live still starts at the live edge.
+ */
+internal fun playerRetrySeekTarget(
+    isLive: Boolean,
+    resumePromptPending: Boolean,
+    preservedPositionMs: Long,
+    playerPositionMs: Long,
+): Long = when {
+    isLive || resumePromptPending -> 0L
+    else -> maxOf(preservedPositionMs, playerPositionMs).coerceAtLeast(0L)
+}
 
 internal data class MovieOfflineCardCopy(
     val title: String,
@@ -528,6 +556,10 @@ fun PlayerScreen(
     var pendingPlayerReplacement by remember(request) { mutableStateOf<PlayerReplacementState?>(null) }
     var recoveryDelayMs by remember(request) { mutableLongStateOf(0L) }
     var pendingSeekMs by remember(request) { mutableLongStateOf(0L) }
+    // A retry/reprepare command owns the exact preserved position, including a legitimate zero.
+    // Without this, the existing prepare fallback would treat zero as "no pending seek" and could
+    // jump to an older saved history position after an explicit Restart.
+    var pendingSeekAuthoritative by remember(request) { mutableStateOf(false) }
     var finalError by remember(request) { mutableStateOf<String?>(null) }
     var finalFailureClass by remember(request) { mutableStateOf<RecoveryFailureClass?>(null) }
     var suspendedFinalError by remember(request) { mutableStateOf<SuspendedPlayerError?>(null) }
@@ -843,14 +875,26 @@ fun PlayerScreen(
                 true
             }
             RecoveryCommandType.RETRY_CURRENT_SOURCE -> {
-                pendingSeekMs = if (request.isLive) 0L else player.currentPosition.coerceAtLeast(0L)
+                pendingSeekMs = playerRetrySeekTarget(
+                    isLive = request.isLive,
+                    resumePromptPending = resumePromptVisible,
+                    preservedPositionMs = pendingSeekMs,
+                    playerPositionMs = player.currentPosition,
+                )
+                pendingSeekAuthoritative = true
                 recoveryDelayMs = command.delayMs
                 buffering = true
                 retryNonce += 1
                 true
             }
             RecoveryCommandType.MOVE_TO_NEXT_SOURCE -> {
-                pendingSeekMs = if (request.isLive) 0L else player.currentPosition.coerceAtLeast(0L)
+                pendingSeekMs = playerRetrySeekTarget(
+                    isLive = request.isLive,
+                    resumePromptPending = resumePromptVisible,
+                    preservedPositionMs = pendingSeekMs,
+                    playerPositionMs = player.currentPosition,
+                )
+                pendingSeekAuthoritative = true
                 recoveryDelayMs = command.delayMs
                 buffering = true
                 if (audioOutputMode == PlayerAudioOutputMode.PLATFORM_SOFTWARE_PCM) {
@@ -883,7 +927,14 @@ fun PlayerScreen(
         }
         offlineFailure = false
         clearFinalErrorState()
-        pendingSeekMs = if (request.isLive) 0L else player.currentPosition.coerceAtLeast(0L)
+        restoredPlayWhenReady = null
+        pendingSeekAuthoritative = false
+        pendingSeekMs = playerRetrySeekTarget(
+            isLive = request.isLive,
+            resumePromptPending = resumePromptVisible,
+            preservedPositionMs = pendingSeekMs,
+            playerPositionMs = player.currentPosition,
+        )
         recoveryDelayMs = 0L
         if (audioOutputMode != PlayerAudioOutputMode.NORMAL) {
             pendingPlayerReplacement = captureReplacementState(
@@ -1344,7 +1395,17 @@ fun PlayerScreen(
         val delayBeforePrepareMs = recoveryDelayMs
         recoveryDelayMs = 0L
         if (delayBeforePrepareMs > 0L) delay(delayBeforePrepareMs)
-        snapshotFlow { appForeground && (localPlayback || networkAvailable) }
+        // A confirmed offline state is owned by the network-restore effect: it captures the outage
+        // position/intent and issues the single recovery command before preparation. Preparing on
+        // connectivity alone would race that bridge and resume from the older saved position.
+        snapshotFlow {
+            playerPreparationReady(
+                appForeground = appForeground,
+                localPlayback = localPlayback,
+                networkAvailable = networkAvailable,
+                offlineFailure = offlineFailure,
+            )
+        }
             .first { readyToPrepare -> readyToPrepare }
 
         playerDiagnostics.onPrepare(candidateIndex, audioOutputMode)
@@ -1376,7 +1437,14 @@ fun PlayerScreen(
         }
         if (replacement != null) {
             player.trackSelectionParameters = replacement.trackSelectionParameters
-            replacement.positionMs?.let(player::seekTo)
+            val restoreSeekTarget = when {
+                request.isLive -> replacement.positionMs
+                resumePromptVisible -> 0L
+                pendingSeekAuthoritative -> pendingSeekMs
+                pendingSeekMs > 0L -> pendingSeekMs
+                else -> replacement.positionMs
+            }
+            restoreSeekTarget?.let(player::seekTo)
             player.setPlaybackSpeed(replacement.speed)
             player.volume = replacement.volume
             player.prepare()
@@ -1384,14 +1452,17 @@ fun PlayerScreen(
                 "HulkPlayer",
                 "prepare issued t=${android.os.SystemClock.elapsedRealtime()} streamId=${request.streamId}",
             )
-            player.playWhenReady = replacement.playWhenReady
+            player.playWhenReady = restoredPlayWhenReady ?: replacement.playWhenReady
             pendingPlayerReplacement = null
             pendingSeekMs = 0L
+            pendingSeekAuthoritative = false
+            restoredPlayWhenReady = null
             manualSeekTargetMs = null
             return@LaunchedEffect
         }
 
         val seekTarget = when {
+            pendingSeekAuthoritative -> pendingSeekMs
             pendingSeekMs > 0L -> pendingSeekMs
             !resumePromptVisible && playbackSettings.resumePlayback -> request.resumePositionMs
             else -> 0L
@@ -1407,6 +1478,7 @@ fun PlayerScreen(
         player.playWhenReady = restoredPlayWhenReady ?: !resumePromptVisible
         restoredPlayWhenReady = null
         pendingSeekMs = 0L
+        pendingSeekAuthoritative = false
         manualSeekTargetMs = null
     }
 
@@ -1453,7 +1525,12 @@ fun PlayerScreen(
             }
             delay(700L)
             if (!hasUsableNetwork(context)) return@LaunchedEffect
-            pendingSeekMs = resumePositionMs
+            pendingSeekMs = playerRetrySeekTarget(
+                isLive = request.isLive,
+                resumePromptPending = resumePromptVisible,
+                preservedPositionMs = resumePositionMs,
+                playerPositionMs = 0L,
+            )
             restoredPlayWhenReady = movieOfflineRestoredPlayWhenReady(
                 wasPlayingBeforeOffline = offlineWasPlaying,
                 resumePromptPending = resumePromptVisible,
