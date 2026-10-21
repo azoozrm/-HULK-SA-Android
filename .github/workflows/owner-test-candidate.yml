@@ -35,7 +35,7 @@ jobs:
     environment: production-signing
     timeout-minutes: 60
     env:
-      PRODUCT_SHA: b70e32a8030f7dd12fbbb86f42fa96541ca74ab9
+      PRODUCT_SHA: 643e97c9be379530eb2ebaf0a3af4400f4dba0b8
       WORKFLOW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       WORKFLOW_MERGE_SHA: ${{ github.sha }}
       EXPECTED_PACKAGE: sa.hulksa.player
@@ -52,7 +52,7 @@ jobs:
       - name: Checkout exact reviewed product source
         uses: actions/checkout@v7
         with:
-          ref: b70e32a8030f7dd12fbbb86f42fa96541ca74ab9
+          ref: 643e97c9be379530eb2ebaf0a3af4400f4dba0b8
           fetch-depth: 1
           persist-credentials: false
 
@@ -199,7 +199,7 @@ jobs:
       - name: Upload only signed owner-test APK and sanitized evidence
         uses: actions/upload-artifact@v7
         with:
-          name: HULK-SA-OWNER-TEST-F01-b70e32a8-${{ github.run_id }}
+          name: HULK-SA-OWNER-TEST-F01-643e97c9-${{ github.run_id }}
           path: owner-test-artifacts/
           if-no-files-found: error
           retention-days: 3
