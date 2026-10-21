@@ -108,7 +108,7 @@ class F01Correction03OwnershipRaceTest {
                 case.label,
                 shouldBeginOutageRestoration(
                     confirmedOutage = true,
-                    networkAvailable = true,
+                    restorationEvidence = true,
                     localPlayback = false,
                 ),
             )
@@ -158,28 +158,28 @@ class F01Correction03OwnershipRaceTest {
         assertTrue(
             shouldBeginOutageRestoration(
                 confirmedOutage = true,
-                networkAvailable = true,
+                restorationEvidence = true,
                 localPlayback = false,
             ),
         )
         assertFalse(
             shouldBeginOutageRestoration(
                 confirmedOutage = false,
-                networkAvailable = true,
+                restorationEvidence = true,
                 localPlayback = false,
             ),
         )
         assertFalse(
             shouldBeginOutageRestoration(
                 confirmedOutage = true,
-                networkAvailable = false,
+                restorationEvidence = false,
                 localPlayback = false,
             ),
         )
         assertFalse(
             shouldBeginOutageRestoration(
                 confirmedOutage = true,
-                networkAvailable = true,
+                restorationEvidence = true,
                 localPlayback = true,
             ),
         )
@@ -246,7 +246,7 @@ class F01Correction03OwnershipRaceTest {
         assertFalse(
             shouldBeginOutageRestoration(
                 confirmedOutage = false,
-                networkAvailable = true,
+                restorationEvidence = true,
                 localPlayback = false,
             ),
         )
