@@ -176,7 +176,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import sa.hulksa.player.data.SettingsProStore
 import sa.hulksa.player.data.AuthenticatedSessionOwner
 import sa.hulksa.player.data.HomeHeroMetadataStore
@@ -211,8 +210,6 @@ private const val CONTROLS_TIMEOUT_MS = 5_000L
 private const val LIVE_CONTROL_HOLD_REPEAT_MS = 180L
 private const val NEXT_EPISODE_SECONDS = 8
 private const val PLAYER_OFFLINE_MESSAGE = "لا يوجد اتصال بالإنترنت. بانتظار عودة الاتصال."
-private const val NETWORK_RESTORE_PROBE_INTERVAL_MS = 3_000L
-private const val NETWORK_RESTORE_PROBE_BUDGET_MS = 300_000L
 
 internal enum class PlayerLifecyclePlaybackAction { NONE, STOP, PREPARE }
 
@@ -625,7 +622,11 @@ fun PlayerScreen(
     var pendingOfflineConfirmation by remember(request) {
         mutableStateOf<PendingOfflineConfirmation?>(null)
     }
+    // An explicit offline Retry restarts only the monitor. It does not create another recovery
+    // owner; the existing C03 restore command remains the only prepare path.
+    var networkRetryNonce by remember(request) { mutableIntStateOf(0) }
     val probeTargets = remember(request) { networkProbeTargets(request) }
+    val networkProbe = remember(context, request) { createNetworkReachabilityProbe(context) }
     var offlineWasPlaying by remember(request) { mutableStateOf(false) }
     var restoredPlayWhenReady by remember(request) { mutableStateOf<Boolean?>(null) }
     var networkAvailable by remember(context, request) { mutableStateOf(hasUsableNetwork(context)) }
@@ -899,6 +900,29 @@ fun PlayerScreen(
         android.util.Log.w(
             "HulkPlayer",
             "final error generic class=$failureClass networkAvailable=$networkAvailable",
+        )
+    }
+
+    fun retryOfflinePlayback() {
+        val positionMs = if (request.isLive) {
+            0L
+        } else {
+            maxOf(pendingSeekMs, currentPositionMs, player.currentPosition.coerceAtLeast(0L))
+        }
+        if (!confirmedOutage) {
+            playerSession.onNetworkUnavailable()
+            enterOfflineState(
+                positionMs = positionMs,
+                currentPlayingIntent = player.playWhenReady || player.isPlaying,
+            )
+        }
+        pendingOfflineConfirmation = null
+        networkRestoreEvidence = false
+        networkRetryNonce += 1
+        android.util.Log.i(
+            "HulkPlayer",
+            "offline retry requested confirmed=$confirmedOutage " +
+                "networkAvailable=$networkAvailable",
         )
     }
 
@@ -1448,7 +1472,8 @@ fun PlayerScreen(
         probeTargets,
     ) {
         val pending = pendingOfflineConfirmation ?: return@LaunchedEffect
-        val reachable = probeNetworkReachable(probeTargets)
+        val reachable = networkProbe.isReachable(probeTargets)
+        if (!isActive || pending != pendingOfflineConfirmation) return@LaunchedEffect
         android.util.Log.i(
             "HulkPlayer",
             "terminal reachability result=$reachable class=${pending.failureClass} " +
@@ -1479,6 +1504,7 @@ fun PlayerScreen(
         appForeground,
         localPlayback,
         request.historyKey,
+        networkRetryNonce,
         probeTargets,
     ) {
         if (
@@ -1489,31 +1515,30 @@ fun PlayerScreen(
         ) {
             return@LaunchedEffect
         }
-        val timedOut = withTimeoutOrNull(NETWORK_RESTORE_PROBE_BUDGET_MS) {
-            var attempt = 0
-            while (isActive) {
-                attempt += 1
-                if (probeNetworkReachable(probeTargets)) {
-                    networkRestoreEvidence = true
-                    networkAvailable = true
-                    android.util.Log.i(
-                        "HulkPlayer",
-                        "network restore evidence attempt=$attempt",
-                    )
-                    return@withTimeoutOrNull
-                }
+        val monitorToken = networkRetryNonce
+        val monitor = NetworkRestoreMonitor(
+            probe = { networkProbe.isReachable(probeTargets) },
+            onAttempt = { attempt, delayMs ->
                 if (attempt == 1 || attempt % 5 == 0) {
                     android.util.Log.i(
                         "HulkPlayer",
-                        "network probe unreachable attempt=$attempt",
+                        "network probe unreachable attempt=$attempt backoffMs=$delayMs",
                     )
                 }
-                delay(NETWORK_RESTORE_PROBE_INTERVAL_MS)
+            },
+        )
+        val attempts = monitor.run {
+            if (
+                monitorToken == networkRetryNonce &&
+                confirmedOutage &&
+                appForeground &&
+                !localPlayback
+            ) {
+                networkRestoreEvidence = true
+                networkAvailable = true
             }
         }
-        if (timedOut == null) {
-            android.util.Log.w("HulkPlayer", "network probe budget exhausted")
-        }
+        android.util.Log.i("HulkPlayer", "network monitor stopped attempts=$attempts")
     }
 
     DisposableEffect(player, request, playerSession, playerDiagnostics) {
@@ -2636,12 +2661,10 @@ fun PlayerScreen(
                 failureMessage = finalError,
                 mediaLabel = vodErrorMediaLabel,
                 onRetry = {
-                    // While connectivity is unusable the same card stays; otherwise the generic
-                    // failure uses the existing manual retry owner.
+                    // An offline Retry starts a fresh owned probe even when platform flags have
+                    // not changed. Online failures keep the existing manual retry owner.
                     if (movieErrorCardOffline) {
-                        if (hasUsableNetwork(context)) {
-                            networkAvailable = true
-                        }
+                        retryOfflinePlayback()
                     } else {
                         retryManually()
                     }
@@ -2706,7 +2729,13 @@ fun PlayerScreen(
                     failureClass = finalFailureClass,
                     candidateCount = request.candidates.size,
                 ),
-                onRetry = { retryManually() },
+                onRetry = {
+                    if (liveErrorPresentation?.offline == true) {
+                        retryOfflinePlayback()
+                    } else {
+                        retryManually()
+                    }
+                },
                 onChooseChannel = {
                     // Live keeps the failure state live and suppresses only its foreground
                     // presentation, so repeated offline notifications cannot re-open the modal
