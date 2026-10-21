@@ -244,10 +244,35 @@ internal fun playerPreparationReady(
     appForeground: Boolean,
     localPlayback: Boolean,
     networkAvailable: Boolean,
-    offlineFailure: Boolean,
+    confirmedOutage: Boolean,
 ): Boolean = appForeground &&
     (localPlayback || networkAvailable) &&
-    (localPlayback || !offlineFailure)
+    (localPlayback || !confirmedOutage)
+
+/** The independent foreground path only prepares when no outage/recovery handoff owns the player. */
+internal fun independentForegroundPreparationReady(
+    appForeground: Boolean,
+    localPlayback: Boolean,
+    networkAvailable: Boolean,
+    confirmedOutage: Boolean,
+    recoveryPreparePending: Boolean,
+): Boolean = !recoveryPreparePending &&
+    playerPreparationReady(
+        appForeground = appForeground,
+        localPlayback = localPlayback,
+        networkAvailable = networkAvailable,
+        confirmedOutage = confirmedOutage,
+    )
+
+/** READY from retained media must not clear a confirmed outage before the handoff resolves. */
+internal fun shouldClearOfflineOnReady(confirmedOutage: Boolean): Boolean = !confirmedOutage
+
+/** Restoration is owned by a confirmed outage and is never started for local playback. */
+internal fun shouldBeginOutageRestoration(
+    confirmedOutage: Boolean,
+    networkAvailable: Boolean,
+    localPlayback: Boolean,
+): Boolean = confirmedOutage && networkAvailable && !localPlayback
 
 internal fun shouldAdvancePlayerAutoplayCountdown(
     appForeground: Boolean,
@@ -553,6 +578,12 @@ fun PlayerScreen(
     // error and never a stale snapshot from a recovered or replaced request.
     var liveErrorSurfaceSuppressed by remember(request) { mutableStateOf(false) }
     var offlineFailure by remember(request) { mutableStateOf(false) }
+    // Authoritative ownership for a confirmed outage. READY from retained media, foreground
+    // preparation and the delayed restoration all consult this state before acting.
+    var confirmedOutage by remember(request) { mutableStateOf(false) }
+    // Set when a recovery command commits a reprepare; the independent foreground path stays
+    // blocked until the main recovery preparation consumes the command.
+    var recoveryPreparePending by remember(request) { mutableStateOf(false) }
     var offlineWasPlaying by remember(request) { mutableStateOf(false) }
     var restoredPlayWhenReady by remember(request) { mutableStateOf<Boolean?>(null) }
     var networkAvailable by remember(context, request) { mutableStateOf(hasUsableNetwork(context)) }
@@ -787,6 +818,7 @@ fun PlayerScreen(
             previousIntent = offlineWasPlaying,
             currentPlayingIntent = currentPlayingIntent,
         )
+        confirmedOutage = true
         offlineFailure = true
         finalError = PLAYER_OFFLINE_MESSAGE
     }
@@ -852,9 +884,8 @@ fun PlayerScreen(
     fun applyRecoveryCommand(command: RecoveryCommand): Boolean {
         if (command.generationId != playerSession.generation.id) return false
         clearFinalErrorState()
-        offlineFailure = false
 
-        return when (command.type) {
+        val accepted = when (command.type) {
             RecoveryCommandType.SELECT_ALTERNATE_AUDIO_TRACK -> {
                 val track = command.audioTrack ?: return false
                 val group = player.currentTracks.groups.getOrNull(track.groupIndex) ?: return false
@@ -864,6 +895,7 @@ fun PlayerScreen(
                     .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, track.trackIndex))
                     .build()
                 if (shouldReprepareAfterAudioTrackOverride(command.trigger)) {
+                    recoveryPreparePending = true
                     recoveryDelayMs = command.delayMs
                     buffering = true
                     retryNonce += 1
@@ -873,6 +905,7 @@ fun PlayerScreen(
             RecoveryCommandType.RECREATE_WITH_SOFTWARE_AUDIO -> {
                 val targetMode = PlayerAudioOutputMode.PLATFORM_SOFTWARE_PCM
                 pendingPlayerReplacement = captureReplacementState(command.candidateIndex, targetMode)
+                recoveryPreparePending = true
                 recoveryDelayMs = command.delayMs
                 buffering = true
                 audioOutputMode = targetMode
@@ -887,6 +920,7 @@ fun PlayerScreen(
                     playerPositionMs = player.currentPosition,
                 )
                 pendingSeekAuthoritative = true
+                recoveryPreparePending = true
                 recoveryDelayMs = command.delayMs
                 buffering = true
                 retryNonce += 1
@@ -900,6 +934,7 @@ fun PlayerScreen(
                     playerPositionMs = player.currentPosition,
                 )
                 pendingSeekAuthoritative = true
+                recoveryPreparePending = true
                 recoveryDelayMs = command.delayMs
                 buffering = true
                 if (audioOutputMode == PlayerAudioOutputMode.PLATFORM_SOFTWARE_PCM) {
@@ -920,6 +955,11 @@ fun PlayerScreen(
             }
             RecoveryCommandType.SHOW_FINAL_ERROR -> false
         }
+        if (accepted) {
+            offlineFailure = false
+            confirmedOutage = false
+        }
+        return accepted
     }
 
     fun retryManually(targetCandidateIndex: Int = playerSession.firstCandidateIndex ?: 0) {
@@ -931,6 +971,8 @@ fun PlayerScreen(
             return
         }
         offlineFailure = false
+        confirmedOutage = false
+        recoveryPreparePending = true
         clearFinalErrorState()
         restoredPlayWhenReady = null
         pendingSeekAuthoritative = false
@@ -1196,9 +1238,22 @@ fun PlayerScreen(
         onDispose { playerSession.invalidate() }
     }
 
-    LaunchedEffect(appForeground, localPlayback, networkAvailable, player) {
+    LaunchedEffect(
+        appForeground,
+        localPlayback,
+        networkAvailable,
+        confirmedOutage,
+        recoveryPreparePending,
+        player,
+    ) {
         if (
-            appForeground &&
+            independentForegroundPreparationReady(
+                appForeground = appForeground,
+                localPlayback = localPlayback,
+                networkAvailable = networkAvailable,
+                confirmedOutage = confirmedOutage,
+                recoveryPreparePending = recoveryPreparePending,
+            ) &&
             playerForegroundLifecycleAction(
                 playbackState = player.playbackState,
                 hasMediaItem = player.mediaItemCount > 0,
@@ -1368,9 +1423,11 @@ fun PlayerScreen(
                     livePlaybackStarted = true
                 }
                 if (playbackState == Player.STATE_READY && suspendedFinalError == null) {
-                    finalError = null
-                    finalFailureClass = null
-                    offlineFailure = false
+                    if (shouldClearOfflineOnReady(confirmedOutage)) {
+                        finalError = null
+                        finalFailureClass = null
+                        offlineFailure = false
+                    }
                 }
                 if (
                     playbackState == Player.STATE_ENDED &&
@@ -1458,7 +1515,7 @@ fun PlayerScreen(
                 appForeground = appForeground,
                 localPlayback = localPlayback,
                 networkAvailable = networkAvailable,
-                offlineFailure = offlineFailure,
+                confirmedOutage = confirmedOutage,
             )
         }
             .first { readyToPrepare -> readyToPrepare }
@@ -1466,6 +1523,7 @@ fun PlayerScreen(
         playerDiagnostics.onPrepare(candidateIndex, audioOutputMode)
         val mediaItem = playerSession.prepareMediaItem(player, candidateIndex)
         if (mediaItem == null) {
+            recoveryPreparePending = false
             suspendedFinalError = null
             finalFailureClass = RecoveryFailureClass.SOURCE
             finalError = "لا يوجد رابط تشغيل صالح لهذا المحتوى."
@@ -1513,6 +1571,7 @@ fun PlayerScreen(
             pendingSeekAuthoritative = false
             restoredPlayWhenReady = null
             manualSeekTargetMs = null
+            recoveryPreparePending = false
             return@LaunchedEffect
         }
 
@@ -1535,12 +1594,12 @@ fun PlayerScreen(
         pendingSeekMs = 0L
         pendingSeekAuthoritative = false
         manualSeekTargetMs = null
+        recoveryPreparePending = false
     }
 
     LaunchedEffect(
         networkAvailable,
-        offlineFailure,
-        finalError,
+        confirmedOutage,
         request.historyKey,
         localPlayback,
         player,
@@ -1566,14 +1625,28 @@ fun PlayerScreen(
             return@LaunchedEffect
         }
 
-        if (offlineFailure) {
+        if (
+            shouldBeginOutageRestoration(
+                confirmedOutage = confirmedOutage,
+                networkAvailable = networkAvailable,
+                localPlayback = localPlayback,
+            )
+        ) {
             val resumePositionMs = if (request.isLive) {
                 0L
             } else {
                 maxOf(pendingSeekMs, currentPositionMs, player.currentPosition.coerceAtLeast(0L))
             }
             delay(700L)
-            if (!networkAvailable) return@LaunchedEffect
+            if (
+                !shouldBeginOutageRestoration(
+                    confirmedOutage = confirmedOutage,
+                    networkAvailable = networkAvailable,
+                    localPlayback = localPlayback,
+                )
+            ) {
+                return@LaunchedEffect
+            }
             pendingSeekMs = playerRetrySeekTarget(
                 isLive = request.isLive,
                 resumePromptPending = resumePromptVisible,

@@ -22,7 +22,7 @@ class VodForegroundRecoveryHandoffTest {
                 appForeground = false,
                 localPlayback = false,
                 networkAvailable = true,
-                offlineFailure = true,
+                confirmedOutage = true,
             ),
         )
         // Foreground, no media item/expected source yet: the first NETWORK_RESTORED source recovery
@@ -42,7 +42,7 @@ class VodForegroundRecoveryHandoffTest {
                 appForeground = true,
                 localPlayback = false,
                 networkAvailable = true,
-                offlineFailure = false,
+                confirmedOutage = false,
             ),
         )
     }
@@ -107,7 +107,7 @@ class VodForegroundRecoveryHandoffTest {
                 appForeground = false,
                 localPlayback = false,
                 networkAvailable = true,
-                offlineFailure = false,
+                confirmedOutage = false,
             ),
         )
         assertFalse(
@@ -115,7 +115,7 @@ class VodForegroundRecoveryHandoffTest {
                 appForeground = true,
                 localPlayback = false,
                 networkAvailable = false,
-                offlineFailure = false,
+                confirmedOutage = false,
             ),
         )
         assertFalse(
@@ -123,7 +123,7 @@ class VodForegroundRecoveryHandoffTest {
                 appForeground = true,
                 localPlayback = false,
                 networkAvailable = true,
-                offlineFailure = true,
+                confirmedOutage = true,
             ),
         )
         assertTrue(
@@ -131,7 +131,7 @@ class VodForegroundRecoveryHandoffTest {
                 appForeground = true,
                 localPlayback = false,
                 networkAvailable = true,
-                offlineFailure = false,
+                confirmedOutage = false,
             ),
         )
         assertTrue(
@@ -139,7 +139,7 @@ class VodForegroundRecoveryHandoffTest {
                 appForeground = true,
                 localPlayback = true,
                 networkAvailable = false,
-                offlineFailure = true,
+                confirmedOutage = true,
             ),
         )
     }
