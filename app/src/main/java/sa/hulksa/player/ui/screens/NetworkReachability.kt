@@ -7,6 +7,8 @@ import android.net.Network
 import android.os.Build
 import android.os.CancellationSignal
 import androidx.annotation.RequiresApi
+import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -68,6 +70,25 @@ internal fun networkProbeTargets(request: PlaybackRequest): List<NetworkProbeTar
 }
 
 /**
+ * Give the first address of each available family an opportunity before a second address of either
+ * family. This prevents a long IPv4 list from consuming the whole total deadline before IPv6.
+ */
+internal fun interleaveAddressFamilies(addresses: List<InetAddress>): List<InetAddress> {
+    val distinct = addresses.distinct()
+    val ipv4 = distinct.filterIsInstance<Inet4Address>()
+    val ipv6 = distinct.filterIsInstance<Inet6Address>()
+    val other = distinct.filter { it !is Inet4Address && it !is Inet6Address }
+    return buildList(distinct.size) {
+        val familySize = maxOf(ipv4.size, ipv6.size)
+        for (index in 0 until familySize) {
+            ipv4.getOrNull(index)?.let(::add)
+            ipv6.getOrNull(index)?.let(::add)
+        }
+        addAll(other)
+    }
+}
+
+/**
  * Bounded reachability orchestration. DNS is resolved before connecting, and every target and
  * address checks the remaining deadline and coroutine cancellation. It never sends an HTTP request
  * and never logs host names.
@@ -94,7 +115,7 @@ internal class BoundedReachabilityProbe(
                     timeoutMs = minOf(perTargetTimeoutMs.toLong(), remainingMs),
                 )
                 if (!currentCoroutineContext().isActive) return@withTimeoutOrNull false
-                for (address in addresses.distinct()) {
+                for (address in interleaveAddressFamilies(addresses)) {
                     val remainingForConnectionMs = totalTimeoutMs - (clockMs() - startedMs)
                     if (remainingForConnectionMs <= 0L) return@withTimeoutOrNull false
                     val connectionTimeoutMs = minOf(
@@ -284,15 +305,23 @@ internal class SocketAddressConnector(
                 runCatching { socket.close() }
             }
             val task = Runnable {
+                var connected = false
                 try {
                     if (!continuation.isActive) return@Runnable
                     socket.connect(InetSocketAddress(address, port), timeoutMs)
-                    continuation.resume(true) { _, _, _ -> runCatching { socket.close() } }
+                    connected = true
                 } catch (error: Throwable) {
-                    continuation.resume(false) { _, _, _ -> runCatching { socket.close() } }
+                    connected = false
                 } finally {
-                    inFlight.set(false)
+                    // Cleanup and ownership release must happen before the caller can resume and
+                    // immediately schedule the next address.
                     runCatching { socket.close() }
+                    inFlight.set(false)
+                    if (continuation.isActive) {
+                        continuation.resume(connected) { _, _, _ ->
+                            runCatching { socket.close() }
+                        }
+                    }
                 }
             }
             try {
