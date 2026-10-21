@@ -6,7 +6,6 @@ import android.net.DnsResolver
 import android.net.Network
 import android.os.Build
 import android.os.CancellationSignal
-import android.os.SystemClock
 import androidx.annotation.RequiresApi
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -16,13 +15,12 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import sa.hulksa.player.model.PlaybackRequest
 
@@ -38,6 +36,9 @@ internal interface HostResolver {
 internal interface AddressConnector {
     suspend fun connect(address: InetAddress, port: Int, timeoutMs: Int): Boolean
 }
+
+private const val DNS_TYPE_A = 1
+private const val DNS_TYPE_AAAA = 28
 
 private val STABLE_PROBE_TARGETS = listOf(
     NetworkProbeTarget(host = "hulksa.com", port = 443),
@@ -118,7 +119,7 @@ internal fun createNetworkReachabilityProbe(context: Context?): BoundedReachabil
         } else {
             AndroidHostResolver(context.applicationContext)
         },
-        connector = SocketAddressConnector,
+        connector = SocketAddressConnector(),
     )
 
 /** Backward-compatible JVM/test entry point; the screen uses the Android resolver. */
@@ -132,6 +133,35 @@ internal suspend fun probeNetworkReachable(
     totalTimeoutMs = totalTimeoutMs,
 )
 
+/**
+ * Query A and AAAA concurrently and return both families. A successful IPv4 answer must not
+ * suppress a working IPv6 path; a slow/failed family returns empty without erasing the other.
+ */
+internal suspend fun resolveAddressFamilies(
+    timeoutMs: Long,
+    query: suspend (type: Int, timeoutMs: Long) -> List<InetAddress>,
+): List<InetAddress> {
+    if (timeoutMs <= 0L) return emptyList()
+    val familyTimeoutMs = maxOf(1L, timeoutMs / 2L)
+    return withTimeoutOrNull(timeoutMs) {
+        coroutineScope {
+            suspend fun queryFamily(type: Int): List<InetAddress> = try {
+                withTimeoutOrNull(familyTimeoutMs) {
+                    query(type, familyTimeoutMs)
+                } ?: emptyList()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                emptyList()
+            }
+
+            val ipv4 = async { queryFamily(DNS_TYPE_A) }
+            val ipv6 = async { queryFamily(DNS_TYPE_AAAA) }
+            (ipv4.await() + ipv6.await()).distinct()
+        }
+    } ?: emptyList()
+}
+
 private class AndroidHostResolver(context: Context) : HostResolver {
     private val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
 
@@ -141,12 +171,9 @@ private class AndroidHostResolver(context: Context) : HostResolver {
             return LegacyHostResolver.resolve(host, timeoutMs)
         }
         val network = manager?.activeNetwork ?: return emptyList()
-        val startedMs = SystemClock.elapsedRealtime()
-        val ipv4 = query(network, host, DnsResolver.TYPE_A, timeoutMs)
-        if (ipv4.isNotEmpty()) return ipv4
-        val remainingMs = timeoutMs - (SystemClock.elapsedRealtime() - startedMs)
-        if (remainingMs <= 0L) return emptyList()
-        return query(network, host, DnsResolver.TYPE_AAAA, remainingMs)
+        return resolveAddressFamilies(timeoutMs) { type, familyTimeoutMs ->
+            query(network, host, type, familyTimeoutMs)
+        }
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -224,24 +251,57 @@ private object LegacyHostResolver : HostResolver {
     }
 }
 
-private object SocketAddressConnector : AddressConnector {
+internal class SocketAddressConnector(
+    private val socketFactory: () -> Socket = { Socket() },
+) : AddressConnector {
+    companion object {
+        private val executor = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "HulkNetSocket").apply { isDaemon = true }
+        }
+        private val inFlight = AtomicBoolean(false)
+    }
+
     override suspend fun connect(
         address: InetAddress,
         port: Int,
         timeoutMs: Int,
-    ): Boolean = withContext(Dispatchers.IO) {
-        val socket = Socket()
-        val completion = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
-            if (cause is CancellationException) runCatching { socket.close() }
-        }
-        try {
-            socket.connect(InetSocketAddress(address, port), timeoutMs)
-            true
-        } catch (error: Throwable) {
-            false
-        } finally {
-            completion?.dispose()
-            runCatching { socket.close() }
+    ): Boolean {
+        if (!currentCoroutineContext().isActive) return false
+        if (!inFlight.compareAndSet(false, true)) return false
+        return suspendCancellableCoroutine { continuation ->
+            if (!continuation.isActive) {
+                inFlight.set(false)
+                return@suspendCancellableCoroutine
+            }
+            val socket = try {
+                socketFactory()
+            } catch (error: Throwable) {
+                inFlight.set(false)
+                continuation.resume(false)
+                return@suspendCancellableCoroutine
+            }
+            continuation.invokeOnCancellation {
+                runCatching { socket.close() }
+            }
+            val task = Runnable {
+                try {
+                    if (!continuation.isActive) return@Runnable
+                    socket.connect(InetSocketAddress(address, port), timeoutMs)
+                    continuation.resume(true) { _, _, _ -> runCatching { socket.close() } }
+                } catch (error: Throwable) {
+                    continuation.resume(false) { _, _, _ -> runCatching { socket.close() } }
+                } finally {
+                    inFlight.set(false)
+                    runCatching { socket.close() }
+                }
+            }
+            try {
+                executor.execute(task)
+            } catch (error: Throwable) {
+                inFlight.set(false)
+                runCatching { socket.close() }
+                continuation.resume(false) { _, _, _ -> runCatching { socket.close() } }
+            }
         }
     }
 }
