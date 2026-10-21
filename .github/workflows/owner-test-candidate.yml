@@ -7,8 +7,13 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - '.github/workflows/owner-test-candidate.yml'
-      - 'app/src/main/java/sa/hulksa/player/security/CredentialVault.kt'
-      - 'app/src/test/java/sa/hulksa/player/security/CredentialVaultKeyRecoveryTest.kt'
+      - 'app/src/main/java/sa/hulksa/player/playback/PlayerEnginePolicy.kt'
+      - 'app/src/main/java/sa/hulksa/player/playback/PlayerSessionController.kt'
+      - 'app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt'
+      - 'app/src/test/java/sa/hulksa/player/playback/VodForegroundRecoveryHandoffTest.kt'
+      - 'app/src/test/java/sa/hulksa/player/playback/VodNetworkRestoreRecoveryTest.kt'
+      - 'app/src/test/java/sa/hulksa/player/playback/VodRecoveryHealthHandoffTest.kt'
+      - 'app/src/test/java/sa/hulksa/player/ui/screens/VodNetworkRestoreIntentTest.kt'
 
 permissions:
   contents: read
@@ -22,15 +27,15 @@ jobs:
     name: Signed owner-test release APK
     if: >
       github.repository == 'azoozrm/-HULK-SA-Android' &&
-      github.event.pull_request.number == 357 &&
+      github.event.pull_request.number == 360 &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'fix/login-pairing-reliability-20261020' &&
+      github.event.pull_request.head.ref == 'fix/vod-network-restore-f01' &&
       github.event.pull_request.base.ref == 'phase-3-v0.9.3.0-adaptive-foundation'
     runs-on: ubuntu-latest
     environment: production-signing
     timeout-minutes: 60
     env:
-      PRODUCT_SHA: 6f9caf7ab884412680a4e9a2d6b0e4f1e463937c
+      PRODUCT_SHA: d6a413982eea2e571d1237a47985ba9a0130a78e
       WORKFLOW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       WORKFLOW_MERGE_SHA: ${{ github.sha }}
       EXPECTED_PACKAGE: sa.hulksa.player
@@ -47,7 +52,7 @@ jobs:
       - name: Checkout exact reviewed product source
         uses: actions/checkout@v7
         with:
-          ref: 6f9caf7ab884412680a4e9a2d6b0e4f1e463937c
+          ref: d6a413982eea2e571d1237a47985ba9a0130a78e
           fetch-depth: 1
           persist-credentials: false
 
@@ -56,7 +61,8 @@ jobs:
           set -euo pipefail
           actual="$(git rev-parse HEAD)"
           test "$actual" = "$PRODUCT_SHA"
-          test -f app/src/main/java/sa/hulksa/player/security/CredentialVault.kt
+          test -f app/src/main/java/sa/hulksa/player/playback/PlayerSessionController.kt
+          test -f app/src/test/java/sa/hulksa/player/playback/VodRecoveryHealthHandoffTest.kt
           mkdir -p owner-test-artifacts
           {
             echo "product_source_sha=$PRODUCT_SHA"
@@ -65,7 +71,7 @@ jobs:
             echo "workflow_merge_ref_sha=$WORKFLOW_MERGE_SHA"
             echo "workflow_ref=${GITHUB_REF}"
             echo "workflow_run_id=${GITHUB_RUN_ID}"
-            echo "pull_request=#357"
+            echo "pull_request=#360"
           } > owner-test-artifacts/SOURCE-PROVENANCE.txt
           cat owner-test-artifacts/SOURCE-PROVENANCE.txt
 
@@ -193,7 +199,7 @@ jobs:
       - name: Upload only signed owner-test APK and sanitized evidence
         uses: actions/upload-artifact@v7
         with:
-          name: HULK-SA-OWNER-TEST-6f9caf7a-${{ github.run_id }}
+          name: HULK-SA-OWNER-TEST-F01-d6a41398-${{ github.run_id }}
           path: owner-test-artifacts/
           if-no-files-found: error
           retention-days: 3
