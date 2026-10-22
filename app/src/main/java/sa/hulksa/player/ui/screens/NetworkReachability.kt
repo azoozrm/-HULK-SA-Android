@@ -279,8 +279,10 @@ internal class SocketAddressConnector(
         private val executor = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "HulkNetSocket").apply { isDaemon = true }
         }
-        private val inFlight = AtomicBoolean(false)
     }
+
+    // Ownership belongs to this probe/screen connector, not to all connectors in the process.
+    private val inFlight = AtomicBoolean(false)
 
     override suspend fun connect(
         address: InetAddress,
