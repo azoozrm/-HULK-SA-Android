@@ -209,7 +209,7 @@ import java.util.Locale
 private const val CONTROLS_TIMEOUT_MS = 5_000L
 private const val LIVE_CONTROL_HOLD_REPEAT_MS = 180L
 private const val NEXT_EPISODE_SECONDS = 8
-private const val PLAYER_OFFLINE_MESSAGE = "لا يوجد اتصال بالانترنت. سيتم استئناف التشغيل تلقائيا عند عودة الاتصال."
+private const val PLAYER_OFFLINE_MESSAGE = "لا يوجد اتصال بالإنترنت. بانتظار عودة الاتصال."
 
 internal enum class PlayerLifecyclePlaybackAction { NONE, STOP, PREPARE }
 
@@ -235,6 +235,44 @@ internal fun playerForegroundLifecycleAction(
     } else {
         PlayerLifecyclePlaybackAction.NONE
     }
+
+/**
+ * Preparation is allowed only while foregrounded, with a usable source, and after a confirmed
+ * offline state has been resolved by the recovery owner. Local playback never waits on connectivity.
+ */
+internal fun playerPreparationReady(
+    appForeground: Boolean,
+    localPlayback: Boolean,
+    networkAvailable: Boolean,
+    confirmedOutage: Boolean,
+): Boolean = appForeground &&
+    (localPlayback || networkAvailable) &&
+    (localPlayback || !confirmedOutage)
+
+/** The independent foreground path only prepares when no outage/recovery handoff owns the player. */
+internal fun independentForegroundPreparationReady(
+    appForeground: Boolean,
+    localPlayback: Boolean,
+    networkAvailable: Boolean,
+    confirmedOutage: Boolean,
+    recoveryPreparePending: Boolean,
+): Boolean = !recoveryPreparePending &&
+    playerPreparationReady(
+        appForeground = appForeground,
+        localPlayback = localPlayback,
+        networkAvailable = networkAvailable,
+        confirmedOutage = confirmedOutage,
+    )
+
+/** READY from retained media must not clear a confirmed outage before the handoff resolves. */
+internal fun shouldClearOfflineOnReady(confirmedOutage: Boolean): Boolean = !confirmedOutage
+
+/** Restoration is owned by a confirmed outage and a positive reachability restoration signal. */
+internal fun shouldBeginOutageRestoration(
+    confirmedOutage: Boolean,
+    restorationEvidence: Boolean,
+    localPlayback: Boolean,
+): Boolean = confirmedOutage && restorationEvidence && !localPlayback
 
 internal fun shouldAdvancePlayerAutoplayCountdown(
     appForeground: Boolean,
@@ -289,12 +327,8 @@ internal fun moviePlayerErrorCopy(
     failureMessage: String?,
     mediaLabel: String,
 ): MovieOfflineCardCopy = when {
-    offline && resumePending -> movieOfflineCardCopy(
-        resumePending = true,
-        formattedSavedTime = formattedSavedTime,
-    )
     offline -> movieOfflineCardCopy(
-        resumePending = false,
+        resumePending = resumePending,
         formattedSavedTime = formattedSavedTime,
     )
     else -> MovieOfflineCardCopy(
@@ -317,13 +351,10 @@ internal data class LivePlayerErrorPresentation(
 )
 
 /**
- * Truthful Live player error presentation.
- *
- * `offlineFailure` is the typed unusable-connectivity state (never message-string matching). A
- * started broadcast that was playing when connectivity dropped keeps the automatic-return wording
- * because the existing network-restore owner replays the captured intent; an offline entry or a
- * paused broadcast never promises autoplay. Online Live failures keep the real server/media message
- * under the Live channel-recovery title. No Movie saved-position/Resume wording is used.
+ * Truthful Live player error presentation. Offline copy is neutral: it never promises automatic
+ * playback, because paused playback and a pending Resume decision must stay paused. Online Live
+ * failures keep the real server/media message under the Live channel-recovery title. No Movie
+ * saved-position/Resume wording is used.
  */
 internal fun livePlayerErrorPresentation(
     offlineFailure: Boolean,
@@ -331,19 +362,9 @@ internal fun livePlayerErrorPresentation(
     autoResumeIntent: Boolean,
     failureMessage: String?,
 ): LivePlayerErrorPresentation = when {
-    offlineFailure && playbackStarted && autoResumeIntent -> LivePlayerErrorPresentation(
-        title = "انقطع اتصال الانترنت",
-        body = "سيعود تشغيل القناة تلقائيا عند عودة الاتصال",
-        offline = true,
-    )
-    offlineFailure && playbackStarted -> LivePlayerErrorPresentation(
-        title = "انقطع اتصال الانترنت",
-        body = "القناة متوقفة مؤقتا ، اضغط تشغيل للمتابعة بعد عودة الاتصال",
-        offline = true,
-    )
     offlineFailure -> LivePlayerErrorPresentation(
-        title = "لا يوجد اتصال بالانترنت",
-        body = "تعذر تشغيل القناة ، تحقق من الاتصال وحاول مرة اخرى",
+        title = "لا يوجد اتصال بالإنترنت",
+        body = "بانتظار عودة الاتصال.",
         offline = true,
     )
     else -> LivePlayerErrorPresentation(
@@ -363,27 +384,34 @@ internal fun movieOfflineRestoredPlayWhenReady(
     resumePromptPending: Boolean,
 ): Boolean = wasPlayingBeforeOffline && !resumePromptPending
 
+/**
+ * Seek target for a retry/reprepare command. A preserved VOD position survives even when the
+ * transient player position has already collapsed to zero, while a pending Resume decision keeps
+ * preparation at zero behind the prompt and Live still starts at the live edge.
+ */
+internal fun playerRetrySeekTarget(
+    isLive: Boolean,
+    resumePromptPending: Boolean,
+    preservedPositionMs: Long,
+    playerPositionMs: Long,
+): Long = when {
+    isLive || resumePromptPending -> 0L
+    else -> maxOf(preservedPositionMs, playerPositionMs).coerceAtLeast(0L)
+}
+
 internal data class MovieOfflineCardCopy(
     val title: String,
     val body: String,
     val context: String,
 )
 
-/** Exact owner copy for the single Movie offline card; resumePending selects the state. */
+/** Exact owner copy for the single Movie/Episode offline card; both states use neutral copy. */
 internal fun movieOfflineCardCopy(resumePending: Boolean, formattedSavedTime: String): MovieOfflineCardCopy =
-    if (resumePending) {
-        MovieOfflineCardCopy(
-            title = "لا يوجد اتصال بالانترنت",
-            body = "اتصل بالانترنت لاكمال المشاهدة",
-            context = "توقفت عند $formattedSavedTime",
-        )
-    } else {
-        MovieOfflineCardCopy(
-            title = "انقطع اتصال الانترنت",
-            body = "سيعود التشغيل تلقائيا عند عودة الاتصال",
-            context = "مكان توقفك محفوظ",
-        )
-    }
+    MovieOfflineCardCopy(
+        title = "لا يوجد اتصال بالإنترنت",
+        body = "بانتظار عودة الاتصال.",
+        context = "مكان توقفك محفوظ.",
+    )
 
 private enum class PlayerPanel { AUDIO, SUBTITLES, SPEED, RESIZE, QUALITY, SERVERS }
 
@@ -411,6 +439,12 @@ private data class SuspendedPlayerError(
     val failureClass: RecoveryFailureClass?,
 )
 
+private data class PendingOfflineConfirmation(
+    val failureClass: RecoveryFailureClass,
+    val positionMs: Long,
+    val playingIntent: Boolean,
+)
+
 internal fun hasUsableNetwork(context: Context): Boolean {
     val manager = context.applicationContext
         .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
@@ -420,6 +454,40 @@ internal fun hasUsableNetwork(context: Context): Boolean {
     return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
         capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
 }
+
+/**
+ * A terminal source error with usable platform flags must be checked against an actual
+ * reachability probe before it is allowed to remain a generic source error.
+ */
+internal fun shouldProbeForTerminalSourceError(
+    failureClass: RecoveryFailureClass,
+    localPlayback: Boolean,
+    networkAvailable: Boolean,
+): Boolean = failureClass == RecoveryFailureClass.SOURCE &&
+    !localPlayback &&
+    networkAvailable
+
+/** Decide offline entry from platform evidence plus the bounded reachability result. */
+internal fun shouldEnterOfflineAfterReachabilityCheck(
+    failureClass: RecoveryFailureClass,
+    localPlayback: Boolean,
+    networkAvailable: Boolean,
+    reachable: Boolean,
+): Boolean = failureClass == RecoveryFailureClass.SOURCE &&
+    !localPlayback &&
+    (!networkAvailable || !reachable)
+
+/** A terminal source error becomes the offline state only when connectivity is already unusable. */
+internal fun shouldEnterOfflineForTerminalError(
+    failureClass: RecoveryFailureClass,
+    localPlayback: Boolean,
+    networkAvailable: Boolean,
+): Boolean = shouldEnterOfflineAfterReachabilityCheck(
+    failureClass = failureClass,
+    localPlayback = localPlayback,
+    networkAvailable = networkAvailable,
+    reachable = true,
+)
 
 private fun PlaybackRequest.usesOnlyLocalMedia(): Boolean =
     candidates.isNotEmpty() && candidates.all { candidate ->
@@ -528,6 +596,10 @@ fun PlayerScreen(
     var pendingPlayerReplacement by remember(request) { mutableStateOf<PlayerReplacementState?>(null) }
     var recoveryDelayMs by remember(request) { mutableLongStateOf(0L) }
     var pendingSeekMs by remember(request) { mutableLongStateOf(0L) }
+    // A retry/reprepare command owns the exact preserved position, including a legitimate zero.
+    // Without this, the existing prepare fallback would treat zero as "no pending seek" and could
+    // jump to an older saved history position after an explicit Restart.
+    var pendingSeekAuthoritative by remember(request) { mutableStateOf(false) }
     var finalError by remember(request) { mutableStateOf<String?>(null) }
     var finalFailureClass by remember(request) { mutableStateOf<RecoveryFailureClass?>(null) }
     var suspendedFinalError by remember(request) { mutableStateOf<SuspendedPlayerError?>(null) }
@@ -537,6 +609,24 @@ fun PlayerScreen(
     // error and never a stale snapshot from a recovered or replaced request.
     var liveErrorSurfaceSuppressed by remember(request) { mutableStateOf(false) }
     var offlineFailure by remember(request) { mutableStateOf(false) }
+    // Authoritative ownership for a confirmed outage. READY from retained media, foreground
+    // preparation and the delayed restoration all consult this state before acting.
+    var confirmedOutage by remember(request) { mutableStateOf(false) }
+    // Set when a recovery command commits a reprepare; the independent foreground path stays
+    // blocked until the main recovery preparation consumes the command.
+    var recoveryPreparePending by remember(request) { mutableStateOf(false) }
+    // Platform connectivity can remain validated while DNS/transport is unusable. A confirmed
+    // outage therefore requires a bounded reachability probe before restoration can be armed.
+    var networkRestoreEvidence by remember(request) { mutableStateOf(false) }
+    var networkDroppedDuringOutage by remember(request) { mutableStateOf(false) }
+    var pendingOfflineConfirmation by remember(request) {
+        mutableStateOf<PendingOfflineConfirmation?>(null)
+    }
+    // An explicit offline Retry restarts only the monitor. It does not create another recovery
+    // owner; the existing C03 restore command remains the only prepare path.
+    var networkRetryNonce by remember(request) { mutableIntStateOf(0) }
+    val probeTargets = remember(request) { networkProbeTargets(request) }
+    val networkProbe = remember(context, request) { createNetworkReachabilityProbe(context) }
     var offlineWasPlaying by remember(request) { mutableStateOf(false) }
     var restoredPlayWhenReady by remember(request) { mutableStateOf<Boolean?>(null) }
     var networkAvailable by remember(context, request) { mutableStateOf(hasUsableNetwork(context)) }
@@ -733,8 +823,10 @@ fun PlayerScreen(
     )
     val movieErrorActive = !request.isLive && moviePresentation == VodPlayerPresentation.ERROR_CARD
     val movieModalActive = !request.isLive && moviePresentation != VodPlayerPresentation.PLAYER
-    // The card uses offline wording/icon only for genuinely unusable connectivity.
-    val movieErrorCardOffline = !request.isLive && !localPlayback && (movieOfflineInitial || !networkAvailable)
+    // The card uses offline wording/icon only for genuinely unusable connectivity, including the
+    // short confirmation window before an established outage is reconnected.
+    val movieErrorCardOffline = !request.isLive && !localPlayback &&
+        (movieOfflineInitial || offlineFailure || !networkAvailable)
     val vodErrorMediaLabel = if (request.streamKind.equals("series", ignoreCase = true)) "الحلقة" else "الفلم"
     // One foreground eligibility shared by the error path's rendering, key/pointer ownership and
     // focus acquisition. While a Live error-origin surface owns input, all three are suspended.
@@ -752,6 +844,86 @@ fun PlayerScreen(
         finalError = null
         finalFailureClass = null
         suspendedFinalError = null
+    }
+
+    /**
+     * The single offline state transition shared by the delayed connectivity owner, the controller's
+     * offline callback and a terminal source error observed after connectivity is already unusable.
+     */
+    fun enterOfflineState(positionMs: Long, currentPlayingIntent: Boolean) {
+        val enteringNewOutage = !offlineFailure
+        pendingSeekMs = if (request.isLive) 0L else maxOf(pendingSeekMs, positionMs)
+        suspendedFinalError = null
+        finalFailureClass = null
+        buffering = false
+        controlsVisible = true
+        offlineWasPlaying = playerOfflinePlayIntentCapture(
+            alreadyOffline = offlineFailure,
+            previousIntent = offlineWasPlaying,
+            currentPlayingIntent = currentPlayingIntent,
+        )
+        if (enteringNewOutage) {
+            networkRestoreEvidence = false
+            networkDroppedDuringOutage = !networkAvailable
+        }
+        pendingOfflineConfirmation = null
+        confirmedOutage = true
+        offlineFailure = true
+        finalError = PLAYER_OFFLINE_MESSAGE
+        android.util.Log.w(
+            "HulkPlayer",
+            "offline enter positionMs=$positionMs intent=$currentPlayingIntent " +
+                "networkAvailable=$networkAvailable dropped=$networkDroppedDuringOutage",
+        )
+    }
+
+    fun showGenericFinalError(failureClass: RecoveryFailureClass) {
+        suspendedFinalError = null
+        finalFailureClass = failureClass
+        offlineFailure = false
+        buffering = false
+        controlsVisible = true
+        finalError = when {
+            failureClass == RecoveryFailureClass.AUDIO && request.isLive -> {
+                "تعذر تشغيل صوت هذه القناة. اعد المحاولة او افتح قناة اخرى"
+            }
+            failureClass == RecoveryFailureClass.AUDIO -> {
+                "تعذر تشغيل الصوت لهذا المحتوى. اعد المحاولة."
+            }
+            request.isLive -> {
+                "البث غير متاح حاليا ، جرب اعادة المحاولة او اختر قناة اخرى"
+            }
+            else -> {
+                "تعذر تشغيل المحتوى. اعد المحاولة او اختر مصدرا اخر عند توفره."
+            }
+        }
+        android.util.Log.w(
+            "HulkPlayer",
+            "final error generic class=$failureClass networkAvailable=$networkAvailable",
+        )
+    }
+
+    fun retryOfflinePlayback() {
+        val positionMs = if (request.isLive) {
+            0L
+        } else {
+            maxOf(pendingSeekMs, currentPositionMs, player.currentPosition.coerceAtLeast(0L))
+        }
+        if (!confirmedOutage) {
+            playerSession.onNetworkUnavailable()
+            enterOfflineState(
+                positionMs = positionMs,
+                currentPlayingIntent = player.playWhenReady || player.isPlaying,
+            )
+        }
+        pendingOfflineConfirmation = null
+        networkRestoreEvidence = false
+        networkRetryNonce += 1
+        android.util.Log.i(
+            "HulkPlayer",
+            "offline retry requested confirmed=$confirmedOutage " +
+                "networkAvailable=$networkAvailable",
+        )
     }
 
     fun suspendFinalErrorForModal() {
@@ -815,9 +987,8 @@ fun PlayerScreen(
     fun applyRecoveryCommand(command: RecoveryCommand): Boolean {
         if (command.generationId != playerSession.generation.id) return false
         clearFinalErrorState()
-        offlineFailure = false
 
-        return when (command.type) {
+        val accepted = when (command.type) {
             RecoveryCommandType.SELECT_ALTERNATE_AUDIO_TRACK -> {
                 val track = command.audioTrack ?: return false
                 val group = player.currentTracks.groups.getOrNull(track.groupIndex) ?: return false
@@ -827,6 +998,7 @@ fun PlayerScreen(
                     .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, track.trackIndex))
                     .build()
                 if (shouldReprepareAfterAudioTrackOverride(command.trigger)) {
+                    recoveryPreparePending = true
                     recoveryDelayMs = command.delayMs
                     buffering = true
                     retryNonce += 1
@@ -836,6 +1008,7 @@ fun PlayerScreen(
             RecoveryCommandType.RECREATE_WITH_SOFTWARE_AUDIO -> {
                 val targetMode = PlayerAudioOutputMode.PLATFORM_SOFTWARE_PCM
                 pendingPlayerReplacement = captureReplacementState(command.candidateIndex, targetMode)
+                recoveryPreparePending = true
                 recoveryDelayMs = command.delayMs
                 buffering = true
                 audioOutputMode = targetMode
@@ -843,14 +1016,28 @@ fun PlayerScreen(
                 true
             }
             RecoveryCommandType.RETRY_CURRENT_SOURCE -> {
-                pendingSeekMs = if (request.isLive) 0L else player.currentPosition.coerceAtLeast(0L)
+                pendingSeekMs = playerRetrySeekTarget(
+                    isLive = request.isLive,
+                    resumePromptPending = resumePromptVisible,
+                    preservedPositionMs = pendingSeekMs,
+                    playerPositionMs = player.currentPosition,
+                )
+                pendingSeekAuthoritative = true
+                recoveryPreparePending = true
                 recoveryDelayMs = command.delayMs
                 buffering = true
                 retryNonce += 1
                 true
             }
             RecoveryCommandType.MOVE_TO_NEXT_SOURCE -> {
-                pendingSeekMs = if (request.isLive) 0L else player.currentPosition.coerceAtLeast(0L)
+                pendingSeekMs = playerRetrySeekTarget(
+                    isLive = request.isLive,
+                    resumePromptPending = resumePromptVisible,
+                    preservedPositionMs = pendingSeekMs,
+                    playerPositionMs = player.currentPosition,
+                )
+                pendingSeekAuthoritative = true
+                recoveryPreparePending = true
                 recoveryDelayMs = command.delayMs
                 buffering = true
                 if (audioOutputMode == PlayerAudioOutputMode.PLATFORM_SOFTWARE_PCM) {
@@ -871,6 +1058,11 @@ fun PlayerScreen(
             }
             RecoveryCommandType.SHOW_FINAL_ERROR -> false
         }
+        if (accepted) {
+            offlineFailure = false
+            confirmedOutage = false
+        }
+        return accepted
     }
 
     fun retryManually(targetCandidateIndex: Int = playerSession.firstCandidateIndex ?: 0) {
@@ -882,8 +1074,17 @@ fun PlayerScreen(
             return
         }
         offlineFailure = false
+        confirmedOutage = false
+        recoveryPreparePending = true
         clearFinalErrorState()
-        pendingSeekMs = if (request.isLive) 0L else player.currentPosition.coerceAtLeast(0L)
+        restoredPlayWhenReady = null
+        pendingSeekAuthoritative = false
+        pendingSeekMs = playerRetrySeekTarget(
+            isLive = request.isLive,
+            resumePromptPending = resumePromptVisible,
+            preservedPositionMs = pendingSeekMs,
+            playerPositionMs = player.currentPosition,
+        )
         recoveryDelayMs = 0L
         if (audioOutputMode != PlayerAudioOutputMode.NORMAL) {
             pendingPlayerReplacement = captureReplacementState(
@@ -1140,9 +1341,22 @@ fun PlayerScreen(
         onDispose { playerSession.invalidate() }
     }
 
-    LaunchedEffect(appForeground, localPlayback, networkAvailable, player) {
+    LaunchedEffect(
+        appForeground,
+        localPlayback,
+        networkAvailable,
+        confirmedOutage,
+        recoveryPreparePending,
+        player,
+    ) {
         if (
-            appForeground &&
+            independentForegroundPreparationReady(
+                appForeground = appForeground,
+                localPlayback = localPlayback,
+                networkAvailable = networkAvailable,
+                confirmedOutage = confirmedOutage,
+                recoveryPreparePending = recoveryPreparePending,
+            ) &&
             playerForegroundLifecycleAction(
                 playbackState = player.playbackState,
                 hasMediaItem = player.mediaItemCount > 0,
@@ -1158,21 +1372,55 @@ fun PlayerScreen(
         val manager = context.applicationContext
             .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
         val mainHandler = Handler(Looper.getMainLooper())
-        val callback = object : ConnectivityManager.NetworkCallback() {
-            private fun publishNetworkState() {
-                val available = hasUsableNetwork(context)
-                mainHandler.post { networkAvailable = available }
+        val initialNetwork = manager?.activeNetwork
+        val connectivityLock = Any()
+        var connectivity = NetworkAvailabilityState(
+            available = hasUsableNetwork(context),
+            networkToken = initialNetwork?.hashCode(),
+        )
+        fun publish(signal: NetworkCallbackSignal) {
+            val available = synchronized(connectivityLock) {
+                connectivity = reduceNetworkAvailability(connectivity, signal)
+                connectivity.available
             }
+            android.util.Log.i(
+                "HulkPlayer",
+                "network callback kind=${signal.kind} available=$available " +
+                    "internet=${signal.hasInternet} validated=${signal.validated}",
+            )
+            mainHandler.post { networkAvailable = available }
+        }
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) = publish(
+                NetworkCallbackSignal(
+                    kind = NetworkCallbackKind.AVAILABLE,
+                    networkToken = network.hashCode(),
+                ),
+            )
 
-            override fun onAvailable(network: Network) = publishNetworkState()
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = publish(
+                NetworkCallbackSignal(
+                    kind = NetworkCallbackKind.CAPABILITIES,
+                    networkToken = network.hashCode(),
+                    hasInternet = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
+                    validated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+                ),
+            )
 
-            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = publishNetworkState()
+            override fun onLost(network: Network) = publish(
+                NetworkCallbackSignal(
+                    kind = NetworkCallbackKind.LOST,
+                    networkToken = network.hashCode(),
+                ),
+            )
 
-            override fun onLost(network: Network) = publishNetworkState()
+            override fun onUnavailable() = publish(
+                NetworkCallbackSignal(kind = NetworkCallbackKind.UNAVAILABLE),
+            )
         }
 
         if (manager != null) {
-            runCatching {
+            val registered = runCatching {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                     manager.registerDefaultNetworkCallback(callback)
                 } else {
@@ -1183,14 +1431,114 @@ fun PlayerScreen(
                         callback,
                     )
                 }
-            }
-            networkAvailable = hasUsableNetwork(context)
+            }.isSuccess
+            val initialAvailable = synchronized(connectivityLock) { connectivity.available }
+            android.util.Log.i(
+                "HulkPlayer",
+                "network callback registered=$registered initial=$initialAvailable",
+            )
+            networkAvailable = initialAvailable
         }
 
         onDispose {
             mainHandler.removeCallbacksAndMessages(null)
             if (manager != null) runCatching { manager.unregisterNetworkCallback(callback) }
         }
+    }
+
+    LaunchedEffect(networkAvailable, confirmedOutage) {
+        if (!confirmedOutage) {
+            networkDroppedDuringOutage = false
+            networkRestoreEvidence = false
+            return@LaunchedEffect
+        }
+        if (!networkAvailable) {
+            networkDroppedDuringOutage = true
+            networkRestoreEvidence = false
+            android.util.Log.i("HulkPlayer", "outage connectivity lost")
+            return@LaunchedEffect
+        }
+        if (networkDroppedDuringOutage) {
+            networkRestoreEvidence = true
+            android.util.Log.i("HulkPlayer", "outage connectivity callback restored")
+        }
+    }
+
+    LaunchedEffect(
+        pendingOfflineConfirmation,
+        networkAvailable,
+        request.historyKey,
+        localPlayback,
+        probeTargets,
+    ) {
+        val pending = pendingOfflineConfirmation ?: return@LaunchedEffect
+        val reachable = networkProbe.isReachable(probeTargets)
+        if (!isActive || pending != pendingOfflineConfirmation) return@LaunchedEffect
+        android.util.Log.i(
+            "HulkPlayer",
+            "terminal reachability result=$reachable class=${pending.failureClass} " +
+                "networkAvailable=$networkAvailable",
+        )
+        if (
+            shouldEnterOfflineAfterReachabilityCheck(
+                failureClass = pending.failureClass,
+                localPlayback = localPlayback,
+                networkAvailable = networkAvailable,
+                reachable = reachable,
+            )
+        ) {
+            playerSession.onNetworkUnavailable()
+            enterOfflineState(
+                positionMs = pending.positionMs,
+                currentPlayingIntent = pending.playingIntent,
+            )
+        } else {
+            showGenericFinalError(pending.failureClass)
+        }
+        pendingOfflineConfirmation = null
+    }
+
+    LaunchedEffect(
+        confirmedOutage,
+        networkRestoreEvidence,
+        appForeground,
+        localPlayback,
+        request.historyKey,
+        networkRetryNonce,
+        probeTargets,
+    ) {
+        if (
+            !confirmedOutage ||
+            networkRestoreEvidence ||
+            localPlayback ||
+            !appForeground
+        ) {
+            return@LaunchedEffect
+        }
+        val monitorToken = networkRetryNonce
+        val monitor = NetworkRestoreMonitor(
+            probe = { networkProbe.isReachable(probeTargets) },
+            onAttempt = { attempt, delayMs ->
+                if (attempt == 1 || attempt % 5 == 0) {
+                    android.util.Log.i(
+                        "HulkPlayer",
+                        "network probe unreachable attempt=$attempt backoffMs=$delayMs",
+                    )
+                }
+            },
+        )
+        val attempts = monitor.run {
+            if (
+                monitorToken == networkRetryNonce &&
+                confirmedOutage &&
+                appForeground &&
+                !localPlayback
+            ) {
+                networkRestoreEvidence = true
+                networkAvailable = true
+            }
+        }
+        android.util.Log.i("HulkPlayer", "network monitor stopped attempts=$attempts")
     }
 
     DisposableEffect(player, request, playerSession, playerDiagnostics) {
@@ -1202,7 +1550,7 @@ fun PlayerScreen(
             candidateIndex = candidateIndex,
             outputMode = audioOutputMode,
             callbacks = PlayerSessionCallbacks(
-                isNetworkAvailable = { localPlayback || hasUsableNetwork(context) },
+                isNetworkAvailable = { localPlayback || networkAvailable },
                 isRecoveryCommandCurrent = { command ->
                     ownsRecoveryCommand(
                         command = command,
@@ -1212,40 +1560,64 @@ fun PlayerScreen(
                 },
                 onRecoveryCommand = attachedRecoveryCommandHandler,
                 onFinalError = { failureClass ->
+                    val terminalPositionMs = player.currentPosition.coerceAtLeast(0L)
+                    val terminalPlayingIntent = player.playWhenReady || player.isPlaying
                     player.stop()
-                    suspendedFinalError = null
-                    finalFailureClass = failureClass
-                    offlineFailure = false
-                    buffering = false
-                    controlsVisible = true
-                    finalError = when {
-                        failureClass == RecoveryFailureClass.AUDIO && request.isLive -> {
-                            "تعذر تشغيل صوت هذه القناة. اعد المحاولة او افتح قناة اخرى"
+                    val preservedPositionMs = if (request.isLive) {
+                        0L
+                    } else {
+                        maxOf(
+                            pendingSeekMs,
+                            currentPositionMs,
+                            terminalPositionMs,
+                        )
+                    }
+                    when {
+                        shouldEnterOfflineForTerminalError(
+                            failureClass = failureClass,
+                            localPlayback = localPlayback,
+                            networkAvailable = networkAvailable,
+                        ) -> {
+                            playerSession.onNetworkUnavailable()
+                            enterOfflineState(
+                                positionMs = preservedPositionMs,
+                                currentPlayingIntent = terminalPlayingIntent,
+                            )
                         }
-                        failureClass == RecoveryFailureClass.AUDIO -> {
-                            "تعذر تشغيل الصوت لهذا المحتوى. اعد المحاولة."
+                        shouldProbeForTerminalSourceError(
+                            failureClass = failureClass,
+                            localPlayback = localPlayback,
+                            networkAvailable = networkAvailable,
+                        ) -> {
+                            pendingOfflineConfirmation = PendingOfflineConfirmation(
+                                failureClass = failureClass,
+                                positionMs = preservedPositionMs,
+                                playingIntent = terminalPlayingIntent,
+                            )
+                            suspendedFinalError = null
+                            finalFailureClass = null
+                            offlineFailure = false
+                            buffering = true
+                            controlsVisible = true
+                            finalError = null
+                            android.util.Log.i(
+                                "HulkPlayer",
+                                "final error awaiting reachability class=$failureClass " +
+                                    "networkAvailable=$networkAvailable position=$preservedPositionMs",
+                            )
                         }
-                        request.isLive -> {
-                            "البث غير متاح حاليا ، جرب اعادة المحاولة او اختر قناة اخرى"
-                        }
-                        else -> {
-                            "تعذر تشغيل المحتوى. اعد المحاولة او اختر مصدرا اخر عند توفره."
-                        }
+                        else -> showGenericFinalError(failureClass)
                     }
                 },
                 onOffline = { positionMs ->
-                    pendingSeekMs = positionMs
-                    suspendedFinalError = null
-                    finalFailureClass = null
-                    buffering = false
-                    controlsVisible = true
-                    offlineWasPlaying = playerOfflinePlayIntentCapture(
-                        alreadyOffline = offlineFailure,
-                        previousIntent = offlineWasPlaying,
+                    enterOfflineState(
+                        positionMs = if (request.isLive) {
+                            0L
+                        } else {
+                            maxOf(pendingSeekMs, currentPositionMs, positionMs)
+                        },
                         currentPlayingIntent = player.playWhenReady || player.isPlaying,
                     )
-                    offlineFailure = true
-                    finalError = PLAYER_OFFLINE_MESSAGE
                 },
             ),
         )
@@ -1262,9 +1634,11 @@ fun PlayerScreen(
                     livePlaybackStarted = true
                 }
                 if (playbackState == Player.STATE_READY && suspendedFinalError == null) {
-                    finalError = null
-                    finalFailureClass = null
-                    offlineFailure = false
+                    if (shouldClearOfflineOnReady(confirmedOutage)) {
+                        finalError = null
+                        finalFailureClass = null
+                        offlineFailure = false
+                    }
                 }
                 if (
                     playbackState == Player.STATE_ENDED &&
@@ -1344,12 +1718,23 @@ fun PlayerScreen(
         val delayBeforePrepareMs = recoveryDelayMs
         recoveryDelayMs = 0L
         if (delayBeforePrepareMs > 0L) delay(delayBeforePrepareMs)
-        snapshotFlow { appForeground && (localPlayback || networkAvailable) }
+        // A confirmed offline state is owned by the network-restore effect: it captures the outage
+        // position/intent and issues the single recovery command before preparation. Preparing on
+        // connectivity alone would race that bridge and resume from the older saved position.
+        snapshotFlow {
+            playerPreparationReady(
+                appForeground = appForeground,
+                localPlayback = localPlayback,
+                networkAvailable = networkAvailable,
+                confirmedOutage = confirmedOutage,
+            )
+        }
             .first { readyToPrepare -> readyToPrepare }
 
         playerDiagnostics.onPrepare(candidateIndex, audioOutputMode)
         val mediaItem = playerSession.prepareMediaItem(player, candidateIndex)
         if (mediaItem == null) {
+            recoveryPreparePending = false
             suspendedFinalError = null
             finalFailureClass = RecoveryFailureClass.SOURCE
             finalError = "لا يوجد رابط تشغيل صالح لهذا المحتوى."
@@ -1376,7 +1761,14 @@ fun PlayerScreen(
         }
         if (replacement != null) {
             player.trackSelectionParameters = replacement.trackSelectionParameters
-            replacement.positionMs?.let(player::seekTo)
+            val restoreSeekTarget = when {
+                request.isLive -> replacement.positionMs
+                resumePromptVisible -> 0L
+                pendingSeekAuthoritative -> pendingSeekMs
+                pendingSeekMs > 0L -> pendingSeekMs
+                else -> replacement.positionMs
+            }
+            restoreSeekTarget?.let(player::seekTo)
             player.setPlaybackSpeed(replacement.speed)
             player.volume = replacement.volume
             player.prepare()
@@ -1384,14 +1776,18 @@ fun PlayerScreen(
                 "HulkPlayer",
                 "prepare issued t=${android.os.SystemClock.elapsedRealtime()} streamId=${request.streamId}",
             )
-            player.playWhenReady = replacement.playWhenReady
+            player.playWhenReady = restoredPlayWhenReady ?: replacement.playWhenReady
             pendingPlayerReplacement = null
             pendingSeekMs = 0L
+            pendingSeekAuthoritative = false
+            restoredPlayWhenReady = null
             manualSeekTargetMs = null
+            recoveryPreparePending = false
             return@LaunchedEffect
         }
 
         val seekTarget = when {
+            pendingSeekAuthoritative -> pendingSeekMs
             pendingSeekMs > 0L -> pendingSeekMs
             !resumePromptVisible && playbackSettings.resumePlayback -> request.resumePositionMs
             else -> 0L
@@ -1407,13 +1803,15 @@ fun PlayerScreen(
         player.playWhenReady = restoredPlayWhenReady ?: !resumePromptVisible
         restoredPlayWhenReady = null
         pendingSeekMs = 0L
+        pendingSeekAuthoritative = false
         manualSeekTargetMs = null
+        recoveryPreparePending = false
     }
 
     LaunchedEffect(
         networkAvailable,
-        offlineFailure,
-        finalError,
+        confirmedOutage,
+        networkRestoreEvidence,
         request.historyKey,
         localPlayback,
         player,
@@ -1421,42 +1819,60 @@ fun PlayerScreen(
     ) {
         if (localPlayback) return@LaunchedEffect
 
-        if (!networkAvailable) {
+        if (!networkAvailable && !networkRestoreEvidence) {
             delay(350L)
-            if (hasUsableNetwork(context)) return@LaunchedEffect
-            pendingSeekMs = if (request.isLive) {
+            if (networkAvailable || networkRestoreEvidence) return@LaunchedEffect
+            val offlinePositionMs = if (request.isLive) {
                 0L
             } else {
                 maxOf(pendingSeekMs, currentPositionMs, player.currentPosition.coerceAtLeast(0L))
             }
+            val currentPlayingIntent = player.playWhenReady || player.isPlaying
             playerSession.onNetworkUnavailable()
-            offlineWasPlaying = playerOfflinePlayIntentCapture(
-                alreadyOffline = offlineFailure,
-                previousIntent = offlineWasPlaying,
-                currentPlayingIntent = player.playWhenReady || player.isPlaying,
-            )
             player.pause()
-            suspendedFinalError = null
-            finalFailureClass = null
-            buffering = false
-            controlsVisible = true
-            offlineFailure = true
-            finalError = PLAYER_OFFLINE_MESSAGE
+            enterOfflineState(
+                positionMs = offlinePositionMs,
+                currentPlayingIntent = currentPlayingIntent,
+            )
             return@LaunchedEffect
         }
 
-        if (offlineFailure) {
+        if (
+            shouldBeginOutageRestoration(
+                confirmedOutage = confirmedOutage,
+                restorationEvidence = networkRestoreEvidence,
+                localPlayback = localPlayback,
+            )
+        ) {
             val resumePositionMs = if (request.isLive) {
                 0L
             } else {
                 maxOf(pendingSeekMs, currentPositionMs, player.currentPosition.coerceAtLeast(0L))
             }
             delay(700L)
-            if (!hasUsableNetwork(context)) return@LaunchedEffect
-            pendingSeekMs = resumePositionMs
+            if (
+                !shouldBeginOutageRestoration(
+                    confirmedOutage = confirmedOutage,
+                    restorationEvidence = networkRestoreEvidence,
+                    localPlayback = localPlayback,
+                )
+            ) {
+                return@LaunchedEffect
+            }
+            pendingSeekMs = playerRetrySeekTarget(
+                isLive = request.isLive,
+                resumePromptPending = resumePromptVisible,
+                preservedPositionMs = resumePositionMs,
+                playerPositionMs = 0L,
+            )
             restoredPlayWhenReady = movieOfflineRestoredPlayWhenReady(
                 wasPlayingBeforeOffline = offlineWasPlaying,
                 resumePromptPending = resumePromptVisible,
+            )
+            android.util.Log.i(
+                "HulkPlayer",
+                "outage restore dispatch intent=$restoredPlayWhenReady " +
+                    "seek=$pendingSeekMs",
             )
             playerSession.onNetworkRestored(player)
         }
@@ -2245,12 +2661,10 @@ fun PlayerScreen(
                 failureMessage = finalError,
                 mediaLabel = vodErrorMediaLabel,
                 onRetry = {
-                    // While connectivity is unusable the same card stays; otherwise the generic
-                    // failure uses the existing manual retry owner.
+                    // An offline Retry starts a fresh owned probe even when platform flags have
+                    // not changed. Online failures keep the existing manual retry owner.
                     if (movieErrorCardOffline) {
-                        if (hasUsableNetwork(context)) {
-                            networkAvailable = true
-                        }
+                        retryOfflinePlayback()
                     } else {
                         retryManually()
                     }
@@ -2315,7 +2729,13 @@ fun PlayerScreen(
                     failureClass = finalFailureClass,
                     candidateCount = request.candidates.size,
                 ),
-                onRetry = { retryManually() },
+                onRetry = {
+                    if (liveErrorPresentation?.offline == true) {
+                        retryOfflinePlayback()
+                    } else {
+                        retryManually()
+                    }
+                },
                 onChooseChannel = {
                     // Live keeps the failure state live and suppresses only its foreground
                     // presentation, so repeated offline notifications cannot re-open the modal

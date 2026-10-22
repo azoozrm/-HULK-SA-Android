@@ -48,10 +48,10 @@ internal class PlayerSessionController(
     val sourcePlan: MediaSourcePlan = planMediaSources(request)
     val firstCandidateIndex: Int? = sourcePlan.firstCandidateIndex
 
-    private val recovery = PlayerRecoveryCoordinator(
+    private val recovery = createPlayerRecoveryCoordinator(
         generation = generation,
         sourcePlan = sourcePlan,
-        maxSameSourceRetries = maxSameSourceRetriesFor(request.isLive),
+        isLive = request.isLive,
     )
     private var healthMonitor = PlaybackHealthMonitor(isLive = request.isLive)
     private var callbacks: PlayerSessionCallbacks? = null
@@ -131,6 +131,7 @@ internal class PlayerSessionController(
                 if (!request.usesOnlyLocalMedia() && callbacks.isNetworkAvailable().not()) {
                     monitorSuppressed = true
                     networkSuspended = true
+                    recovery.onNetworkUnavailable(generation.id)
                     callbacks.onOffline(if (request.isLive) 0L else player.currentPosition.coerceAtLeast(0L))
                     return
                 }
@@ -340,7 +341,7 @@ internal class PlayerSessionController(
         when (signal) {
             PlaybackHealthSignal.NONE -> Unit
             PlaybackHealthSignal.SOURCE_HEALTHY -> {
-                if (recovery.markSourceHealthy(generation.id)) {
+                if (recordPlaybackHealthSignal(signal, recovery, generation.id)) {
                     Log.i(
                         HULK_PLAYER_LOG_TAG,
                         "recovery result=source_healthy generation=${generation.safeLogId} " +
@@ -350,7 +351,7 @@ internal class PlayerSessionController(
                 }
             }
             PlaybackHealthSignal.AUDIO_HEALTHY -> {
-                recovery.markAudioHealthy(generation.id)
+                recordPlaybackHealthSignal(signal, recovery, generation.id)
                 resumeDeferredRecovery(player)
             }
             PlaybackHealthSignal.STARTUP_TIMEOUT -> {
@@ -375,6 +376,7 @@ internal class PlayerSessionController(
     fun onNetworkUnavailable() {
         networkSuspended = true
         monitorSuppressed = true
+        recovery.onNetworkUnavailable(generation.id)
     }
 
     fun onNetworkRestored(player: ExoPlayer) {
@@ -385,8 +387,19 @@ internal class PlayerSessionController(
 
     fun onAppForegroundChanged(player: ExoPlayer, foreground: Boolean) {
         appForeground = foreground
-        if (!foreground || !acceptsCurrentSource(player)) return
+        if (!foreground) return
         val pending = deferredRecovery ?: return
+        if (
+            !canReplayDeferredRecovery(
+                acceptsPlayer = accepts(player),
+                currentSourceAccepted = acceptsCurrentSource(player),
+                firstPreparationPending = preparedCandidateIndex < 0 && expectedSource == null,
+                pendingFailureClass = pending.failureClass,
+                pendingTrigger = pending.trigger,
+            )
+        ) {
+            return
+        }
         deferredRecovery = null
         if (pending.failureClass == RecoveryFailureClass.AUDIO) {
             issueAudioRecovery(
@@ -471,7 +484,7 @@ internal class PlayerSessionController(
     }
 
     private fun resumeDeferredRecovery(player: ExoPlayer) {
-        if (recovery.activeFailure != null || monitorSuppressed || !appForeground) return
+        if (!canResumeDeferredRecovery(recovery.activeFailure, monitorSuppressed, appForeground)) return
         val pending = deferredRecovery ?: return
         deferredRecovery = null
         if (pending.failureClass == RecoveryFailureClass.AUDIO) {
@@ -722,6 +735,39 @@ internal class PlayerSessionController(
         }
     }
 }
+
+/**
+ * Foreground replay guard for deferred recovery. A source that has already been prepared must still
+ * match the player's current media item. Before the first preparation no expected source exists yet;
+ * only a deferred confirmed NETWORK_RESTORED source recovery may cross that gap, because it is the
+ * command that resolves the offline state and lets first preparation begin. Audio recovery and all
+ * other source triggers still require a prepared, current source.
+ */
+internal fun canReplayDeferredRecovery(
+    acceptsPlayer: Boolean,
+    currentSourceAccepted: Boolean,
+    firstPreparationPending: Boolean,
+    pendingFailureClass: RecoveryFailureClass,
+    pendingTrigger: RecoveryTrigger,
+): Boolean = acceptsPlayer &&
+    (
+        currentSourceAccepted ||
+            (
+                firstPreparationPending &&
+                    pendingFailureClass == RecoveryFailureClass.SOURCE &&
+                    pendingTrigger == RecoveryTrigger.NETWORK_RESTORED
+                )
+        )
+
+/**
+ * A deferred recovery may run only after the active failure has been proven clear, the health
+ * monitor is active and the app is foregrounded.
+ */
+internal fun canResumeDeferredRecovery(
+    activeFailure: RecoveryFailureClass?,
+    monitorSuppressed: Boolean,
+    appForeground: Boolean,
+): Boolean = activeFailure == null && !monitorSuppressed && appForeground
 
 private fun PlaybackRequest.usesOnlyLocalMedia(): Boolean =
     candidates.isNotEmpty() && candidates.all { candidate ->

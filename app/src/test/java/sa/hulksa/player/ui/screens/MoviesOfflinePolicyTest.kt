@@ -35,21 +35,12 @@ class MoviesOfflinePolicyTest {
     @Test
     fun movieOfflineCardCopyMatchesTheOwnerWording() {
         val interrupted = movieOfflineCardCopy(resumePending = false, formattedSavedTime = "03:52")
-        assertEquals("انقطع اتصال الانترنت", interrupted.title)
-        assertEquals("سيعود التشغيل تلقائيا عند عودة الاتصال", interrupted.body)
-        assertEquals("مكان توقفك محفوظ", interrupted.context)
-
         val pending = movieOfflineCardCopy(resumePending = true, formattedSavedTime = "03:52")
-        assertEquals("لا يوجد اتصال بالانترنت", pending.title)
-        assertEquals("اتصل بالانترنت لاكمال المشاهدة", pending.body)
-        assertEquals("توقفت عند 03:52", pending.context)
 
         listOf(interrupted, pending).forEach { copy ->
-            listOf(copy.title, copy.body, copy.context).forEach { line ->
-                assertFalse(line.contains('أ'))
-                assertFalse(line.contains('إ'))
-                assertFalse(line.contains('آ'))
-            }
+            assertEquals("لا يوجد اتصال بالإنترنت", copy.title)
+            assertEquals("بانتظار عودة الاتصال.", copy.body)
+            assertEquals("مكان توقفك محفوظ.", copy.context)
         }
     }
 
@@ -230,9 +221,9 @@ class MoviesOfflinePolicyTest {
             failureMessage = null,
             mediaLabel = "الفلم",
         )
-        assertEquals("لا يوجد اتصال بالانترنت", offlinePending.title)
-        assertEquals("اتصل بالانترنت لاكمال المشاهدة", offlinePending.body)
-        assertEquals("توقفت عند 03:52", offlinePending.context)
+        assertEquals("لا يوجد اتصال بالإنترنت", offlinePending.title)
+        assertEquals("بانتظار عودة الاتصال.", offlinePending.body)
+        assertEquals("مكان توقفك محفوظ.", offlinePending.context)
 
         val offlineInterrupted = moviePlayerErrorCopy(
             offline = true,
@@ -241,8 +232,20 @@ class MoviesOfflinePolicyTest {
             failureMessage = null,
             mediaLabel = "الفلم",
         )
-        assertEquals("انقطع اتصال الانترنت", offlineInterrupted.title)
-        assertEquals("سيعود التشغيل تلقائيا عند عودة الاتصال", offlineInterrupted.body)
+        assertEquals("لا يوجد اتصال بالإنترنت", offlineInterrupted.title)
+        assertEquals("بانتظار عودة الاتصال.", offlineInterrupted.body)
+        assertEquals("مكان توقفك محفوظ.", offlineInterrupted.context)
+
+        val offlineEpisode = moviePlayerErrorCopy(
+            offline = true,
+            resumePending = false,
+            formattedSavedTime = "03:52",
+            failureMessage = null,
+            mediaLabel = "الحلقة",
+        )
+        assertEquals("لا يوجد اتصال بالإنترنت", offlineEpisode.title)
+        assertEquals("بانتظار عودة الاتصال.", offlineEpisode.body)
+        assertEquals("مكان توقفك محفوظ.", offlineEpisode.context)
 
         val generic = moviePlayerErrorCopy(
             offline = false,
