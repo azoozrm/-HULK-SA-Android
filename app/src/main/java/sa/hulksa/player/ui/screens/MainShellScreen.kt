@@ -188,6 +188,7 @@ import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.MainDestination
 import sa.hulksa.player.data.AccountProfileStateScope
+import sa.hulksa.player.data.DownloadActionIntent
 import sa.hulksa.player.data.FavoriteMutationOutcome
 import sa.hulksa.player.data.GrowthAction
 import sa.hulksa.player.data.HomeHeroMetadataStore
@@ -1069,7 +1070,7 @@ fun MainShellScreen(
     onClearHistory: () -> Unit,
     onPlayDownload: (OfflineDownload) -> Unit,
     onDeleteDownload: (OfflineDownload) -> Unit,
-    onRetryDownload: (OfflineDownload) -> Unit,
+    onDownloadPrimaryAction: (OfflineDownload, DownloadActionIntent) -> Unit,
     onToggleWifiOnly: () -> Unit,
     onToggleDownloadSchedule: () -> Unit,
     onCycleConcurrentDownloads: () -> Unit,
@@ -1278,7 +1279,7 @@ fun MainShellScreen(
                         onClearHistory = onClearHistory,
                         onPlayDownload = onPlayDownload,
                         onDeleteDownload = onDeleteDownload,
-                        onRetryDownload = onRetryDownload,
+                        onDownloadPrimaryAction = onDownloadPrimaryAction,
                         onToggleWifiOnly = onToggleWifiOnly,
                         onToggleDownloadSchedule = onToggleDownloadSchedule,
                         onCycleConcurrentDownloads = onCycleConcurrentDownloads,
@@ -1334,7 +1335,7 @@ fun MainShellScreen(
                         onClearHistory = onClearHistory,
                         onPlayDownload = onPlayDownload,
                         onDeleteDownload = onDeleteDownload,
-                        onRetryDownload = onRetryDownload,
+                        onDownloadPrimaryAction = onDownloadPrimaryAction,
                         onToggleWifiOnly = onToggleWifiOnly,
                         onToggleDownloadSchedule = onToggleDownloadSchedule,
                         onCycleConcurrentDownloads = onCycleConcurrentDownloads,
@@ -1552,7 +1553,7 @@ private fun DestinationContent(
     onClearHistory: () -> Unit,
     onPlayDownload: (OfflineDownload) -> Unit,
     onDeleteDownload: (OfflineDownload) -> Unit,
-    onRetryDownload: (OfflineDownload) -> Unit,
+    onDownloadPrimaryAction: (OfflineDownload, DownloadActionIntent) -> Unit,
     onToggleWifiOnly: () -> Unit,
     onToggleDownloadSchedule: () -> Unit,
     onCycleConcurrentDownloads: () -> Unit,
@@ -1665,7 +1666,7 @@ private fun DestinationContent(
             navigationMemory = navigationMemory,
             onPlay = onPlayDownload,
             onDelete = onDeleteDownload,
-            onRetry = onRetryDownload,
+            onDownloadPrimaryAction = onDownloadPrimaryAction,
             onToggleWifiOnly = onToggleWifiOnly,
             onToggleSchedule = onToggleDownloadSchedule,
             onCycleConcurrent = onCycleConcurrentDownloads,
@@ -4990,7 +4991,7 @@ private fun DownloadsScreen(
     navigationMemory: NavigationMemoryStore,
     onPlay: (OfflineDownload) -> Unit,
     onDelete: (OfflineDownload) -> Unit,
-    onRetry: (OfflineDownload) -> Unit,
+    onDownloadPrimaryAction: (OfflineDownload, DownloadActionIntent) -> Unit,
     onToggleWifiOnly: () -> Unit,
     onToggleSchedule: () -> Unit,
     onCycleConcurrent: () -> Unit,
@@ -5414,7 +5415,7 @@ private fun DownloadsScreen(
                                         },
                                         onPlay = onPlay,
                                         onDelete = ::deleteWithFocusTransfer,
-                                        onRetry = onRetry,
+                                        onDownloadPrimaryAction = onDownloadPrimaryAction,
                                         onCyclePriority = onCyclePriority,
                                         modifier = Modifier.fillMaxWidth(),
                                     )
@@ -5435,7 +5436,7 @@ private fun DownloadsScreen(
                                         },
                                         onPlay = onPlay,
                                         onDelete = ::deleteWithFocusTransfer,
-                                        onRetry = onRetry,
+                                        onDownloadPrimaryAction = onDownloadPrimaryAction,
                                         onCyclePriority = onCyclePriority,
                                         modifier = Modifier.fillMaxWidth(),
                                     )
@@ -5771,7 +5772,7 @@ private fun DownloadCard(
     onDirection: (DownloadFocusSlot, DownloadFocusMove) -> Boolean,
     onPlay: (OfflineDownload) -> Unit,
     onDelete: (OfflineDownload) -> Unit,
-    onRetry: (OfflineDownload) -> Unit,
+    onDownloadPrimaryAction: (OfflineDownload, DownloadActionIntent) -> Unit,
     onCyclePriority: (OfflineDownload) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -5806,7 +5807,7 @@ private fun DownloadCard(
             onDirection = onDirection,
             onPlay = onPlay,
             onDelete = onDelete,
-            onRetry = onRetry,
+            onDownloadPrimaryAction = onDownloadPrimaryAction,
             onCyclePriority = onCyclePriority,
             fillPrimaryWidth = true,
         )
@@ -5823,7 +5824,7 @@ private fun DownloadTvRow(
     onDirection: (DownloadFocusSlot, DownloadFocusMove) -> Boolean,
     onPlay: (OfflineDownload) -> Unit,
     onDelete: (OfflineDownload) -> Unit,
-    onRetry: (OfflineDownload) -> Unit,
+    onDownloadPrimaryAction: (OfflineDownload, DownloadActionIntent) -> Unit,
     onCyclePriority: (OfflineDownload) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -5864,7 +5865,7 @@ private fun DownloadTvRow(
             onDirection = onDirection,
             onPlay = onPlay,
             onDelete = onDelete,
-            onRetry = onRetry,
+            onDownloadPrimaryAction = onDownloadPrimaryAction,
             onCyclePriority = onCyclePriority,
         )
     }
@@ -6031,7 +6032,7 @@ private fun DownloadTvRowActions(
     onDirection: (DownloadFocusSlot, DownloadFocusMove) -> Boolean,
     onPlay: (OfflineDownload) -> Unit,
     onDelete: (OfflineDownload) -> Unit,
-    onRetry: (OfflineDownload) -> Unit,
+    onDownloadPrimaryAction: (OfflineDownload, DownloadActionIntent) -> Unit,
     onCyclePriority: (OfflineDownload) -> Unit,
     fillPrimaryWidth: Boolean = false,
 ) {
@@ -6053,7 +6054,13 @@ private fun DownloadTvRowActions(
             isTv = isTv,
             emphasized = true,
             onClick = {
-                if (action == DownloadTvRowAction.PLAY) onPlay(item) else onRetry(item)
+                if (action == DownloadTvRowAction.PLAY) {
+                    onPlay(item)
+                } else {
+                    downloadTvRowActionIntent(action)?.let { intent ->
+                        onDownloadPrimaryAction(item, intent)
+                    }
+                }
             },
             onFocused = { onFocused(DownloadFocusSlot.PRIMARY) },
             modifier = (

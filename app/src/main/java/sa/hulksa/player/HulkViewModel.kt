@@ -30,6 +30,10 @@ import sa.hulksa.player.data.AuthenticatedSessionOwner
 import sa.hulksa.player.data.AuthenticatedSessionRegistry
 import sa.hulksa.player.data.AuthenticationStartResult
 import sa.hulksa.player.data.ContentMetadataRequestKey
+import sa.hulksa.player.data.DownloadActionClaim
+import sa.hulksa.player.data.DownloadActionIntent
+import sa.hulksa.player.data.DownloadActionOutcome
+import sa.hulksa.player.data.DownloadPrimaryActionDispatcher
 import sa.hulksa.player.data.DownloadRepository
 import sa.hulksa.player.data.EpisodeNotificationPopup
 import sa.hulksa.player.data.EpisodeNotificationSubscription
@@ -69,7 +73,6 @@ import sa.hulksa.player.data.PresenceClient
 import sa.hulksa.player.data.PresenceLifecycleOwner
 import sa.hulksa.player.data.currentPresenceAppMetadata
 import sa.hulksa.player.data.currentPresenceDeviceMetadata
-import sa.hulksa.player.data.ProfileDownloadPauseOutcome
 import sa.hulksa.player.data.ProfileDownloadMutationOutcome
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.data.UserLibrary
@@ -299,12 +302,6 @@ internal suspend fun <T> runDownloadEnqueueOffMain(
     enqueue()
 }
 
-internal suspend fun runDownloadPauseOffMain(
-    pause: () -> ProfileDownloadPauseOutcome,
-): ProfileDownloadPauseOutcome = withContext(Dispatchers.IO) {
-    pause()
-}
-
 internal suspend fun <T> runDownloadSettingsPersistenceOffMain(
     persistence: suspend () -> T,
 ): T = withContext(Dispatchers.IO) {
@@ -435,15 +432,50 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val detailsRequestGate = DetailsRequestGate()
     private val downloadSettingsMutationGate = DownloadSettingsMutationGate()
     private val downloadSnapshotPublicationGate = DownloadSnapshotPublicationGate()
-    private val downloadResumeMutationGates = mutableMapOf<Long, DownloadSettingsMutationGate>()
+    private val downloadPrimaryActionDispatcher = DownloadPrimaryActionDispatcher(downloadRepository)
     private val downloadPriorityMutationQueues = mutableMapOf<Long, DownloadPriorityMutationQueue>()
     private var loginJob: Job? = null
     private var logoutJob: Job? = null
     private var pendingAccountDecision: PendingAccountDecision? = null
-    private val catalogJobs = mutableMapOf<ContentType, Job>()
-    private var catalogGeneration: Long = 0L
     private val loadedCatalogs = mutableMapOf<ContentType, Catalog>()
     private val homeCatalogs = mutableMapOf<ContentType, Catalog>()
+    private val catalogRequestOwner = CatalogRequestOwner(
+        scope = viewModelScope,
+        load = { activeSession, type ->
+            val full = repository.catalog(activeSession, type)
+            val snapshot = mutableState.value
+            val home = if (type == ContentType.MOVIE || type == ContentType.SERIES) {
+                withContext(Dispatchers.Default) {
+                    compactHomeCatalog(full, snapshot.favorites, snapshot.history)
+                }
+            } else {
+                full
+            }
+            CatalogLoadResult(full = full, home = home)
+        },
+        hasLoaded = { type -> loadedCatalogs[type] != null },
+        isSessionCurrent = { activeSession -> session === activeSession },
+        onLoadingChanged = { loadingTypes ->
+            mutableState.update { it.copy(loadingTypes = loadingTypes) }
+        },
+        onLoaded = { type, result, remaining ->
+            loadedCatalogs[type] = result.full
+            homeCatalogs[type] = result.home
+            mutableState.update { state ->
+                val base = state.catalogs + (type to result.full)
+                state.copy(
+                    catalogs = catalogsForDestination(state.destination, base),
+                    loadingTypes = remaining,
+                )
+            }
+            resolvePendingTvDeepLink()
+            scheduleTvPlatformSync(immediate = false)
+        },
+        onFailure = { _, error, remaining ->
+            mutableState.update { it.copy(loadingTypes = remaining) }
+            showFailure(error)
+        },
+    )
     private val selectedCategoryByType = mutableMapOf<ContentType, String?>()
     private var detailsJob: Job? = null
     private var accountRefreshJob: Job? = null
@@ -1332,7 +1364,15 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         return true
     }
 
-    fun retryDownload(item: OfflineDownload, onResult: (DownloadFeedback) -> Unit = {}) {
+    /**
+     * Applies the explicit download action the user saw. The authoritative record validates the
+     * intent; it never chooses a different action, so a stale Retry cannot become a Pause.
+     */
+    fun onDownloadPrimaryAction(
+        item: OfflineDownload,
+        intent: DownloadActionIntent,
+        onResult: (DownloadFeedback) -> Unit = {},
+    ) {
         if (!mutableState.value.operations.features.downloadsEnabled) {
             onResult(downloadFeatureDisabledFeedback())
             return
@@ -1348,15 +1388,12 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         viewModelScope.launch {
-            // The UI item may be stale. The owned repository record is the authority for
-            // choosing pause/resume and for refusing to restart a completed download.
-            val record = runDownloadSettingsPersistenceOffMain {
-                downloadRepository.record(
-                    downloadId = item.downloadId,
-                    expectedAccountId = expectedAccountId,
-                    expectedProfileId = expectedProfileId,
-                )
-            }
+            val outcome = downloadPrimaryActionDispatcher.dispatch(
+                downloadId = item.downloadId,
+                expectedAccountId = expectedAccountId,
+                expectedProfileId = expectedProfileId,
+                intent = intent,
+            )
             if (
                 session !== expectedSession ||
                 !downloadOwnerContextMatches(
@@ -1366,122 +1403,32 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     activeProfileId = profileStore.activeProfileId(),
                 )
             ) return@launch
-            if (record == null) {
-                onResult(downloadOwnerChangedFeedback())
-                return@launch
-            }
-            when (record.status) {
-                OfflineStatus.COMPLETED -> onResult(downloadAlreadyCompletedFeedback())
-                OfflineStatus.QUEUED,
-                OfflineStatus.CHECKING,
-                OfflineStatus.DOWNLOADING,
-                -> pauseDownload(
-                    item = record,
-                    expectedSession = expectedSession,
-                    expectedAccountId = expectedAccountId,
-                    expectedProfileId = expectedProfileId,
-                    onResult = onResult,
-                )
-                OfflineStatus.PAUSED,
-                OfflineStatus.WAITING_SCHEDULE,
-                OfflineStatus.WAITING_NETWORK,
-                OfflineStatus.WAITING_STORAGE,
-                -> resumeDownload(
-                    item = record,
-                    successFeedback = downloadResumeAcceptedFeedback(),
-                    expectedSession = expectedSession,
-                    expectedAccountId = expectedAccountId,
-                    expectedProfileId = expectedProfileId,
-                    onResult = onResult,
-                )
-                OfflineStatus.FAILED -> resumeDownload(
-                    item = record,
-                    successFeedback = downloadRetryAcceptedFeedback(),
-                    expectedSession = expectedSession,
-                    expectedAccountId = expectedAccountId,
-                    expectedProfileId = expectedProfileId,
-                    onResult = onResult,
-                )
-            }
-        }
-    }
-
-    private fun pauseDownload(
-        item: OfflineDownload,
-        expectedSession: AuthenticatedSession,
-        expectedAccountId: String,
-        expectedProfileId: String,
-        onResult: (DownloadFeedback) -> Unit,
-    ) {
-        viewModelScope.launch {
-            val outcome = runDownloadPauseOffMain {
-                downloadRepository.pause(
-                    downloadId = item.downloadId,
-                    expectedAccountId = expectedAccountId,
-                    expectedProfileId = expectedProfileId,
-                )
-            }
-            if (
-                session !== expectedSession ||
-                !downloadOwnerContextMatches(
-                    expectedAccountId = expectedAccountId,
-                    expectedProfileId = expectedProfileId,
-                    activeAccountId = downloadRepository.activeAccountIdForCleanup(),
-                    activeProfileId = profileStore.activeProfileId(),
-                )
-            ) {
-                return@launch
-            }
-            if (outcome.applied && outcome.persisted) {
-                mutableState.update { it.copy(downloads = outcome.downloads) }
-                onResult(downloadPausePersistedFeedback())
-            } else {
-                onResult(downloadPauseFailedFeedback())
-            }
-        }
-    }
-
-    private fun resumeDownload(
-        item: OfflineDownload,
-        successFeedback: DownloadFeedback,
-        expectedSession: AuthenticatedSession,
-        expectedAccountId: String,
-        expectedProfileId: String,
-        onResult: (DownloadFeedback) -> Unit,
-    ) {
-        val gate = downloadResumeMutationGates.getOrPut(item.downloadId, ::DownloadSettingsMutationGate)
-        val attempt = gate.begin()
-        viewModelScope.launch {
-            val outcome = runDownloadSettingsPersistenceOffMain {
-                gate.writeIfCurrent(attempt) {
-                    downloadRepository.resume(item.downloadId, expectedAccountId, expectedProfileId)
-                }
-            } ?: return@launch
-            if (
-                !gate.isCurrent(attempt) ||
-                session !== expectedSession ||
-                !downloadOwnerContextMatches(
-                    expectedAccountId = expectedAccountId,
-                    expectedProfileId = expectedProfileId,
-                    activeAccountId = downloadRepository.activeAccountIdForCleanup(),
-                    activeProfileId = profileStore.activeProfileId(),
-                )
-            ) return@launch
-            if (outcome.resumed) {
+            if (outcome.downloads.isNotEmpty()) {
                 mutableState.update { state ->
                     state.copy(downloads = outcome.downloads)
                 }
-                onResult(successFeedback)
-                return@launch
             }
-            onResult(
-                if (outcome.status == OfflineStatus.COMPLETED) {
-                    downloadAlreadyCompletedFeedback()
-                } else {
-                    downloadGenericFailureFeedback()
-                },
-            )
+            downloadActionFeedback(outcome, intent)?.let(onResult)
         }
+    }
+
+    private fun downloadActionFeedback(
+        outcome: DownloadActionOutcome,
+        intent: DownloadActionIntent,
+    ): DownloadFeedback? = when (outcome.claim) {
+        DownloadActionClaim.APPLIED -> when (intent) {
+            DownloadActionIntent.RETRY -> downloadRetryAcceptedFeedback()
+            DownloadActionIntent.RESUME -> downloadResumeAcceptedFeedback()
+            DownloadActionIntent.PAUSE -> downloadPausePersistedFeedback()
+        }
+        DownloadActionClaim.ALREADY_QUEUED -> downloadAlreadyQueuedFeedback()
+        DownloadActionClaim.ALREADY_COMPLETED -> downloadAlreadyCompletedFeedback()
+        DownloadActionClaim.OWNER_CHANGED -> downloadOwnerChangedFeedback()
+        DownloadActionClaim.PERSISTENCE_FAILED -> downloadPauseFailedFeedback()
+        DownloadActionClaim.FAILED -> downloadGenericFailureFeedback()
+        DownloadActionClaim.NOT_APPLICABLE,
+        DownloadActionClaim.SUPERSEDED,
+        -> null
     }
 
     fun openHistory(entry: HistoryEntry) {
@@ -2110,8 +2057,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     fun onProfileChanged() {
         downloadSettingsMutationGate.invalidate()
         downloadSnapshotPublicationGate.invalidate()
-        downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
-        downloadResumeMutationGates.clear()
+        downloadPrimaryActionDispatcher.invalidate()
         downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
         downloadPriorityMutationQueues.clear()
         invalidatePlayerProgressPersistence()
@@ -2842,6 +2788,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                             errorMessage = null,
                         )
                     }
+                    catalogRequestOwner.replaceSession(
+                        session = refreshed,
+                        requiredTypes = catalogTypesForDestination(mutableState.value.destination),
+                    )
                     publishPresenceOwnership(refreshed)
                     onResult("تم تحديث بيانات الاشتراك من السيرفر.")
                 }
@@ -3003,9 +2953,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun invalidateCatalogRequests() {
-        catalogGeneration += 1L
-        catalogJobs.values.forEach(Job::cancel)
-        catalogJobs.clear()
+        catalogRequestOwner.invalidate()
     }
 
     private fun invalidateAccountRefresh() {
@@ -3043,8 +2991,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         invalidatePlayerProgressPersistence()
         downloadSettingsMutationGate.invalidate()
         downloadSnapshotPublicationGate.invalidate()
-        downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
-        downloadResumeMutationGates.clear()
+        downloadPrimaryActionDispatcher.invalidate()
         downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
         downloadPriorityMutationQueues.clear()
         logoutJob = viewModelScope.launch {
@@ -3331,8 +3278,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         invalidatePlayerProgressPersistence()
         downloadSettingsMutationGate.invalidate()
         downloadSnapshotPublicationGate.invalidate()
-        downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
-        downloadResumeMutationGates.clear()
+        downloadPrimaryActionDispatcher.invalidate()
         downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
         downloadPriorityMutationQueues.clear()
         session = authenticated
@@ -3388,12 +3334,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun ensureCatalog(type: ContentType, force: Boolean = false) {
         val activeSession = session ?: return
-        if (!catalogRequestShouldStart(
-                hasLoadedCatalog = loadedCatalogs[type] != null,
-                force = force,
-                inFlight = catalogJobs[type]?.isActive == true,
-            )
-        ) {
+        if (!catalogRequestOwner.request(activeSession, type, force)) {
             if (!force) {
                 mutableState.update { state ->
                     val display = catalogsForDestination(state.destination, state.catalogs)
@@ -3402,52 +3343,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             }
             return
         }
-        val requestGeneration = catalogGeneration
-        mutableState.update {
-            it.copy(loadingTypes = it.loadingTypes + type, errorMessage = null)
-        }
-        catalogJobs[type] = viewModelScope.launch {
-            try {
-                val full = repository.catalog(activeSession, type)
-                val snapshot = mutableState.value
-                val compact = if (type == ContentType.MOVIE || type == ContentType.SERIES) {
-                    withContext(Dispatchers.Default) {
-                        compactHomeCatalog(full, snapshot.favorites, snapshot.history)
-                    }
-                } else {
-                    full
-                }
-                if (!catalogPublicationAllowed(
-                        requestGeneration = requestGeneration,
-                        currentGeneration = catalogGeneration,
-                        sessionCurrent = session === activeSession,
-                    )
-                ) return@launch
-
-                loadedCatalogs[type] = full
-                homeCatalogs[type] = compact
-                mutableState.update { state ->
-                    val base = state.catalogs + (type to full)
-                    state.copy(
-                        catalogs = catalogsForDestination(state.destination, base),
-                        loadingTypes = state.loadingTypes - type,
-                    )
-                }
-                resolvePendingTvDeepLink()
-                scheduleTvPlatformSync(immediate = false)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                if (!catalogPublicationAllowed(
-                        requestGeneration = requestGeneration,
-                        currentGeneration = catalogGeneration,
-                        sessionCurrent = session === activeSession,
-                    )
-                ) return@launch
-                mutableState.update { it.copy(loadingTypes = it.loadingTypes - type) }
-                showFailure(error)
-            }
-        }
+        mutableState.update { it.copy(errorMessage = null) }
     }
 
     private fun resolvePendingTvDeepLink() {

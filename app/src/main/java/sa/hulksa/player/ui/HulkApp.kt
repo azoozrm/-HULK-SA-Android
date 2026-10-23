@@ -75,6 +75,7 @@ import sa.hulksa.player.ui.screens.PlayerProScreen
 import sa.hulksa.player.ui.screens.ScopedHomeActionNotice
 import sa.hulksa.player.ui.screens.SeriesDetailsProPolishedScreen
 import sa.hulksa.player.ui.screens.detailsProRelatedItems
+import sa.hulksa.player.ui.screens.downloadPrimaryActionIntent
 import sa.hulksa.player.ui.screens.favoriteFeedbackIcon
 import sa.hulksa.player.ui.screens.favoriteMutationFeedback
 import sa.hulksa.player.ui.screens.downloadNoticeDisplayText
@@ -426,8 +427,12 @@ fun HulkApp(
                                     onDeleteDownload = { item ->
                                         viewModel.deleteDownload(item, postDownloadFeedback)
                                     },
-                                    onRetryDownload = { item ->
-                                        viewModel.retryDownload(item, postDownloadFeedback)
+                                    onDownloadPrimaryAction = { item, intent ->
+                                        viewModel.onDownloadPrimaryAction(
+                                            item = item,
+                                            intent = intent,
+                                            onResult = postDownloadFeedback,
+                                        )
                                     },
                                     onToggleWifiOnly = { postDownloadFeedback(viewModel.toggleWifiOnly()) },
                                     onToggleDownloadSchedule = {
@@ -493,7 +498,13 @@ fun HulkApp(
                                     if (movieDownload == null) {
                                         viewModel.downloadSelectedMovie(postDownloadFeedback)
                                     } else {
-                                        viewModel.retryDownload(movieDownload, postDownloadFeedback)
+                                        downloadPrimaryActionIntent(movieDownload.status)?.let { intent ->
+                                            viewModel.onDownloadPrimaryAction(
+                                                item = movieDownload,
+                                                intent = intent,
+                                                onResult = postDownloadFeedback,
+                                            )
+                                        }
                                     }
                                 },
                                 onCancelDownload = {
@@ -563,7 +574,13 @@ fun HulkApp(
                                     if (existing == null) {
                                         viewModel.downloadEpisode(episode, postDownloadFeedback)
                                     } else {
-                                        viewModel.retryDownload(existing, postDownloadFeedback)
+                                        downloadPrimaryActionIntent(existing.status)?.let { intent ->
+                                            viewModel.onDownloadPrimaryAction(
+                                                item = existing,
+                                                intent = intent,
+                                                onResult = postDownloadFeedback,
+                                            )
+                                        }
                                     }
                                 },
                                 onCancelDownload = { episode ->

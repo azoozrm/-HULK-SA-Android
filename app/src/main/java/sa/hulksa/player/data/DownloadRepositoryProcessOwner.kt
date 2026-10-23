@@ -279,14 +279,14 @@ internal data class ProfileDownloadResumeOutcome(
     val status: OfflineStatus?,
 )
 
-internal class ProfileScopedDownloadRepository(context: Context) {
+internal class ProfileScopedDownloadRepository(context: Context) : DownloadPrimaryActionStore {
     private val appContext = context.applicationContext
     private val accountSessionStore = AccountSessionStore(appContext)
     private val profileStore = ProfileStore(appContext)
 
     fun downloads(): List<OfflineDownload> = snapshot()
 
-    fun snapshot(): List<OfflineDownload> {
+    override fun snapshot(): List<OfflineDownload> {
         val binding = activeSnapshotBinding() ?: return emptyList()
         return ProfileDownloadSnapshotList(
             accountId = binding.accountId,
@@ -361,7 +361,7 @@ internal class ProfileScopedDownloadRepository(context: Context) {
         )
     }
 
-    fun pause(
+    override fun pause(
         downloadId: Long,
         expectedAccountId: String,
         expectedProfileId: String,
@@ -401,7 +401,7 @@ internal class ProfileScopedDownloadRepository(context: Context) {
         )
     }
 
-    fun record(
+    override fun record(
         downloadId: Long,
         expectedAccountId: String,
         expectedProfileId: String,
@@ -419,7 +419,7 @@ internal class ProfileScopedDownloadRepository(context: Context) {
         return binding.delegate.record(downloadId)
     }
 
-    fun resume(
+    override fun resume(
         downloadId: Long,
         expectedAccountId: String,
         expectedProfileId: String,

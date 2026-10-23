@@ -10,6 +10,7 @@ MUTATION_GATE = REPO_ROOT / "app/src/main/java/sa/hulksa/player/DownloadSettings
 PROCESS_OWNER = REPO_ROOT / "app/src/main/java/sa/hulksa/player/data/DownloadRepositoryProcessOwner.kt"
 REPOSITORY = REPO_ROOT / "app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt"
 INDEX_STORE = REPO_ROOT / "app/src/main/java/sa/hulksa/player/data/DownloadIndexStore.kt"
+PRIMARY_ACTION = REPO_ROOT / "app/src/main/java/sa/hulksa/player/data/DownloadPrimaryAction.kt"
 
 
 class DownloadSettingsPersistenceContractTest(unittest.TestCase):
@@ -20,7 +21,13 @@ class DownloadSettingsPersistenceContractTest(unittest.TestCase):
         self.assertIn("downloadSettingsMutationGate.writeIfCurrent(attempt)", source)
         self.assertIn("downloadSettingsMutationGate.invalidate()", source)
         self.assertIn("downloadRepository.setSettings(next, expectedAccountId, expectedProfileId)", source)
-        self.assertIn("downloadRepository.resume(item.downloadId, expectedAccountId, expectedProfileId)", source)
+        self.assertIn("downloadPrimaryActionDispatcher.dispatch(", source)
+        self.assertIn("intent = intent", source)
+
+        action_source = PRIMARY_ACTION.read_text(encoding="utf-8")
+        self.assertIn("gate.writeIfCurrent(attempt)", action_source)
+        self.assertIn("downloads.resume(", action_source)
+        self.assertIn("withContext(Dispatchers.IO)", action_source)
 
     def test_settings_gate_releases_its_state_monitor_before_durable_persistence(self) -> None:
         source = MUTATION_GATE.read_text(encoding="utf-8")
@@ -32,9 +39,14 @@ class DownloadSettingsPersistenceContractTest(unittest.TestCase):
     def test_priority_queue_is_independent_from_resume_generation_ownership(self) -> None:
         source = VIEW_MODEL.read_text(encoding="utf-8")
 
-        self.assertIn("downloadResumeMutationGates", source)
+        self.assertIn("downloadPrimaryActionDispatcher", source)
         self.assertIn("downloadPriorityMutationQueues", source)
         self.assertIn("submitDownloadPriorityMutation", source)
+
+        action_source = PRIMARY_ACTION.read_text(encoding="utf-8")
+        self.assertIn("gates.getOrPut(downloadId, ::DownloadSettingsMutationGate)", action_source)
+        self.assertIn("gate.begin()", action_source)
+        self.assertIn("gate.writeIfCurrent(attempt)", action_source)
 
     def test_settings_mutations_are_bound_to_the_captured_account_and_profile(self) -> None:
         source = PROCESS_OWNER.read_text(encoding="utf-8")
