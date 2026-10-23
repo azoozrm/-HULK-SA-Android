@@ -10,6 +10,8 @@ on:
       - 'app/src/main/java/sa/hulksa/player/HulkViewModel.kt'
       - 'app/src/main/java/sa/hulksa/player/data/**'
       - 'app/src/test/java/sa/hulksa/player/data/**'
+      - 'app/src/androidTest/java/sa/hulksa/player/data/**'
+      - 'quality/compatibility-v2/tests/test_download_settings_persistence_contract.py'
 
 permissions:
   contents: read
