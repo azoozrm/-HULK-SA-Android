@@ -36,6 +36,7 @@ import sa.hulksa.player.data.EpisodeNotificationStoreResult
 import sa.hulksa.player.data.HulkRepository
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.data.HomeHeroTechnicalMetadata
+import sa.hulksa.player.data.historyPublicationAllowed
 import sa.hulksa.player.data.KidsContentFilterStore
 import sa.hulksa.player.data.LocalEpisodeNotification
 import sa.hulksa.player.data.LocalEpisodeNotificationStore
@@ -1542,11 +1543,52 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun removeHistoryEntry(key: String) {
-        val updated = userLibrary.removeHistory(key)
-        mutableState.update { it.copy(history = updated) }
-        tvLastSyncedPositions.remove(key)
-        scheduleTvPlatformSync(immediate = true)
+    fun removeHistoryEntry(key: String, onResult: (Boolean) -> Unit = {}) {
+        val expectedOwner = AuthenticatedSessionRegistry.currentOwner()
+        if (expectedOwner == null) {
+            onResult(false)
+            return
+        }
+        if (expectedOwner.session !== session) {
+            onResult(false)
+            return
+        }
+        if (mutableState.value.history.none { it.key == key }) {
+            onResult(false)
+            return
+        }
+        val expectedProfileId = profileStore.activeProfileId()
+        val historyAttempt = userLibrary.beginHistoryMutation()
+        viewModelScope.launch {
+            val updated = userLibrary.removeHistoryForOwner(
+                expectedOwner = expectedOwner,
+                expectedAccountId = expectedOwner.accountId,
+                expectedProfileId = expectedProfileId,
+                key = key,
+                historyAttempt = historyAttempt,
+            )
+            if (updated == null) {
+                onResult(false)
+                return@launch
+            }
+            if (!historyPublicationAllowed(
+                    attemptCurrent = userLibrary.isCurrentHistoryMutation(historyAttempt),
+                    sessionCurrent = AuthenticatedSessionRegistry.isCurrent(expectedOwner) &&
+                        session === expectedOwner.session,
+                    expectedAccountId = expectedOwner.accountId,
+                    activeAccountId = repository.activeAccountSession()?.accountId,
+                    expectedProfileId = expectedProfileId,
+                    activeProfileId = profileStore.activeProfileId(),
+                )
+            ) {
+                onResult(false)
+                return@launch
+            }
+            mutableState.update { it.copy(history = updated) }
+            tvLastSyncedPositions.remove(key)
+            scheduleTvPlatformSync(immediate = true)
+            onResult(true)
+        }
     }
 
     fun toggleFavorite(item: ContentItem) {
@@ -3625,22 +3667,45 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         if (operationsDeviceIsTv && !request.isLive) {
             tvLastSyncedPositions.remove(request.historyKey)
         }
-        playerProgressProfileOwner = profileStore.activeProfileId()
+        val expectedProfileId = profileStore.activeProfileId()
+        playerProgressProfileOwner = expectedProfileId
         val resumable = request.copy(resumePositionMs = userLibrary.resumePosition(request.historyKey))
-        val historyStartMs = android.os.SystemClock.uptimeMillis()
-        val updatedHistory = userLibrary.recordStart(resumable)
-        android.util.Log.i(
-            "HulkPlayer",
-            "history recorded t=${android.os.SystemClock.elapsedRealtime()} streamId=${request.streamId} " +
-                "in ${android.os.SystemClock.uptimeMillis() - historyStartMs}ms",
-        )
+        val expectedOwner = AuthenticatedSessionRegistry.currentOwner()
+            ?.takeIf { it.session === session }
+        val historyAttempt = userLibrary.currentHistoryAttempt()
         mutableState.update {
             it.copy(
                 screen = HulkScreen.PLAYER,
                 playback = resumable,
-                history = updatedHistory,
                 errorMessage = null,
             )
+        }
+        if (expectedOwner == null) return
+        viewModelScope.launch {
+            val historyStartMs = android.os.SystemClock.uptimeMillis()
+            val updatedHistory = userLibrary.recordStartForOwner(
+                expectedOwner = expectedOwner,
+                expectedAccountId = expectedOwner.accountId,
+                expectedProfileId = expectedProfileId,
+                request = resumable,
+                historyAttempt = historyAttempt,
+            ) ?: return@launch
+            android.util.Log.i(
+                "HulkPlayer",
+                "history recorded t=${android.os.SystemClock.elapsedRealtime()} streamId=${request.streamId} " +
+                    "in ${android.os.SystemClock.uptimeMillis() - historyStartMs}ms",
+            )
+            if (!historyPublicationAllowed(
+                    attemptCurrent = userLibrary.isCurrentHistoryMutation(historyAttempt),
+                    sessionCurrent = AuthenticatedSessionRegistry.isCurrent(expectedOwner) &&
+                        session === expectedOwner.session,
+                    expectedAccountId = expectedOwner.accountId,
+                    activeAccountId = repository.activeAccountSession()?.accountId,
+                    expectedProfileId = expectedProfileId,
+                    activeProfileId = profileStore.activeProfileId(),
+                )
+            ) return@launch
+            mutableState.update { it.copy(history = updatedHistory) }
         }
     }
 

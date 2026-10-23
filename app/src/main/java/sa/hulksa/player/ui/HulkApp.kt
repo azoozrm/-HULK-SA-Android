@@ -41,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -123,6 +124,7 @@ fun HulkApp(
     // can never clear a newer notice.
     var actionNotice by remember { mutableStateOf<ScopedNoticeEvent?>(null) }
     var actionNoticeSequence by remember { mutableLongStateOf(0L) }
+    val mobileHomeFocusRequester = remember { FocusRequester() }
     LaunchedEffect(actionNotice) {
         val event = actionNotice ?: return@LaunchedEffect
         delay(5_000L)
@@ -417,6 +419,9 @@ fun HulkApp(
                                             viewModel.openHistory(entry)
                                         }
                                     },
+                                    onRemoveHistoryEntry = { key, result ->
+                                        viewModel.removeHistoryEntry(key, result)
+                                    },
                                     onToggleFavorite = viewModel::toggleFavorite,
                                     onRefresh = viewModel::refresh,
                                     onOpenNotifications = openNotificationCenter,
@@ -458,6 +463,7 @@ fun HulkApp(
                                     homeMessagePresentation = homeMessagePresentation,
                                     onOpenAnnouncementDetail = onOpenHomeAnnouncementDetail,
                                     onOpenUpdateDetail = onOpenHomeUpdateDetail,
+                                    mobileHomeFocusRequester = mobileHomeFocusRequester,
                                 )
                             }
                         }
@@ -670,6 +676,7 @@ fun HulkApp(
                         selected = state.destination,
                         downloadsEnabled = state.operations.features.downloadsEnabled,
                         onSelectDestination = selectDestinationWithProfileContext,
+                        homeFocusRequester = mobileHomeFocusRequester,
                         modifier = Modifier.align(Alignment.BottomCenter),
                     )
                 }

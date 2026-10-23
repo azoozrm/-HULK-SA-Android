@@ -56,7 +56,9 @@ internal fun sanitizePersistedDownloadJson(raw: String?): String? {
         }
         if (changed) array.toString() else raw
     }.getOrElse {
-        if (containsCredentialBearingIptvMaterial(raw)) "[]" else raw
+        // Invalid top-level documents stay unreadable; sanitizer rejection must never
+        // manufacture a valid empty collection or create a new plaintext copy.
+        raw
     }
 }
 
@@ -117,13 +119,7 @@ internal fun scrubPersistedDownloadCredentialUrls(context: Context): Boolean {
     var persisted = true
     downloadNames.forEach { name ->
         val preferences = appContext.getSharedPreferences(name, Context.MODE_PRIVATE)
-        val raw = preferences.getString(DurableDownloadPreferenceStore.KEY_DOWNLOADS, null)
-        val sanitized = sanitizePersistedDownloadJson(raw)
-        if (sanitized != raw) {
-            persisted = preferences.edit()
-                .putString(DurableDownloadPreferenceStore.KEY_DOWNLOADS, sanitized)
-                .commit() && persisted
-        }
+        persisted = scrubPersistedDownloadCredentialDocument(preferences) && persisted
     }
 
     existingNames
@@ -141,13 +137,33 @@ internal fun scrubPersistedDownloadCredentialUrls(context: Context): Boolean {
     return persisted
 }
 
-private fun scrubCredentialBearingMetadataPreferences(preferences: SharedPreferences): Boolean {
+internal fun scrubPersistedDownloadCredentialDocument(preferences: SharedPreferences): Boolean {
+    val raw = runCatching {
+        preferences.getString(DurableDownloadPreferenceStore.KEY_DOWNLOADS, null)
+    }.getOrNull() ?: return true
+    val sanitized = sanitizePersistedDownloadJson(raw) ?: return true
+    if (containsCredentialBearingIptvMaterial(sanitized)) return false
+    if (sanitized == raw) return true
+    return runCatching {
+        preferences.edit()
+            .putString(DurableDownloadPreferenceStore.KEY_DOWNLOADS, sanitized)
+            .commit()
+    }.getOrDefault(false)
+}
+
+internal fun scrubCredentialBearingMetadataPreferences(preferences: SharedPreferences): Boolean {
     val replacements = mutableMapOf<String, String>()
+    var unsafe = false
     preferences.all.forEach { (key, value) ->
         val raw = value as? String ?: return@forEach
         val sanitized = sanitizePersistedMetadataJson(raw)
+        if (containsCredentialBearingIptvMaterial(sanitized)) {
+            unsafe = true
+            return@forEach
+        }
         if (sanitized != raw) replacements[key] = sanitized
     }
+    if (unsafe) return false
     if (replacements.isEmpty()) return true
     val editor = preferences.edit()
     replacements.forEach { (key, value) -> editor.putString(key, value) }
@@ -169,5 +185,6 @@ private fun sanitizePersistedMetadataJson(raw: String): String = runCatching {
     }
     if (changed) array.toString() else raw
 }.getOrElse {
-    if (containsCredentialBearingIptvMaterial(raw)) "[]" else raw
+    // Never replace an unreadable metadata document with a valid-empty value.
+    raw
 }

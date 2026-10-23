@@ -7,6 +7,7 @@ import sa.hulksa.player.model.DownloadSettings
 import sa.hulksa.player.model.AuthenticatedSession
 import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.PlaybackRequest
+import sa.hulksa.player.security.containsCredentialBearingIptvMaterial
 import java.security.MessageDigest
 
 internal enum class LegacyDownloadMigrationPolicy {
@@ -135,6 +136,7 @@ internal class DownloadAccountStorage(context: Context) {
                 copyPreferences(
                     source = appContext.getSharedPreferences(baseName, Context.MODE_PRIVATE),
                     target = editor,
+                    baseName = baseName,
                 )
             }
             check(editor.putBoolean(KEY_ACCOUNT_DOWNLOAD_SCOPE_MIGRATED, true).commit()) {
@@ -147,8 +149,14 @@ internal class DownloadAccountStorage(context: Context) {
     private fun copyPreferences(
         source: SharedPreferences,
         target: SharedPreferences.Editor,
+        baseName: String,
     ) {
+        var unsafePayloadSkipped = false
         source.all.forEach { (key, value) ->
+            if (value is String && containsCredentialBearingIptvMaterial(value)) {
+                unsafePayloadSkipped = true
+                return@forEach
+            }
             when (value) {
                 is Boolean -> target.putBoolean(key, value)
                 is Float -> target.putFloat(key, value)
@@ -157,6 +165,9 @@ internal class DownloadAccountStorage(context: Context) {
                 is String -> target.putString(key, value)
                 is Set<*> -> target.putStringSet(key, value.filterIsInstance<String>().toSet())
             }
+        }
+        if (unsafePayloadSkipped) {
+            target.putBoolean(unsafeLegacyMigrationMarkerKey(baseName), true)
         }
     }
 

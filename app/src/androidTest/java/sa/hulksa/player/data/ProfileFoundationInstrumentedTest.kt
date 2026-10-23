@@ -121,9 +121,9 @@ class ProfileFoundationInstrumentedTest {
     @Test
     fun logoutKeepsAccessCodeAndRotatedCodeKeepsSameSubscriberLibrary() {
         val sessionStore = AccountSessionStore(context)
-        val firstMetadata = sessionStore.recordAuthenticated(
-            session(host = HOST_A, accessCode = FIRST_ACCESS_CODE),
-        )
+        val firstSession = session(host = HOST_A, accessCode = FIRST_ACCESS_CODE)
+        val firstMetadata = sessionStore.recordAuthenticated(firstSession)
+        AuthenticatedSessionRegistry.update(firstSession, firstMetadata)
         val profileStore = ProfileStore(context)
         val createdProfile = requireNotNull(profileStore.createProfile("متابع"))
         val library = UserLibrary(context)
@@ -138,18 +138,28 @@ class ProfileFoundationInstrumentedTest {
             containerExtension = "mp4",
         )
         library.toggle(movie)
-        library.recordStart(
-            PlaybackRequest(
-                title = movie.name,
-                posterUrl = movie.posterUrl,
-                candidates = listOf("http://stream.example/movie/7.mp4"),
-                isLive = false,
-                historyKey = "MOVIE:7",
-                streamKind = "movie",
-                streamId = movie.id,
-                extension = "mp4",
-            ),
-        )
+        val owner = requireNotNull(AuthenticatedSessionRegistry.currentOwner())
+        val historyAttempt = library.beginHistoryMutation()
+        runBlocking {
+            requireNotNull(
+                library.recordStartForOwner(
+                    expectedOwner = owner,
+                    expectedAccountId = firstMetadata.accountId,
+                    expectedProfileId = profileStore.activeProfileId(),
+                    request = PlaybackRequest(
+                        title = movie.name,
+                        posterUrl = movie.posterUrl,
+                        candidates = listOf("http://stream.example/movie/7.mp4"),
+                        isLive = false,
+                        historyKey = "MOVIE:7",
+                        streamKind = "movie",
+                        streamId = movie.id,
+                        extension = "mp4",
+                    ),
+                    historyAttempt = historyAttempt,
+                ),
+            )
+        }
 
         assertEquals(FIRST_ACCESS_CODE, sessionStore.lastAccessCode())
 
@@ -196,6 +206,7 @@ class ProfileFoundationInstrumentedTest {
     )
 
     private fun clearTestState() {
+        AuthenticatedSessionRegistry.clear()
         val accountIds = setOf(
             stableAccountId(HOST_A, USERNAME),
             stableAccountId(HOST_B, USERNAME),

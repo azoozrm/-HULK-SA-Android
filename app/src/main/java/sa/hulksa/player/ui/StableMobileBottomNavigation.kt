@@ -31,6 +31,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -95,6 +97,7 @@ internal fun StableMobileBottomNavigation(
     selected: MainDestination,
     downloadsEnabled: Boolean,
     onSelectDestination: (MainDestination) -> Unit,
+    homeFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
     if (WindowInsets.isImeVisible) return
@@ -127,6 +130,7 @@ internal fun StableMobileBottomNavigation(
                 entries = visibleEntries,
                 selected = selected,
                 onSelectDestination = onSelectDestination,
+                homeFocusRequester = homeFocusRequester,
             )
         } else {
             val split = (visibleEntries.size + 1) / 2
@@ -135,11 +139,13 @@ internal fun StableMobileBottomNavigation(
                     entries = visibleEntries.take(split),
                     selected = selected,
                     onSelectDestination = onSelectDestination,
+                    homeFocusRequester = homeFocusRequester,
                 )
                 StableMobileNavigationRow(
                     entries = visibleEntries.drop(split),
                     selected = selected,
                     onSelectDestination = onSelectDestination,
+                    homeFocusRequester = homeFocusRequester,
                 )
             }
         }
@@ -151,6 +157,7 @@ private fun StableMobileNavigationRow(
     entries: List<StableMobileEntry>,
     selected: MainDestination,
     onSelectDestination: (MainDestination) -> Unit,
+    homeFocusRequester: FocusRequester?,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -162,6 +169,7 @@ private fun StableMobileNavigationRow(
                 label = entry.label,
                 active = selected == entry.destination,
                 onClick = { onSelectDestination(entry.destination) },
+                focusRequester = homeFocusRequester.takeIf { entry.destination == MainDestination.HOME },
                 modifier = Modifier.weight(1f),
             )
         }
@@ -174,6 +182,7 @@ private fun StableMobileNavItem(
     label: String,
     active: Boolean,
     onClick: () -> Unit,
+    focusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
@@ -186,6 +195,13 @@ private fun StableMobileNavItem(
     Column(
         modifier = modifier
             .height(MOBILE_BOTTOM_NAVIGATION_ITEM_HEIGHT)
+            .then(
+                if (focusRequester != null) {
+                    Modifier.focusRequester(focusRequester)
+                } else {
+                    Modifier
+                },
+            )
             .clip(shape)
             .background(
                 if (active) colors.gold.copy(alpha = .16f)
