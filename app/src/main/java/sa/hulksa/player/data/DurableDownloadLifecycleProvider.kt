@@ -79,6 +79,25 @@ internal suspend fun runDurableDownloadStartupMaintenanceWithRetry(
     return result
 }
 
+internal class DurableDownloadReconciliationIntent {
+    var forceWaitingNetworkReenqueue: Boolean = false
+
+    fun deferIfMutationInProgress(
+        snapshot: DurableDownloadPreferenceSnapshot,
+        scheduleRetry: () -> Unit,
+    ): Boolean {
+        if (!snapshot.mutationInProgress) return false
+        scheduleRetry()
+        return true
+    }
+
+    fun consumeForceWaitingNetwork(): Boolean {
+        val value = forceWaitingNetworkReenqueue
+        forceWaitingNetworkReenqueue = false
+        return value
+    }
+}
+
 internal class DurableDownloadLifecycleProvider : ContentProvider() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val startupScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -90,7 +109,7 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
     private var boundAccountId: String? = null
     private var connectivityManager: ConnectivityManager? = null
     private var knownSchedulingStates: Map<Long, DurableDownloadSchedulingState> = emptyMap()
-    private var forceWaitingNetworkReenqueue = false
+    private val reconciliationIntent = DurableDownloadReconciliationIntent()
 
     private val reconcileRunnable = Runnable(::reconcile)
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -171,7 +190,7 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
 
     private fun requestNetworkRecovery() {
         mainHandler.post {
-            forceWaitingNetworkReenqueue = true
+            reconciliationIntent.forceWaitingNetworkReenqueue = true
             requestReconciliation()
         }
     }
@@ -190,9 +209,16 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
         val currentStore = store ?: return
         val currentBridge = bridge ?: return
         val accountId = boundAccountId ?: return
-        val forceNetworkRecovery = forceWaitingNetworkReenqueue
-        forceWaitingNetworkReenqueue = false
         val snapshot = currentStore.snapshot()
+        if (reconciliationIntent.deferIfMutationInProgress(snapshot) {
+                DownloadPersistenceMutationGate.whenPublished(accountId) {
+                    mainHandler.post(::reconcile)
+                }
+            }
+        ) {
+            return
+        }
+        val forceNetworkRecovery = reconciliationIntent.consumeForceWaitingNetwork()
         val recordsById = snapshot.records.associateBy { it.downloadId }
         val currentStates = recordsById.mapValues { (_, record) ->
             durableDownloadSchedulingState(record, snapshot.wifiOnly)

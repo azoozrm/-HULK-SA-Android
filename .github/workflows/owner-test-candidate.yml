@@ -7,16 +7,13 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - '.github/workflows/owner-test-candidate.yml'
-      - 'app/src/main/java/sa/hulksa/player/playback/PlayerEnginePolicy.kt'
-      - 'app/src/main/java/sa/hulksa/player/playback/PlayerSessionController.kt'
-      - 'app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt'
-      - 'app/src/test/java/sa/hulksa/player/playback/VodForegroundRecoveryHandoffTest.kt'
-      - 'app/src/test/java/sa/hulksa/player/playback/VodNetworkRestoreRecoveryTest.kt'
-      - 'app/src/test/java/sa/hulksa/player/playback/VodRecoveryHealthHandoffTest.kt'
-      - 'app/src/test/java/sa/hulksa/player/ui/screens/VodNetworkRestoreIntentTest.kt'
+      - 'app/src/main/java/sa/hulksa/player/HulkViewModel.kt'
+      - 'app/src/main/java/sa/hulksa/player/data/**'
+      - 'app/src/test/java/sa/hulksa/player/data/**'
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: hulk-owner-test-candidate-${{ github.event.pull_request.number }}
@@ -27,21 +24,21 @@ jobs:
     name: Signed owner-test release APK
     if: >
       github.repository == 'azoozrm/-HULK-SA-Android' &&
-      github.event.pull_request.number == 360 &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'fix/vod-network-restore-f01' &&
+      github.event.pull_request.head.ref == 'fix/data-integrity-f02-f05-f09-f10' &&
       github.event.pull_request.base.ref == 'phase-3-v0.9.3.0-adaptive-foundation'
     runs-on: ubuntu-latest
     environment: production-signing
     timeout-minutes: 60
     env:
-      PRODUCT_SHA: 6ac26d560b59d515da54f51dd7bbfdef1fae99da
+      PRODUCT_SHA: ${{ github.event.pull_request.head.sha }}
       WORKFLOW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       WORKFLOW_MERGE_SHA: ${{ github.sha }}
       EXPECTED_PACKAGE: sa.hulksa.player
       EXPECTED_VERSION_CODE: '68'
       EXPECTED_VERSION_NAME: 1.0.0
       EXPECTED_INSTALLED_CERT_SHA256: 144e0548da502aa8bd060a9a280a98bb9dc6763387bf8b20ea100b5fed652fe0
+      GH_TOKEN: ${{ github.token }}
       HULK_RELEASE_KEYSTORE_BASE64: ${{ secrets.HULK_RELEASE_KEYSTORE_BASE64 }}
       ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_ALIAS: ${{ secrets.HULK_RELEASE_KEY_ALIAS }}
       ORG_GRADLE_PROJECT_HULK_RELEASE_STORE_PASSWORD: ${{ secrets.HULK_RELEASE_STORE_PASSWORD }}
@@ -49,29 +46,36 @@ jobs:
       EXPECTED_CERT_SHA256: ${{ secrets.HULK_RELEASE_CERT_SHA256 }}
 
     steps:
-      - name: Checkout exact reviewed product source
+      - name: Checkout exact PR head
         uses: actions/checkout@v7
         with:
-          ref: 6ac26d560b59d515da54f51dd7bbfdef1fae99da
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Verify product source identity
+      - name: Verify product source and current PR head identity
         run: |
           set -euo pipefail
           actual="$(git rev-parse HEAD)"
+          test -n "$PRODUCT_SHA"
           test "$actual" = "$PRODUCT_SHA"
-          test -f app/src/main/java/sa/hulksa/player/playback/PlayerSessionController.kt
-          test -f app/src/test/java/sa/hulksa/player/playback/VodRecoveryHealthHandoffTest.kt
+          current_pr_head="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${{ github.event.pull_request.number }}" --jq .head.sha)"
+          test "$current_pr_head" = "$PRODUCT_SHA"
+          test "$WORKFLOW_HEAD_SHA" = "$PRODUCT_SHA"
+          test -f app/src/main/java/sa/hulksa/player/data/DownloadIndexStore.kt
+          test -f app/src/main/java/sa/hulksa/player/data/ProfileStore.kt
+          test -f app/src/main/java/sa/hulksa/player/data/HistoryPersistence.kt
+          test -f app/src/test/java/sa/hulksa/player/data/DownloadRepositoryIntegrityTest.kt
           mkdir -p owner-test-artifacts
           {
             echo "product_source_sha=$PRODUCT_SHA"
             echo "product_checkout_sha=$actual"
+            echo "current_pr_head_sha=$current_pr_head"
             echo "workflow_head_sha=$WORKFLOW_HEAD_SHA"
             echo "workflow_merge_ref_sha=$WORKFLOW_MERGE_SHA"
             echo "workflow_ref=${GITHUB_REF}"
             echo "workflow_run_id=${GITHUB_RUN_ID}"
-            echo "pull_request=#360"
+            echo "pull_request=#${{ github.event.pull_request.number }}"
           } > owner-test-artifacts/SOURCE-PROVENANCE.txt
           cat owner-test-artifacts/SOURCE-PROVENANCE.txt
 
@@ -186,10 +190,10 @@ jobs:
         run: |
           set -euo pipefail
           cp app/build/outputs/apk/release/app-release.apk \
-            owner-test-artifacts/HULK-SA-OWNER-TEST-68-1.0.0.apk
+            owner-test-artifacts/HULK-SA-DATA-INTEGRITY-68-1.0.0.apk
           (
             cd owner-test-artifacts
-            sha256sum HULK-SA-OWNER-TEST-68-1.0.0.apk > APK-SHA256.txt
+            sha256sum HULK-SA-DATA-INTEGRITY-68-1.0.0.apk > APK-SHA256.txt
             find . -type f ! -name SHA256SUMS.txt ! -name APK-SHA256.txt -print0 \
               | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
             sha256sum -c SHA256SUMS.txt
@@ -199,7 +203,7 @@ jobs:
       - name: Upload only signed owner-test APK and sanitized evidence
         uses: actions/upload-artifact@v7
         with:
-          name: HULK-SA-OWNER-TEST-F01-6ac26d56-${{ github.run_id }}
+          name: HULK-SA-DATA-INTEGRITY-OWNER-TEST-${{ github.run_id }}
           path: owner-test-artifacts/
           if-no-files-found: error
           retention-days: 3

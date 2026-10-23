@@ -89,6 +89,92 @@ internal data class SecureFourDigitCredentialSnapshot(
     val iterations: Int,
 )
 
+internal data class StoredPinCredential(
+    val salt: ByteArray,
+    val verifier: ByteArray,
+    val iterations: Int,
+)
+
+internal sealed interface ProfilePinCredentialStatus {
+    data object Absent : ProfilePinCredentialStatus
+    data class Valid(val credential: StoredPinCredential) : ProfilePinCredentialStatus
+    data object Corrupt : ProfilePinCredentialStatus
+}
+
+internal fun hasEstablishedPinCredentialState(preferences: SharedPreferences): Boolean =
+    runCatching {
+        preferences.all.keys.any { it.startsWith("profile:") }
+    }.getOrDefault(true)
+
+internal fun profilePinRequiresProtection(status: ProfilePinCredentialStatus): Boolean =
+    status != ProfilePinCredentialStatus.Absent
+
+internal fun profilePinVerificationCredential(
+    status: ProfilePinCredentialStatus,
+): StoredPinCredential? = (status as? ProfilePinCredentialStatus.Valid)?.credential
+
+/**
+ * Classifies persisted PIN material without ever accepting a partial record as unprotected.
+ * Keys present in the credential namespace are authoritative; enabled foundation metadata with no
+ * credential keys also stays protected because the credential may have been damaged.
+ */
+internal fun readProfilePinCredentialStatus(
+    preferences: SharedPreferences,
+    profileId: String,
+    foundation: ProfilePinFoundation,
+    decodeBase64: (String) -> ByteArray? = { raw ->
+        runCatching { Base64.decode(raw, Base64.NO_WRAP) }.getOrNull()
+    },
+): ProfilePinCredentialStatus {
+    val id = profileId.trim().takeIf(String::isNotBlank) ?: return ProfilePinCredentialStatus.Absent
+    return try {
+        val keys = listOf(
+            ProfilePinCredentialStore.KEY_VERSION,
+            ProfilePinCredentialStore.KEY_ITERATIONS,
+            ProfilePinCredentialStore.KEY_SALT,
+            ProfilePinCredentialStore.KEY_VERIFIER,
+        )
+        val presentKeys = keys.count { preferences.contains("profile:$id:$it") }
+        if (presentKeys == 0) {
+            return if (foundation.enabled || foundation.credentialVersion > 0) {
+                ProfilePinCredentialStatus.Corrupt
+            } else {
+                ProfilePinCredentialStatus.Absent
+            }
+        }
+        if (presentKeys != keys.size) return ProfilePinCredentialStatus.Corrupt
+
+        val version = preferences.getInt("profile:$id:${ProfilePinCredentialStore.KEY_VERSION}", 0)
+        if (version != ProfilePinCredentialStore.CURRENT_CREDENTIAL_VERSION) {
+            return ProfilePinCredentialStatus.Corrupt
+        }
+        val iterations = preferences.getInt(
+            "profile:$id:${ProfilePinCredentialStore.KEY_ITERATIONS}",
+            0,
+        )
+        if (iterations <= 0) return ProfilePinCredentialStatus.Corrupt
+        val salt = preferences.getString(
+            "profile:$id:${ProfilePinCredentialStore.KEY_SALT}",
+            null,
+        )?.let(decodeBase64)?.takeIf(ByteArray::isNotEmpty)
+            ?: return ProfilePinCredentialStatus.Corrupt
+        val verifier = preferences.getString(
+            "profile:$id:${ProfilePinCredentialStore.KEY_VERIFIER}",
+            null,
+        )?.let(decodeBase64)?.takeIf(ByteArray::isNotEmpty)
+            ?: return ProfilePinCredentialStatus.Corrupt
+        ProfilePinCredentialStatus.Valid(
+            StoredPinCredential(
+                salt = salt,
+                verifier = verifier,
+                iterations = iterations,
+            ),
+        )
+    } catch (_: Exception) {
+        ProfilePinCredentialStatus.Corrupt
+    }
+}
+
 internal data class FourDigitCredentialAttemptState(
     val failedAttempts: Int = 0,
     val lockoutLevel: Int = 0,
@@ -170,10 +256,44 @@ internal sealed interface FourDigitCredentialAttemptDecision {
     data object Unavailable : FourDigitCredentialAttemptDecision
 }
 
+internal interface CredentialAttemptProtection {
+    fun check(
+        preferences: SharedPreferences,
+        prefix: String,
+    ): FourDigitCredentialAttemptDecision
+
+    fun recordFailure(
+        preferences: SharedPreferences,
+        prefix: String,
+    ): FourDigitCredentialAttemptDecision
+
+    fun reset(
+        preferences: SharedPreferences,
+        prefix: String,
+    ): Boolean
+
+    fun removeFromEditor(
+        editor: SharedPreferences.Editor,
+        prefix: String,
+    ): SharedPreferences.Editor
+}
+
+internal data class PinCredentialCodec(
+    val encode: (ByteArray) -> String,
+    val decode: (String) -> ByteArray?,
+) {
+    companion object {
+        fun android(): PinCredentialCodec = PinCredentialCodec(
+            encode = { bytes -> Base64.encodeToString(bytes, Base64.NO_WRAP) },
+            decode = { raw -> runCatching { Base64.decode(raw, Base64.NO_WRAP) }.getOrNull() },
+        )
+    }
+}
+
 internal class FourDigitCredentialAttemptProtection(
     private val context: Context,
-) {
-    fun check(
+) : CredentialAttemptProtection {
+    override fun check(
         preferences: SharedPreferences,
         prefix: String,
     ): FourDigitCredentialAttemptDecision {
@@ -203,7 +323,7 @@ internal class FourDigitCredentialAttemptProtection(
         }
     }
 
-    fun recordFailure(
+    override fun recordFailure(
         preferences: SharedPreferences,
         prefix: String,
     ): FourDigitCredentialAttemptDecision {
@@ -256,7 +376,7 @@ internal class FourDigitCredentialAttemptProtection(
         }
     }
 
-    fun reset(
+    override fun reset(
         preferences: SharedPreferences,
         prefix: String,
     ): Boolean = runCatching {
@@ -270,7 +390,7 @@ internal class FourDigitCredentialAttemptProtection(
             .commit()
     }.getOrDefault(false)
 
-    fun removeFromEditor(
+    override fun removeFromEditor(
         editor: SharedPreferences.Editor,
         prefix: String,
     ): SharedPreferences.Editor = editor
@@ -394,20 +514,68 @@ internal fun credentialVerificationMutex(ownerKey: String): Mutex =
  * PBKDF2 work is dispatched to [cpuDispatcher]. Blocking SharedPreferences commits, including the
  * matching PIN foundation metadata update, are dispatched to [ioDispatcher].
  */
-class ProfilePinCredentialStore(
-    context: Context,
-    private val cpuDispatcher: CoroutineDispatcher = Dispatchers.Default,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+class ProfilePinCredentialStore internal constructor(
+    private val accountScope: AccountScopeStore,
+    private val profilePreferencesStore: ProfilePreferencesStore,
+    private val secureRandom: SecureRandom,
+    private val attemptProtection: CredentialAttemptProtection,
+    private val codec: PinCredentialCodec,
+    private val scopedPreferencesForAccount: (String) -> SharedPreferences,
+    private val cpuDispatcher: CoroutineDispatcher,
+    private val ioDispatcher: CoroutineDispatcher,
 ) {
-    private val appContext = context.applicationContext
-    private val accountScope = AccountScopeStore(appContext)
-    private val profilePreferencesStore = ProfilePreferencesStore(appContext)
+    constructor(
+        context: Context,
+        cpuDispatcher: CoroutineDispatcher = Dispatchers.Default,
+        ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    ) : this(
+        accountScope = AccountScopeStore(context.applicationContext),
+        profilePreferencesStore = ProfilePreferencesStore(context.applicationContext),
+        secureRandom = SecureRandom(),
+        attemptProtection = FourDigitCredentialAttemptProtection(context.applicationContext),
+        codec = PinCredentialCodec.android(),
+        scopedPreferencesForAccount = { accountId ->
+            context.applicationContext.getSharedPreferences(
+                accountScopedPreferencesName(PREFERENCES_NAME, accountId),
+                Context.MODE_PRIVATE,
+            )
+        },
+        cpuDispatcher = cpuDispatcher,
+        ioDispatcher = ioDispatcher,
+    )
+
     private val preferences: SharedPreferences
         get() = accountScope.preferences(PREFERENCES_NAME)
-    private val secureRandom = SecureRandom()
-    private val attemptProtection = FourDigitCredentialAttemptProtection(appContext)
 
-    fun hasPin(profileId: String): Boolean = load(profileId) != null
+    fun hasPin(profileId: String): Boolean = try {
+        profilePinRequiresProtection(credentialStatus(profileId))
+    } catch (_: Exception) {
+        true
+    }
+
+    internal fun credentialStatus(profileId: String): ProfilePinCredentialStatus = try {
+        credentialStatus(profileId, preferences)
+    } catch (_: Exception) {
+        ProfilePinCredentialStatus.Corrupt
+    }
+
+    private fun credentialStatus(
+        profileId: String,
+        sourcePreferences: SharedPreferences,
+    ): ProfilePinCredentialStatus {
+        val id = normalizeProfileId(profileId) ?: return ProfilePinCredentialStatus.Absent
+        val foundation = try {
+            profilePreferencesStore.pinFoundationForCredential(id)
+        } catch (_: Exception) {
+            return ProfilePinCredentialStatus.Corrupt
+        }
+        return readProfilePinCredentialStatus(
+            preferences = sourcePreferences,
+            profileId = id,
+            foundation = foundation,
+            decodeBase64 = codec.decode,
+        )
+    }
 
     suspend fun setPin(profileId: String, pin: String): Boolean {
         val id = normalizeProfileId(profileId) ?: return false
@@ -468,7 +636,7 @@ class ProfilePinCredentialStore(
         } catch (_: Exception) {
             null
         } ?: return false
-        val targetPreferences = preferencesForAccount(accountId)
+        val targetPreferences = scopedPreferencesForAccount(accountId)
         val attemptPrefix = attemptPrefix(id)
         val ownerKey = "profile-pin:$accountId:$id"
 
@@ -486,21 +654,27 @@ class ProfilePinCredentialStore(
             }
 
             val credential = try {
-                withContext(ioDispatcher) { load(id, targetPreferences) }
+                withContext(ioDispatcher) { credentialStatus(id, targetPreferences) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                null
-            } ?: return@withLock false
+                ProfilePinCredentialStatus.Corrupt
+            }
+            val storedCredential = when (credential) {
+                is ProfilePinCredentialStatus.Valid -> credential.credential
+                ProfilePinCredentialStatus.Absent -> return@withLock false
+                ProfilePinCredentialStatus.Corrupt ->
+                    throw FourDigitCredentialProtectionUnavailableException()
+            }
 
             val matches = try {
                 withContext(cpuDispatcher) {
                     val candidate = deriveProfilePinVerifier(
                         pin = pin,
-                        salt = credential.salt,
-                        iterations = credential.iterations,
+                        salt = storedCredential.salt,
+                        iterations = storedCredential.iterations,
                     )
-                    MessageDigest.isEqual(credential.verifier, candidate)
+                    MessageDigest.isEqual(storedCredential.verifier, candidate)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -585,7 +759,7 @@ class ProfilePinCredentialStore(
     suspend fun clearCredential(accountId: String, profileId: String): Boolean {
         val normalizedAccountId = accountId.trim().takeIf(String::isNotBlank) ?: return false
         val id = normalizeProfileId(profileId) ?: return false
-        val scopedPreferences = preferencesForAccount(normalizedAccountId)
+        val scopedPreferences = scopedPreferencesForAccount(normalizedAccountId)
         return try {
             withContext(ioDispatcher) {
                 try {
@@ -614,7 +788,7 @@ class ProfilePinCredentialStore(
             val scopedPreferences = if (accountScope.activeAccountId() == normalizedAccountId) {
                 accountScope.preferences(PREFERENCES_NAME)
             } else {
-                preferencesForAccount(normalizedAccountId)
+                scopedPreferencesForAccount(normalizedAccountId)
             }
             load(id, scopedPreferences)?.let { credential ->
                 SecureFourDigitCredentialSnapshot(
@@ -633,11 +807,8 @@ class ProfilePinCredentialStore(
     ): Boolean = preferences.edit()
         .putInt(key(profileId, KEY_VERSION), CURRENT_CREDENTIAL_VERSION)
         .putInt(key(profileId, KEY_ITERATIONS), credential.iterations)
-        .putString(key(profileId, KEY_SALT), Base64.encodeToString(credential.salt, Base64.NO_WRAP))
-        .putString(
-            key(profileId, KEY_VERIFIER),
-            Base64.encodeToString(credential.verifier, Base64.NO_WRAP),
-        )
+        .putString(key(profileId, KEY_SALT), codec.encode(credential.salt))
+        .putString(key(profileId, KEY_VERIFIER), codec.encode(credential.verifier))
         .commit()
 
     @Synchronized
@@ -658,35 +829,8 @@ class ProfilePinCredentialStore(
     private fun load(
         profileId: String,
         sourcePreferences: SharedPreferences = preferences,
-    ): StoredPinCredential? {
-        val id = normalizeProfileId(profileId) ?: return null
-        val version = sourcePreferences.getInt(key(id, KEY_VERSION), 0)
-        if (version != CURRENT_CREDENTIAL_VERSION) return null
-
-        val iterations = sourcePreferences.getInt(key(id, KEY_ITERATIONS), 0)
-        if (iterations <= 0) return null
-
-        val salt = sourcePreferences.getString(key(id, KEY_SALT), null)
-            ?.let { runCatching { Base64.decode(it, Base64.NO_WRAP) }.getOrNull() }
-            ?.takeIf { it.isNotEmpty() }
-            ?: return null
-        val verifier = sourcePreferences.getString(key(id, KEY_VERIFIER), null)
-            ?.let { runCatching { Base64.decode(it, Base64.NO_WRAP) }.getOrNull() }
-            ?.takeIf { it.isNotEmpty() }
-            ?: return null
-
-        return StoredPinCredential(
-            salt = salt,
-            verifier = verifier,
-            iterations = iterations,
-        )
-    }
-
-    private fun preferencesForAccount(accountId: String): SharedPreferences =
-        appContext.getSharedPreferences(
-            accountScopedPreferencesName(PREFERENCES_NAME, accountId),
-            Context.MODE_PRIVATE,
-        )
+    ): StoredPinCredential? =
+        profilePinVerificationCredential(credentialStatus(profileId, sourcePreferences))
 
     private fun normalizeProfileId(profileId: String): String? =
         profileId.trim().takeIf(String::isNotBlank)
@@ -695,21 +839,15 @@ class ProfilePinCredentialStore(
 
     private fun attemptPrefix(profileId: String): String = "profile:$profileId:attempt_protection"
 
-    private data class StoredPinCredential(
-        val salt: ByteArray,
-        val verifier: ByteArray,
-        val iterations: Int,
-    )
-
     companion object {
         const val CURRENT_CREDENTIAL_VERSION = 1
         const val DEFAULT_ITERATIONS = 120_000
 
         internal const val PREFERENCES_NAME = "hulk_profile_pin_credentials_v1"
-        private const val KEY_VERSION = "credential_version"
-        private const val KEY_ITERATIONS = "iterations"
-        private const val KEY_SALT = "salt"
-        private const val KEY_VERIFIER = "verifier"
+        internal const val KEY_VERSION = "credential_version"
+        internal const val KEY_ITERATIONS = "iterations"
+        internal const val KEY_SALT = "salt"
+        internal const val KEY_VERIFIER = "verifier"
     }
 }
 

@@ -3,6 +3,7 @@ package sa.hulksa.player.data
 import android.content.Context
 import android.content.SharedPreferences
 import sa.hulksa.player.model.AuthenticatedSession
+import sa.hulksa.player.security.containsCredentialBearingIptvMaterial
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -343,26 +344,49 @@ class AccountScopeStore internal constructor(
 
         val editor = scoped.edit()
         val ownsLegacy = state.getString(KEY_LEGACY_OWNER_ACCOUNT_ID, null) == accountId
-        if (ownsLegacy) {
+        val establishedCredentialState = legacyName == ProfilePinCredentialStore.PREFERENCES_NAME &&
+            hasEstablishedPinCredentialState(scoped)
+        if (
+            ownsLegacy &&
+            !establishedCredentialState &&
+            !hasEstablishedScopedProfileState(legacyName, scoped)
+        ) {
             val legacy = scopedPreferences(legacyName)
-            copyPreferences(legacy, editor)
+            copyPreferences(legacy, scoped, editor, legacyName)
         }
         editor.putBoolean(KEY_SCOPE_MIGRATED, true).commit()
     }
 
+    private fun hasEstablishedScopedProfileState(
+        baseName: String,
+        scoped: SharedPreferences,
+    ): Boolean = baseName == PROFILE_PREFERENCES_NAME &&
+        profilePreferencesHaveEstablishedState(scoped)
+
     private fun copyPreferences(
         source: SharedPreferences,
-        target: SharedPreferences.Editor,
+        target: SharedPreferences,
+        targetEditor: SharedPreferences.Editor,
+        legacyName: String,
     ) {
+        var unsafePayloadSkipped = false
         source.all.forEach { (key, value) ->
-            when (value) {
-                is String -> target.putString(key, value)
-                is Boolean -> target.putBoolean(key, value)
-                is Int -> target.putInt(key, value)
-                is Long -> target.putLong(key, value)
-                is Float -> target.putFloat(key, value)
-                is Set<*> -> target.putStringSet(key, value.filterIsInstance<String>().toSet())
+            if (target.contains(key)) return@forEach
+            if (value is String && containsCredentialBearingIptvMaterial(value)) {
+                unsafePayloadSkipped = true
+                return@forEach
             }
+            when (value) {
+                is String -> targetEditor.putString(key, value)
+                is Boolean -> targetEditor.putBoolean(key, value)
+                is Int -> targetEditor.putInt(key, value)
+                is Long -> targetEditor.putLong(key, value)
+                is Float -> targetEditor.putFloat(key, value)
+                is Set<*> -> targetEditor.putStringSet(key, value.filterIsInstance<String>().toSet())
+            }
+        }
+        if (unsafePayloadSkipped) {
+            targetEditor.putBoolean(unsafeLegacyMigrationMarkerKey(legacyName), true)
         }
     }
 
@@ -371,6 +395,10 @@ class AccountScopeStore internal constructor(
         const val KEY_ACTIVE_ACCOUNT_ID = "active_account_id"
         const val KEY_LEGACY_OWNER_ACCOUNT_ID = "legacy_owner_account_id"
         const val KEY_SCOPE_MIGRATED = "__account_scope_migrated_v1"
+        const val PROFILE_PREFERENCES_NAME = "hulk_profiles_v1"
+        const val KEY_PROFILE_DOCUMENT = "profiles"
+        const val KEY_PROFILE_ACTIVE_ID = "active_profile_id"
+        const val KEY_PROFILE_SCHEMA_VERSION = "schema_version"
     }
 }
 

@@ -50,12 +50,20 @@ data class ProfilePinFoundation(
  * AccountScopeStore keeps each account's profile metadata isolated while the
  * existing profile-level keys remain unchanged inside that account scope.
  */
-class ProfilePreferencesStore(context: Context) {
-    private val appContext = context.applicationContext
-    private val accountScope = AccountScopeStore(appContext)
+class ProfilePreferencesStore internal constructor(
+    private val accountScope: AccountScopeStore,
+    private val profileStore: ProfileStore,
+) {
+    constructor(context: Context) : this(
+        AccountScopeStore(context.applicationContext),
+        ProfileStore(context.applicationContext),
+    )
+
     private val preferences: SharedPreferences
         get() = accountScope.preferences(PREFERENCES_NAME).also(::ensureSchema)
-    private val profileStore = ProfileStore(appContext)
+
+    private val pinPreferences: SharedPreferences
+        get() = accountScope.preferences(PREFERENCES_NAME)
 
     fun routing(): ProfileRoutingPreferences = routing(
         preferences = preferences,
@@ -82,6 +90,12 @@ class ProfilePreferencesStore(context: Context) {
         preferences: SharedPreferences,
         profileIds: Set<String>,
     ): ProfileRoutingPreferences {
+        if (profileIds.isEmpty()) {
+            return ProfileRoutingPreferences(
+                directEntryEnabled = preferences.getBoolean(KEY_DIRECT_ENTRY_ENABLED, false),
+                defaultProfileId = null,
+            )
+        }
         val storedDefault = preferences.getString(KEY_DEFAULT_PROFILE_ID, null)
             ?.trim()
             ?.takeIf(String::isNotBlank)
@@ -144,9 +158,18 @@ class ProfilePreferencesStore(context: Context) {
 
     fun pinFoundation(profileId: String): ProfilePinFoundation {
         val id = normalizedExistingProfileId(profileId) ?: return ProfilePinFoundation()
+        return pinFoundationForCredential(id)
+    }
+
+    /**
+     * Reads PIN foundation metadata without depending on the readable profile document.
+     * Credential integrity must stay fail-closed even when profile data itself is damaged.
+     */
+    internal fun pinFoundationForCredential(profileId: String): ProfilePinFoundation {
+        val id = profileId.trim().takeIf(String::isNotBlank) ?: return ProfilePinFoundation()
         return ProfilePinFoundation(
-            enabled = preferences.getBoolean(profileKey(id, KEY_PIN_ENABLED), false),
-            credentialVersion = preferences
+            enabled = pinPreferences.getBoolean(profileKey(id, KEY_PIN_ENABLED), false),
+            credentialVersion = pinPreferences
                 .getInt(profileKey(id, KEY_PIN_CREDENTIAL_VERSION), 0)
                 .coerceAtLeast(0),
         )

@@ -5,9 +5,8 @@ import android.content.SharedPreferences
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.PlaybackRequest
@@ -27,6 +26,9 @@ internal suspend fun <T> runUserLibraryStartupOffMain(operation: () -> T): T =
 internal suspend fun <T> runUserLibraryProgressPersistenceOffMain(operation: suspend () -> T): T =
     withContext(Dispatchers.IO) { operation() }
 
+internal suspend fun <T> runUserLibraryHistoryPersistenceOffMain(operation: suspend () -> T): T =
+    withContext(Dispatchers.IO) { operation() }
+
 internal fun userLibraryProgressWriteAllowed(
     attemptCurrent: Boolean,
     sameAuthenticatedSession: Boolean,
@@ -40,6 +42,19 @@ internal fun userLibraryProgressWriteAllowed(
         expectedAccountId == activeAccountId &&
         expectedProfileId == activeProfileId
 
+internal fun historyPublicationAllowed(
+    attemptCurrent: Boolean,
+    sessionCurrent: Boolean,
+    expectedAccountId: String,
+    activeAccountId: String?,
+    expectedProfileId: String,
+    activeProfileId: String,
+): Boolean =
+    attemptCurrent &&
+        sessionCurrent &&
+        expectedAccountId == activeAccountId &&
+        expectedProfileId == activeProfileId
+
 internal fun resumePositionForHistory(entries: List<HistoryEntry>, key: String): Long {
     val entry = entries.firstOrNull { it.key == key } ?: return 0L
     return entry.positionMs.takeIf {
@@ -47,17 +62,35 @@ internal fun resumePositionForHistory(entries: List<HistoryEntry>, key: String):
     }?.coerceAtLeast(0L) ?: 0L
 }
 
-class UserLibrary(context: Context) {
-    private val appContext = context.applicationContext
-    private val accountScope = AccountScopeStore(appContext)
+class UserLibrary internal constructor(
+    private val accountScope: AccountScopeStore,
+    private val profileStore: ProfileStore,
+    private val kidsContentFilterStore: KidsContentFilterStore,
+) {
+    constructor(context: Context) : this(
+        AccountScopeStore(context.applicationContext),
+        ProfileStore(context.applicationContext),
+        KidsContentFilterStore(context.applicationContext),
+    )
+
     private val preferences: SharedPreferences
         get() = accountScope.preferences(PREFERENCES_NAME)
-    private val profileStore = ProfileStore(appContext)
-    private val kidsContentFilterStore = KidsContentFilterStore(appContext)
     private val historyMutationGate = UserLibraryHistoryMutationGate()
+    private val historyPersistenceLock = Any()
+    private val historyFinalWriteLock = Any()
 
     internal fun beginProgressMutation(): UserLibraryHistoryMutationGate.ProgressAttempt =
         historyMutationGate.beginProgress()
+
+    internal fun currentHistoryAttempt(): UserLibraryHistoryMutationGate.HistoryAttempt =
+        historyMutationGate.currentHistoryAttempt()
+
+    internal fun beginHistoryMutation(): UserLibraryHistoryMutationGate.HistoryAttempt =
+        historyMutationGate.beginHistoryMutation()
+
+    internal fun isCurrentHistoryMutation(
+        attempt: UserLibraryHistoryMutationGate.HistoryAttempt,
+    ): Boolean = historyMutationGate.isCurrentHistory(attempt)
 
     internal fun isCurrentProgressMutation(
         attempt: UserLibraryHistoryMutationGate.ProgressAttempt,
@@ -117,50 +150,33 @@ class UserLibrary(context: Context) {
     private fun history(
         preferences: SharedPreferences,
         profile: UserProfile,
+        canRepair: () -> Boolean = { false },
+    ): List<HistoryEntry> = readHistoryForProfile(preferences, profile, canRepair).entries
+
+    private fun readHistoryForProfile(
+        preferences: SharedPreferences,
+        profile: UserProfile,
         canRepair: () -> Boolean = { true },
-    ): List<HistoryEntry> = runCatching {
-        val historyKey = profileKey(profile.id, KEY_HISTORY)
-        val raw = preferences.getString(historyKey, null) ?: return emptyList()
-        val safeRaw = sanitizeHistoryJson(raw)
-        if (safeRaw != raw) {
-            if (!canRepair()) return emptyList()
-            preferences.edit().putString(historyKey, safeRaw).commit()
+    ): HistoryDocumentRead {
+        if (profile.id == ProfileStore.INTEGRITY_BLOCKED_PROFILE_ID) {
+            return HistoryDocumentRead(
+                entries = emptyList(),
+                state = HistoryDocumentState.UNREADABLE,
+                safeRawDocument = null,
+                requiresPrivacyRewrite = false,
+            )
         }
-        val array = JSONArray(safeRaw)
-        val decoded = buildList {
-            for (index in 0 until array.length()) {
-                val item = array.optJSONObject(index) ?: continue
-                add(
-                    HistoryEntry(
-                        key = item.getString("key"),
-                        title = item.getString("title"),
-                        posterUrl = persistableExternalUrlOrNull(
-                            item.optString("poster").takeUnless(String::isBlank),
-                        ),
-                        streamKind = item.getString("kind"),
-                        streamId = item.getInt("id"),
-                        extension = item.optString("extension", "mp4"),
-                        isLive = item.optBoolean("live", false),
-                        positionMs = item.optLong("position", 0L),
-                        durationMs = item.optLong("duration", 0L),
-                        updatedAtEpochMs = item.optLong("updated", 0L),
-                        seriesTitle = item.optString("seriesTitle").takeUnless { it.isBlank() },
-                        season = item.optInt("season").takeIf { item.has("season") && !item.isNull("season") },
-                        episodeNumber = item.optInt("episodeNumber").takeIf {
-                            item.has("episodeNumber") && !item.isNull("episodeNumber")
-                        },
-                        episodeTitle = item.optString("episodeTitle").takeUnless { it.isBlank() },
-                        parentContentId = item.optInt("parentContentId").takeIf {
-                            item.has("parentContentId") && !item.isNull("parentContentId") && it > 0
-                        },
-                    ),
-                )
-            }
-        }.sortedByDescending(HistoryEntry::updatedAtEpochMs)
-        if (profile.kind != ProfileKind.KIDS) return decoded
+        val historyKey = profileKey(profile.id, KEY_HISTORY)
+        val read = readHistoryDocument(preferences, historyKey)
+        if (read.requiresPrivacyRewrite && read.safeRawDocument != null && canRepair()) {
+            preferences.edit().putString(historyKey, read.safeRawDocument).commit()
+        }
+        if (profile.kind != ProfileKind.KIDS) return read
         val allowed = kidsContentFilterStore.allowedKeys()
-        decoded.filter { entry -> isAllowedKidsHistoryEntry(allowed, entry) }
-    }.getOrDefault(emptyList())
+        return read.copy(
+            entries = read.entries.filter { entry -> isAllowedKidsHistoryEntry(allowed, entry) },
+        )
+    }
 
     /**
      * Runs the account-scoped legacy migration and initial library decode away
@@ -177,33 +193,74 @@ class UserLibrary(context: Context) {
         if (!matchesOwner(expectedAccountId, profile.id)) return@runUserLibraryStartupOffMain null
         val snapshot = UserLibrarySnapshot(
             favorites = favorites(scopedPreferences, profile),
-            history = history(scopedPreferences, profile),
+            history = history(scopedPreferences, profile) { true },
         )
         snapshot.takeIf { matchesOwner(expectedAccountId, profile.id) }
     }
 
-    fun recordStart(request: PlaybackRequest): List<HistoryEntry> {
-        historyMutationGate.beginHistoryMutation()
-        if (isActiveKidsProfile() && !kidsContentFilterStore.isAllowed(request)) return history()
-        val previous = history().firstOrNull { it.key == request.historyKey }
-        val entry = HistoryEntry(
-            key = request.historyKey,
-            title = request.title,
-            posterUrl = persistableExternalUrlOrNull(request.posterUrl),
-            streamKind = request.streamKind,
-            streamId = request.streamId,
-            extension = request.extension,
-            isLive = request.isLive,
-            positionMs = previous?.positionMs ?: request.resumePositionMs,
-            durationMs = previous?.durationMs ?: 0L,
-            updatedAtEpochMs = System.currentTimeMillis(),
-            seriesTitle = request.seriesTitle ?: previous?.seriesTitle,
-            season = request.season ?: previous?.season,
-            episodeNumber = request.episodeNumber ?: previous?.episodeNumber,
-            episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
-            parentContentId = request.parentContentId ?: previous?.parentContentId,
-        )
-        return saveHistory(listOf(entry) + history().filterNot { it.key == entry.key })
+    internal suspend fun recordStartForOwner(
+        expectedOwner: AuthenticatedSessionOwner,
+        expectedAccountId: String,
+        expectedProfileId: String,
+        request: PlaybackRequest,
+        historyAttempt: UserLibraryHistoryMutationGate.HistoryAttempt,
+    ): List<HistoryEntry>? = runUserLibraryHistoryPersistenceOffMain {
+        val operationContext = currentCoroutineContext()
+        fun canWrite(): Boolean =
+            operationContext.isActive &&
+                expectedOwner.accountId == expectedAccountId &&
+                AuthenticatedSessionRegistry.isCurrent(expectedOwner) &&
+                accountScope.activeAccountId() == expectedAccountId &&
+                profileStore.activeProfileId() == expectedProfileId &&
+                historyMutationGate.isCurrentHistory(historyAttempt)
+
+        if (!canWrite()) return@runUserLibraryHistoryPersistenceOffMain null
+        synchronized(historyPersistenceLock) {
+            if (!canWrite()) return@synchronized null
+            val profile = profileStore.activeProfile()
+            if (profile.id != expectedProfileId) return@synchronized null
+            val scopedPreferences = accountScope.preferences(PREFERENCES_NAME, expectedAccountId)
+            val read = readHistoryForProfile(scopedPreferences, profile, ::canWrite)
+            if (profile.kind == ProfileKind.KIDS && !kidsContentFilterStore.isAllowed(request)) {
+                return@synchronized read.entries
+            }
+            val previous = read.entries.firstOrNull { it.key == request.historyKey }
+            val entry = HistoryEntry(
+                key = request.historyKey,
+                title = request.title,
+                posterUrl = persistableExternalUrlOrNull(request.posterUrl),
+                streamKind = request.streamKind,
+                streamId = request.streamId,
+                extension = request.extension,
+                isLive = request.isLive,
+                positionMs = previous?.positionMs ?: request.resumePositionMs,
+                durationMs = previous?.durationMs ?: 0L,
+                updatedAtEpochMs = System.currentTimeMillis(),
+                seriesTitle = request.seriesTitle ?: previous?.seriesTitle,
+                season = request.season ?: previous?.season,
+                episodeNumber = request.episodeNumber ?: previous?.episodeNumber,
+                episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
+                parentContentId = request.parentContentId ?: previous?.parentContentId,
+            )
+            val normalized = normalizeHistory(
+                entries = listOf(entry) + read.entries.filterNot { it.key == entry.key },
+                profile = profile,
+            )
+            if (!canWrite()) return@synchronized null
+            if (!writeHistoryDocument(
+                    preferences = scopedPreferences,
+                    historyKey = profileKey(profile.id, KEY_HISTORY),
+                    entries = normalized,
+                    read = read,
+                    canWrite = ::canWrite,
+                    finalWriteLock = historyFinalWriteLock,
+                )
+            ) {
+                null
+            } else {
+                normalized
+            }
+        }
     }
 
     /**
@@ -221,8 +278,9 @@ class UserLibrary(context: Context) {
         historyAttempt: UserLibraryHistoryMutationGate.ProgressAttempt,
         isCurrentAttempt: () -> Boolean,
     ): List<HistoryEntry>? = runUserLibraryProgressPersistenceOffMain {
-        currentCoroutineContext().ensureActive()
-        fun canWrite(): Boolean = userLibraryProgressWriteAllowed(
+        val operationContext = currentCoroutineContext()
+        operationContext.ensureActive()
+        fun canWrite(): Boolean = operationContext.isActive && userLibraryProgressWriteAllowed(
             attemptCurrent = isCurrentAttempt() && historyMutationGate.isCurrent(historyAttempt),
             sameAuthenticatedSession = AuthenticatedSessionRegistry.isCurrent(expectedOwner),
             expectedAccountId = expectedOwner.accountId,
@@ -232,59 +290,105 @@ class UserLibrary(context: Context) {
         )
 
         if (!canWrite()) return@runUserLibraryProgressPersistenceOffMain null
-        val profile = profileStore.activeProfile()
-        if (profile.id != expectedProfileId || !canWrite()) return@runUserLibraryProgressPersistenceOffMain null
-        val scopedPreferences = accountScope.preferences(PREFERENCES_NAME, expectedOwner.accountId)
-        if (!canWrite()) return@runUserLibraryProgressPersistenceOffMain null
-
-        val currentHistory = history(
-            preferences = scopedPreferences,
-            profile = profile,
-            canRepair = ::canWrite,
-        )
-        currentCoroutineContext().ensureActive()
-        if (!canWrite()) return@runUserLibraryProgressPersistenceOffMain null
-        if (profile.kind == ProfileKind.KIDS && !kidsContentFilterStore.isAllowed(request)) {
-            return@runUserLibraryProgressPersistenceOffMain currentHistory
+        val result = synchronized(historyPersistenceLock) {
+            if (!canWrite()) return@synchronized null
+            val profile = profileStore.activeProfile()
+            if (profile.id != expectedProfileId) return@synchronized null
+            val scopedPreferences = accountScope.preferences(PREFERENCES_NAME, expectedOwner.accountId)
+            if (!canWrite()) return@synchronized null
+            val currentHistoryRead = readHistoryForProfile(
+                preferences = scopedPreferences,
+                profile = profile,
+                canRepair = ::canWrite,
+            )
+            val currentHistory = currentHistoryRead.entries
+            if (!canWrite()) return@synchronized null
+            if (profile.kind == ProfileKind.KIDS && !kidsContentFilterStore.isAllowed(request)) {
+                return@synchronized currentHistory
+            }
+            val previous = currentHistory.firstOrNull { it.key == request.historyKey }
+            val entry = HistoryEntry(
+                key = request.historyKey,
+                title = request.title,
+                posterUrl = persistableExternalUrlOrNull(request.posterUrl),
+                streamKind = request.streamKind,
+                streamId = request.streamId,
+                extension = request.extension,
+                isLive = request.isLive,
+                positionMs = if (request.isLive) 0L else positionMs.coerceAtLeast(0L),
+                durationMs = if (request.isLive) 0L else durationMs.coerceAtLeast(0L),
+                updatedAtEpochMs = System.currentTimeMillis(),
+                seriesTitle = request.seriesTitle ?: previous?.seriesTitle,
+                season = request.season ?: previous?.season,
+                episodeNumber = request.episodeNumber ?: previous?.episodeNumber,
+                episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
+                parentContentId = request.parentContentId ?: previous?.parentContentId,
+            )
+            val normalized = normalizeHistory(
+                entries = listOf(entry) + currentHistory.filterNot { it.key == entry.key },
+                profile = profile,
+            )
+            if (!canWrite()) return@synchronized null
+            historyMutationGate.writeIfCurrent(historyAttempt) {
+                if (!canWrite()) return@writeIfCurrent null
+                if (!writeHistoryDocument(
+                        preferences = scopedPreferences,
+                        historyKey = profileKey(profile.id, KEY_HISTORY),
+                        entries = normalized,
+                        read = currentHistoryRead,
+                        canWrite = ::canWrite,
+                        finalWriteLock = historyFinalWriteLock,
+                    )
+                ) {
+                    null
+                } else {
+                    normalized
+                }
+            }
         }
-
-        val previous = currentHistory.firstOrNull { it.key == request.historyKey }
-        val entry = HistoryEntry(
-            key = request.historyKey,
-            title = request.title,
-            posterUrl = persistableExternalUrlOrNull(request.posterUrl),
-            streamKind = request.streamKind,
-            streamId = request.streamId,
-            extension = request.extension,
-            isLive = request.isLive,
-            positionMs = if (request.isLive) 0L else positionMs.coerceAtLeast(0L),
-            durationMs = if (request.isLive) 0L else durationMs.coerceAtLeast(0L),
-            updatedAtEpochMs = System.currentTimeMillis(),
-            seriesTitle = request.seriesTitle ?: previous?.seriesTitle,
-            season = request.season ?: previous?.season,
-            episodeNumber = request.episodeNumber ?: previous?.episodeNumber,
-            episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
-            parentContentId = request.parentContentId ?: previous?.parentContentId,
-        )
-        val normalized = normalizeHistory(
-            entries = listOf(entry) + currentHistory.filterNot { it.key == entry.key },
-            profile = profile,
-        )
         currentCoroutineContext().ensureActive()
-        historyMutationGate.writeIfCurrent(historyAttempt) {
-            if (!canWrite()) return@writeIfCurrent null
-            scopedPreferences.edit()
-                .putString(profileKey(profile.id, KEY_HISTORY), encodeHistory(normalized))
-                .apply()
-            normalized
-        }
+        if (!canWrite()) null else result
     }
 
-    fun removeHistory(key: String): List<HistoryEntry> {
-        historyMutationGate.beginHistoryMutation()
-        val current = history()
-        if (current.none { it.key == key }) return current
-        return saveHistory(current.filterNot { it.key == key })
+    internal suspend fun removeHistoryForOwner(
+        expectedOwner: AuthenticatedSessionOwner,
+        expectedAccountId: String,
+        expectedProfileId: String,
+        key: String,
+        historyAttempt: UserLibraryHistoryMutationGate.HistoryAttempt,
+    ): List<HistoryEntry>? = runUserLibraryHistoryPersistenceOffMain {
+        val operationContext = currentCoroutineContext()
+        fun canWrite(): Boolean =
+            operationContext.isActive &&
+                expectedOwner.accountId == expectedAccountId &&
+                AuthenticatedSessionRegistry.isCurrent(expectedOwner) &&
+                accountScope.activeAccountId() == expectedAccountId &&
+                profileStore.activeProfileId() == expectedProfileId &&
+                historyMutationGate.isCurrentHistory(historyAttempt)
+
+        if (!canWrite()) return@runUserLibraryHistoryPersistenceOffMain null
+        synchronized(historyPersistenceLock) {
+            if (!canWrite()) return@synchronized null
+            val profile = profileStore.activeProfile()
+            if (profile.id != expectedProfileId) return@synchronized null
+            val scopedPreferences = accountScope.preferences(PREFERENCES_NAME, expectedAccountId)
+            val read = readHistoryForProfile(scopedPreferences, profile, ::canWrite)
+            if (read.entries.none { it.key == key }) return@synchronized read.entries
+            val normalized = normalizeHistory(read.entries.filterNot { it.key == key }, profile)
+            if (!writeHistoryDocument(
+                    preferences = scopedPreferences,
+                    historyKey = profileKey(profile.id, KEY_HISTORY),
+                    entries = normalized,
+                    read = read,
+                    canWrite = ::canWrite,
+                    finalWriteLock = historyFinalWriteLock,
+                )
+            ) {
+                null
+            } else {
+                normalized
+            }
+        }
     }
 
     fun resumePosition(key: String): Long {
@@ -293,15 +397,11 @@ class UserLibrary(context: Context) {
 
     fun clearHistory(): List<HistoryEntry> {
         historyMutationGate.beginHistoryMutation()
-        preferences.edit().remove(activeKey(KEY_HISTORY)).apply()
+        val historyKey = activeKey(KEY_HISTORY)
+        synchronized(historyFinalWriteLock) {
+            preferences.edit().remove(historyKey).apply()
+        }
         return emptyList()
-    }
-
-    private fun saveHistory(entries: List<HistoryEntry>): List<HistoryEntry> {
-        val profile = profileStore.activeProfile()
-        val normalized = normalizeHistory(entries, profile)
-        preferences.edit().putString(profileKey(profile.id, KEY_HISTORY), encodeHistory(normalized)).apply()
-        return normalized
     }
 
     private fun normalizeHistory(
@@ -322,49 +422,6 @@ class UserLibrary(context: Context) {
         return normalized
     }
 
-    private fun encodeHistory(entries: List<HistoryEntry>): String {
-        val array = JSONArray()
-        entries.forEach { entry ->
-            array.put(
-                JSONObject()
-                    .put("key", entry.key)
-                    .put("title", entry.title)
-                    .put("poster", persistableExternalUrlOrNull(entry.posterUrl).orEmpty())
-                    .put("kind", entry.streamKind)
-                    .put("id", entry.streamId)
-                    .put("extension", entry.extension)
-                    .put("live", entry.isLive)
-                    .put("position", entry.positionMs)
-                    .put("duration", entry.durationMs)
-                    .put("updated", entry.updatedAtEpochMs)
-                    .apply {
-                        entry.seriesTitle?.let { put("seriesTitle", it) }
-                        entry.season?.let { put("season", it) }
-                        entry.episodeNumber?.let { put("episodeNumber", it) }
-                        entry.episodeTitle?.let { put("episodeTitle", it) }
-                        entry.parentContentId?.let { put("parentContentId", it) }
-                    },
-            )
-        }
-        return array.toString()
-    }
-
-    private fun sanitizeHistoryJson(raw: String): String = runCatching {
-        val array = JSONArray(raw)
-        var changed = false
-        for (index in 0 until array.length()) {
-            val item = array.optJSONObject(index) ?: continue
-            val poster = item.optString("poster").takeIf(String::isNotBlank) ?: continue
-            if (persistableExternalUrlOrNull(poster) == null) {
-                item.put("poster", "")
-                changed = true
-            }
-        }
-        if (changed) array.toString() else raw
-    }.getOrElse {
-        if (containsCredentialBearingIptvMaterial(raw)) "[]" else raw
-    }
-
     private fun isActiveKidsProfile(): Boolean =
         profileStore.activeProfile().kind == ProfileKind.KIDS
 
@@ -379,6 +436,7 @@ class UserLibrary(context: Context) {
             profileStore.activeProfileId() == expectedProfileId
 
     private fun migrateLegacyLibraryIfNeeded(preferences: SharedPreferences) {
+        if (hasUnsafeLegacyMigrationMarker(preferences, USER_LIBRARY_PREFERENCES_BASE)) return
         val primaryProfileId = ProfileStore.PRIMARY_PROFILE_ID
         val scopedFavoritesKey = profileKey(primaryProfileId, KEY_FAVORITES)
         val scopedHistoryKey = profileKey(primaryProfileId, KEY_HISTORY)
@@ -400,9 +458,20 @@ class UserLibrary(context: Context) {
         }
         if (preferences.contains(KEY_HISTORY)) {
             preferences.getString(KEY_HISTORY, null)?.let { rawHistory ->
-                val safeHistory = sanitizeHistoryJson(rawHistory)
-                if (plan.copyLegacyHistory) editor.putString(scopedHistoryKey, safeHistory)
-                if (safeHistory != rawHistory) editor.putString(KEY_HISTORY, safeHistory)
+                val safeToCopy = isStructurallyValidHistoryDocument(rawHistory) &&
+                    !containsCredentialBearingIptvMaterial(rawHistory)
+                if (safeToCopy) {
+                    val safeHistory = sanitizeHistoryDocumentJson(rawHistory)
+                    if (plan.copyLegacyHistory) editor.putString(scopedHistoryKey, safeHistory)
+                    if (safeHistory != rawHistory) editor.putString(KEY_HISTORY, safeHistory)
+                } else {
+                    // Keep the raw legacy source untouched, but prevent this scoped
+                    // store from treating the abandoned history as fresh/writable.
+                    editor.putBoolean(
+                        unsafeLegacyMigrationMarkerKey(USER_LIBRARY_PREFERENCES_BASE),
+                        true,
+                    )
+                }
             }
         }
 

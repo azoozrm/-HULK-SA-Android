@@ -16,6 +16,7 @@ internal data class DurableDownloadPersistedRecord(
 internal data class DurableDownloadPreferenceSnapshot(
     val wifiOnly: Boolean,
     val records: List<DurableDownloadPersistedRecord>,
+    val mutationInProgress: Boolean = false,
 )
 
 internal enum class DurableDownloadLifecycleAction {
@@ -90,10 +91,27 @@ internal class DurableDownloadPreferenceStore(
         accountId,
     )
 
-    fun snapshot(): DurableDownloadPreferenceSnapshot = DurableDownloadPreferenceSnapshot(
-        wifiOnly = preferences.getBoolean(KEY_WIFI_ONLY, false),
-        records = parseRecords(preferences.getString(KEY_DOWNLOADS, null)),
-    )
+    fun snapshot(): DurableDownloadPreferenceSnapshot = snapshotInternal { }
+
+    internal fun snapshotWithValidationHook(
+        afterGeneration: () -> Unit,
+    ): DurableDownloadPreferenceSnapshot = snapshotInternal(afterGeneration)
+
+    private fun snapshotInternal(
+        afterGeneration: () -> Unit,
+    ): DurableDownloadPreferenceSnapshot {
+        val generationBefore = DownloadPersistenceMutationGate.generation(accountId)
+        val wifiOnly = preferences.getBoolean(KEY_WIFI_ONLY, false)
+        val records = parseRecords(preferences.getString(KEY_DOWNLOADS, null))
+        val generationAfter = DownloadPersistenceMutationGate.generation(accountId)
+        afterGeneration()
+        return DurableDownloadPreferenceSnapshot(
+            wifiOnly = wifiOnly,
+            records = records,
+            mutationInProgress = generationBefore != generationAfter ||
+                generationAfter % 2L != 0L,
+        )
+    }
 
     fun register(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
         preferences.registerOnSharedPreferenceChangeListener(listener)

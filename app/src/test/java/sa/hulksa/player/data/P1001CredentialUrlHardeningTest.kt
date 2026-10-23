@@ -116,9 +116,16 @@ class P1001CredentialUrlHardeningTest {
     }
 
     @Test
-    fun `malformed legacy download metadata with credential material fails closed`() {
+    fun `malformed legacy download metadata with credential material fails closed without empty rewrite`() {
         val malformed = "not-json http://provider.test/series/alpha/secret/99.mkv"
-        assertEquals("[]", sanitizePersistedDownloadJson(malformed))
+        assertEquals(malformed, sanitizePersistedDownloadJson(malformed))
+        val preferences = FakeSharedPreferences()
+        preferences.edit()
+            .putString(DurableDownloadPreferenceStore.KEY_DOWNLOADS, malformed)
+            .apply()
+        val read = DownloadIndexStore(preferences).read()
+        assertEquals(DownloadIndexState.UNREADABLE, read.state)
+        assertEquals(malformed, preferences.durableValue(DurableDownloadPreferenceStore.KEY_DOWNLOADS))
     }
 
     @Test

@@ -13,6 +13,11 @@ internal class FakeSharedPreferences private constructor(
     private val memory: MutableMap<String, Any?> = durable.toMutableMap()
 
     var commitResult: Boolean = true
+    val commitResults: ArrayDeque<Boolean> = ArrayDeque()
+    var beforeCommit: (() -> Unit)? = null
+    var afterMemoryMutationBeforeCommit: (() -> Unit)? = null
+    var beforeApply: (() -> Unit)? = null
+    var afterStringRead: ((String) -> Unit)? = null
 
     constructor() : this(mutableMapOf())
 
@@ -26,20 +31,36 @@ internal class FakeSharedPreferences private constructor(
 
     override fun getAll(): MutableMap<String, *> = memory.toMutableMap()
 
-    override fun getString(key: String?, defValue: String?): String? =
-        memory[key] as? String ?: defValue
+    override fun getString(key: String?, defValue: String?): String? {
+        val value = memory[key]
+        afterStringRead?.invoke(key.orEmpty())
+        return if (value == null) defValue else value as String
+    }
 
-    override fun getStringSet(key: String?, defValues: MutableSet<String>?): MutableSet<String>? =
-        (memory[key] as? Set<*>)?.filterIsInstance<String>()?.toMutableSet() ?: defValues
+    override fun getStringSet(key: String?, defValues: MutableSet<String>?): MutableSet<String>? {
+        val value = memory[key] ?: return defValues
+        return (value as Set<*>).filterIsInstance<String>().toMutableSet()
+    }
 
-    override fun getInt(key: String?, defValue: Int): Int = memory[key] as? Int ?: defValue
+    override fun getInt(key: String?, defValue: Int): Int {
+        val value = memory[key]
+        return if (value == null) defValue else value as Int
+    }
 
-    override fun getLong(key: String?, defValue: Long): Long = memory[key] as? Long ?: defValue
+    override fun getLong(key: String?, defValue: Long): Long {
+        val value = memory[key]
+        return if (value == null) defValue else value as Long
+    }
 
-    override fun getFloat(key: String?, defValue: Float): Float = memory[key] as? Float ?: defValue
+    override fun getFloat(key: String?, defValue: Float): Float {
+        val value = memory[key]
+        return if (value == null) defValue else value as Float
+    }
 
-    override fun getBoolean(key: String?, defValue: Boolean): Boolean =
-        memory[key] as? Boolean ?: defValue
+    override fun getBoolean(key: String?, defValue: Boolean): Boolean {
+        val value = memory[key]
+        return if (value == null) defValue else value as Boolean
+    }
 
     override fun contains(key: String?): Boolean = memory.containsKey(key)
 
@@ -86,15 +107,19 @@ internal class FakeSharedPreferences private constructor(
         }
 
         override fun commit(): Boolean {
+            beforeCommit?.invoke()
             applyPending()
-            if (commitResult) {
+            afterMemoryMutationBeforeCommit?.invoke()
+            val result = if (commitResults.isNotEmpty()) commitResults.removeFirst() else commitResult
+            if (result) {
                 durable.clear()
                 durable.putAll(memory)
             }
-            return commitResult
+            return result
         }
 
         override fun apply() {
+            beforeApply?.invoke()
             applyPending()
             durable.clear()
             durable.putAll(memory)

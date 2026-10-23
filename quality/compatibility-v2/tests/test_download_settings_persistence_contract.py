@@ -9,6 +9,7 @@ VIEW_MODEL = REPO_ROOT / "app/src/main/java/sa/hulksa/player/HulkViewModel.kt"
 MUTATION_GATE = REPO_ROOT / "app/src/main/java/sa/hulksa/player/DownloadSettingsMutationGate.kt"
 PROCESS_OWNER = REPO_ROOT / "app/src/main/java/sa/hulksa/player/data/DownloadRepositoryProcessOwner.kt"
 REPOSITORY = REPO_ROOT / "app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt"
+INDEX_STORE = REPO_ROOT / "app/src/main/java/sa/hulksa/player/data/DownloadIndexStore.kt"
 
 
 class DownloadSettingsPersistenceContractTest(unittest.TestCase):
@@ -44,9 +45,11 @@ class DownloadSettingsPersistenceContractTest(unittest.TestCase):
 
     def test_scheduling_revision_and_existing_download_mutation_paths_remain_explicit(self) -> None:
         source = REPOSITORY.read_text(encoding="utf-8")
+        index_source = INDEX_STORE.read_text(encoding="utf-8")
 
-        self.assertIn("if (schedulingChanged)", source)
-        self.assertIn("KEY_LIFECYCLE_REVISION", source)
+        self.assertIn("schedulingChanged = schedulingChanged", source)
+        self.assertIn("if (schedulingChanged)", index_source)
+        self.assertIn("KEY_LIFECYCLE_REVISION", index_source)
         self.assertIn("fun enqueue(", source)
         self.assertIn("internal fun pause(", source)
         self.assertIn("internal fun removeOwner(", source)
