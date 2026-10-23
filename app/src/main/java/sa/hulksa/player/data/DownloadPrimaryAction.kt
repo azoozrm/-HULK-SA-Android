@@ -143,7 +143,7 @@ internal class DownloadPrimaryActionDispatcher(
             gates.getOrPut(downloadId, ::DownloadSettingsMutationGate)
         }
         val attempt = gate.begin()
-        return withContext(Dispatchers.IO) {
+        val result = withContext(Dispatchers.IO) {
             gate.writeIfCurrent(attempt) {
                 dispatchCurrent(
                     downloadId = downloadId,
@@ -152,7 +152,13 @@ internal class DownloadPrimaryActionDispatcher(
                     intent = intent,
                 )
             }
-        } ?: DownloadActionOutcome(DownloadActionClaim.SUPERSEDED)
+        }
+        // Ownership may have been superseded during IO or while this continuation was queued
+        // back to the caller. The post-IO check must run here, not only inside the IO block.
+        if (result == null || !gate.isCurrent(attempt)) {
+            return DownloadActionOutcome(DownloadActionClaim.SUPERSEDED)
+        }
+        return result
     }
 
     private fun dispatchCurrent(
