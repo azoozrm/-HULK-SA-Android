@@ -101,3 +101,65 @@ internal class HomeRemovalInputGuard {
         return true
     }
 }
+
+/** A single pending handoff of focus after the Continue Watching row empties. */
+internal data class HomeEmptyRowFocusRequest(val id: Long)
+
+/** True when a row's first logical card is outside the row's current composed viewport. */
+internal fun homeRowFirstCardNeedsReveal(visibleIndices: Iterable<Int>): Boolean =
+    0 !in visibleIndices
+
+/**
+ * Actual row-level first-card handoff action. It reveals a horizontally scrolled-away first
+ * card, waits for real composition, requests focus, and then waits for the card's own focus
+ * callback before reporting success.
+ */
+internal suspend fun focusHomeRowFirstCard(
+    firstCardVisible: () -> Boolean,
+    revealFirstCard: suspend () -> Unit,
+    awaitFirstCard: suspend () -> Unit,
+    requestFocus: () -> Boolean,
+    awaitFocused: suspend () -> Unit,
+): Boolean {
+    if (!firstCardVisible()) revealFirstCard()
+    awaitFirstCard()
+    if (!requestFocus()) return false
+    awaitFocused()
+    return true
+}
+
+/**
+ * One real Home row's focus owner. Rows attach a suspending first-card focus action; the
+ * parent handoff cannot complete until that action has revealed/awaited the actual card and
+ * verified focus.
+ */
+internal class HomeRowFocusTarget {
+    private var focusFirstCardAction: (suspend () -> Boolean)? = null
+
+    fun attach(action: suspend () -> Boolean) {
+        focusFirstCardAction = action
+    }
+
+    fun detach() {
+        focusFirstCardAction = null
+    }
+
+    suspend fun focusFirstCard(): Boolean = focusFirstCardAction?.invoke() ?: false
+}
+
+/**
+ * Production empty-row handoff: vertical row availability, then the row's real first-card
+ * focus action, otherwise the Home navigation entry. It returns true only after the chosen
+ * target reports verified focus.
+ */
+internal class HomeEmptyRowFocusHandoff(
+    private val ensureRowAvailable: suspend (rowKey: String) -> Boolean,
+    private val focusRowFirstCard: suspend (rowKey: String) -> Boolean,
+    private val focusHomeEntry: suspend () -> Boolean,
+) {
+    suspend fun run(targetRow: String?): Boolean {
+        if (targetRow == null) return focusHomeEntry()
+        if (!ensureRowAvailable(targetRow)) return false
+        return focusRowFirstCard(targetRow)
+    }
+}

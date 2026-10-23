@@ -1779,7 +1779,8 @@ private fun CinemaHomeScreen(
                 it.status == OfflineStatus.WAITING_STORAGE
         }.take(4)
     }
-    var pendingContinueRowFocus by remember { mutableStateOf(false) }
+    var pendingContinueRowFocus by remember { mutableStateOf<HomeEmptyRowFocusRequest?>(null) }
+    var nextContinueRowFocusRequestId by remember { mutableLongStateOf(0L) }
     val homeRemovalSessionActive = remember { mutableStateOf(true) }
     DisposableEffect(Unit) {
         onDispose { homeRemovalSessionActive.value = false }
@@ -1787,11 +1788,16 @@ private fun CinemaHomeScreen(
     val removeHistoryRef = rememberUpdatedState(onRemoveHistoryEntry)
     val actionNoticeRef = rememberUpdatedState(onActionNotice)
     val homeRowFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
+    val homeRowFocusTargets = remember { mutableMapOf<String, HomeRowFocusTarget>() }
+    LaunchedEffect(navigationMemory) { pendingContinueRowFocus = null }
     val removalController = remember {
         HomeHistoryRemovalController(
             removeHistory = { key, result -> removeHistoryRef.value(key, result) },
             onSuccessfulRemoval = { wasLastCard ->
-                if (wasLastCard) pendingContinueRowFocus = true
+                if (wasLastCard) {
+                    nextContinueRowFocusRequestId += 1L
+                    pendingContinueRowFocus = HomeEmptyRowFocusRequest(nextContinueRowFocusRequestId)
+                }
             },
             canPublishSuccess = { homeRemovalSessionActive.value },
             onSuccessNotice = {
@@ -1801,6 +1807,8 @@ private fun CinemaHomeScreen(
     }
     fun rowFocusRequester(rowKey: String): FocusRequester =
         homeRowFocusRequesters.getOrPut(rowKey) { FocusRequester() }
+    fun rowFocusTarget(rowKey: String): HomeRowFocusTarget =
+        homeRowFocusTargets.getOrPut(rowKey) { HomeRowFocusTarget() }
     var featuredIdentity by remember(navigationMemory) { mutableStateOf<String?>(null) }
     val featured = remember(featuredIdentity, featuredCandidates, movies, series) {
         resolvePresentedHomeHero(
@@ -1912,27 +1920,37 @@ private fun CinemaHomeScreen(
         if (lastLive != null) add("last-live")
         if (suggestedLive.isNotEmpty()) add("popular-live")
     }
-    LaunchedEffect(pendingContinueRowFocus, continueWatching.isEmpty(), availableHomeContentRows) {
-        if (!pendingContinueRowFocus || continueWatching.isNotEmpty()) return@LaunchedEffect
-        pendingContinueRowFocus = false
+    LaunchedEffect(pendingContinueRowFocus?.id, navigationMemory, continueWatching.isEmpty(), availableHomeContentRows) {
+        val request = pendingContinueRowFocus ?: return@LaunchedEffect
+        if (continueWatching.isNotEmpty()) return@LaunchedEffect
         val targetRow = removalFocusTarget(
             previousKeys = HOME_CONTENT_ROW_ORDER,
             remainingKeys = availableHomeContentRows.toList(),
             removedKey = "continue",
         )
-        val targetIndex = targetRow?.let { rowIndexByKey[it] } ?: -1
-        if (targetRow == null || targetIndex < 0) {
-            withFrameNanos { }
-            runCatching { homeEntryFocusRequester?.requestFocus() }
-            return@LaunchedEffect
+        val handoff = HomeEmptyRowFocusHandoff(
+            ensureRowAvailable = { rowKey ->
+                val targetIndex = rowIndexByKey[rowKey]
+                if (targetIndex == null) {
+                    false
+                } else {
+                    if (listState.layoutInfo.visibleItemsInfo.none { it.key == rowKey }) {
+                        listState.scrollToItem(targetIndex)
+                    }
+                    snapshotFlow {
+                        listState.layoutInfo.visibleItemsInfo.any { it.key == rowKey }
+                    }.first { it }
+                    true
+                }
+            },
+            focusRowFirstCard = { rowKey ->
+                homeRowFocusTargets[rowKey]?.focusFirstCard() ?: false
+            },
+            focusHomeEntry = { homeEntryFocusRequester?.requestFocus() ?: false },
+        )
+        if (handoff.run(targetRow) && pendingContinueRowFocus?.id == request.id) {
+            pendingContinueRowFocus = null
         }
-        if (listState.layoutInfo.visibleItemsInfo.none { it.key == targetRow }) {
-            listState.scrollToItem(targetIndex)
-        }
-        snapshotFlow { listState.layoutInfo.visibleItemsInfo.any { it.key == targetRow } }
-            .first { it }
-        withFrameNanos { }
-        runCatching { homeRowFocusRequesters[targetRow]?.requestFocus() }
     }
     val homeHeroFocusRequester = remember { FocusRequester() }
     // A player round-trip changes the history input, so Home first presents its cheap
@@ -2043,30 +2061,30 @@ private fun CinemaHomeScreen(
                 }
             }
         }
-        if (activeDownloads.isNotEmpty()) item(key = "downloads") { HomeSectionPadding(isTv) { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads, rowFocusRequester("downloads")) } }
+        if (activeDownloads.isNotEmpty()) item(key = "downloads") { HomeSectionPadding(isTv) { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads, rowFocusRequester("downloads"), rowFocusTarget("downloads")) } }
         if (becauseYouWatched.isNotEmpty()) {
-            item(key = "because-watched") { HomeSectionPadding(isTv) { HomeBoxedSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("because-watched")) } }
+            item(key = "because-watched") { HomeSectionPadding(isTv) { HomeBoxedSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("because-watched"), rowFocusTarget("because-watched")) } }
         }
         if (suggested.isNotEmpty()) {
-            item(key = "recommended") { HomeSectionPadding(isTv) { HomeBoxedSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("recommended")) } }
+            item(key = "recommended") { HomeSectionPadding(isTv) { HomeBoxedSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("recommended"), rowFocusTarget("recommended")) } }
         }
         if (homeMovies.isNotEmpty()) {
-            item(key = "recent-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("recent-movies")) } }
+            item(key = "recent-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("recent-movies"), rowFocusTarget("recent-movies")) } }
         }
         if (homeSeries.isNotEmpty()) {
-            item(key = "recent-series") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("recent-series")) } }
+            item(key = "recent-series") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("recent-series"), rowFocusTarget("recent-series")) } }
         }
         if (popularMovies.isNotEmpty()) {
-            item(key = "top-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("top-movies")) } }
+            item(key = "top-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("top-movies"), rowFocusTarget("top-movies")) } }
         }
         if (popularSeries.isNotEmpty()) {
-            item(key = "top-series") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("top-series")) } }
+            item(key = "top-series") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("top-series"), rowFocusTarget("top-series")) } }
         }
         if (lastLive != null) {
-            item(key = "last-live") { HomeSectionPadding(isTv) { HomeLastChannelSection("last-live", lastLiveRow, lastLive, isTv, navigationMemory, onOpenHistory, rowFocusRequester("last-live")) } }
+            item(key = "last-live") { HomeSectionPadding(isTv) { HomeLastChannelSection("last-live", lastLiveRow, lastLive, isTv, navigationMemory, onOpenHistory, rowFocusRequester("last-live"), rowFocusTarget("last-live")) } }
         }
         if (suggestedLive.isNotEmpty()) {
-            item(key = "popular-live") { HomeSectionPadding(isTv) { HomeBoxedSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("popular-live")) } }
+            item(key = "popular-live") { HomeSectionPadding(isTv) { HomeBoxedSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("popular-live"), rowFocusTarget("popular-live")) } }
         }
     }
 }
@@ -2355,8 +2373,32 @@ private fun ActiveDownloadsSection(
     isTv: Boolean,
     onOpenDownloads: () -> Unit,
     firstItemFocusRequester: FocusRequester? = null,
+    rowFocusTarget: HomeRowFocusTarget? = null,
 ) {
     val colors = LocalHulkColors.current
+    val rowState = rememberLazyListState()
+    var firstCardFocused by remember { mutableStateOf(false) }
+    SideEffect {
+        val target = rowFocusTarget ?: return@SideEffect
+        val firstRequester = firstItemFocusRequester ?: return@SideEffect
+        target.attach {
+            focusHomeRowFirstCard(
+                firstCardVisible = {
+                    !homeRowFirstCardNeedsReveal(rowState.layoutInfo.visibleItemsInfo.map { it.index })
+                },
+                revealFirstCard = { rowState.scrollToItem(0) },
+                awaitFirstCard = {
+                    snapshotFlow { rowState.layoutInfo.visibleItemsInfo.any { it.index == 0 } }
+                        .first { it }
+                },
+                requestFocus = { firstRequester.requestFocus() },
+                awaitFocused = { snapshotFlow { firstCardFocused }.first { it } },
+            )
+        }
+    }
+    DisposableEffect(rowFocusTarget) {
+        onDispose { rowFocusTarget?.detach() }
+    }
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             // Caption physically RIGHT with its simple glyph physically LEFT in RTL.
@@ -2366,6 +2408,7 @@ private fun ActiveDownloadsSection(
         }
         Spacer(Modifier.height(10.dp))
         LazyRow(
+            state = rowState,
             contentPadding = PaddingValues(horizontal = 5.dp, vertical = 5.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -2390,7 +2433,10 @@ private fun ActiveDownloadsSection(
                             if (focused) colors.goldBright else colors.line.copy(alpha = .45f),
                             shape,
                         )
-                        .onFocusChanged { focused = it.isFocused }
+                        .onFocusChanged {
+                            focused = it.isFocused
+                            if (it.isFocused) firstCardFocused = index == 0
+                        }
                         .clickable(role = Role.Button, onClick = onOpenDownloads)
                         .padding(13.dp),
                 ) {
@@ -3253,6 +3299,7 @@ private fun HomeBoxedSection(
     onOpen: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     firstItemFocusRequester: FocusRequester? = null,
+    rowFocusTarget: HomeRowFocusTarget? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -3266,6 +3313,28 @@ private fun HomeBoxedSection(
     val targetIndex = if (remembered.rowKey == rowKey) remembered.itemIndex.coerceIn(0, content.lastIndex.coerceAtLeast(0)) else 0
     val rowState = rememberLazyListState(initialFirstVisibleItemIndex = targetIndex)
     val targetRequester = remember { FocusRequester() }
+    var firstCardFocused by remember { mutableStateOf(false) }
+    SideEffect {
+        val target = rowFocusTarget ?: return@SideEffect
+        val firstRequester = firstItemFocusRequester ?: return@SideEffect
+        target.attach {
+            focusHomeRowFirstCard(
+                firstCardVisible = {
+                    !homeRowFirstCardNeedsReveal(rowState.layoutInfo.visibleItemsInfo.map { it.index })
+                },
+                revealFirstCard = { rowState.scrollToItem(0) },
+                awaitFirstCard = {
+                    snapshotFlow { rowState.layoutInfo.visibleItemsInfo.any { it.index == 0 } }
+                        .first { it }
+                },
+                requestFocus = { firstRequester.requestFocus() },
+                awaitFocused = { snapshotFlow { firstCardFocused }.first { it } },
+            )
+        }
+    }
+    DisposableEffect(rowFocusTarget) {
+        onDispose { rowFocusTarget?.detach() }
+    }
     LaunchedEffect(Unit) {
         if (remembered.rowKey == rowKey && content.isNotEmpty()) {
             rowState.scrollToItem(targetIndex)
@@ -3295,6 +3364,7 @@ private fun HomeBoxedSection(
                     Modifier.restoreFocus(restore, targetRequester)
                 }
                 val saveFocus = {
+                    firstCardFocused = index == 0
                     navigationMemory.save(MainDestination.HOME, itemKey, index, rowKey, rowIndex)
                 }
                 when (item.type) {
@@ -3451,6 +3521,7 @@ private fun HomeLastChannelSection(
     navigationMemory: NavigationMemoryStore,
     onOpen: (HistoryEntry) -> Unit,
     firstItemFocusRequester: FocusRequester? = null,
+    rowFocusTarget: HomeRowFocusTarget? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -3460,6 +3531,22 @@ private fun HomeLastChannelSection(
     val remembered = navigationMemory.position(MainDestination.HOME)
     val ownedRequester = remember { FocusRequester() }
     val rowRequester = firstItemFocusRequester ?: ownedRequester
+    var firstCardFocused by remember { mutableStateOf(false) }
+    SideEffect {
+        val target = rowFocusTarget ?: return@SideEffect
+        target.attach {
+            focusHomeRowFirstCard(
+                firstCardVisible = { true },
+                revealFirstCard = {},
+                awaitFirstCard = {},
+                requestFocus = { rowRequester.requestFocus() },
+                awaitFocused = { snapshotFlow { firstCardFocused }.first { it } },
+            )
+        }
+    }
+    DisposableEffect(rowFocusTarget) {
+        onDispose { rowFocusTarget?.detach() }
+    }
     LaunchedEffect(Unit) {
         if (remembered.rowKey == rowKey) {
             runCatching { rowRequester.requestFocus() }
@@ -3477,7 +3564,10 @@ private fun HomeLastChannelSection(
                 modifier = Modifier
                     .width(cardWidth)
                     .focusRequester(rowRequester),
-                onFocused = { navigationMemory.save(MainDestination.HOME, entry.key, 0, rowKey, rowIndex) },
+                onFocused = {
+                    firstCardFocused = true
+                    navigationMemory.save(MainDestination.HOME, entry.key, 0, rowKey, rowIndex)
+                },
             )
         }
     }

@@ -1,6 +1,11 @@
 package sa.hulksa.player.ui.screens
 
 import androidx.compose.ui.input.key.KeyEventType
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -148,6 +153,137 @@ class HomeHistoryRemovalTest {
         assertTrue(guard.onSelectKey(KeyEventType.KeyUp))
         assertFalse(guard.active)
         assertFalse(guard.onSelectKey(KeyEventType.KeyDown))
+    }
+
+    @Test
+    fun emptyRowHandoff_waitsForRowAndCardReadinessAndCompletesOnce() = runBlocking {
+        val rowReady = CompletableDeferred<Unit>()
+        val cardReady = CompletableDeferred<Unit>()
+        var focusCalls = 0
+        var homeEntryCalls = 0
+        val target = HomeRowFocusTarget().apply {
+            attach {
+                cardReady.await()
+                focusCalls += 1
+                true
+            }
+        }
+        val handoff = HomeEmptyRowFocusHandoff(
+            ensureRowAvailable = {
+                rowReady.await()
+                true
+            },
+            focusRowFirstCard = { target.focusFirstCard() },
+            focusHomeEntry = {
+                homeEntryCalls += 1
+                true
+            },
+        )
+
+        val work = async(Dispatchers.Default) { handoff.run("recommended") }
+        assertFalse(work.isCompleted)
+        rowReady.complete(Unit)
+        assertFalse(work.isCompleted)
+        cardReady.complete(Unit)
+        assertTrue(work.await())
+        assertEquals(1, focusCalls)
+        assertEquals(0, homeEntryCalls)
+    }
+
+    @Test
+    fun emptyRowHandoff_cancellationNeverFocusesOrFallsThrough() = runBlocking {
+        val rowReady = CompletableDeferred<Unit>()
+        var focused = false
+        val handoff = HomeEmptyRowFocusHandoff(
+            ensureRowAvailable = {
+                rowReady.await()
+                true
+            },
+            focusRowFirstCard = {
+                focused = true
+                true
+            },
+            focusHomeEntry = { true },
+        )
+
+        val work = async(Dispatchers.Default) { handoff.run("recommended") }
+        work.cancelAndJoin()
+        rowReady.complete(Unit)
+        assertFalse(focused)
+    }
+
+    @Test
+    fun emptyRowHandoff_usesHomeEntryWhenNoContentRowRemains() = runBlocking {
+        var homeEntryCalls = 0
+        val handoff = HomeEmptyRowFocusHandoff(
+            ensureRowAvailable = { false },
+            focusRowFirstCard = { false },
+            focusHomeEntry = {
+                homeEntryCalls += 1
+                true
+            },
+        )
+
+        assertTrue(handoff.run(null))
+        assertEquals(1, homeEntryCalls)
+    }
+
+    @Test
+    fun rowFirstCardNeedsReveal_detectsHorizontallyScrolledRow() {
+        assertTrue(homeRowFirstCardNeedsReveal(listOf(2, 3, 4)))
+        assertFalse(homeRowFirstCardNeedsReveal(listOf(0, 1, 2)))
+        assertTrue(homeRowFirstCardNeedsReveal(emptyList()))
+    }
+
+    @Test
+    fun rowFirstCardHelper_revealsHorizontallyScrolledCardBeforeFocus() = runBlocking {
+        var visible = false
+        var revealed = false
+        var requested = false
+        var focused = false
+
+        assertTrue(
+            focusHomeRowFirstCard(
+                firstCardVisible = { visible },
+                revealFirstCard = {
+                    revealed = true
+                    visible = true
+                },
+                awaitFirstCard = {},
+                requestFocus = {
+                    requested = true
+                    true
+                },
+                awaitFocused = { focused = true },
+            ),
+        )
+        assertTrue(revealed)
+        assertTrue(requested)
+        assertTrue(focused)
+    }
+
+    @Test
+    fun rowFirstCardHelper_doesNotCompleteWhenFocusRequestFails() = runBlocking {
+        var focused = false
+        assertFalse(
+            focusHomeRowFirstCard(
+                firstCardVisible = { true },
+                revealFirstCard = { error("must not reveal") },
+                awaitFirstCard = {},
+                requestFocus = { false },
+                awaitFocused = { focused = true },
+            ),
+        )
+        assertFalse(focused)
+    }
+
+    @Test
+    fun detachedRowTargetDoesNotClaimFocus() = runBlocking {
+        val target = HomeRowFocusTarget()
+        target.attach { true }
+        assertTrue(target.focusFirstCard())
+        target.detach()
+        assertFalse(target.focusFirstCard())
     }
 
     @Test
