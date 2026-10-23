@@ -188,6 +188,7 @@ import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.MainDestination
 import sa.hulksa.player.data.AccountProfileStateScope
+import sa.hulksa.player.data.FavoriteMutationOutcome
 import sa.hulksa.player.data.GrowthAction
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.data.OperationsAnnouncement
@@ -1062,7 +1063,7 @@ fun MainShellScreen(
     onOpen: (ContentItem) -> Unit,
     onOpenHistory: (HistoryEntry) -> Unit,
     onRemoveHistoryEntry: (String, (Boolean) -> Unit) -> Unit,
-    onToggleFavorite: (ContentItem) -> Unit,
+    onToggleFavoriteWithResult: (ContentItem, (FavoriteMutationOutcome) -> Unit) -> Unit,
     onRefresh: () -> Unit,
     onOpenNotifications: () -> Unit,
     onClearHistory: () -> Unit,
@@ -1167,22 +1168,8 @@ fun MainShellScreen(
             !downloadsEnabled && entry.destination == MainDestination.DOWNLOADS
         }
     }
-    val favoriteOverrides = remember { mutableStateMapOf<String, Boolean>() }
-    var favoriteActionLocked by remember { mutableStateOf(false) }
-    val favoriteScope = rememberCoroutineScope()
-    LaunchedEffect(state.favorites) {
-        favoriteOverrides.entries.toList().forEach { (key, optimisticValue) ->
-            if ((key in state.favorites) == optimisticValue) favoriteOverrides.remove(key)
-        }
-    }
-    val favoriteSnapshot = CatalogFavoriteSnapshot(
-        persisted = state.favorites,
-        optimistic = favoriteOverrides.toMap(),
-    )
-    val resolvedIsFavorite: (ContentItem) -> Boolean = { item ->
-        val key = "${item.type.name}:${item.id}"
-        favoriteOverrides[key] ?: isFavorite(item)
-    }
+    val favoriteSnapshot = CatalogFavoriteSnapshot(persisted = state.favorites)
+    val resolvedIsFavorite: (ContentItem) -> Boolean = isFavorite
     var growthQrDestination by remember { mutableStateOf<GrowthDestination?>(null) }
     // The shell-level scoped action notice is owned above this screen (single notice owner);
     // real Home action results are posted to it instead of the previous unstyled Toasts.
@@ -1205,27 +1192,12 @@ fun MainShellScreen(
         }
     }
     val toggleFavoriteWithFeedback: (ContentItem) -> Unit = { pressedItem ->
-        if (!favoriteActionLocked) {
-            favoriteActionLocked = true
-            val pressedKey = "${pressedItem.type.name}:${pressedItem.id}"
-            val pressedTitle = pressedItem.name
-            val wasFavorite = resolvedIsFavorite(pressedItem)
-            val optimisticValue = !wasFavorite
-            favoriteOverrides[pressedKey] = optimisticValue
-            onToggleFavorite(pressedItem)
-            onActionNotice(
-                if (wasFavorite) {
-                    "تمت ازالة $pressedTitle من المفضلة"
-                } else {
-                    "تمت اضافة $pressedTitle الى المفضلة"
-                },
-                if (wasFavorite) Icons.Outlined.FavoriteBorder else Icons.Rounded.Favorite,
-            )
-            favoriteScope.launch {
-                delay(1_600L)
-                favoriteActionLocked = false
-                delay(3_400L)
-                if (favoriteOverrides[pressedKey] == optimisticValue) favoriteOverrides.remove(pressedKey)
+        onToggleFavoriteWithResult(pressedItem) { outcome ->
+            favoriteMutationFeedback(outcome, pressedItem.name)?.let { feedback ->
+                onActionNotice(
+                    feedback.message,
+                    favoriteFeedbackIcon(feedback.glyph),
+                )
             }
         }
     }

@@ -48,10 +48,14 @@ class LivePlayerFavoriteBindingContractTest(unittest.TestCase):
         self.assertNotIn("favoriteIds = if (favorite)", browser)
         self.assertNotIn("Toast.makeText", browser)
 
-    def test_player_favorite_feedback_only_fires_on_accepted_membership_change(self) -> None:
+    def test_player_favorite_feedback_only_fires_on_accepted_outcome(self) -> None:
         player = self.read(PLAYER_SCREEN)
-        self.assertIn("val isNowFavorite = isFavorite(channel)", player)
-        self.assertIn("if (isNowFavorite != wasFavorite)", player)
+        self.assertIn("onToggleFavorite(channel) { outcome ->", player)
+        self.assertIn("favoriteMutationFeedback(outcome, \"القناة\")", player)
+        # Feedback is derived from the authoritative mutation result, never a pre-click guess
+        # or an immediate post-call membership read.
+        self.assertNotIn("val isNowFavorite = isFavorite(channel)", player)
+        self.assertNotIn("if (isNowFavorite != wasFavorite)", player)
 
     def test_no_second_favorite_shadow_store_or_polling_is_introduced(self) -> None:
         for path in (HULK_APP, PLAYER_PRO, PLAYER_SCREEN, LIVE_BROWSER):

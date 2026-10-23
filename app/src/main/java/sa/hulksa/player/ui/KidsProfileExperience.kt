@@ -336,8 +336,10 @@ fun KidsProfileExperience(
                             onSelectLiveChannel = { channel ->
                                 if (isVerifiedKidsItem(safeSnapshot, channel)) viewModel.switchLiveChannel(channel)
                             },
-                            onToggleFavorite = { item ->
-                                if (isVerifiedKidsItem(safeSnapshot, item)) viewModel.toggleFavorite(item)
+                            onToggleFavorite = { item, result ->
+                                if (isVerifiedKidsItem(safeSnapshot, item)) {
+                                    viewModel.toggleFavorite(item, result)
+                                }
                             },
                             onBack = viewModel::back,
                             onProgress = viewModel::onPlaybackProgress,

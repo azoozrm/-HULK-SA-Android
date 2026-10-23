@@ -204,7 +204,7 @@ fun PlayerProScreen(
     favoriteKeys: Set<String>,
     vodItem: ContentItem? = null,
     onSelectLiveChannel: (ContentItem) -> Unit,
-    onToggleFavorite: (ContentItem) -> Unit,
+    onToggleFavorite: (ContentItem, (sa.hulksa.player.data.FavoriteMutationOutcome) -> Unit) -> Unit,
     onBack: () -> Unit,
     onProgress: (request: PlaybackRequest, positionMs: Long, durationMs: Long) -> Unit,
     previousEpisode: Episode?,

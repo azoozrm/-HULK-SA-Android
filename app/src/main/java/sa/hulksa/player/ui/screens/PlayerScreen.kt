@@ -531,7 +531,7 @@ fun PlayerScreen(
     favoriteKeys: Set<String> = emptySet(),
     vodItem: ContentItem? = null,
     onSelectLiveChannel: (ContentItem) -> Unit,
-    onToggleFavorite: (ContentItem) -> Unit,
+    onToggleFavorite: (ContentItem, (sa.hulksa.player.data.FavoriteMutationOutcome) -> Unit) -> Unit,
     onLastChannel: (() -> Unit)? = null,
     onBack: () -> Unit,
     onProgress: (request: PlaybackRequest, positionMs: Long, durationMs: Long) -> Unit,
@@ -2436,7 +2436,9 @@ fun PlayerScreen(
                             onPrevious = onPreviousLiveChannel ?: { switchRelative(-1); 0 },
                             onNext = onNextLiveChannel ?: { switchRelative(1); 0 },
                             onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
-                            onFavorite = { liveFavoriteChannel?.let(onToggleFavorite) },
+                            onFavorite = {
+                                liveFavoriteChannel?.let { channel -> onToggleFavorite(channel) { } }
+                            },
                             onChannels = {
                                 controlsVisible = false
                                 activePanel = null
@@ -2536,7 +2538,7 @@ fun PlayerScreen(
                             onRewind = { seekBy(-seekStepMs) },
                             onForward = { seekBy(seekStepMs) },
                             onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
-                            onFavorite = { vodItem?.let(onToggleFavorite) },
+                            onFavorite = { vodItem?.let { item -> onToggleFavorite(item) { } } },
                             onPreview = ::previewVodSeek,
                             onCommit = ::commitVodSeek,
                             onPreviewCancel = ::cancelVodSeekPreview,
@@ -2807,15 +2809,10 @@ fun PlayerScreen(
                 isFavorite = isFavorite,
                 favoriteKeys = favoriteKeys,
                 onToggleFavorite = { channel ->
-                    val wasFavorite = isFavorite(channel)
-                    onToggleFavorite(channel)
-                    val isNowFavorite = isFavorite(channel)
-                    if (isNowFavorite != wasFavorite) {
-                        Toast.makeText(
-                            context,
-                            if (isNowFavorite) "تمت اضافة القناة الى المفضلة" else "تمت ازالة القناة من المفضلة",
-                            Toast.LENGTH_SHORT,
-                        ).show()
+                    onToggleFavorite(channel) { outcome ->
+                        favoriteMutationFeedback(outcome, "القناة")?.let { feedback ->
+                            Toast.makeText(context, feedback.message, Toast.LENGTH_SHORT).show()
+                        }
                     }
                 },
                 onSelectChannel = { channel ->

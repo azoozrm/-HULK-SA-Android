@@ -6,6 +6,7 @@ import android.content.SharedPreferences
 import sa.hulksa.player.model.DownloadSettings
 import sa.hulksa.player.model.AuthenticatedSession
 import sa.hulksa.player.model.OfflineDownload
+import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.model.PlaybackRequest
 import sa.hulksa.player.security.containsCredentialBearingIptvMaterial
 import java.security.MessageDigest
@@ -272,6 +273,12 @@ internal data class ProfileDownloadMutationOutcome(
     val applied: Boolean,
 )
 
+internal data class ProfileDownloadResumeOutcome(
+    val downloads: List<OfflineDownload>,
+    val resumed: Boolean,
+    val status: OfflineStatus?,
+)
+
 internal class ProfileScopedDownloadRepository(context: Context) {
     private val appContext = context.applicationContext
     private val accountSessionStore = AccountSessionStore(appContext)
@@ -394,13 +401,65 @@ internal class ProfileScopedDownloadRepository(context: Context) {
         )
     }
 
+    fun record(
+        downloadId: Long,
+        expectedAccountId: String,
+        expectedProfileId: String,
+    ): OfflineDownload? {
+        if (
+            !downloadOwnerContextMatches(
+                expectedAccountId = expectedAccountId,
+                expectedProfileId = expectedProfileId,
+                activeAccountId = activeAccountId(),
+                activeProfileId = profileStore.activeProfileId(),
+            )
+        ) return null
+        val binding = activeBinding() ?: return null
+        if (binding.accountId != expectedAccountId || !owns(binding, downloadId)) return null
+        return binding.delegate.record(downloadId)
+    }
+
     fun resume(
         downloadId: Long,
         expectedAccountId: String,
         expectedProfileId: String,
-    ): ProfileDownloadMutationOutcome = mutateForOwner(expectedAccountId, expectedProfileId) { binding ->
-        val resumed = owns(binding, downloadId) && binding.delegate.resume(downloadId)
-        binding.delegate.settings() to resumed
+    ): ProfileDownloadResumeOutcome {
+        if (
+            !downloadOwnerContextMatches(
+                expectedAccountId = expectedAccountId,
+                expectedProfileId = expectedProfileId,
+                activeAccountId = activeAccountId(),
+                activeProfileId = profileStore.activeProfileId(),
+            )
+        ) {
+            return ProfileDownloadResumeOutcome(
+                downloads = snapshot(),
+                resumed = false,
+                status = null,
+            )
+        }
+        val binding = activeBinding()
+            ?: return ProfileDownloadResumeOutcome(
+                downloads = emptyList(),
+                resumed = false,
+                status = null,
+            )
+        if (binding.accountId != expectedAccountId || !owns(binding, downloadId)) {
+            return ProfileDownloadResumeOutcome(
+                downloads = snapshotForOwner(binding, expectedAccountId, expectedProfileId),
+                resumed = false,
+                status = null,
+            )
+        }
+        val resumed = binding.delegate.resume(downloadId)
+        val status = binding.delegate.record(downloadId)
+            ?.takeIf { expectedProfileId in it.ownerProfileIds }
+            ?.status
+        return ProfileDownloadResumeOutcome(
+            downloads = snapshotForOwner(binding, expectedAccountId, expectedProfileId),
+            resumed = resumed,
+            status = status,
+        )
     }
 
     fun remove(downloadId: Long): List<OfflineDownload> {

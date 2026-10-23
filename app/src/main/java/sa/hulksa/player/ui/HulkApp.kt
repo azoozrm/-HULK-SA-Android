@@ -13,12 +13,10 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Downloading
-import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Notifications
@@ -77,6 +75,8 @@ import sa.hulksa.player.ui.screens.PlayerProScreen
 import sa.hulksa.player.ui.screens.ScopedHomeActionNotice
 import sa.hulksa.player.ui.screens.SeriesDetailsProPolishedScreen
 import sa.hulksa.player.ui.screens.detailsProRelatedItems
+import sa.hulksa.player.ui.screens.favoriteFeedbackIcon
+import sa.hulksa.player.ui.screens.favoriteMutationFeedback
 import sa.hulksa.player.ui.screens.downloadNoticeDisplayText
 import sa.hulksa.player.ui.screens.liveTvProDecorateMainState
 import sa.hulksa.player.ui.screens.liveTvProMainCategoryToContext
@@ -372,20 +372,14 @@ fun HulkApp(
                                 onRefresh = viewModel::refresh,
                                 onOpen = openWithLiveContext,
                                 onToggleFavorite = { item ->
-                                    val wasFavorite = viewModel.isFavorite(item)
-                                    viewModel.toggleFavorite(item)
-                                    postActionNotice(
-                                        if (wasFavorite) {
-                                            "تمت ازالة ${item.name} من المفضلة"
-                                        } else {
-                                            "تمت اضافة ${item.name} الى المفضلة"
-                                        },
-                                        if (wasFavorite) {
-                                            Icons.Outlined.FavoriteBorder
-                                        } else {
-                                            Icons.Rounded.Favorite
-                                        },
-                                    )
+                                    viewModel.toggleFavorite(item) { outcome ->
+                                        favoriteMutationFeedback(outcome, item.name)?.let { feedback ->
+                                            postActionNotice(
+                                                feedback.message,
+                                                favoriteFeedbackIcon(feedback.glyph),
+                                            )
+                                        }
+                                    }
                                 },
                                 onSwitchProfile = requestProfileSwitch,
                             )
@@ -422,7 +416,9 @@ fun HulkApp(
                                     onRemoveHistoryEntry = { key, result ->
                                         viewModel.removeHistoryEntry(key, result)
                                     },
-                                    onToggleFavorite = viewModel::toggleFavorite,
+                                    onToggleFavoriteWithResult = { item, result ->
+                                        viewModel.toggleFavorite(item, result)
+                                    },
                                     onRefresh = viewModel::refresh,
                                     onOpenNotifications = openNotificationCenter,
                                     onClearHistory = viewModel::clearHistory,
@@ -507,15 +503,11 @@ fun HulkApp(
                                 },
                                 onToggleFavorite = { viewModel.toggleFavorite(item) },
                                 onToggleRelatedFavorite = { related ->
-                                    val wasFavorite = viewModel.isFavorite(related)
-                                    viewModel.toggleFavorite(related)
-                                    notify(
-                                        if (wasFavorite) {
-                                            "تمت ازالة ${related.name} من المفضلة"
-                                        } else {
-                                            "تمت اضافة ${related.name} الى المفضلة"
-                                        },
-                                    )
+                                    viewModel.toggleFavorite(related) { outcome ->
+                                        favoriteMutationFeedback(outcome, related.name)?.let { feedback ->
+                                            notify(feedback.message)
+                                        }
+                                    }
                                 },
                                 onOpenRelated = viewModel::open,
                                 onRetryDetails = { viewModel.open(item) },
@@ -591,15 +583,11 @@ fun HulkApp(
                                     }
                                 },
                                 onToggleRelatedFavorite = { related ->
-                                    val wasFavorite = viewModel.isFavorite(related)
-                                    viewModel.toggleFavorite(related)
-                                    notify(
-                                        if (wasFavorite) {
-                                            "تمت ازالة ${related.name} من المفضلة"
-                                        } else {
-                                            "تمت اضافة ${related.name} الى المفضلة"
-                                        },
-                                    )
+                                    viewModel.toggleFavorite(related) { outcome ->
+                                        favoriteMutationFeedback(outcome, related.name)?.let { feedback ->
+                                            notify(feedback.message)
+                                        }
+                                    }
                                 },
                                 onOpenRelated = viewModel::open,
                                 onRetryDetails = { viewModel.open(series) },
@@ -653,7 +641,9 @@ fun HulkApp(
                                 favoriteKeys = state.favorites,
                                 vodItem = vodFavoriteItem,
                                 onSelectLiveChannel = viewModel::switchLiveChannel,
-                                onToggleFavorite = viewModel::toggleFavorite,
+                                onToggleFavorite = { item, result ->
+                                    viewModel.toggleFavorite(item, result)
+                                },
                                 onBack = viewModel::back,
                                 onProgress = viewModel::onPlaybackProgress,
                                 previousEpisode = episodeNeighbors.previous,
