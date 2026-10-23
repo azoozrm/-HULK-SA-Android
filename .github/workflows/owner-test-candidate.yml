@@ -9,8 +9,11 @@ on:
       - '.github/workflows/owner-test-candidate.yml'
       - 'app/src/main/java/sa/hulksa/player/HulkViewModel.kt'
       - 'app/src/main/java/sa/hulksa/player/data/**'
+      - 'app/src/main/java/sa/hulksa/player/ui/**'
       - 'app/src/test/java/sa/hulksa/player/data/**'
+      - 'app/src/test/java/sa/hulksa/player/ui/**'
       - 'app/src/androidTest/java/sa/hulksa/player/data/**'
+      - 'app/src/androidTest/java/sa/hulksa/player/ui/**'
       - 'quality/compatibility-v2/tests/test_download_settings_persistence_contract.py'
 
 permissions:

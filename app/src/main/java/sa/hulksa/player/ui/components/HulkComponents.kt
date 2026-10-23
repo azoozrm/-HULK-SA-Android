@@ -1592,7 +1592,8 @@ internal fun seriesHistoryIdentityText(entry: HistoryEntry): String? {
  * the physical RIGHT (RTL layout start), matching [sa.hulksa.player.ui.screens.MovieInlineResumeStrip].
  * `identityText`/`reserveIdentitySlot` add the Series season/episode line without changing the
  * Movie footer. No rating, seek thumb, fake minimum fill or extra playback/delete control.
- * Long-press removal keeps the exact [HistoryCard] semantics including the pre-removal focus move.
+ * When [onRemoveRequested] is supplied, Home owns removal/focus/input completion; otherwise the
+ * legacy card-local removal behavior (including the pre-removal focus move) remains unchanged.
  */
 @Composable
 fun BoxedHistoryCard(
@@ -1604,6 +1605,7 @@ fun BoxedHistoryCard(
     onFooterHeightMeasured: ((Int) -> Unit)? = null,
     identityText: String? = null,
     reserveIdentitySlot: Boolean = false,
+    onRemoveRequested: ((HistoryEntry, Boolean) -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -1635,17 +1637,21 @@ fun BoxedHistoryCard(
     val shape = RoundedCornerShape(if (adaptiveUi.isTelevision) 12.dp else 10.dp)
     val title = historyPrimaryTitle(entry)
     val playedFraction = movieRecentPlayedFraction(entry.positionMs, entry.durationMs)
-    val dismissFromContinueWatching: (Boolean) -> Unit = { moveFocusFirst ->
-        if (canDismiss && viewModel != null) {
-            if (moveFocusFirst) {
-                val forward = if (layoutDirection == LayoutDirection.Rtl) FocusDirection.Left else FocusDirection.Right
-                val backward = if (layoutDirection == LayoutDirection.Rtl) FocusDirection.Right else FocusDirection.Left
-                val movedToNeighbor = focusManager.moveFocus(forward) || focusManager.moveFocus(backward)
-                if (!movedToNeighbor) {
-                    focusManager.moveFocus(FocusDirection.Up)
+    val requestRemoval: (Boolean) -> Unit = { remote ->
+        if (canDismiss) {
+            if (onRemoveRequested != null) {
+                onRemoveRequested(entry, remote)
+            } else if (viewModel != null) {
+                if (remote) {
+                    val forward = if (layoutDirection == LayoutDirection.Rtl) FocusDirection.Left else FocusDirection.Right
+                    val backward = if (layoutDirection == LayoutDirection.Rtl) FocusDirection.Right else FocusDirection.Left
+                    val movedToNeighbor = focusManager.moveFocus(forward) || focusManager.moveFocus(backward)
+                    if (!movedToNeighbor) {
+                        focusManager.moveFocus(FocusDirection.Up)
+                    }
                 }
+                viewModel.removeHistoryEntry(entry.key)
             }
-            viewModel.removeHistoryEntry(entry.key)
         }
     }
     Column(
@@ -1667,12 +1673,17 @@ fun BoxedHistoryCard(
                 if (!canDismiss || !event.nativeKeyEvent.isRemoteSelectKey()) {
                     false
                 } else if (event.type == KeyEventType.KeyDown) {
+                    if (event.nativeKeyEvent.repeatCount == 0 && !event.nativeKeyEvent.isLongPress) {
+                        // A fresh press clears any stale guard left when the shell consumed the
+                        // previous removal's KeyUp. No time-based lock is involved.
+                        remoteLongPressHandled = false
+                    }
                     if (
                         (event.nativeKeyEvent.repeatCount > 0 || event.nativeKeyEvent.isLongPress) &&
                         !remoteLongPressHandled
                     ) {
                         remoteLongPressHandled = true
-                        dismissFromContinueWatching(true)
+                        requestRemoval(true)
                     }
                     true
                 } else if (event.type == KeyEventType.KeyUp) {
@@ -1686,7 +1697,7 @@ fun BoxedHistoryCard(
             .combinedClickable(
                 role = Role.Button,
                 onClick = onClick,
-                onLongClick = if (canDismiss) ({ dismissFromContinueWatching(false) }) else null,
+                onLongClick = if (canDismiss) ({ requestRemoval(false) }) else null,
             ),
     ) {
         Box(

@@ -599,6 +599,12 @@ internal fun tvPageSafeInsets(
     )
 }
 
+private fun AndroidKeyEvent.isRemoteSelectKeyCode(): Boolean =
+    keyCode == AndroidKeyEvent.KEYCODE_DPAD_CENTER ||
+        keyCode == AndroidKeyEvent.KEYCODE_ENTER ||
+        keyCode == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER ||
+        keyCode == AndroidKeyEvent.KEYCODE_SPACE
+
 @Composable
 private fun Modifier.adaptiveTvPageSafePadding(
     isTv: Boolean,
@@ -643,6 +649,20 @@ internal data class HomeContentSnapshot(
     val popularMovies: List<ContentItem>,
     val popularSeries: List<ContentItem>,
     val featuredCandidates: List<ContentItem>,
+)
+
+/** Stable LazyColumn content-row order used by Continue Watching's post-removal handoff. */
+private val HOME_CONTENT_ROW_ORDER = listOf(
+    "continue",
+    "downloads",
+    "because-watched",
+    "recommended",
+    "recent-movies",
+    "recent-series",
+    "top-movies",
+    "top-series",
+    "last-live",
+    "popular-live",
 )
 
 internal fun homeHeroIdentity(item: ContentItem): String = "${item.type}:${item.id}"
@@ -1041,6 +1061,7 @@ fun MainShellScreen(
     onSearch: (String) -> Unit,
     onOpen: (ContentItem) -> Unit,
     onOpenHistory: (HistoryEntry) -> Unit,
+    onRemoveHistoryEntry: (String, (Boolean) -> Unit) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
     onOpenNotifications: () -> Unit,
@@ -1060,6 +1081,7 @@ fun MainShellScreen(
     onOpenAnnouncementDetail: (OperationsAnnouncement) -> Unit,
     onOpenUpdateDetail: () -> Unit,
     onActionNotice: (String, ImageVector) -> Unit,
+    mobileHomeFocusRequester: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
     val context = LocalContext.current
@@ -1217,6 +1239,7 @@ fun MainShellScreen(
         } else {
             currentTvContentFocusRequester
         }
+    val homeRemovalInputGuard = remember { HomeRemovalInputGuard() }
     val currentTvCatalogInitialFocusPending =
         pendingTvContentFocusHandoff?.destination == state.destination &&
             state.destination in tvCatalogAllFocusRequesters
@@ -1242,7 +1265,11 @@ fun MainShellScreen(
             pendingTvContentFocusHandoff = null
         }
     }
-    Box(Modifier.fillMaxSize().background(colors.background)) {
+    HomeRemovalInputBoundary(
+        enabled = isTv,
+        guard = homeRemovalInputGuard,
+    ) {
+        Box(Modifier.fillMaxSize().background(colors.background)) {
         if (useNavigationRail) {
             Row(Modifier.fillMaxSize()) {
                 CinematicNavigationRail(
@@ -1270,6 +1297,7 @@ fun MainShellScreen(
                         onSearch = onSearch,
                         onOpen = onOpen,
                         onOpenHistory = onOpenHistory,
+                        onRemoveHistoryEntry = onRemoveHistoryEntry,
                         onToggleFavorite = toggleFavoriteWithFeedback,
                         onRefresh = onRefresh,
                         onOpenNotifications = onOpenNotifications,
@@ -1291,6 +1319,8 @@ fun MainShellScreen(
                         onOpenAnnouncementDetail = onOpenAnnouncementDetail,
                         onOpenUpdateDetail = onOpenUpdateDetail,
                         onActionNotice = onActionNotice,
+                        homeEntryFocusRequester = tvRailFocusRequesters[MainDestination.HOME],
+                        homeRemovalInputGuard = homeRemovalInputGuard,
                         initialAllFocusRequester = tvCatalogAllFocusRequesters[state.destination],
                         initialAllFocusPending = currentTvCatalogInitialFocusPending,
                         downloadsExitFocusRequester = tvRailFocusRequesters[MainDestination.DOWNLOADS],
@@ -1323,6 +1353,7 @@ fun MainShellScreen(
                         onSearch = onSearch,
                         onOpen = onOpen,
                         onOpenHistory = onOpenHistory,
+                        onRemoveHistoryEntry = onRemoveHistoryEntry,
                         onToggleFavorite = toggleFavoriteWithFeedback,
                         onRefresh = onRefresh,
                         onOpenNotifications = onOpenNotifications,
@@ -1344,6 +1375,8 @@ fun MainShellScreen(
                         onOpenAnnouncementDetail = onOpenAnnouncementDetail,
                         onOpenUpdateDetail = onOpenUpdateDetail,
                         onActionNotice = onActionNotice,
+                        homeEntryFocusRequester = mobileHomeFocusRequester,
+                        homeRemovalInputGuard = homeRemovalInputGuard,
                     )
                 }
                 Spacer(
@@ -1368,6 +1401,29 @@ fun MainShellScreen(
                 )
             }
         }
+        }
+    }
+}
+
+/** Shell-level owner for the removing select gesture, surviving Home row/card disposal. */
+@Composable
+private fun HomeRemovalInputBoundary(
+    enabled: Boolean,
+    guard: HomeRemovalInputGuard,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .onPreviewKeyEvent { event ->
+                if (!enabled || !event.nativeKeyEvent.isRemoteSelectKeyCode()) {
+                    false
+                } else {
+                    guard.onSelectKey(event.type)
+                }
+            },
+    ) {
+        content()
     }
 }
 
@@ -1515,6 +1571,7 @@ private fun DestinationContent(
     onSearch: (String) -> Unit,
     onOpen: (ContentItem) -> Unit,
     onOpenHistory: (HistoryEntry) -> Unit,
+    onRemoveHistoryEntry: (String, (Boolean) -> Unit) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
     onOpenNotifications: () -> Unit,
@@ -1536,6 +1593,8 @@ private fun DestinationContent(
     onOpenAnnouncementDetail: (OperationsAnnouncement) -> Unit,
     onOpenUpdateDetail: () -> Unit,
     onActionNotice: (String, ImageVector) -> Unit,
+    homeEntryFocusRequester: FocusRequester? = null,
+    homeRemovalInputGuard: HomeRemovalInputGuard? = null,
     initialAllFocusRequester: FocusRequester? = null,
     initialAllFocusPending: Boolean = false,
     downloadsExitFocusRequester: FocusRequester? = null,
@@ -1554,6 +1613,7 @@ private fun DestinationContent(
             isFavorite = isFavorite,
             onOpen = onOpen,
             onOpenHistory = onOpenHistory,
+            onRemoveHistoryEntry = onRemoveHistoryEntry,
             onToggleFavorite = onToggleFavorite,
             onRefresh = onRefresh,
             onOpenNotifications = onOpenNotifications,
@@ -1563,6 +1623,9 @@ private fun DestinationContent(
             homeMessagePresentation = homeMessagePresentation,
             onOpenAnnouncementDetail = onOpenAnnouncementDetail,
             onOpenUpdateDetail = onOpenUpdateDetail,
+            onActionNotice = onActionNotice,
+            homeEntryFocusRequester = homeEntryFocusRequester,
+            homeRemovalInputGuard = homeRemovalInputGuard,
         )
         MainDestination.LIVE -> LiveCatalogScreen(
             state = state,
@@ -1672,6 +1735,7 @@ private fun CinemaHomeScreen(
     isFavorite: (ContentItem) -> Boolean,
     onOpen: (ContentItem) -> Unit,
     onOpenHistory: (HistoryEntry) -> Unit,
+    onRemoveHistoryEntry: (String, (Boolean) -> Unit) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
     onOpenNotifications: () -> Unit,
@@ -1681,6 +1745,9 @@ private fun CinemaHomeScreen(
     homeMessagePresentation: HomeMessagePresentationState,
     onOpenAnnouncementDetail: (OperationsAnnouncement) -> Unit,
     onOpenUpdateDetail: () -> Unit,
+    onActionNotice: (String, ImageVector) -> Unit,
+    homeEntryFocusRequester: FocusRequester?,
+    homeRemovalInputGuard: HomeRemovalInputGuard?,
 ) {
     val movies = homeContent.movies
     val series = homeContent.series
@@ -1712,6 +1779,28 @@ private fun CinemaHomeScreen(
                 it.status == OfflineStatus.WAITING_STORAGE
         }.take(4)
     }
+    var pendingContinueRowFocus by remember { mutableStateOf(false) }
+    val homeRemovalSessionActive = remember { mutableStateOf(true) }
+    DisposableEffect(Unit) {
+        onDispose { homeRemovalSessionActive.value = false }
+    }
+    val removeHistoryRef = rememberUpdatedState(onRemoveHistoryEntry)
+    val actionNoticeRef = rememberUpdatedState(onActionNotice)
+    val homeRowFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
+    val removalController = remember {
+        HomeHistoryRemovalController(
+            removeHistory = { key, result -> removeHistoryRef.value(key, result) },
+            onSuccessfulRemoval = { wasLastCard ->
+                if (wasLastCard) pendingContinueRowFocus = true
+            },
+            canPublishSuccess = { homeRemovalSessionActive.value },
+            onSuccessNotice = {
+                actionNoticeRef.value("تمت ازالة المشاهدة", Icons.Rounded.DeleteOutline)
+            },
+        )
+    }
+    fun rowFocusRequester(rowKey: String): FocusRequester =
+        homeRowFocusRequesters.getOrPut(rowKey) { FocusRequester() }
     var featuredIdentity by remember(navigationMemory) { mutableStateOf<String?>(null) }
     val featured = remember(featuredIdentity, featuredCandidates, movies, series) {
         resolvePresentedHomeHero(
@@ -1812,6 +1901,39 @@ private fun CinemaHomeScreen(
     )
     val initialRow = rowIndexByKey[remembered.rowKey]?.takeIf { it >= 0 } ?: 0
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialRow)
+    val availableHomeContentRows = buildSet {
+        if (activeDownloads.isNotEmpty()) add("downloads")
+        if (becauseYouWatched.isNotEmpty()) add("because-watched")
+        if (suggested.isNotEmpty()) add("recommended")
+        if (homeMovies.isNotEmpty()) add("recent-movies")
+        if (homeSeries.isNotEmpty()) add("recent-series")
+        if (popularMovies.isNotEmpty()) add("top-movies")
+        if (popularSeries.isNotEmpty()) add("top-series")
+        if (lastLive != null) add("last-live")
+        if (suggestedLive.isNotEmpty()) add("popular-live")
+    }
+    LaunchedEffect(pendingContinueRowFocus, continueWatching.isEmpty(), availableHomeContentRows) {
+        if (!pendingContinueRowFocus || continueWatching.isNotEmpty()) return@LaunchedEffect
+        pendingContinueRowFocus = false
+        val targetRow = removalFocusTarget(
+            previousKeys = HOME_CONTENT_ROW_ORDER,
+            remainingKeys = availableHomeContentRows.toList(),
+            removedKey = "continue",
+        )
+        val targetIndex = targetRow?.let { rowIndexByKey[it] } ?: -1
+        if (targetRow == null || targetIndex < 0) {
+            withFrameNanos { }
+            runCatching { homeEntryFocusRequester?.requestFocus() }
+            return@LaunchedEffect
+        }
+        if (listState.layoutInfo.visibleItemsInfo.none { it.key == targetRow }) {
+            listState.scrollToItem(targetIndex)
+        }
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.any { it.key == targetRow } }
+            .first { it }
+        withFrameNanos { }
+        runCatching { homeRowFocusRequesters[targetRow]?.requestFocus() }
+    }
     val homeHeroFocusRequester = remember { FocusRequester() }
     // A player round-trip changes the history input, so Home first presents its cheap
     // no-history fallback and the remembered row is temporarily absent. Once the exact model
@@ -1905,32 +2027,46 @@ private fun CinemaHomeScreen(
             }
         }
         if (continueWatching.isNotEmpty()) {
-            item(key = "continue") { HomeSectionPadding(isTv) { HomeContinueWatchingSection("متابعة المشاهدة", "continue", continueRow, continueWatching, isTv, navigationMemory, onOpenHistory) } }
+            item(key = "continue") {
+                HomeSectionPadding(isTv) {
+                    HomeContinueWatchingSection(
+                        title = "متابعة المشاهدة",
+                        rowKey = "continue",
+                        rowIndex = continueRow,
+                        entries = continueWatching,
+                        isTv = isTv,
+                        navigationMemory = navigationMemory,
+                        onOpen = onOpenHistory,
+                        removalController = removalController,
+                        onRemoteRemovalStarted = { homeRemovalInputGuard?.begin() },
+                    )
+                }
+            }
         }
-        if (activeDownloads.isNotEmpty()) item(key = "downloads") { HomeSectionPadding(isTv) { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads) } }
+        if (activeDownloads.isNotEmpty()) item(key = "downloads") { HomeSectionPadding(isTv) { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads, rowFocusRequester("downloads")) } }
         if (becauseYouWatched.isNotEmpty()) {
-            item(key = "because-watched") { HomeSectionPadding(isTv) { HomeBoxedSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item(key = "because-watched") { HomeSectionPadding(isTv) { HomeBoxedSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("because-watched")) } }
         }
         if (suggested.isNotEmpty()) {
-            item(key = "recommended") { HomeSectionPadding(isTv) { HomeBoxedSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item(key = "recommended") { HomeSectionPadding(isTv) { HomeBoxedSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("recommended")) } }
         }
         if (homeMovies.isNotEmpty()) {
-            item(key = "recent-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item(key = "recent-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("recent-movies")) } }
         }
         if (homeSeries.isNotEmpty()) {
-            item(key = "recent-series") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item(key = "recent-series") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("recent-series")) } }
         }
         if (popularMovies.isNotEmpty()) {
-            item(key = "top-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item(key = "top-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("top-movies")) } }
         }
         if (popularSeries.isNotEmpty()) {
-            item(key = "top-series") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item(key = "top-series") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("top-series")) } }
         }
         if (lastLive != null) {
-            item(key = "last-live") { HomeSectionPadding(isTv) { HomeLastChannelSection("last-live", lastLiveRow, lastLive, isTv, navigationMemory, onOpenHistory) } }
+            item(key = "last-live") { HomeSectionPadding(isTv) { HomeLastChannelSection("last-live", lastLiveRow, lastLive, isTv, navigationMemory, onOpenHistory, rowFocusRequester("last-live")) } }
         }
         if (suggestedLive.isNotEmpty()) {
-            item(key = "popular-live") { HomeSectionPadding(isTv) { HomeBoxedSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item(key = "popular-live") { HomeSectionPadding(isTv) { HomeBoxedSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("popular-live")) } }
         }
     }
 }
@@ -2218,6 +2354,7 @@ private fun ActiveDownloadsSection(
     downloads: List<OfflineDownload>,
     isTv: Boolean,
     onOpenDownloads: () -> Unit,
+    firstItemFocusRequester: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
     Column {
@@ -2232,13 +2369,20 @@ private fun ActiveDownloadsSection(
             contentPadding = PaddingValues(horizontal = 5.dp, vertical = 5.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            items(downloads, key = OfflineDownload::downloadId) { item ->
+            itemsIndexed(downloads, key = { _, item -> item.downloadId }) { index, item ->
                 var focused by remember(item.downloadId) { mutableStateOf(false) }
                 val shape = RoundedCornerShape(if (isTv) 15.dp else 14.dp)
                 val identity = downloadDisplayIdentity(item)
                 Column(
                     modifier = Modifier
                         .width(if (isTv) 270.dp else 300.dp)
+                        .then(
+                            if (index == 0 && firstItemFocusRequester != null) {
+                                Modifier.focusRequester(firstItemFocusRequester)
+                            } else {
+                                Modifier
+                            },
+                        )
                         .clip(shape)
                         .background(if (focused) colors.gold.copy(alpha = .12f) else Color(0xFF15160F))
                         .border(
@@ -3108,6 +3252,7 @@ private fun HomeBoxedSection(
     isFavorite: (ContentItem) -> Boolean,
     onOpen: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
+    firstItemFocusRequester: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -3124,7 +3269,12 @@ private fun HomeBoxedSection(
     LaunchedEffect(Unit) {
         if (remembered.rowKey == rowKey && content.isNotEmpty()) {
             rowState.scrollToItem(targetIndex)
-            runCatching { targetRequester.requestFocus() }
+            val restoreRequester = if (targetIndex == 0) {
+                firstItemFocusRequester ?: targetRequester
+            } else {
+                targetRequester
+            }
+            runCatching { restoreRequester.requestFocus() }
         }
     }
     Column {
@@ -3139,7 +3289,11 @@ private fun HomeBoxedSection(
                 val itemKey = "${item.type}:${item.id}"
                 val restore = remembered.rowKey == rowKey &&
                     (remembered.itemKey == itemKey || (remembered.itemKey.isBlank() && index == targetIndex))
-                val itemModifier = Modifier.restoreFocus(restore, targetRequester)
+                val itemModifier = if (index == 0 && firstItemFocusRequester != null) {
+                    Modifier.focusRequester(firstItemFocusRequester)
+                } else {
+                    Modifier.restoreFocus(restore, targetRequester)
+                }
                 val saveFocus = {
                     navigationMemory.save(MainDestination.HOME, itemKey, index, rowKey, rowIndex)
                 }
@@ -3182,6 +3336,10 @@ private fun HomeBoxedSection(
  * callback and long-press removal, presented with the accepted boxed Recent card. The Series
  * season/episode line uses the existing shared identity helper; the reserved slot keeps mixed
  * movie/series cards the same height.
+ *
+ * Remove/focus is one Home-owned transaction: the card only requests removal, the controller
+ * survives row disposal, and focus is granted only after the updated model exposes the next
+ * surviving stable key.
  */
 @Composable
 private fun HomeContinueWatchingSection(
@@ -3192,6 +3350,8 @@ private fun HomeContinueWatchingSection(
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
     onOpen: (HistoryEntry) -> Unit,
+    removalController: HomeHistoryRemovalController,
+    onRemoteRemovalStarted: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -3201,12 +3361,53 @@ private fun HomeContinueWatchingSection(
     val remembered = navigationMemory.position(MainDestination.HOME)
     val targetIndex = if (remembered.rowKey == rowKey) remembered.itemIndex.coerceIn(0, entries.lastIndex.coerceAtLeast(0)) else 0
     val rowState = rememberLazyListState(initialFirstVisibleItemIndex = targetIndex)
-    val targetRequester = remember { FocusRequester() }
+    val focusRequesters = remember(entries.map { it.key }) {
+        entries.associate { it.key to FocusRequester() }
+    }
+    DisposableEffect(removalController) {
+        onDispose { removalController.finish() }
+    }
     LaunchedEffect(Unit) {
         if (remembered.rowKey == rowKey && entries.isNotEmpty()) {
             rowState.scrollToItem(targetIndex)
-            runCatching { targetRequester.requestFocus() }
+            entries.getOrNull(targetIndex)?.let { entry ->
+                runCatching { focusRequesters[entry.key]?.requestFocus() }
+            }
         }
+    }
+    LaunchedEffect(removalController.succeeded, removalController.pendingKey, entries) {
+        if (!removalController.succeeded) return@LaunchedEffect
+        val removedKey = removalController.pendingKey ?: return@LaunchedEffect
+        // The old list is still presented until the owner-guarded Home model update lands.
+        if (entries.any { it.key == removedKey }) return@LaunchedEffect
+        val remainingKeys = entries.map { it.key }
+        val targetKey = removalController.focusTarget(remainingKeys)
+        val targetIndex = targetKey?.let { key -> entries.indexOfFirst { it.key == key } } ?: -1
+        if (targetKey == null || targetIndex < 0) {
+            removalController.finish()
+            return@LaunchedEffect
+        }
+        if (rowState.layoutInfo.visibleItemsInfo.none { it.key == targetKey }) {
+            rowState.scrollToItem(targetIndex)
+        }
+        snapshotFlow { rowState.layoutInfo.visibleItemsInfo.any { it.key == targetKey } }
+            .first { it }
+        rowState.layoutInfo.visibleItemsInfo
+            .firstOrNull { it.key == targetKey }
+            ?.let { targetInfo ->
+                val correction = focusedCardScrollCorrection(
+                    itemTop = targetInfo.offset,
+                    itemBottom = targetInfo.offset + targetInfo.size,
+                    usableStart = rowState.layoutInfo.viewportStartOffset,
+                    usableEnd = rowState.layoutInfo.viewportEndOffset,
+                    marginPx = 0,
+                )
+                if (correction != 0) rowState.scrollBy(correction.toFloat())
+            }
+        withFrameNanos { }
+        runCatching { focusRequesters[targetKey]?.requestFocus() }
+        navigationMemory.save(MainDestination.HOME, targetKey, targetIndex, rowKey, rowIndex)
+        removalController.finish()
     }
     Column {
         Text(title, color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
@@ -3217,15 +3418,23 @@ private fun HomeContinueWatchingSection(
             horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
         ) {
             itemsIndexed(entries, key = { _, entry -> entry.key }) { index, entry ->
-                val restore = remembered.rowKey == rowKey &&
-                    (remembered.itemKey == entry.key || (remembered.itemKey.isBlank() && index == targetIndex))
                 BoxedHistoryCard(
                     entry = entry,
                     onClick = { onOpen(entry) },
-                    modifier = Modifier.width(cardWidth).restoreFocus(restore, targetRequester),
+                    modifier = Modifier
+                        .width(cardWidth)
+                        .focusRequester(focusRequesters.getValue(entry.key)),
                     identityText = seriesHistoryIdentityText(entry),
                     reserveIdentitySlot = true,
-                    onFocused = { navigationMemory.save(MainDestination.HOME, entry.key, index, rowKey, rowIndex) },
+                    onFocused = {
+                        navigationMemory.save(MainDestination.HOME, entry.key, index, rowKey, rowIndex)
+                    },
+                    onRemoveRequested = { _, remote ->
+                        if (removalController.pendingKey == null) {
+                            if (remote) onRemoteRemovalStarted()
+                            removalController.begin(entry.key, entries.map { it.key })
+                        }
+                    },
                 )
             }
         }
@@ -3241,6 +3450,7 @@ private fun HomeLastChannelSection(
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
     onOpen: (HistoryEntry) -> Unit,
+    firstItemFocusRequester: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -3248,10 +3458,11 @@ private fun HomeLastChannelSection(
         homeLiveCardWidth(isTv, adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
     }
     val remembered = navigationMemory.position(MainDestination.HOME)
-    val targetRequester = remember { FocusRequester() }
+    val ownedRequester = remember { FocusRequester() }
+    val rowRequester = firstItemFocusRequester ?: ownedRequester
     LaunchedEffect(Unit) {
         if (remembered.rowKey == rowKey) {
-            runCatching { targetRequester.requestFocus() }
+            runCatching { rowRequester.requestFocus() }
         }
     }
     Column {
@@ -3265,7 +3476,7 @@ private fun HomeLastChannelSection(
                 onClick = { onOpen(entry) },
                 modifier = Modifier
                     .width(cardWidth)
-                    .restoreFocus(remembered.rowKey == rowKey, targetRequester),
+                    .focusRequester(rowRequester),
                 onFocused = { navigationMemory.save(MainDestination.HOME, entry.key, 0, rowKey, rowIndex) },
             )
         }

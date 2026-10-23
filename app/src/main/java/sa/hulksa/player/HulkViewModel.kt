@@ -1543,9 +1543,20 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun removeHistoryEntry(key: String) {
-        val expectedOwner = AuthenticatedSessionRegistry.currentOwner() ?: return
-        if (expectedOwner.session !== session) return
+    fun removeHistoryEntry(key: String, onResult: (Boolean) -> Unit = {}) {
+        val expectedOwner = AuthenticatedSessionRegistry.currentOwner()
+        if (expectedOwner == null) {
+            onResult(false)
+            return
+        }
+        if (expectedOwner.session !== session) {
+            onResult(false)
+            return
+        }
+        if (mutableState.value.history.none { it.key == key }) {
+            onResult(false)
+            return
+        }
         val expectedProfileId = profileStore.activeProfileId()
         val historyAttempt = userLibrary.beginHistoryMutation()
         viewModelScope.launch {
@@ -1555,7 +1566,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 expectedProfileId = expectedProfileId,
                 key = key,
                 historyAttempt = historyAttempt,
-            ) ?: return@launch
+            )
+            if (updated == null) {
+                onResult(false)
+                return@launch
+            }
             if (!historyPublicationAllowed(
                     attemptCurrent = userLibrary.isCurrentHistoryMutation(historyAttempt),
                     sessionCurrent = AuthenticatedSessionRegistry.isCurrent(expectedOwner) &&
@@ -1565,10 +1580,14 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     expectedProfileId = expectedProfileId,
                     activeProfileId = profileStore.activeProfileId(),
                 )
-            ) return@launch
+            ) {
+                onResult(false)
+                return@launch
+            }
             mutableState.update { it.copy(history = updated) }
             tvLastSyncedPositions.remove(key)
             scheduleTvPlatformSync(immediate = true)
+            onResult(true)
         }
     }
 
