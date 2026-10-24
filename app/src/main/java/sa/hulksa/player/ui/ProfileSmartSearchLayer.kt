@@ -1682,10 +1682,7 @@ private fun SmartSearchCatalogGrid(
                                         suppressSelectKeyUp = false
                                         true
                                     }
-                                    FavoritesSelectGuardDecision.CLEAR_ARMED_ON_PRESS -> {
-                                        suppressSelectKeyUp = false
-                                        false
-                                    }
+                                    FavoritesSelectGuardDecision.CONSUME_PRESS -> true
                                     FavoritesSelectGuardDecision.PASS -> false
                                 }
                             }

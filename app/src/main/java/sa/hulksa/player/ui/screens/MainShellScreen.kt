@@ -1213,6 +1213,7 @@ fun MainShellScreen(
             currentTvContentFocusRequester
         }
     val homeRemovalInputGuard = remember { HomeRemovalInputGuard() }
+    val favoritesRemovalInputGuard = remember { FavoritesRemovalInputGuard() }
     val currentTvCatalogInitialFocusPending =
         pendingTvContentFocusHandoff?.destination == state.destination &&
             state.destination in tvCatalogAllFocusRequesters
@@ -1238,9 +1239,10 @@ fun MainShellScreen(
             pendingTvContentFocusHandoff = null
         }
     }
-    HomeRemovalInputBoundary(
+    TvRemovalInputBoundary(
         enabled = isTv,
-        guard = homeRemovalInputGuard,
+        homeGuard = homeRemovalInputGuard,
+        favoritesGuard = favoritesRemovalInputGuard,
     ) {
         Box(Modifier.fillMaxSize().background(colors.background)) {
         if (useNavigationRail) {
@@ -1272,6 +1274,7 @@ fun MainShellScreen(
                         onOpenHistory = onOpenHistory,
                         onRemoveHistoryEntry = onRemoveHistoryEntry,
                         onToggleFavorite = toggleFavoriteWithFeedback,
+                        onFavoritesRemovalStarted = favoritesRemovalInputGuard::begin,
                         onRefresh = onRefresh,
                         onOpenNotifications = onOpenNotifications,
                         onGrowthAction = openGrowthDestination,
@@ -1328,6 +1331,7 @@ fun MainShellScreen(
                         onOpenHistory = onOpenHistory,
                         onRemoveHistoryEntry = onRemoveHistoryEntry,
                         onToggleFavorite = toggleFavoriteWithFeedback,
+                        onFavoritesRemovalStarted = favoritesRemovalInputGuard::begin,
                         onRefresh = onRefresh,
                         onOpenNotifications = onOpenNotifications,
                         onGrowthAction = openGrowthDestination,
@@ -1378,11 +1382,15 @@ fun MainShellScreen(
     }
 }
 
-/** Shell-level owner for the removing select gesture, surviving Home row/card disposal. */
+/**
+ * Shell-level owner for removal select gestures. Home and Favorites each keep their own guard,
+ * but one boundary consumes the physical hold before replacement rows/cards/filters can receive it.
+ */
 @Composable
-private fun HomeRemovalInputBoundary(
+private fun TvRemovalInputBoundary(
     enabled: Boolean,
-    guard: HomeRemovalInputGuard,
+    homeGuard: HomeRemovalInputGuard,
+    favoritesGuard: FavoritesRemovalInputGuard,
     content: @Composable () -> Unit,
 ) {
     Box(
@@ -1392,7 +1400,9 @@ private fun HomeRemovalInputBoundary(
                 if (!enabled || !event.nativeKeyEvent.isRemoteSelectKeyCode()) {
                     false
                 } else {
-                    guard.onSelectKey(event.type)
+                    val homeConsumed = homeGuard.onSelectKey(event.type)
+                    val favoritesConsumed = favoritesGuard.onSelectKey(event.type)
+                    homeConsumed || favoritesConsumed
                 }
             },
     ) {
@@ -1546,6 +1556,7 @@ private fun DestinationContent(
     onOpenHistory: (HistoryEntry) -> Unit,
     onRemoveHistoryEntry: (String, (Boolean) -> Unit) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
+    onFavoritesRemovalStarted: () -> Unit,
     onRefresh: () -> Unit,
     onOpenNotifications: () -> Unit,
     onGrowthAction: (GrowthDestination) -> Unit,
@@ -1656,6 +1667,7 @@ private fun DestinationContent(
             isFavorite = isFavorite,
             onOpen = onOpen,
             onToggleFavorite = onToggleFavorite,
+            onFavoritesRemovalStarted = onFavoritesRemovalStarted,
             onRefresh = onRefresh,
         )
         MainDestination.SEARCH -> UnifiedSearchScreen(state, isTv, navigationMemory, isFavorite, onSearch, onOpen, onToggleFavorite)
@@ -4614,6 +4626,7 @@ private fun FavoritesScreen(
     isFavorite: (ContentItem) -> Boolean,
     onOpen: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
+    onFavoritesRemovalStarted: () -> Unit,
     onRefresh: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
@@ -4753,6 +4766,7 @@ private fun FavoritesScreen(
                         onToggleFavorite = onToggleFavorite,
                         restoreFocusedCard = true,
                         memoryRowKey = activeFilter.memoryKey,
+                        onFavoritesRemovalStarted = onFavoritesRemovalStarted,
                     )
                 }
                 resolving -> LoadingRing(

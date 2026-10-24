@@ -308,6 +308,7 @@ internal fun TvCatalogGrid(
     restoreFocusedCard: Boolean,
     onMoveToCategories: (() -> Boolean)? = null,
     memoryRowKey: String = "",
+    onFavoritesRemovalStarted: () -> Unit = {},
 ) {
     require(
         destination == MainDestination.MOVIES ||
@@ -355,12 +356,10 @@ internal fun TvCatalogGrid(
     val moviesBringIntoViewSpec = remember { moviesNoBringIntoViewSpec() }
     val gridBringIntoViewSpec = if (boxedCards) moviesBringIntoViewSpec else inheritedBringIntoViewSpec
     var focusedIndex by remember(contentKeys) { mutableIntStateOf(-1) }
-    // Favorites removal ownership: the last focused card key, the previous key/row state that
-    // identifies a removal, and the select-release guard. The guard is armed by the card
-    // long-press BEFORE the favorite is toggled, so it can never be skipped by a restoration
-    // overwriting the focused key. Other destinations keep the accepted behavior untouched.
+    // Favorites removal focus ownership: the last focused card key and the previous key/row
+    // state identify the removal. The shell owns the physical select gesture, so this grid can
+    // be disposed and replaced without losing the hold. Other destinations keep their behavior.
     var focusedKey by remember(destination) { mutableStateOf<String?>(null) }
-    var suppressSelectKeyUp by remember(destination) { mutableStateOf(false) }
     val previousContentKeys = remember(destination) { mutableStateOf(contentKeys) }
     val previousContentRowKey = remember(destination) { mutableStateOf(memoryRowKey) }
     DisposableEffect(focusMoveState) {
@@ -565,40 +564,7 @@ internal fun TvCatalogGrid(
                     bottom = FAVORITES_MOBILE_BOTTOM_PADDING,
                 )
             },
-            modifier = Modifier
-                .fillMaxSize()
-                .then(
-                    // Favorites-only: consume the stray select KeyUp of a removal long-press so
-                    // the replacement card cannot be opened by the same release.
-                    if (destination == MainDestination.FAVORITES) {
-                        Modifier.onPreviewKeyEvent { event ->
-                            val selectKey = event.key == Key.Enter ||
-                                event.key == Key.DirectionCenter ||
-                                event.key == Key.NumPadEnter ||
-                                event.key == Key.Spacebar
-                            when (
-                                favoritesSelectGuardDecision(
-                                    armed = suppressSelectKeyUp,
-                                    isSelectKey = selectKey,
-                                    isKeyUp = event.type == KeyEventType.KeyUp,
-                                    keyDownRepeatCount = event.nativeKeyEvent.repeatCount,
-                                )
-                            ) {
-                                FavoritesSelectGuardDecision.CONSUME_RELEASE -> {
-                                    suppressSelectKeyUp = false
-                                    true
-                                }
-                                FavoritesSelectGuardDecision.CLEAR_ARMED_ON_PRESS -> {
-                                    suppressSelectKeyUp = false
-                                    false
-                                }
-                                FavoritesSelectGuardDecision.PASS -> false
-                            }
-                        }
-                    } else {
-                        Modifier
-                    },
-                ),
+            modifier = Modifier.fillMaxSize(),
         ) {
             itemsIndexed(content, key = { index, _ -> contentKeys[index] }) { index, item ->
                 val key = contentKeys[index]
@@ -695,12 +661,14 @@ internal fun TvCatalogGrid(
                     navigationMemory.save(destination, key, index, rowKey = memoryRowKey)
                 }
                 val onCardLongClick = {
-                    // Arm the TV select-release guard BEFORE the toggle so a restoration pass can
-                    // never rewrite the focused key before removal detection and skip the guard.
-                    if (destination == MainDestination.FAVORITES && isTelevision) {
-                        suppressSelectKeyUp = true
-                    }
-                    onToggleFavorite(item)
+                    // Arm the shell-scoped Favorites gesture guard BEFORE the toggle. It survives
+                    // this card/grid disposal and consumes the rest of the same physical hold.
+                    beginFavoritesRemovalLongPress(
+                        enabled = destination == MainDestination.FAVORITES && isTelevision,
+                        beginGuard = onFavoritesRemovalStarted,
+                        toggleFavorite = { onToggleFavorite(item) },
+                    )
+                    Unit
                 }
 
                 val seriesCard = if (destination == MainDestination.FAVORITES) {
