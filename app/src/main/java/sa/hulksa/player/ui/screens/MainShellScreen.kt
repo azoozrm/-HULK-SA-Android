@@ -145,6 +145,7 @@ import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -167,6 +168,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -193,6 +195,7 @@ import sa.hulksa.player.data.FavoriteMutationOutcome
 import sa.hulksa.player.data.FavoriteMutationStatus
 import sa.hulksa.player.data.GrowthAction
 import sa.hulksa.player.data.HomeHeroMetadataStore
+import sa.hulksa.player.data.HomeHeroTechnicalMetadata
 import sa.hulksa.player.data.OperationsAnnouncement
 import sa.hulksa.player.data.OperationsAnnouncementSeverity
 import sa.hulksa.player.data.OperationsDownloadStatus
@@ -2765,92 +2768,239 @@ private fun CinemaHero(
             )
         }
 
-        if (compactHeaderActions) {
-            // R02: one compact five-action group in the original header slot, natural content
-            // width beside the title; the measured fit keeps the title/subtitle readable and the
-            // constrained reflow stays inside the header.
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .onGloballyPositioned { coordinates ->
-                        measuredHeaderContentHeightDp =
-                            with(density) { coordinates.size.height.toDp() }
-                    }
-                    .padding(
-                        horizontal = HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp,
-                        vertical = 10.dp,
-                    ),
-            ) {
-                if (compactHeaderSingleRow) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CinemaHeroTitle(Modifier.weight(1f))
-                        topActions()
-                    }
-                } else {
-                    Column(Modifier.fillMaxWidth()) {
-                        CinemaHeroTitle(Modifier.align(Alignment.Start))
-                        Box(Modifier.align(Alignment.End)) { topActions() }
+        // Header and copy are explicit siblings in one vertical flow: the measured header height
+        // is reserved before the copy region receives the remaining space, so no title, fact row
+        // or plot can ever grow into the header. The copy stays on the physical right for wide
+        // layouts through the direction-relative Start alignment of this Column.
+        Column(Modifier.fillMaxSize()) {
+            if (compactHeaderActions) {
+                // R02: one compact five-action group in the original header slot, natural content
+                // width beside the title; the measured fit keeps the title/subtitle readable and
+                // the constrained reflow stays inside the header.
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .onGloballyPositioned { coordinates ->
+                            measuredHeaderContentHeightDp =
+                                with(density) { coordinates.size.height.toDp() }
+                        }
+                        .padding(
+                            horizontal = HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp,
+                            vertical = 10.dp,
+                        ),
+                ) {
+                    if (compactHeaderSingleRow) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CinemaHeroTitle(Modifier.weight(1f))
+                            topActions()
+                        }
+                    } else {
+                        Column(Modifier.fillMaxWidth()) {
+                            CinemaHeroTitle(Modifier.align(Alignment.Start))
+                            Box(Modifier.align(Alignment.End)) { topActions() }
+                        }
                     }
                 }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(if (isTv) Modifier else Modifier.statusBarsPadding())
+                        .padding(
+                            horizontal = if (isTv) 26.dp else HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp,
+                            vertical = if (isTv) 18.dp else 10.dp,
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CinemaHeroTitle(Modifier.weight(1f))
+                    if (isLoading) LoadingRing()
+                    Spacer(Modifier.width(10.dp))
+                    NotificationBellButton(
+                        unreadCount = unreadNotificationCount,
+                        isTv = isTv,
+                        onClick = onOpenNotifications,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    RoundAction(Icons.Rounded.Refresh, "تحديث المحتوى", onRefresh)
+                }
             }
-        } else {
-            Row(
+            HeroCopy(
+                title = item.name,
+                item = item,
+                isTv = isTv,
+                heroMetadata = heroMetadata,
+                heroPlot = heroPlot,
+                isFavorite = isFavorite,
+                onOpen = onOpen,
+                onToggleFavorite = onToggleFavorite,
+                watchModifier = watchModifier,
+                onFocused = onFocused,
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .then(if (isTv) Modifier else Modifier.statusBarsPadding())
-                    .padding(
-                        horizontal = if (isTv) 26.dp else HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp,
-                        vertical = if (isTv) 18.dp else 10.dp,
-                    ),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CinemaHeroTitle(Modifier.weight(1f))
-                if (isLoading) LoadingRing()
-                Spacer(Modifier.width(10.dp))
-                NotificationBellButton(
-                    unreadCount = unreadNotificationCount,
-                    isTv = isTv,
-                    onClick = onOpenNotifications,
-                )
-                Spacer(Modifier.width(8.dp))
-                RoundAction(Icons.Rounded.Refresh, "تحديث المحتوى", onRefresh)
-            }
-        }
-
-        Column(
-            modifier = Modifier
-                // Model 1: the copy stack is anchored in the lower band of the hero and grows
-                // upward, on the physical right for wide layouts.
-                .align(Alignment.BottomStart)
-                .fillMaxWidth(if (isTv) HERO_WIDE_COPY_WIDTH_FRACTION else 1f)
-                .padding(
-                    start = if (isTv) 27.dp else 18.dp,
-                    end = if (isTv) 27.dp else 18.dp,
-                    bottom = if (isTv) 40.dp else 24.dp,
-                ),
-        ) {
-            Text(
-                item.name,
-                color = Color.White,
-                fontSize = if (isTv) 36.sp else 28.sp,
-                lineHeight = if (isTv) 42.sp else 34.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+                    .fillMaxWidth(if (isTv) HERO_WIDE_COPY_WIDTH_FRACTION else 1f)
+                    .weight(1f)
+                    .padding(horizontal = if (isTv) 27.dp else 18.dp),
             )
-            Spacer(Modifier.height(if (isTv) 8.dp else 9.dp))
-            HomeHeroFacts(item, isTv = isTv, metadata = heroMetadata, modifier = Modifier.fillMaxWidth())
-            heroPlot?.let {
-                Spacer(Modifier.height(if (isTv) 8.dp else 10.dp))
-                Text(it, color = Color(0xFFD4D0C5), fontSize = 12.sp, lineHeight = if (isTv) 17.sp else 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-            Spacer(Modifier.height(if (isTv) 12.dp else 15.dp))
+        }
+    }
+}
+
+private const val HERO_WIDE_COPY_WIDTH_FRACTION = .46f
+private const val HERO_PHONE_HEADER_OFFSET_DP = 64
+private const val HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP = 18
+
+/**
+ * Measured hero-copy anchors. The header owns the space above [titleTopPx]; the title gets one
+ * reserved two-line slot, the facts row gets a reserved two-row budget, and the actions are
+ * anchored from the bottom. `reservedPlotLines` is derived from the actual remaining height so the
+ * same viewport/font scale keeps the title, facts and action positions stable while plot lines
+ * yield first.
+ */
+internal data class HeroCopyLayoutMetrics(
+    val titleTopPx: Int,
+    val factsTopPx: Int,
+    val plotTopPx: Int,
+    val actionsTopPx: Int,
+    val titleSlotPx: Int,
+    val factsSlotPx: Int,
+    val actionsHeightPx: Int,
+    val reservedPlotLines: Int,
+    val plotLineHeightPx: Int,
+    val fitsContent: Boolean,
+)
+
+internal fun heroCopyLayoutMetrics(
+    availableHeightPx: Int,
+    titleSlotPx: Int,
+    factsSlotPx: Int,
+    actionsHeightPx: Int,
+    topGapPx: Int,
+    bottomPaddingPx: Int,
+    titleFactsGapPx: Int,
+    plotGapPx: Int,
+    plotLineHeightPx: Int,
+    maxPlotLines: Int = 2,
+): HeroCopyLayoutMetrics {
+    val height = availableHeightPx.coerceAtLeast(0)
+    val safeLineHeight = plotLineHeightPx.coerceAtLeast(1)
+    val fixedBand = titleSlotPx + titleFactsGapPx + factsSlotPx + plotGapPx +
+        bottomPaddingPx + actionsHeightPx
+    val usableHeight = (height - topGapPx).coerceAtLeast(0)
+    val reservedPlotLines = if (usableHeight <= fixedBand) {
+        0
+    } else {
+        ((usableHeight - fixedBand) / safeLineHeight)
+            .coerceIn(0, maxPlotLines.coerceAtLeast(0))
+    }
+    val bandHeight = fixedBand + reservedPlotLines * safeLineHeight
+    val unclampedTitleTop = height - bandHeight
+    val titleTop = unclampedTitleTop.coerceAtLeast(topGapPx)
+    val factsTop = titleTop + titleSlotPx + titleFactsGapPx
+    val actionsTop = (height - bottomPaddingPx - actionsHeightPx).coerceAtLeast(0)
+    val plotTop = actionsTop - plotGapPx - reservedPlotLines * safeLineHeight
+    return HeroCopyLayoutMetrics(
+        titleTopPx = titleTop,
+        factsTopPx = factsTop,
+        plotTopPx = plotTop,
+        actionsTopPx = actionsTop,
+        titleSlotPx = titleSlotPx,
+        factsSlotPx = factsSlotPx,
+        actionsHeightPx = actionsHeightPx,
+        reservedPlotLines = reservedPlotLines,
+        plotLineHeightPx = safeLineHeight,
+        fitsContent = unclampedTitleTop >= topGapPx,
+    )
+}
+
+/**
+ * Facts may exceed the reserved two-row budget on dense Series metadata or a large font scale.
+ * The plot is lower priority, so its reserved lines are reduced first; the caller only moves the
+ * title/facts block upward when there is no plot left to give.
+ */
+internal fun heroCopyVisiblePlotLines(
+    reservedPlotLines: Int,
+    measuredFactsHeightPx: Int,
+    factsSlotPx: Int,
+    plotLineHeightPx: Int,
+): Int {
+    if (reservedPlotLines <= 0) return 0
+    val safeLineHeight = plotLineHeightPx.coerceAtLeast(1)
+    val factsOverflow = (measuredFactsHeightPx - factsSlotPx).coerceAtLeast(0)
+    val remainingPlotHeight = reservedPlotLines * safeLineHeight - factsOverflow
+    return (remainingPlotHeight / safeLineHeight).coerceIn(0, reservedPlotLines)
+}
+
+/**
+ * Last-resort upward shift of the title/facts block when the measured facts exceed the reserved
+ * facts-plus-plot space. It is bounded by the real gap below the header, and actions never move.
+ */
+internal fun heroCopyFactsShiftPx(
+    measuredFactsHeightPx: Int,
+    factsTopPx: Int,
+    actionsTopPx: Int,
+    plotGapPx: Int,
+    availableTopShiftPx: Int,
+): Int {
+    val factsRoom = (actionsTopPx - plotGapPx - factsTopPx).coerceAtLeast(0)
+    val overflow = (measuredFactsHeightPx - factsRoom).coerceAtLeast(0)
+    return overflow.coerceIn(0, availableTopShiftPx.coerceAtLeast(0))
+}
+
+/** Non-phone hero artwork always uses the same full-bleed background window. */
+internal fun heroArtworkLayoutMode(phonePortrait: Boolean): HeroArtworkLayoutMode =
+    if (phonePortrait) HeroArtworkLayoutMode.PHONE_WINDOW else HeroArtworkLayoutMode.WIDE_BACKGROUND
+
+internal enum class HeroArtworkLayoutMode {
+    PHONE_WINDOW,
+    WIDE_BACKGROUND,
+}
+
+/**
+ * Home hero copy region. The full header/copy split is owned by the caller's Column, so this
+ * layout only receives the space that is genuinely left below the measured header.
+ *
+ * Title: fixed two-line slot, bottom-aligned inside the slot, so one-line and two-line titles
+ * start the facts at the same y. Facts: wrapped at the real width inside a reserved two-row
+ * budget; dense groups may use the plot budget next. Actions: measured and anchored from the
+ * bottom. Plot: two lines when the viewport allows, one line on short TV heroes, none when the
+ * facts consume the available budget. Every anchor depends on the viewport/font scale and the
+ * measured action height, never on asynchronous metadata arriving at a different time.
+ */
+@Composable
+private fun HeroCopy(
+    title: String,
+    item: ContentItem,
+    isTv: Boolean,
+    heroMetadata: HomeHeroTechnicalMetadata,
+    heroPlot: String?,
+    isFavorite: Boolean,
+    onOpen: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    watchModifier: Modifier,
+    onFocused: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val titleFontSize = if (isTv) 36.sp else 28.sp
+    val titleLineHeight = if (isTv) 42.sp else 34.sp
+    val titleSlotPx = with(density) { (titleLineHeight.toDp() * 2f).roundToPx() }
+    val factsRowHeightPx = with(density) { (if (isTv) 24.sp else 20.sp).toDp().roundToPx() }
+    val factsRowGapPx = with(density) { (if (isTv) 8.dp else 6.dp).roundToPx() }
+    val factsSlotPx = factsRowHeightPx * 2 + factsRowGapPx
+    val plotLineHeightPx = with(density) { (if (isTv) 17.sp else 18.sp).toDp().roundToPx() }
+    val titleFactsGapPx = with(density) { (if (isTv) 8.dp else 9.dp).roundToPx() }
+    val plotGapPx = with(density) { (if (isTv) 8.dp else 10.dp).roundToPx() }
+    val bottomPaddingPx = with(density) { (if (isTv) 40.dp else 24.dp).roundToPx() }
+    val topGapPx = with(density) { (if (isTv) 16.dp else 12.dp).roundToPx() }
+
+    SubcomposeLayout(modifier = modifier) { constraints ->
+        val width = constraints.maxWidth
+        val height = constraints.maxHeight
+
+        val actionsPlaceable = subcompose("hero-actions") {
             HomeHeroActions(
                 primaryCaption = if (item.type == ContentType.SERIES) "عرض الحلقات" else "شاهد الان",
                 isFavorite = isFavorite,
@@ -2860,14 +3010,96 @@ private fun CinemaHero(
                 watchModifier = watchModifier,
                 onFocused = onFocused,
             )
+        }.first().measure(Constraints(maxWidth = width))
+
+        val metrics = heroCopyLayoutMetrics(
+            availableHeightPx = height,
+            titleSlotPx = titleSlotPx,
+            factsSlotPx = factsSlotPx,
+            actionsHeightPx = actionsPlaceable.height,
+            topGapPx = topGapPx,
+            bottomPaddingPx = bottomPaddingPx,
+            titleFactsGapPx = titleFactsGapPx,
+            plotGapPx = plotGapPx,
+            plotLineHeightPx = plotLineHeightPx,
+        )
+
+        val factsPlaceable = subcompose("hero-facts") {
+            HomeHeroFacts(
+                item = item,
+                isTv = isTv,
+                metadata = heroMetadata,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }.firstOrNull()?.measure(Constraints(maxWidth = width))
+        val factsHeight = factsPlaceable?.height ?: 0
+
+        val factsShift = heroCopyFactsShiftPx(
+            measuredFactsHeightPx = factsHeight,
+            factsTopPx = metrics.factsTopPx,
+            actionsTopPx = metrics.actionsTopPx,
+            plotGapPx = plotGapPx,
+            availableTopShiftPx = metrics.titleTopPx - topGapPx,
+        )
+        val titleTop = metrics.titleTopPx - factsShift
+        val factsTop = metrics.factsTopPx - factsShift
+        val visiblePlotLines = if (factsShift > 0) {
+            0
+        } else {
+            heroCopyVisiblePlotLines(
+                reservedPlotLines = metrics.reservedPlotLines,
+                measuredFactsHeightPx = factsHeight,
+                factsSlotPx = factsSlotPx,
+                plotLineHeightPx = metrics.plotLineHeightPx,
+            )
+        }
+
+        val titlePlaceable = subcompose("hero-title") {
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = titleFontSize,
+                lineHeight = titleLineHeight,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }.first().measure(Constraints(maxWidth = width, maxHeight = titleSlotPx))
+
+        val plotPlaceable = if (heroPlot != null && visiblePlotLines > 0) {
+            subcompose("hero-plot") {
+                Text(
+                    text = heroPlot,
+                    color = Color(0xFFD4D0C5),
+                    fontSize = 12.sp,
+                    lineHeight = if (isTv) 17.sp else 18.sp,
+                    maxLines = visiblePlotLines,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }.first().measure(
+                Constraints(
+                    maxWidth = width,
+                    maxHeight = visiblePlotLines * metrics.plotLineHeightPx,
+                ),
+            )
+        } else {
+            null
+        }
+
+        layout(width, height) {
+            titlePlaceable.placeRelative(
+                x = 0,
+                y = titleTop + titleSlotPx - titlePlaceable.height,
+            )
+            factsPlaceable?.placeRelative(x = 0, y = factsTop)
+            plotPlaceable?.placeRelative(
+                x = 0,
+                y = metrics.actionsTopPx - plotGapPx - plotPlaceable.height,
+            )
+            actionsPlaceable.placeRelative(x = 0, y = metrics.actionsTopPx)
         }
     }
 }
-
-private const val HERO_WIDE_COPY_WIDTH_FRACTION = .46f
-private const val HERO_PORTRAIT_TV_ARTWORK_WIDTH_FRACTION = .56f
-private const val HERO_PHONE_HEADER_OFFSET_DP = 64
-private const val HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP = 18
 
 /**
  * Physical-left alignment for hero artwork. Absolute (not start/end relative), so the app's RTL
@@ -2950,12 +3182,14 @@ internal fun heroArtworkOnFailed(
 
 /**
  * Model 1 artwork stage. Candidates are classified one at a time by their decoded dimensions:
- * a landscape source fills the wide hero (physical-left biased), a portrait/near-square source
- * is retained and, when no landscape is found, is bounded inside the physical-left visual
- * region with Fit on TV. Nothing is painted wide before the dimensions are known, each candidate
- * is attempted at most once, and the successfully decoded painter is reused for display (no
- * second request and no separate render failure path). On portrait phones every successful
- * source renders into one uniform 16:9 artwork window instead.
+ * a landscape source wins when one exists, while the first portrait/near-square source is
+ * retained across later failures. On TV/wide windows every successful source, including the
+ * retained portrait fallback, fills the same background bounds as an aspect-preserving
+ * physical-left Crop; a portrait is never presented as a narrow contained poster. Nothing is
+ * painted wide before the dimensions are known, each candidate is attempted at most once, and
+ * the successfully decoded painter is reused for display (no second request and no separate
+ * render failure path). On portrait phones every successful source renders into one uniform 16:9
+ * artwork window instead.
  */
 @Composable
 private fun BoxScope.HeroArtwork(
@@ -3019,7 +3253,7 @@ private fun BoxScope.HeroArtwork(
         return
     }
 
-    if (phonePortrait) {
+    if (heroArtworkLayoutMode(phonePortrait) == HeroArtworkLayoutMode.PHONE_WINDOW) {
         // One uniform phone artwork window for every successful source: full Home-content width,
         // 16:9 height derived from the window width, aspect-preserving centered Crop. Differing
         // source ratios crop inside this window; the window bounds never change.
@@ -3033,27 +3267,15 @@ private fun BoxScope.HeroArtwork(
         return
     }
 
-    if (selection.landscapeIndex != null) {
-        // Wide artwork fills the hero with its visual weight on the physical left.
-        Image(
-            painter = painter,
-            contentDescription = contentDescription,
-            contentScale = ContentScale.Crop,
-            alignment = heroArtworkPhysicalLeftAlignment,
-            modifier = Modifier.fillMaxSize(),
-        )
-    } else {
-        // TV/short-window portrait fallback: bounded physical-left Fit, never blown up wide.
-        Image(
-            painter = painter,
-            contentDescription = contentDescription,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .align(heroArtworkPhysicalLeftAlignment)
-                .fillMaxHeight()
-                .fillMaxWidth(HERO_PORTRAIT_TV_ARTWORK_WIDTH_FRACTION),
-        )
-    }
+    // TV/wide background: landscape and retained portrait fallback share the exact same bounds,
+    // an aspect-preserving Crop and the physical-left visual emphasis. Never a contained poster.
+    Image(
+        painter = painter,
+        contentDescription = contentDescription,
+        contentScale = ContentScale.Crop,
+        alignment = heroArtworkPhysicalLeftAlignment,
+        modifier = Modifier.fillMaxSize(),
+    )
 }
 
 /** Reserved phone artwork window: below the measured header/safe inset, full content width. */

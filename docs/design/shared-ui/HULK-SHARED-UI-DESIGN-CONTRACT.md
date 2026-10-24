@@ -262,7 +262,8 @@ Movies catalog and Recent use accepted compact square artwork plus fixed footer 
 cards reserve the same two title lines and metadata area even when data is missing or arrives later.
 Keep actual artwork/crop, gold metadata glyphs and ivory values. Missing data never becomes a fake
 rating, duration or progress. Recent shows actual saved time/total/progress without a seek thumb;
-preserve its existing footer progress orientation independently from the physical-LTR player bar.
+the gold played segment starts at the physical LEFT and grows rightward, matching the player
+timeline under RTL and LTR.
 
 Series catalog inherits this card family. Season/episode cards and Live channel geometry may differ
 when their content requires it, but typography, palette roles, corners, gutters and focus treatment
@@ -555,10 +556,11 @@ direction. Section 12.2's hero-composition wording is superseded by this bounded
   0.94 at 0.54, 1.00 from 0.68) plus the separate bottom fade; phone keeps a vertical mask and
   its previous heights.
 - Artwork: the hero now uses ordered real candidates (owned metadata backdrop first, then the
-  item backdrop/poster fields) classified by decoded dimensions — only aspect >= 1.3 fills the
-  wide hero with Crop biased to the physical left; portrait/near-square sources fall back to a
-  Fit rendering bounded inside the left visual region, and an exhausted list keeps the original
-  brand mark. Nothing is painted wide before the dimensions are known.
+  item backdrop/poster fields) classified by decoded dimensions — only aspect >= 1.3 selects the
+  wide hero immediately; portrait/near-square sources are retained while later candidates are
+  tried and, when no landscape is found, render as the same physical-left Crop background rather
+  than a contained poster (12.5); an exhausted list keeps the original brand mark. Nothing is
+  painted wide before the dimensions are known.
 - Real plot/genre/backdrop reuse the existing bounded card-metadata payloads
   (`get_vod_info`/`get_series_info`) through the owner-keyed store: the active hero may trigger
   one marked presentation backfill with the existing cooldown/in-flight/owner protection, and the
@@ -602,9 +604,32 @@ parsing, R03 atoms and all R04 surfaces are preserved. R05/R06 Android acceptanc
   one uniform 16:9 window (full Home-content width, height derived from that width, placed below
   the measured header/safe top inset, aspect-preserving centered Crop, lower edge blended by the
   existing vertical mask). The R05 0.56-width Fit side-poster phone presentation is removed;
-  loading, retained portrait, failure and brand all stay inside that reserved window. TV keeps
-  the physical-left bounded Fit portrait fallback. Other adaptive windows keep their content
-  fit; no zoom, scale, stretch, source-dependent sizing or tall TV container on phones.
+  loading, retained portrait, failure and brand all stay inside that reserved window. TV/wide
+  windows use the 12.5 full-bleed physical-left Crop background for landscape and retained
+  portrait sources. Other adaptive windows keep their content fit; no zoom, scale, stretch,
+  source-dependent sizing or tall TV container on phones.
+
+### 12.5 Owner Home hero / Continue Watching correction (2026-10-24)
+
+This bounded correction supersedes only the wide/TV contained `Fit` portrait fallback and the
+old Continue Watching RTL-right fill origin. It preserves the accepted candidate order, decoded
+aspect classification, retained-painter reuse, stale-result rejection, phone 16:9 window, hero
+selection/rotation, favorite callbacks, focus and D-pad ownership.
+
+- TV/wide artwork: every successful source, including a retained portrait fallback, renders as an
+  aspect-preserving `Crop` background in the same full hero bounds, biased to the physical left.
+  The 0.56-width contained poster branch is removed; no stretch, `FillBounds`, duplicate blurred
+  image or new provider request is introduced.
+- Hero copy: the header and copy are explicit vertical siblings, so the measured header reserves
+  its own region before the copy receives the remaining height. The copy reserves one two-line
+  title slot and a two-row facts budget; actions are measured and bottom-anchored. Plot lines are
+  viewport-derived (two, one or zero) and yield before facts or actions. Dense facts may wrap and
+  consume the plot budget; they never move the title or actions into the header. Hero height
+  policy, phone header and phone artwork window are unchanged.
+- Continue Watching: the shared `BoxedHistoryCard` gold fill starts at the physical LEFT with
+  `AbsoluteAlignment.CenterLeft` and grows rightward. The track, colors, truthful
+  `movieRecentPlayedFraction`, invalid/unknown-duration behavior, Arabic text, time row, artwork,
+  identity slots, removal and focus behavior are unchanged.
 
 ## 13. Login / Who's Watching / entry-subflows adoption record (2026-10-11)
 

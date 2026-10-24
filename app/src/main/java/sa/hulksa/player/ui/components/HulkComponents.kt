@@ -1577,6 +1577,13 @@ internal fun movieRecentPlayedFraction(positionMs: Long, durationMs: Long): Floa
     return (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
 }
 
+/**
+ * Physical-left fill origin for the informational Recent/Continue Watching track. Absolute
+ * alignment is direction-independent, so the gold segment always starts at the physical left and
+ * grows rightward exactly like the player timeline under both RTL and LTR.
+ */
+internal val historyProgressPhysicalLeftAlignment: Alignment = AbsoluteAlignment.CenterLeft
+
 /** Real Series season/episode identity for the Recent card; null when the entry carries none. */
 internal fun seriesHistoryIdentityText(entry: HistoryEntry): String? {
     val season = entry.season ?: return null
@@ -1589,7 +1596,7 @@ internal fun seriesHistoryIdentityText(entry: HistoryEntry): String? {
  * artwork, common two-line title area and identical footer paddings) and replaces the catalog
  * metadata row with the authoritative saved time and a thin informational progress track. The
  * warm-gold clock sits physically LEFT of the LTR numeric group; the gold played segment starts at
- * the physical RIGHT (RTL layout start), matching [sa.hulksa.player.ui.screens.MovieInlineResumeStrip].
+ * the physical LEFT and grows rightward, matching the player timeline under RTL and LTR.
  * `identityText`/`reserveIdentitySlot` add the Series season/episode line without changing the
  * Movie footer. No rating, seek thumb, fake minimum fill or extra playback/delete control.
  * When [onRemoveRequested] is supplied, Home owns removal/focus/input completion; otherwise the
@@ -1788,6 +1795,7 @@ fun BoxedHistoryCard(
             ) {
                 Box(
                     Modifier
+                        .align(historyProgressPhysicalLeftAlignment)
                         .fillMaxWidth(playedFraction)
                         .fillMaxHeight()
                         .background(colors.gold),
