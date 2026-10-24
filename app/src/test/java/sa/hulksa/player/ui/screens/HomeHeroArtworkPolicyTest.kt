@@ -53,6 +53,12 @@ class HomeHeroArtworkPolicyTest {
     }
 
     @Test
+    fun `non-phone artwork always uses the same full-bleed background mode`() {
+        assertEquals(HeroArtworkLayoutMode.WIDE_BACKGROUND, heroArtworkLayoutMode(phonePortrait = false))
+        assertEquals(HeroArtworkLayoutMode.PHONE_WINDOW, heroArtworkLayoutMode(phonePortrait = true))
+    }
+
+    @Test
     fun `physical-left artwork alignment never mirrors under rtl`() {
         val size = IntSize(100, 100)
         val space = IntSize(600, 400)

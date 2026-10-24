@@ -262,7 +262,8 @@ Movies catalog and Recent use accepted compact square artwork plus fixed footer 
 cards reserve the same two title lines and metadata area even when data is missing or arrives later.
 Keep actual artwork/crop, gold metadata glyphs and ivory values. Missing data never becomes a fake
 rating, duration or progress. Recent shows actual saved time/total/progress without a seek thumb;
-preserve its existing footer progress orientation independently from the physical-LTR player bar.
+the gold played segment starts at the physical LEFT and grows rightward, matching the player
+timeline under RTL and LTR.
 
 Series catalog inherits this card family. Season/episode cards and Live channel geometry may differ
 when their content requires it, but typography, palette roles, corners, gutters and focus treatment
@@ -294,7 +295,8 @@ All have equal compact outer height and vertically centered contents. The accept
 larger text. Narrow layout measures full captions: Watch first/full width, secondary pair when
 it fits, otherwise stacked. Do not reintroduce oversized controls or blank telemetry space.
 
-Inline Resume retains actual saved position/progress, ivory wording and gold clock.
+Inline Resume retains actual saved position/progress, ivory wording and gold clock; the gold
+played segment starts at the physical LEFT and grows rightward under RTL and LTR.
 Movies tabs remain `القصة` / `معلومات الفلم` / `افلام مشابهة`, all ivory with an ivory
 selected underline. Information labels are gold, real values ivory. Selecting a tab reveals its
 usable section and preserves the page's scrolling owner. Series retains its own real tabs,
@@ -325,9 +327,10 @@ once and restore the download trigger. Preserve scheduler, storage and persisten
 ## 7. Resume and errors
 
 Resume is one centered bounded dark dialog containing History, `اكمل المشاهدة`, real title,
-`توقفت عند` plus saved time and truthful progress when duration is known. Measure complete
-captions: fitting three-action row, otherwise Resume above a secondary pair/stack as accepted.
-Initial focus is Resume; the directional graph is closed on all actions.
+`توقفت عند` plus saved time and truthful progress when duration is known. The gold progress fill
+starts at the physical LEFT and grows rightward under RTL and LTR. Measure complete captions:
+fitting three-action row, otherwise Resume above a secondary pair/stack as accepted. Initial
+focus is Resume; the directional graph is closed on all actions.
 
 While a Resume decision is pending, header, timeline, transport and background input are hidden
 or ineligible. BACK exits on the FIRST press through one existing owner; it must not merely clear
@@ -555,10 +558,11 @@ direction. Section 12.2's hero-composition wording is superseded by this bounded
   0.94 at 0.54, 1.00 from 0.68) plus the separate bottom fade; phone keeps a vertical mask and
   its previous heights.
 - Artwork: the hero now uses ordered real candidates (owned metadata backdrop first, then the
-  item backdrop/poster fields) classified by decoded dimensions — only aspect >= 1.3 fills the
-  wide hero with Crop biased to the physical left; portrait/near-square sources fall back to a
-  Fit rendering bounded inside the left visual region, and an exhausted list keeps the original
-  brand mark. Nothing is painted wide before the dimensions are known.
+  item backdrop/poster fields) classified by decoded dimensions — only aspect >= 1.3 selects the
+  wide hero immediately; portrait/near-square sources are retained while later candidates are
+  tried and, when no landscape is found, render as the same physical-left Crop background rather
+  than a contained poster (12.5); an exhausted list keeps the original brand mark. Nothing is
+  painted wide before the dimensions are known.
 - Real plot/genre/backdrop reuse the existing bounded card-metadata payloads
   (`get_vod_info`/`get_series_info`) through the owner-keyed store: the active hero may trigger
   one marked presentation backfill with the existing cooldown/in-flight/owner protection, and the
@@ -602,9 +606,67 @@ parsing, R03 atoms and all R04 surfaces are preserved. R05/R06 Android acceptanc
   one uniform 16:9 window (full Home-content width, height derived from that width, placed below
   the measured header/safe top inset, aspect-preserving centered Crop, lower edge blended by the
   existing vertical mask). The R05 0.56-width Fit side-poster phone presentation is removed;
-  loading, retained portrait, failure and brand all stay inside that reserved window. TV keeps
-  the physical-left bounded Fit portrait fallback. Other adaptive windows keep their content
-  fit; no zoom, scale, stretch, source-dependent sizing or tall TV container on phones.
+  loading, retained portrait, failure and brand all stay inside that reserved window. TV/wide
+  windows use the 12.5 full-bleed physical-left Crop background for landscape and retained
+  portrait sources. Other adaptive windows keep their content fit; no zoom, scale, stretch,
+  source-dependent sizing or tall TV container on phones.
+
+### 12.5 Owner Home hero / Continue Watching correction (2026-10-24)
+
+This bounded correction supersedes only the wide/TV contained `Fit` portrait fallback and the
+old Continue Watching RTL-right fill origin. It preserves the accepted candidate order, decoded
+aspect classification, retained-painter reuse, stale-result rejection, phone 16:9 window, hero
+selection/rotation, favorite callbacks, focus and D-pad ownership.
+
+- TV/wide artwork: every successful source, including a retained portrait fallback, renders as an
+  aspect-preserving `Crop` background in the same full hero bounds, biased to the physical left.
+  The 0.56-width contained poster branch is removed; no stretch, `FillBounds`, duplicate blurred
+  image or new provider request is introduced.
+- Hero copy: the header and copy are explicit vertical siblings, so the measured header reserves
+  its own region before the copy receives the remaining height. The copy reserves one two-line
+  title slot and a two-row facts budget; actions are measured and bottom-anchored. Plot lines are
+  viewport-derived (two, one or zero) and yield before facts or actions. Dense facts may wrap and
+  consume the plot budget; they never move the title or actions into the header. Hero height
+  policy, phone header and phone artwork window are unchanged.
+- Continue Watching: the shared `BoxedHistoryCard` gold fill starts at the physical LEFT with
+  `AbsoluteAlignment.CenterLeft` and grows rightward. The track, colors, truthful
+  `movieRecentPlayedFraction`, invalid/unknown-duration behavior, Arabic text, time row, artwork,
+  identity slots, removal and focus behavior are unchanged.
+
+### 12.6 Resume progress direction continuation (2026-10-25)
+
+The owner extended the physical-left watched-progress direction to the remaining resume surfaces.
+This supersedes only the old physical-right/independent orientation wording for those indicators.
+It preserves all accepted dialog, Details, player and focus contracts.
+
+- The shared `PhysicalLeftProgressFill` atom is the production played fill for the Home/Movies/
+  Series Continue Watching card, the shared `MovieInlineResumeStrip` used by Movie and Series
+  Details on phone and TV, and the shared `ResumePrompt` used by Movie and Series playback.
+- Track geometry, colors, labels, truthful `positionMs / durationMs` fraction, clamping and
+  per-component visibility rules are unchanged. The unplayed remainder stays on the physical
+  RIGHT; the fraction is never inverted.
+- Dialog dimensions, typography, icons, action arrangement, initial focus, closed D-pad graph,
+  Resume/From Beginning/Back callbacks, saved-position persistence, offline/recovery behavior and
+  pending-Resume blocking are unchanged.
+
+### 12.7 Hero insufficient-height correction (2026-10-25)
+
+The owner-visible hero copy must never overlap its header or action row when the viewport cannot
+carry the full reserved band. This supersedes only the fixed-copy-height assumption.
+
+- Header height is measured from the real title/subtitle typography, the actual status-bar inset
+  and the top-action minimum. The hero keeps its accepted viewport policy whenever that policy can
+  carry the copy band.
+- The minimum hero height is derived from the real HomeHeroFacts row height (24dp floor,
+  font-scale-aware), the worst valid five-entry metadata wrap, and the measured/guarded action
+  height. It is a viewport/font-scale floor, not an individual item or metadata dependent height.
+- The final copy placement is executable: normal bottom-anchored band first, plot yields, then
+  compact gaps and finally minimal gaps when measured facts exceed the reservation. The placed
+  rectangles keep the title below the header, facts below the title and facts plus a gap before
+  the actions; actions stay inside the usable hero.
+- TV and portrait-phone heights are preserved when the band fits. A necessary fallback grows the
+  hero item within the existing Home scrolling owner; no second scroll/focus owner, clipping,
+  hidden buttons, universal font shrink or synthetic metadata is introduced.
 
 ## 13. Login / Who's Watching / entry-subflows adoption record (2026-10-11)
 
