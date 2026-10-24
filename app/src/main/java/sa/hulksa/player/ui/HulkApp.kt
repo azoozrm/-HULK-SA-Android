@@ -43,6 +43,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -694,6 +695,9 @@ fun HulkApp(
                         isTv = isTv,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
+                            // The player/browser overlay is inside the preceding screen content.
+                            // Keep the single notice owner above that overlay as well as Home.
+                            .zIndex(1f)
                             .padding(
                                 bottom = if (isTv) {
                                     28.dp

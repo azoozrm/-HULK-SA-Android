@@ -65,6 +65,7 @@ class LivePlayerFavoriteBindingContractTest(unittest.TestCase):
         pro = self.read(PLAYER_PRO)
         player = self.read(PLAYER_SCREEN)
         self.assertIn("onActionNotice = postActionNotice", app)
+        self.assertIn(".zIndex(1f)", app)
         self.assertIn("onActionNotice: (String, ImageVector) -> Unit", pro)
         self.assertIn("onActionNotice = onActionNotice", pro)
         self.assertIn("onActionNotice: (String, ImageVector) -> Unit", player)
