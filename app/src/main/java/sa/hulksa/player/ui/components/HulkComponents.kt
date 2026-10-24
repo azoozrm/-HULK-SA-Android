@@ -1953,6 +1953,33 @@ fun LiveChannelHomeCard(
     }
 }
 
+/**
+ * Row-local remote SELECT latch. A fresh initial KeyDown starts a new gesture and clears the
+ * latch, so a row that survives a failed removal cannot swallow the next independent short SELECT.
+ * Repeats/long-press events still produce exactly one action; the release resets the latch when it
+ * reaches the row (the shell guard may own that release after a removal).
+ */
+internal class RemoteSelectGestureLatch {
+    private var longPressHandled = false
+
+    /** Returns true exactly once for the long-press/repeat transition of the current gesture. */
+    fun onKeyDown(repeatCount: Int, isLongPress: Boolean): Boolean {
+        if (repeatCount == 0 && !isLongPress) longPressHandled = false
+        if ((repeatCount > 0 || isLongPress) && !longPressHandled) {
+            longPressHandled = true
+            return true
+        }
+        return false
+    }
+
+    /** Returns true when the release belongs to a consumed long press. */
+    fun onKeyUp(): Boolean {
+        val handled = longPressHandled
+        longPressHandled = false
+        return handled
+    }
+}
+
 @Composable
 fun ChannelListItem(
     item: ContentItem,
@@ -1962,11 +1989,12 @@ fun ChannelListItem(
     modifier: Modifier = Modifier,
     isFavorite: Boolean = false,
     onLongClick: (() -> Unit)? = null,
+    onRemoteLongClick: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     var focused by remember { mutableStateOf(false) }
-    var remoteLongPressHandled by remember { mutableStateOf(false) }
+    val remoteSelectLatch = remember { RemoteSelectGestureLatch() }
     val showFocused = focused && adaptiveUi.showFocusHighlights
     val shape = RoundedCornerShape(11.dp)
     Row(
@@ -1999,20 +2027,21 @@ fun ChannelListItem(
                 if (it.isFocused) onFocused()
             }
             .onPreviewKeyEvent { event ->
-                if (onLongClick == null || !event.nativeKeyEvent.isRemoteSelectKey()) {
+                val remoteLongClick = onRemoteLongClick ?: onLongClick
+                if (remoteLongClick == null || !event.nativeKeyEvent.isRemoteSelectKey()) {
                     false
                 } else if (event.type == KeyEventType.KeyDown) {
                     if (
-                        (event.nativeKeyEvent.repeatCount > 0 || event.nativeKeyEvent.isLongPress) &&
-                        !remoteLongPressHandled
+                        remoteSelectLatch.onKeyDown(
+                            repeatCount = event.nativeKeyEvent.repeatCount,
+                            isLongPress = event.nativeKeyEvent.isLongPress,
+                        )
                     ) {
-                        remoteLongPressHandled = true
-                        onLongClick()
+                        remoteLongClick()
                     }
                     true
                 } else if (event.type == KeyEventType.KeyUp) {
-                    if (!remoteLongPressHandled) onClick()
-                    remoteLongPressHandled = false
+                    if (!remoteSelectLatch.onKeyUp()) onClick()
                     true
                 } else {
                     false

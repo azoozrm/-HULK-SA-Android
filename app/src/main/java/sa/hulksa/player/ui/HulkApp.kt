@@ -13,12 +13,10 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Downloading
-import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Notifications
@@ -45,6 +43,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -77,6 +76,9 @@ import sa.hulksa.player.ui.screens.PlayerProScreen
 import sa.hulksa.player.ui.screens.ScopedHomeActionNotice
 import sa.hulksa.player.ui.screens.SeriesDetailsProPolishedScreen
 import sa.hulksa.player.ui.screens.detailsProRelatedItems
+import sa.hulksa.player.ui.screens.downloadPrimaryActionIntent
+import sa.hulksa.player.ui.screens.favoriteFeedbackIcon
+import sa.hulksa.player.ui.screens.favoriteMutationFeedback
 import sa.hulksa.player.ui.screens.downloadNoticeDisplayText
 import sa.hulksa.player.ui.screens.liveTvProDecorateMainState
 import sa.hulksa.player.ui.screens.liveTvProMainCategoryToContext
@@ -372,20 +374,14 @@ fun HulkApp(
                                 onRefresh = viewModel::refresh,
                                 onOpen = openWithLiveContext,
                                 onToggleFavorite = { item ->
-                                    val wasFavorite = viewModel.isFavorite(item)
-                                    viewModel.toggleFavorite(item)
-                                    postActionNotice(
-                                        if (wasFavorite) {
-                                            "تمت ازالة ${item.name} من المفضلة"
-                                        } else {
-                                            "تمت اضافة ${item.name} الى المفضلة"
-                                        },
-                                        if (wasFavorite) {
-                                            Icons.Outlined.FavoriteBorder
-                                        } else {
-                                            Icons.Rounded.Favorite
-                                        },
-                                    )
+                                    viewModel.toggleFavorite(item) { outcome ->
+                                        favoriteMutationFeedback(outcome, item.name)?.let { feedback ->
+                                            postActionNotice(
+                                                feedback.message,
+                                                favoriteFeedbackIcon(feedback.glyph),
+                                            )
+                                        }
+                                    }
                                 },
                                 onSwitchProfile = requestProfileSwitch,
                             )
@@ -422,7 +418,9 @@ fun HulkApp(
                                     onRemoveHistoryEntry = { key, result ->
                                         viewModel.removeHistoryEntry(key, result)
                                     },
-                                    onToggleFavorite = viewModel::toggleFavorite,
+                                    onToggleFavoriteWithResult = { item, result ->
+                                        viewModel.toggleFavorite(item, result)
+                                    },
                                     onRefresh = viewModel::refresh,
                                     onOpenNotifications = openNotificationCenter,
                                     onClearHistory = viewModel::clearHistory,
@@ -430,8 +428,12 @@ fun HulkApp(
                                     onDeleteDownload = { item ->
                                         viewModel.deleteDownload(item, postDownloadFeedback)
                                     },
-                                    onRetryDownload = { item ->
-                                        viewModel.retryDownload(item, postDownloadFeedback)
+                                    onDownloadPrimaryAction = { item, intent ->
+                                        viewModel.onDownloadPrimaryAction(
+                                            item = item,
+                                            intent = intent,
+                                            onResult = postDownloadFeedback,
+                                        )
                                     },
                                     onToggleWifiOnly = { postDownloadFeedback(viewModel.toggleWifiOnly()) },
                                     onToggleDownloadSchedule = {
@@ -497,7 +499,13 @@ fun HulkApp(
                                     if (movieDownload == null) {
                                         viewModel.downloadSelectedMovie(postDownloadFeedback)
                                     } else {
-                                        viewModel.retryDownload(movieDownload, postDownloadFeedback)
+                                        downloadPrimaryActionIntent(movieDownload.status)?.let { intent ->
+                                            viewModel.onDownloadPrimaryAction(
+                                                item = movieDownload,
+                                                intent = intent,
+                                                onResult = postDownloadFeedback,
+                                            )
+                                        }
                                     }
                                 },
                                 onCancelDownload = {
@@ -507,15 +515,11 @@ fun HulkApp(
                                 },
                                 onToggleFavorite = { viewModel.toggleFavorite(item) },
                                 onToggleRelatedFavorite = { related ->
-                                    val wasFavorite = viewModel.isFavorite(related)
-                                    viewModel.toggleFavorite(related)
-                                    notify(
-                                        if (wasFavorite) {
-                                            "تمت ازالة ${related.name} من المفضلة"
-                                        } else {
-                                            "تمت اضافة ${related.name} الى المفضلة"
-                                        },
-                                    )
+                                    viewModel.toggleFavorite(related) { outcome ->
+                                        favoriteMutationFeedback(outcome, related.name)?.let { feedback ->
+                                            notify(feedback.message)
+                                        }
+                                    }
                                 },
                                 onOpenRelated = viewModel::open,
                                 onRetryDetails = { viewModel.open(item) },
@@ -571,7 +575,13 @@ fun HulkApp(
                                     if (existing == null) {
                                         viewModel.downloadEpisode(episode, postDownloadFeedback)
                                     } else {
-                                        viewModel.retryDownload(existing, postDownloadFeedback)
+                                        downloadPrimaryActionIntent(existing.status)?.let { intent ->
+                                            viewModel.onDownloadPrimaryAction(
+                                                item = existing,
+                                                intent = intent,
+                                                onResult = postDownloadFeedback,
+                                            )
+                                        }
                                     }
                                 },
                                 onCancelDownload = { episode ->
@@ -591,15 +601,11 @@ fun HulkApp(
                                     }
                                 },
                                 onToggleRelatedFavorite = { related ->
-                                    val wasFavorite = viewModel.isFavorite(related)
-                                    viewModel.toggleFavorite(related)
-                                    notify(
-                                        if (wasFavorite) {
-                                            "تمت ازالة ${related.name} من المفضلة"
-                                        } else {
-                                            "تمت اضافة ${related.name} الى المفضلة"
-                                        },
-                                    )
+                                    viewModel.toggleFavorite(related) { outcome ->
+                                        favoriteMutationFeedback(outcome, related.name)?.let { feedback ->
+                                            notify(feedback.message)
+                                        }
+                                    }
                                 },
                                 onOpenRelated = viewModel::open,
                                 onRetryDetails = { viewModel.open(series) },
@@ -653,7 +659,10 @@ fun HulkApp(
                                 favoriteKeys = state.favorites,
                                 vodItem = vodFavoriteItem,
                                 onSelectLiveChannel = viewModel::switchLiveChannel,
-                                onToggleFavorite = viewModel::toggleFavorite,
+                                onToggleFavorite = { item, result ->
+                                    viewModel.toggleFavorite(item, result)
+                                },
+                                onActionNotice = postActionNotice,
                                 onBack = viewModel::back,
                                 onProgress = viewModel::onPlaybackProgress,
                                 previousEpisode = episodeNeighbors.previous,
@@ -686,6 +695,9 @@ fun HulkApp(
                         isTv = isTv,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
+                            // The player/browser overlay is inside the preceding screen content.
+                            // Keep the single notice owner above that overlay as well as Home.
+                            .zIndex(1f)
                             .padding(
                                 bottom = if (isTv) {
                                     28.dp

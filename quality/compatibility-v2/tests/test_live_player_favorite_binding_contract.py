@@ -48,10 +48,28 @@ class LivePlayerFavoriteBindingContractTest(unittest.TestCase):
         self.assertNotIn("favoriteIds = if (favorite)", browser)
         self.assertNotIn("Toast.makeText", browser)
 
-    def test_player_favorite_feedback_only_fires_on_accepted_membership_change(self) -> None:
+    def test_player_favorite_feedback_only_fires_on_accepted_outcome(self) -> None:
         player = self.read(PLAYER_SCREEN)
-        self.assertIn("val isNowFavorite = isFavorite(channel)", player)
-        self.assertIn("if (isNowFavorite != wasFavorite)", player)
+        self.assertIn("onToggleFavorite(channel) { outcome ->", player)
+        self.assertIn("favoriteMutationFeedback(outcome, channel.name)", player)
+        self.assertIn("onActionNotice(", player)
+        self.assertIn("favoriteFeedbackIcon(feedback.glyph)", player)
+        self.assertNotIn("Toast.makeText", player)
+        # Feedback is derived from the authoritative mutation result, never a pre-click guess
+        # or an immediate post-call membership read.
+        self.assertNotIn("val isNowFavorite = isFavorite(channel)", player)
+        self.assertNotIn("if (isNowFavorite != wasFavorite)", player)
+
+    def test_browser_feedback_owner_is_wired_from_the_root_notice_host(self) -> None:
+        app = self.read(HULK_APP)
+        pro = self.read(PLAYER_PRO)
+        player = self.read(PLAYER_SCREEN)
+        self.assertIn("onActionNotice = postActionNotice", app)
+        self.assertIn(".zIndex(1f)", app)
+        self.assertIn("onActionNotice: (String, ImageVector) -> Unit", pro)
+        self.assertIn("onActionNotice = onActionNotice", pro)
+        self.assertIn("onActionNotice: (String, ImageVector) -> Unit", player)
+        self.assertIn("liveBrowserFavoriteFeedbackIsCurrent(", player)
 
     def test_no_second_favorite_shadow_store_or_polling_is_introduced(self) -> None:
         for path in (HULK_APP, PLAYER_PRO, PLAYER_SCREEN, LIVE_BROWSER):

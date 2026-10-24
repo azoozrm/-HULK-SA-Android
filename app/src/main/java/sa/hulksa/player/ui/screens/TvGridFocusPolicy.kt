@@ -98,14 +98,15 @@ internal fun favoritesRemovalFocusIndex(removedIndex: Int, remainingCount: Int):
 
 internal enum class FavoritesSelectGuardDecision {
     CONSUME_RELEASE,
-    CLEAR_ARMED_ON_PRESS,
+    CONSUME_PRESS,
     PASS,
 }
 
 /**
- * Select-key arbitration for the Favorites removal release guard. The release of the long press
- * that removed the card (KeyUp) is consumed once; only a fresh press (repeatCount 0) clears an arm
- * that was never released; held repeats neither clear nor consume.
+ * Select-key arbitration for a Favorites removal guard. The release of the long press that
+ * removed a card is consumed once; every press/repeat belonging to that held gesture is also
+ * consumed so a replacement card or filter cannot receive it. Only the release clears the arm;
+ * a genuinely new press after release passes normally. No timer is involved.
  */
 internal fun favoritesSelectGuardDecision(
     armed: Boolean,
@@ -115,6 +116,5 @@ internal fun favoritesSelectGuardDecision(
 ): FavoritesSelectGuardDecision = when {
     !isSelectKey || !armed -> FavoritesSelectGuardDecision.PASS
     isKeyUp -> FavoritesSelectGuardDecision.CONSUME_RELEASE
-    keyDownRepeatCount == 0 -> FavoritesSelectGuardDecision.CLEAR_ARMED_ON_PRESS
-    else -> FavoritesSelectGuardDecision.PASS
+    else -> FavoritesSelectGuardDecision.CONSUME_PRESS
 }

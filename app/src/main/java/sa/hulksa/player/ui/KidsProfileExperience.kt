@@ -88,6 +88,7 @@ import sa.hulksa.player.ui.screens.NotificationBellButton
 import sa.hulksa.player.ui.screens.PlayerScreen
 import sa.hulksa.player.ui.screens.ProfileAvatarArtwork
 import sa.hulksa.player.ui.screens.SeriesDetailsScreenV2
+import sa.hulksa.player.ui.screens.downloadPrimaryActionIntent
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 @Composable
@@ -100,6 +101,7 @@ fun KidsProfileExperience(
     sourceError: String?,
     onRetrySource: () -> Unit,
     onSwitchProfile: () -> Unit,
+    onActionNotice: (String, ImageVector) -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
     val (adaptiveUi, inputController) = rememberAdaptiveUiState(isTelevisionDevice)
@@ -184,7 +186,13 @@ fun KidsProfileExperience(
                                 onBack = viewModel::back,
                                 onPlay = viewModel::playSelectedMovie,
                                 onDownload = {
-                                    if (download == null) viewModel.downloadSelectedMovie { } else viewModel.retryDownload(download)
+                                    if (download == null) {
+                                        viewModel.downloadSelectedMovie { }
+                                    } else {
+                                        downloadPrimaryActionIntent(download.status)?.let { intent ->
+                                            viewModel.onDownloadPrimaryAction(download, intent)
+                                        }
+                                    }
                                 },
                                 onCancelDownload = { download?.let(viewModel::deleteDownload) },
                                 onToggleFavorite = { viewModel.toggleFavorite(item) },
@@ -205,7 +213,13 @@ fun KidsProfileExperience(
                                 onBack = viewModel::back,
                                 onPlay = viewModel::playSelectedMovie,
                                 onDownload = {
-                                    if (download == null) viewModel.downloadSelectedMovie { } else viewModel.retryDownload(download)
+                                    if (download == null) {
+                                        viewModel.downloadSelectedMovie { }
+                                    } else {
+                                        downloadPrimaryActionIntent(download.status)?.let { intent ->
+                                            viewModel.onDownloadPrimaryAction(download, intent)
+                                        }
+                                    }
                                 },
                                 onCancelDownload = { download?.let(viewModel::deleteDownload) },
                                 onToggleFavorite = { viewModel.toggleFavorite(item) },
@@ -254,7 +268,13 @@ fun KidsProfileExperience(
                                 onPlay = viewModel::playEpisode,
                                 onDownload = { episode ->
                                     val existing = state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
-                                    if (existing == null) viewModel.downloadEpisode(episode) { } else viewModel.retryDownload(existing)
+                                    if (existing == null) {
+                                        viewModel.downloadEpisode(episode) { }
+                                    } else {
+                                        downloadPrimaryActionIntent(existing.status)?.let { intent ->
+                                            viewModel.onDownloadPrimaryAction(existing, intent)
+                                        }
+                                    }
                                 },
                                 onCancelDownload = { episode ->
                                     state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
@@ -296,7 +316,13 @@ fun KidsProfileExperience(
                                 onPlay = viewModel::playEpisode,
                                 onDownload = { episode ->
                                     val existing = state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
-                                    if (existing == null) viewModel.downloadEpisode(episode) { } else viewModel.retryDownload(existing)
+                                    if (existing == null) {
+                                        viewModel.downloadEpisode(episode) { }
+                                    } else {
+                                        downloadPrimaryActionIntent(existing.status)?.let { intent ->
+                                            viewModel.onDownloadPrimaryAction(existing, intent)
+                                        }
+                                    }
                                 },
                                 onCancelDownload = { episode ->
                                     state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
@@ -336,9 +362,12 @@ fun KidsProfileExperience(
                             onSelectLiveChannel = { channel ->
                                 if (isVerifiedKidsItem(safeSnapshot, channel)) viewModel.switchLiveChannel(channel)
                             },
-                            onToggleFavorite = { item ->
-                                if (isVerifiedKidsItem(safeSnapshot, item)) viewModel.toggleFavorite(item)
+                            onToggleFavorite = { item, result ->
+                                if (isVerifiedKidsItem(safeSnapshot, item)) {
+                                    viewModel.toggleFavorite(item, result)
+                                }
                             },
+                            onActionNotice = onActionNotice,
                             onBack = viewModel::back,
                             onProgress = viewModel::onPlaybackProgress,
                             nextEpisodeTitle = nextEpisode?.let {

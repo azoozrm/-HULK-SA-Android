@@ -4,7 +4,6 @@ import android.app.Application
 import android.app.UiModeManager
 import android.content.Context
 import android.content.res.Configuration
-import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.util.UUID
@@ -21,7 +20,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import sa.hulksa.player.data.AccountIdentityCandidateLabel
@@ -29,10 +30,17 @@ import sa.hulksa.player.data.AuthenticatedSessionOwner
 import sa.hulksa.player.data.AuthenticatedSessionRegistry
 import sa.hulksa.player.data.AuthenticationStartResult
 import sa.hulksa.player.data.ContentMetadataRequestKey
+import sa.hulksa.player.data.DownloadActionClaim
+import sa.hulksa.player.data.DownloadActionIntent
+import sa.hulksa.player.data.DownloadActionOutcome
+import sa.hulksa.player.data.DownloadPrimaryActionDispatcher
 import sa.hulksa.player.data.DownloadRepository
 import sa.hulksa.player.data.EpisodeNotificationPopup
 import sa.hulksa.player.data.EpisodeNotificationSubscription
 import sa.hulksa.player.data.EpisodeNotificationStoreResult
+import sa.hulksa.player.data.FavoriteMutationGate
+import sa.hulksa.player.data.FavoriteMutationOutcome
+import sa.hulksa.player.data.FavoriteMutationStatus
 import sa.hulksa.player.data.HulkRepository
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.data.HomeHeroTechnicalMetadata
@@ -65,7 +73,6 @@ import sa.hulksa.player.data.PresenceClient
 import sa.hulksa.player.data.PresenceLifecycleOwner
 import sa.hulksa.player.data.currentPresenceAppMetadata
 import sa.hulksa.player.data.currentPresenceDeviceMetadata
-import sa.hulksa.player.data.ProfileDownloadPauseOutcome
 import sa.hulksa.player.data.ProfileDownloadMutationOutcome
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.data.UserLibrary
@@ -81,6 +88,7 @@ import sa.hulksa.player.data.mergeNotificationCenterItems
 import sa.hulksa.player.data.normalizeResellerAccessCode
 import sa.hulksa.player.data.reliableEpisodeKeys
 import sa.hulksa.player.data.resolveLocalNotificationSeriesTarget
+import sa.hulksa.player.data.runFavoriteMutationOffMain
 import sa.hulksa.player.data.contentMetadataKey
 import sa.hulksa.player.model.AccountInfo
 import sa.hulksa.player.model.AuthenticatedSession
@@ -294,12 +302,6 @@ internal suspend fun <T> runDownloadEnqueueOffMain(
     enqueue()
 }
 
-internal suspend fun runDownloadPauseOffMain(
-    pause: () -> ProfileDownloadPauseOutcome,
-): ProfileDownloadPauseOutcome = withContext(Dispatchers.IO) {
-    pause()
-}
-
 internal suspend fun <T> runDownloadSettingsPersistenceOffMain(
     persistence: suspend () -> T,
 ): T = withContext(Dispatchers.IO) {
@@ -351,7 +353,8 @@ internal fun playerProgressProfileOwnerAllowed(
 ): Boolean = expectedProfileId == activeProfileId
 
 class HulkViewModel(application: Application) : AndroidViewModel(application) {
-    private var lastFavoriteToggleAtMs: Long = 0L
+    private val favoriteMutationGate = FavoriteMutationGate()
+    private val favoriteMutationMutex = Mutex()
     private val repository = HulkRepository(application)
     private val userLibrary = UserLibrary(application)
     private val downloadRepository = DownloadRepository(application)
@@ -429,15 +432,50 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val detailsRequestGate = DetailsRequestGate()
     private val downloadSettingsMutationGate = DownloadSettingsMutationGate()
     private val downloadSnapshotPublicationGate = DownloadSnapshotPublicationGate()
-    private val downloadResumeMutationGates = mutableMapOf<Long, DownloadSettingsMutationGate>()
+    private val downloadPrimaryActionDispatcher = DownloadPrimaryActionDispatcher(downloadRepository)
     private val downloadPriorityMutationQueues = mutableMapOf<Long, DownloadPriorityMutationQueue>()
     private var loginJob: Job? = null
     private var logoutJob: Job? = null
     private var pendingAccountDecision: PendingAccountDecision? = null
-    private val catalogJobs = mutableMapOf<ContentType, Job>()
-    private var catalogGeneration: Long = 0L
     private val loadedCatalogs = mutableMapOf<ContentType, Catalog>()
     private val homeCatalogs = mutableMapOf<ContentType, Catalog>()
+    private val catalogRequestOwner = CatalogRequestOwner(
+        scope = viewModelScope,
+        load = { activeSession, type ->
+            val full = repository.catalog(activeSession, type)
+            val snapshot = mutableState.value
+            val home = if (type == ContentType.MOVIE || type == ContentType.SERIES) {
+                withContext(Dispatchers.Default) {
+                    compactHomeCatalog(full, snapshot.favorites, snapshot.history)
+                }
+            } else {
+                full
+            }
+            CatalogLoadResult(full = full, home = home)
+        },
+        hasLoaded = { type -> loadedCatalogs[type] != null },
+        isSessionCurrent = { activeSession -> session === activeSession },
+        onLoadingChanged = { loadingTypes ->
+            mutableState.update { it.copy(loadingTypes = loadingTypes) }
+        },
+        onLoaded = { type, result, remaining ->
+            loadedCatalogs[type] = result.full
+            homeCatalogs[type] = result.home
+            mutableState.update { state ->
+                val base = state.catalogs + (type to result.full)
+                state.copy(
+                    catalogs = catalogsForDestination(state.destination, base),
+                    loadingTypes = remaining,
+                )
+            }
+            resolvePendingTvDeepLink()
+            scheduleTvPlatformSync(immediate = false)
+        },
+        onFailure = { _, error, remaining ->
+            mutableState.update { it.copy(loadingTypes = remaining) }
+            showFailure(error)
+        },
+    )
     private val selectedCategoryByType = mutableMapOf<ContentType, String?>()
     private var detailsJob: Job? = null
     private var accountRefreshJob: Job? = null
@@ -731,31 +769,12 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private fun catalogsForDestination(
         destination: MainDestination,
         current: Map<ContentType, Catalog>,
-    ): Map<ContentType, Catalog> {
-        if (loadedCatalogs.isEmpty()) return current
-        val displayed = current.toMutableMap()
-        fun showFull(type: ContentType) {
-            loadedCatalogs[type]?.let { displayed[type] = it }
-        }
-        fun showHome(type: ContentType) {
-            (homeCatalogs[type] ?: loadedCatalogs[type])?.let { displayed[type] = it }
-        }
-        when (destination) {
-            MainDestination.HOME -> {
-                showHome(ContentType.MOVIE)
-                showHome(ContentType.SERIES)
-            }
-            MainDestination.LIVE -> showFull(ContentType.LIVE)
-            MainDestination.MOVIES -> showFull(ContentType.MOVIE)
-            MainDestination.SERIES -> showFull(ContentType.SERIES)
-            MainDestination.FAVORITES,
-            MainDestination.SEARCH,
-            -> ContentType.entries.forEach(::showFull)
-            MainDestination.DOWNLOADS,
-            MainDestination.SETTINGS -> Unit
-        }
-        return displayed
-    }
+    ): Map<ContentType, Catalog> = projectCatalogsForDestination(
+        destination = destination,
+        current = current,
+        loaded = loadedCatalogs,
+        home = homeCatalogs,
+    )
 
     private fun compactHomeCatalog(
         catalog: Catalog,
@@ -782,20 +801,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun ensureDestinationCatalogs(destination: MainDestination) {
-        when (destination) {
-            MainDestination.HOME -> {
-                ensureCatalog(ContentType.MOVIE)
-                ensureCatalog(ContentType.SERIES)
-            }
-            MainDestination.LIVE -> ensureCatalog(ContentType.LIVE)
-            MainDestination.MOVIES -> ensureCatalog(ContentType.MOVIE)
-            MainDestination.SERIES -> ensureCatalog(ContentType.SERIES)
-            MainDestination.FAVORITES,
-            MainDestination.SEARCH,
-            -> ContentType.entries.forEach(::ensureCatalog)
-            MainDestination.DOWNLOADS,
-            MainDestination.SETTINGS -> Unit
-        }
+        catalogTypesForDestination(destination).forEach(::ensureCatalog)
     }
 
     fun selectType(type: ContentType) {
@@ -849,17 +855,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refresh() {
         refreshOperations(force = true)
-        val types = when (mutableState.value.destination) {
-            MainDestination.HOME -> setOf(ContentType.MOVIE, ContentType.SERIES)
-            MainDestination.LIVE -> setOf(ContentType.LIVE)
-            MainDestination.MOVIES -> setOf(ContentType.MOVIE)
-            MainDestination.SERIES -> setOf(ContentType.SERIES)
-            MainDestination.FAVORITES,
-            MainDestination.SEARCH,
-            -> ContentType.entries.toSet()
-            MainDestination.DOWNLOADS,
-            MainDestination.SETTINGS -> emptySet()
-        }
+        val types = catalogTypesForDestination(mutableState.value.destination)
         if (types.isEmpty()) return
         mutableState.update { it.copy(errorMessage = null) }
         types.forEach { ensureCatalog(it, force = true) }
@@ -1368,83 +1364,37 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         return true
     }
 
-    fun retryDownload(item: OfflineDownload, onResult: (DownloadFeedback) -> Unit = {}) {
+    /**
+     * Applies the explicit download action the user saw. The authoritative record validates the
+     * intent; it never chooses a different action, so a stale Retry cannot become a Pause.
+     */
+    fun onDownloadPrimaryAction(
+        item: OfflineDownload,
+        intent: DownloadActionIntent,
+        onResult: (DownloadFeedback) -> Unit = {},
+    ) {
         if (!mutableState.value.operations.features.downloadsEnabled) {
             onResult(downloadFeatureDisabledFeedback())
             return
         }
-        when (item.status) {
-            OfflineStatus.COMPLETED -> onResult(downloadAlreadyCompletedFeedback())
-            OfflineStatus.QUEUED,
-            OfflineStatus.CHECKING,
-            OfflineStatus.DOWNLOADING,
-            -> {
-                val expectedAccountId = downloadRepository.activeAccountIdForCleanup()
-                val expectedProfileId = profileStore.activeProfileId()
-                if (expectedAccountId.isNullOrBlank() || expectedProfileId.isBlank()) {
-                    onResult(downloadOwnerChangedFeedback())
-                    return
-                }
-                viewModelScope.launch {
-                    val outcome = runDownloadPauseOffMain {
-                        downloadRepository.pause(
-                            downloadId = item.downloadId,
-                            expectedAccountId = expectedAccountId,
-                            expectedProfileId = expectedProfileId,
-                        )
-                    }
-                    if (
-                        !downloadOwnerContextMatches(
-                            expectedAccountId = expectedAccountId,
-                            expectedProfileId = expectedProfileId,
-                            activeAccountId = downloadRepository.activeAccountIdForCleanup(),
-                            activeProfileId = profileStore.activeProfileId(),
-                        )
-                    ) {
-                        return@launch
-                    }
-                    if (outcome.applied && outcome.persisted) {
-                        mutableState.update { it.copy(downloads = outcome.downloads) }
-                        onResult(downloadPausePersistedFeedback())
-                    } else {
-                        onResult(downloadPauseFailedFeedback())
-                    }
-                }
-            }
-            OfflineStatus.PAUSED,
-            OfflineStatus.WAITING_SCHEDULE,
-            OfflineStatus.WAITING_NETWORK,
-            OfflineStatus.WAITING_STORAGE,
-            -> resumeDownload(item, downloadResumeAcceptedFeedback(), onResult)
-            OfflineStatus.FAILED -> resumeDownload(item, downloadRetryAcceptedFeedback(), onResult)
-        }
-    }
-
-    private fun resumeDownload(
-        item: OfflineDownload,
-        successFeedback: DownloadFeedback,
-        onResult: (DownloadFeedback) -> Unit,
-    ) {
         val expectedSession = session ?: run {
-            rebuildDownload(item, onResult)
+            onResult(downloadSessionRequiredFeedback())
             return
         }
         val expectedAccountId = downloadRepository.activeAccountIdForCleanup()
         val expectedProfileId = profileStore.activeProfileId()
         if (expectedAccountId.isNullOrBlank() || expectedProfileId.isBlank()) {
-            rebuildDownload(item, onResult)
+            onResult(downloadOwnerChangedFeedback())
             return
         }
-        val gate = downloadResumeMutationGates.getOrPut(item.downloadId, ::DownloadSettingsMutationGate)
-        val attempt = gate.begin()
         viewModelScope.launch {
-            val outcome = runDownloadSettingsPersistenceOffMain {
-                gate.writeIfCurrent(attempt) {
-                    downloadRepository.resume(item.downloadId, expectedAccountId, expectedProfileId)
-                }
-            } ?: return@launch
+            val outcome = downloadPrimaryActionDispatcher.dispatch(
+                downloadId = item.downloadId,
+                expectedAccountId = expectedAccountId,
+                expectedProfileId = expectedProfileId,
+                intent = intent,
+            )
             if (
-                !gate.isCurrent(attempt) ||
                 session !== expectedSession ||
                 !downloadOwnerContextMatches(
                     expectedAccountId = expectedAccountId,
@@ -1453,49 +1403,32 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     activeProfileId = profileStore.activeProfileId(),
                 )
             ) return@launch
-            if (outcome.applied) {
+            if (outcome.downloads.isNotEmpty()) {
                 mutableState.update { state ->
-                    state.copy(downloadSettings = outcome.settings, downloads = outcome.downloads)
+                    state.copy(downloads = outcome.downloads)
                 }
-                onResult(successFeedback)
-            } else {
-                rebuildDownload(item, onResult)
             }
+            downloadActionFeedback(outcome, intent)?.let(onResult)
         }
     }
 
-    private fun rebuildDownload(
-        item: OfflineDownload,
-        onResult: (DownloadFeedback) -> Unit,
-    ) {
-        val activeSession = session ?: run {
-            onResult(downloadSessionRequiredFeedback())
-            return
+    private fun downloadActionFeedback(
+        outcome: DownloadActionOutcome,
+        intent: DownloadActionIntent,
+    ): DownloadFeedback? = when (outcome.claim) {
+        DownloadActionClaim.APPLIED -> when (intent) {
+            DownloadActionIntent.RETRY -> downloadRetryAcceptedFeedback()
+            DownloadActionIntent.RESUME -> downloadResumeAcceptedFeedback()
+            DownloadActionIntent.PAUSE -> downloadPausePersistedFeedback()
         }
-        val request = repository.playback(
-            activeSession,
-            HistoryEntry(
-                key = item.historyKey,
-                title = item.title,
-                posterUrl = item.posterUrl,
-                streamKind = item.streamKind,
-                streamId = item.streamId,
-                extension = item.extension,
-                isLive = false,
-                positionMs = 0L,
-                durationMs = 0L,
-                updatedAtEpochMs = System.currentTimeMillis(),
-            ),
-        )
-        enqueueDownload(
-            request = request,
-            expectedSession = activeSession,
-            seriesTitle = item.seriesTitle,
-            season = item.season,
-            episodeNumber = item.episodeNumber,
-            replaceDownloadId = item.downloadId,
-            onResult = onResult,
-        )
+        DownloadActionClaim.ALREADY_QUEUED -> downloadAlreadyQueuedFeedback()
+        DownloadActionClaim.ALREADY_COMPLETED -> downloadAlreadyCompletedFeedback()
+        DownloadActionClaim.OWNER_CHANGED -> downloadOwnerChangedFeedback()
+        DownloadActionClaim.PERSISTENCE_FAILED -> downloadPauseFailedFeedback()
+        DownloadActionClaim.FAILED -> downloadGenericFailureFeedback()
+        DownloadActionClaim.NOT_APPLICABLE,
+        DownloadActionClaim.SUPERSEDED,
+        -> null
     }
 
     fun openHistory(entry: HistoryEntry) {
@@ -1592,16 +1525,90 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleFavorite(item: ContentItem) {
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastFavoriteToggleAtMs < 700L) return
-        lastFavoriteToggleAtMs = now
+        toggleFavorite(item) { }
+    }
+
+    /**
+     * One production favorite path. The result callback always receives the authoritative
+     * apply/reject/stale outcome; callers never derive success from a pre-click guess.
+     */
+    fun toggleFavorite(
+        item: ContentItem,
+        onResult: (FavoriteMutationOutcome) -> Unit,
+    ) {
         val key = userLibrary.keyFor(item)
-        val current = mutableState.value.favorites
-        val updated = current.toMutableSet().apply {
-            if (!add(key)) remove(key)
-        }.toSet()
-        userLibrary.replaceFavorites(updated)
-        mutableState.update { it.copy(favorites = updated) }
+        val ticket = favoriteMutationGate.admit(key)
+        if (ticket == null) {
+            onResult(
+                FavoriteMutationOutcome(
+                    status = FavoriteMutationStatus.THROTTLED,
+                    key = key,
+                    favorites = mutableState.value.favorites,
+                ),
+            )
+            return
+        }
+        val expectedOwner = AuthenticatedSessionRegistry.currentOwner()
+        val expectedAccountId = repository.activeAccountSession()?.accountId
+        val expectedProfileId = profileStore.activeProfileId()
+        if (
+            expectedOwner == null ||
+            expectedAccountId.isNullOrBlank() ||
+            expectedProfileId.isBlank() ||
+            expectedOwner.session !== session ||
+            expectedOwner.accountId != expectedAccountId
+        ) {
+            favoriteMutationGate.finish(ticket)
+            onResult(FavoriteMutationOutcome(FavoriteMutationStatus.OWNER_CHANGED, key))
+            return
+        }
+        viewModelScope.launch {
+            try {
+                favoriteMutationMutex.withLock {
+                    val outcome = try {
+                        runFavoriteMutationOffMain {
+                            userLibrary.toggleFavoriteForOwner(
+                                expectedOwner = expectedOwner,
+                                expectedAccountId = expectedAccountId,
+                                expectedProfileId = expectedProfileId,
+                                item = item,
+                            )
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Throwable) {
+                        FavoriteMutationOutcome(
+                            status = FavoriteMutationStatus.PERSISTENCE_FAILED,
+                            key = key,
+                            favorites = mutableState.value.favorites,
+                        )
+                    }
+                    val ownerCurrent =
+                        session === expectedOwner.session &&
+                            AuthenticatedSessionRegistry.isCurrent(expectedOwner) &&
+                            repository.activeAccountSession()?.accountId == expectedAccountId &&
+                            profileStore.activeProfileId() == expectedProfileId
+                    if (!ownerCurrent) {
+                        onResult(FavoriteMutationOutcome(FavoriteMutationStatus.OWNER_CHANGED, key))
+                        return@withLock
+                    }
+                    when (outcome.status) {
+                        FavoriteMutationStatus.APPLIED_ADDED,
+                        FavoriteMutationStatus.APPLIED_REMOVED,
+                        FavoriteMutationStatus.UNCHANGED,
+                        FavoriteMutationStatus.KIDS_REJECTED,
+                        FavoriteMutationStatus.PERSISTENCE_FAILED,
+                        -> mutableState.update { it.copy(favorites = outcome.favorites) }
+                        FavoriteMutationStatus.OWNER_CHANGED,
+                        FavoriteMutationStatus.THROTTLED,
+                        -> Unit
+                    }
+                    onResult(outcome)
+                }
+            } finally {
+                favoriteMutationGate.finish(ticket)
+            }
+        }
     }
 
     fun isFavorite(item: ContentItem): Boolean = userLibrary.isFavorite(item, mutableState.value.favorites)
@@ -2050,8 +2057,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     fun onProfileChanged() {
         downloadSettingsMutationGate.invalidate()
         downloadSnapshotPublicationGate.invalidate()
-        downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
-        downloadResumeMutationGates.clear()
+        downloadPrimaryActionDispatcher.invalidate()
         downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
         downloadPriorityMutationQueues.clear()
         invalidatePlayerProgressPersistence()
@@ -2782,6 +2788,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                             errorMessage = null,
                         )
                     }
+                    catalogRequestOwner.replaceSession(
+                        session = refreshed,
+                        requiredTypes = catalogTypesForDestination(mutableState.value.destination),
+                    )
                     publishPresenceOwnership(refreshed)
                     onResult("تم تحديث بيانات الاشتراك من السيرفر.")
                 }
@@ -2943,9 +2953,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun invalidateCatalogRequests() {
-        catalogGeneration += 1L
-        catalogJobs.values.forEach(Job::cancel)
-        catalogJobs.clear()
+        catalogRequestOwner.invalidate()
     }
 
     private fun invalidateAccountRefresh() {
@@ -2983,8 +2991,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         invalidatePlayerProgressPersistence()
         downloadSettingsMutationGate.invalidate()
         downloadSnapshotPublicationGate.invalidate()
-        downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
-        downloadResumeMutationGates.clear()
+        downloadPrimaryActionDispatcher.invalidate()
         downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
         downloadPriorityMutationQueues.clear()
         logoutJob = viewModelScope.launch {
@@ -3271,8 +3278,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         invalidatePlayerProgressPersistence()
         downloadSettingsMutationGate.invalidate()
         downloadSnapshotPublicationGate.invalidate()
-        downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
-        downloadResumeMutationGates.clear()
+        downloadPrimaryActionDispatcher.invalidate()
         downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
         downloadPriorityMutationQueues.clear()
         session = authenticated
@@ -3302,8 +3308,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         publishPresenceOwnership(authenticated)
-        ensureCatalog(ContentType.MOVIE)
-        ensureCatalog(ContentType.SERIES)
+        ensureDestinationCatalogs(MainDestination.HOME)
         refreshOperations(force = false)
         refreshNotificationState(clearPopup = true)
         scanSubscribedSeries(NotificationScanTrigger.APP_START)
@@ -3329,52 +3334,16 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun ensureCatalog(type: ContentType, force: Boolean = false) {
         val activeSession = session ?: return
-        if (!force) {
-            loadedCatalogs[type]?.let {
+        if (!catalogRequestOwner.request(activeSession, type, force)) {
+            if (!force) {
                 mutableState.update { state ->
                     val display = catalogsForDestination(state.destination, state.catalogs)
                     if (display == state.catalogs) state else state.copy(catalogs = display)
                 }
-                return
             }
+            return
         }
-        if (catalogJobs[type]?.isActive == true) return
-        val requestGeneration = catalogGeneration
-        mutableState.update {
-            it.copy(loadingTypes = it.loadingTypes + type, errorMessage = null)
-        }
-        catalogJobs[type] = viewModelScope.launch {
-            try {
-                val full = repository.catalog(activeSession, type)
-                val snapshot = mutableState.value
-                val compact = if (type == ContentType.MOVIE || type == ContentType.SERIES) {
-                    withContext(Dispatchers.Default) {
-                        compactHomeCatalog(full, snapshot.favorites, snapshot.history)
-                    }
-                } else {
-                    full
-                }
-                if (requestGeneration != catalogGeneration) return@launch
-
-                loadedCatalogs[type] = full
-                homeCatalogs[type] = compact
-                mutableState.update { state ->
-                    val base = state.catalogs + (type to full)
-                    state.copy(
-                        catalogs = catalogsForDestination(state.destination, base),
-                        loadingTypes = state.loadingTypes - type,
-                    )
-                }
-                resolvePendingTvDeepLink()
-                scheduleTvPlatformSync(immediate = false)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                if (requestGeneration != catalogGeneration) return@launch
-                mutableState.update { it.copy(loadingTypes = it.loadingTypes - type) }
-                showFailure(error)
-            }
-        }
+        mutableState.update { it.copy(errorMessage = null) }
     }
 
     private fun resolvePendingTvDeepLink() {
@@ -3827,3 +3796,81 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         private const val TV_PLATFORM_SYNC_DEBOUNCE_MS = 350L
     }
 }
+
+/**
+ * One catalog request plan for authenticated startup, destination entry and manual refresh.
+ * Home consumes Live for its existing recommendations/history presentation, so it must load
+ * and project Live through the same per-type pipeline as Movie and Series.
+ */
+internal fun catalogTypesForDestination(destination: MainDestination): Set<ContentType> =
+    when (destination) {
+        MainDestination.HOME -> setOf(
+            ContentType.MOVIE,
+            ContentType.SERIES,
+            ContentType.LIVE,
+        )
+        MainDestination.LIVE -> setOf(ContentType.LIVE)
+        MainDestination.MOVIES -> setOf(ContentType.MOVIE)
+        MainDestination.SERIES -> setOf(ContentType.SERIES)
+        MainDestination.FAVORITES,
+        MainDestination.SEARCH,
+        -> ContentType.entries.toSet()
+        MainDestination.DOWNLOADS,
+        MainDestination.SETTINGS -> emptySet()
+    }
+
+/**
+ * Destination projection over the existing caches. Home keeps compact Movie/Series catalogs but
+ * publishes the full Live catalog because Live has no compact Home derivation.
+ */
+internal fun projectCatalogsForDestination(
+    destination: MainDestination,
+    current: Map<ContentType, Catalog>,
+    loaded: Map<ContentType, Catalog>,
+    home: Map<ContentType, Catalog>,
+): Map<ContentType, Catalog> {
+    if (loaded.isEmpty()) return current
+    val displayed = current.toMutableMap()
+    fun showFull(type: ContentType) {
+        loaded[type]?.let { displayed[type] = it }
+    }
+    fun showHome(type: ContentType) {
+        (home[type] ?: loaded[type])?.let { displayed[type] = it }
+    }
+    when (destination) {
+        MainDestination.HOME -> {
+            showHome(ContentType.MOVIE)
+            showHome(ContentType.SERIES)
+            showFull(ContentType.LIVE)
+        }
+        MainDestination.LIVE -> showFull(ContentType.LIVE)
+        MainDestination.MOVIES -> showFull(ContentType.MOVIE)
+        MainDestination.SERIES -> showFull(ContentType.SERIES)
+        MainDestination.FAVORITES,
+        MainDestination.SEARCH,
+        -> ContentType.entries.forEach(::showFull)
+        MainDestination.DOWNLOADS,
+        MainDestination.SETTINGS -> Unit
+    }
+    return displayed
+}
+
+/**
+ * A loaded catalog satisfies a non-forced entry; an in-flight request always satisfies both
+ * entry and refresh so overlapping startup/Home/refresh triggers cannot duplicate transport.
+ */
+internal fun catalogRequestShouldStart(
+    hasLoadedCatalog: Boolean,
+    force: Boolean,
+    inFlight: Boolean,
+): Boolean {
+    if (inFlight) return false
+    return force || !hasLoadedCatalog
+}
+
+/** A catalog result may publish only for the session and generation that started it. */
+internal fun catalogPublicationAllowed(
+    requestGeneration: Long,
+    currentGeneration: Long,
+    sessionCurrent: Boolean,
+): Boolean = sessionCurrent && requestGeneration == currentGeneration
