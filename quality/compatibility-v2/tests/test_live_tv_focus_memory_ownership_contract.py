@@ -96,7 +96,11 @@ class LiveTvFocusMemoryOwnershipContractTest(unittest.TestCase):
         self.assertIn("beginFavoritesRemovalLongPress(", live)
         self.assertIn("onFavoritesRemovalStarted", live)
         self.assertIn("liveRemovalHandoff(visible, key)", live)
-        self.assertIn("previewRemovalInProgress", live)
+        self.assertIn("onToggleFavoriteWithResult", live)
+        self.assertIn("beginLiveFavoriteRemoval", live)
+        self.assertIn("LiveFavoriteMutationOrigin.ROW", live)
+        self.assertIn("LiveFavoriteMutationOrigin.PREVIEW", live)
+        self.assertIn("liveFavoriteMutation", live)
 
 
     def test_live_heart_reads_the_explicit_favorite_snapshot(self) -> None:

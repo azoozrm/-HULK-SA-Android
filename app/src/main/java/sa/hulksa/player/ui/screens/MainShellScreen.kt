@@ -190,6 +190,7 @@ import sa.hulksa.player.MainDestination
 import sa.hulksa.player.data.AccountProfileStateScope
 import sa.hulksa.player.data.DownloadActionIntent
 import sa.hulksa.player.data.FavoriteMutationOutcome
+import sa.hulksa.player.data.FavoriteMutationStatus
 import sa.hulksa.player.data.GrowthAction
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.data.OperationsAnnouncement
@@ -1199,15 +1200,20 @@ fun MainShellScreen(
             growthQrDestination = null
         }
     }
-    val toggleFavoriteWithFeedback: (ContentItem) -> Unit = { pressedItem ->
-        onToggleFavoriteWithResult(pressedItem) { outcome ->
-            favoriteMutationFeedback(outcome, pressedItem.name)?.let { feedback ->
-                onActionNotice(
-                    feedback.message,
-                    favoriteFeedbackIcon(feedback.glyph),
-                )
+    val toggleFavoriteWithFeedbackAndResult:
+        (ContentItem, (FavoriteMutationOutcome) -> Unit) -> Unit = { pressedItem, onResult ->
+            onToggleFavoriteWithResult(pressedItem) { outcome ->
+                onResult(outcome)
+                favoriteMutationFeedback(outcome, pressedItem.name)?.let { feedback ->
+                    onActionNotice(
+                        feedback.message,
+                        favoriteFeedbackIcon(feedback.glyph),
+                    )
+                }
             }
         }
+    val toggleFavoriteWithFeedback: (ContentItem) -> Unit = { pressedItem ->
+        toggleFavoriteWithFeedbackAndResult(pressedItem) { }
     }
     val tvRailFocusRequesters = remember(navigationEntries) {
         navigationEntries.associate { entry -> entry.destination to FocusRequester() }
@@ -1281,6 +1287,7 @@ fun MainShellScreen(
                         onOpenHistory = onOpenHistory,
                         onRemoveHistoryEntry = onRemoveHistoryEntry,
                         onToggleFavorite = toggleFavoriteWithFeedback,
+                        onToggleFavoriteWithResult = toggleFavoriteWithFeedbackAndResult,
                         onFavoritesRemovalStarted = favoritesRemovalInputGuard::begin,
                         onRefresh = onRefresh,
                         onOpenNotifications = onOpenNotifications,
@@ -1338,6 +1345,7 @@ fun MainShellScreen(
                         onOpenHistory = onOpenHistory,
                         onRemoveHistoryEntry = onRemoveHistoryEntry,
                         onToggleFavorite = toggleFavoriteWithFeedback,
+                        onToggleFavoriteWithResult = toggleFavoriteWithFeedbackAndResult,
                         onFavoritesRemovalStarted = favoritesRemovalInputGuard::begin,
                         onRefresh = onRefresh,
                         onOpenNotifications = onOpenNotifications,
@@ -1563,6 +1571,7 @@ private fun DestinationContent(
     onOpenHistory: (HistoryEntry) -> Unit,
     onRemoveHistoryEntry: (String, (Boolean) -> Unit) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
+    onToggleFavoriteWithResult: (ContentItem, (FavoriteMutationOutcome) -> Unit) -> Unit,
     onFavoritesRemovalStarted: () -> Unit,
     onRefresh: () -> Unit,
     onOpenNotifications: () -> Unit,
@@ -1627,6 +1636,7 @@ private fun DestinationContent(
             onSearch = onSearch,
             onOpen = onOpen,
             onToggleFavorite = onToggleFavorite,
+            onToggleFavoriteWithResult = onToggleFavoriteWithResult,
             onFavoritesRemovalStarted = onFavoritesRemovalStarted,
             onRefresh = onRefresh,
             initialAllFocusRequester = initialAllFocusRequester,
@@ -4003,6 +4013,57 @@ internal fun isLivePreviewSelected(
 
 internal fun liveChannelKey(item: ContentItem): String = "${item.type}:${item.id}"
 
+/** Which surface initiated the current Live favorite mutation. */
+internal enum class LiveFavoriteMutationOrigin {
+    ROW,
+    PREVIEW,
+}
+
+/** One Live favorite mutation's ownership and the fallback row it expects after removal. */
+internal data class LiveFavoriteMutationIntent(
+    val id: Long,
+    val origin: LiveFavoriteMutationOrigin,
+    val removedKey: String,
+    val fallbackKey: String?,
+)
+
+/**
+ * Snapshot state for the current Live favorite mutation. A newer mutation replaces the active
+ * intent, while a late result is ignored unless it owns the current intent id. A successful
+ * APPLIED_REMOVED intent stays active until the committed membership change is observed.
+ */
+internal data class LiveFavoriteMutationState(
+    val nextId: Long = 0L,
+    val active: LiveFavoriteMutationIntent? = null,
+) {
+    fun begin(
+        origin: LiveFavoriteMutationOrigin,
+        removedKey: String,
+        fallbackKey: String? = null,
+    ): Pair<LiveFavoriteMutationState, LiveFavoriteMutationIntent> {
+        val id = nextId + 1L
+        val intent = LiveFavoriteMutationIntent(
+            id = id,
+            origin = origin,
+            removedKey = removedKey,
+            fallbackKey = fallbackKey,
+        )
+        return copy(nextId = id, active = intent) to intent
+    }
+
+    fun onOutcome(
+        intentId: Long,
+        status: FavoriteMutationStatus,
+    ): LiveFavoriteMutationState {
+        val current = active ?: return this
+        if (current.id != intentId) return this
+        return if (status == FavoriteMutationStatus.APPLIED_REMOVED) this else copy(active = null)
+    }
+
+    /** Clear observed or abandoned intent without ever reusing an older result id. */
+    fun clear(): LiveFavoriteMutationState = copy(active = null)
+}
+
 /** A focused-row removal and the stable surviving row that must receive focus after it disappears. */
 internal data class LiveRemovalHandoff(
     val removedKey: String,
@@ -4074,6 +4135,7 @@ private fun LiveCatalogScreen(
     onSearch: (String) -> Unit,
     onOpen: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
+    onToggleFavoriteWithResult: (ContentItem, (FavoriteMutationOutcome) -> Unit) -> Unit,
     onFavoritesRemovalStarted: () -> Unit,
     onRefresh: () -> Unit,
     initialAllFocusRequester: FocusRequester? = null,
@@ -4136,11 +4198,24 @@ private fun LiveCatalogScreen(
     val channelRequester = remember { FocusRequester() }
     val playRequester = remember { FocusRequester() }
     val favoriteRequester = remember { FocusRequester() }
-    var pendingLiveRemoval by remember { mutableStateOf<LiveRemovalHandoff?>(null) }
-    var previewRemovalInProgress by remember { mutableStateOf(false) }
+    var liveFavoriteMutation by remember { mutableStateOf(LiveFavoriteMutationState()) }
     LaunchedEffect(state.selectedCategoryId, catalog) {
-        pendingLiveRemoval = null
-        previewRemovalInProgress = false
+        liveFavoriteMutation = liveFavoriteMutation.clear()
+    }
+    fun beginLiveFavoriteRemoval(
+        origin: LiveFavoriteMutationOrigin,
+        channel: ContentItem,
+        fallbackKey: String?,
+    ) {
+        val (nextState, intent) = liveFavoriteMutation.begin(
+            origin = origin,
+            removedKey = liveChannelKey(channel),
+            fallbackKey = fallbackKey,
+        )
+        liveFavoriteMutation = nextState
+        onToggleFavoriteWithResult(channel) { outcome ->
+            liveFavoriteMutation = liveFavoriteMutation.onOutcome(intent.id, outcome.status)
+        }
     }
     val categoryFocusRestoreController = remember { CategoryFocusRestoreController() }
     // Accepted Live catalog error classification: typed validated connectivity plus the real
@@ -4201,17 +4276,19 @@ private fun LiveCatalogScreen(
     // replay entry restoration after focus had saved a newer channel. Navigation memory is an
     // input, not a trigger: only entry composition, category/search transitions, a real content
     // change, or an explicit category handoff may restart this effect.
-    val removalHandoff = pendingLiveRemoval
-    val removalApplied = removalHandoff != null &&
-        visible.none { liveChannelKey(it) == removalHandoff.removedKey }
-    val removalFallbackIndex = if (removalApplied) {
-        removalHandoff?.fallbackKey
+    val activeLiveFavoriteMutation = liveFavoriteMutation.active
+    val rowRemovalHandoff = activeLiveFavoriteMutation
+        ?.takeIf { it.origin == LiveFavoriteMutationOrigin.ROW }
+    val rowRemovalApplied = rowRemovalHandoff != null &&
+        visible.none { liveChannelKey(it) == rowRemovalHandoff.removedKey }
+    val removalFallbackIndex = if (rowRemovalApplied) {
+        rowRemovalHandoff?.fallbackKey
             ?.let { key -> visible.indexOfFirst { liveChannelKey(it) == key } }
             ?.takeIf { it >= 0 }
     } else {
         null
     }
-    val liveFocusKey = if (removalApplied) {
+    val liveFocusKey = if (rowRemovalApplied) {
         removalFallbackIndex?.let { liveChannelKey(visible[it]) }.orEmpty()
     } else {
         remembered.itemKey
@@ -4230,80 +4307,79 @@ private fun LiveCatalogScreen(
         )
         val categoryRequest = categoryContentFocusRequest
             ?.takeIf { it.categoryId == state.selectedCategoryId }
-        val handoff = pendingLiveRemoval
+        val handoff = activeLiveFavoriteMutation
         val handoffApplied = handoff != null &&
             visible.none { liveChannelKey(it) == handoff.removedKey }
         if (handoffApplied) {
             if (visible.isEmpty()) {
                 navigationMemory.save(MainDestination.LIVE, itemKey = "", itemIndex = 0)
-                pendingLiveRemoval = null
+                liveFavoriteMutation = liveFavoriteMutation.clear()
                 withFrameNanos { }
                 categoryFocusRestoreController.requestFromSource()
                 return@LaunchedEffect
             }
             // A preview-button removal must keep focus on that button. A row-held removal has
             // already claimed the shell gesture guard and is the only path that takes list focus.
-            if (previewRemovalInProgress) {
-                pendingLiveRemoval = null
+            if (handoff?.origin == LiveFavoriteMutationOrigin.PREVIEW) {
+                previewState.value?.let { fallback ->
+                    val fallbackIndex = visible.indexOfFirst { it.id == fallback.id }
+                    if (fallbackIndex >= 0) {
+                        navigationMemory.save(
+                            MainDestination.LIVE,
+                            liveChannelKey(fallback),
+                            fallbackIndex,
+                        )
+                    }
+                }
+                liveFavoriteMutation = liveFavoriteMutation.clear()
                 return@LaunchedEffect
             }
-            val targetIndex = removalFallbackIndex ?: rememberedIndex
-            if (targetIndex in visible.indices) {
-                val targetKey = liveChannelKey(visible[targetIndex])
-                navigationMemory.save(MainDestination.LIVE, targetKey, targetIndex)
-                val layout = listState.layoutInfo
-                val targetInfo = layout.visibleItemsInfo.firstOrNull { it.index == targetIndex }
-                val revealDelta = liveRemovalRevealDelta(
-                    itemStart = targetInfo?.offset,
-                    itemEnd = targetInfo?.let { it.offset + it.size },
-                    viewportStart = layout.viewportStartOffset,
-                    viewportEnd = layout.viewportEndOffset,
-                )
-                if (targetInfo == null) {
-                    listState.scrollToItem(targetIndex)
-                    snapshotFlow {
-                        listState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex }
-                    }.first { it }
-                } else if (revealDelta != null && revealDelta != 0) {
-                    listState.scrollBy(revealDelta.toFloat())
+            if (handoff?.origin == LiveFavoriteMutationOrigin.ROW) {
+                val targetIndex = removalFallbackIndex ?: rememberedIndex
+                if (targetIndex in visible.indices) {
+                    val targetKey = liveChannelKey(visible[targetIndex])
+                    navigationMemory.save(MainDestination.LIVE, targetKey, targetIndex)
+                    val layout = listState.layoutInfo
+                    val targetInfo = layout.visibleItemsInfo.firstOrNull { it.index == targetIndex }
+                    val revealDelta = liveRemovalRevealDelta(
+                        itemStart = targetInfo?.offset,
+                        itemEnd = targetInfo?.let { it.offset + it.size },
+                        viewportStart = layout.viewportStartOffset,
+                        viewportEnd = layout.viewportEndOffset,
+                    )
+                    if (targetInfo == null) {
+                        listState.scrollToItem(targetIndex)
+                        snapshotFlow {
+                            listState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex }
+                        }.first { it }
+                    } else if (revealDelta != null && revealDelta != 0) {
+                        listState.scrollBy(revealDelta.toFloat())
+                    }
+                    withFrameNanos { }
+                    val focused = runCatching { channelRequester.requestFocus() }.getOrDefault(false)
+                    liveFavoriteMutation = liveFavoriteMutation.clear()
+                    if (!focused) categoryFocusRestoreController.requestFromSource()
+                } else {
+                    navigationMemory.save(MainDestination.LIVE, itemKey = "", itemIndex = 0)
+                    liveFavoriteMutation = liveFavoriteMutation.clear()
+                    withFrameNanos { }
+                    categoryFocusRestoreController.requestFromSource()
                 }
-                withFrameNanos { }
-                val focused = runCatching { channelRequester.requestFocus() }.getOrDefault(false)
-                pendingLiveRemoval = null
-                if (!focused) categoryFocusRestoreController.requestFromSource()
-            } else {
+                return@LaunchedEffect
+            }
+        }
+        // A pending preview removal keeps the button focus. A row intent that has not yet been
+        // observed must not replay a list restoration from the disappearing key.
+        if (handoff != null && !handoffApplied) {
+            if (visible.isEmpty()) {
                 navigationMemory.save(MainDestination.LIVE, itemKey = "", itemIndex = 0)
-                pendingLiveRemoval = null
+                liveFavoriteMutation = liveFavoriteMutation.clear()
                 withFrameNanos { }
                 categoryFocusRestoreController.requestFromSource()
             }
             return@LaunchedEffect
         }
         if (visible.isEmpty()) {
-            if (previewRemovalInProgress || pendingLiveRemoval != null) {
-                previewRemovalInProgress = false
-                withFrameNanos { }
-                categoryFocusRestoreController.requestFromSource()
-            }
-            return@LaunchedEffect
-        }
-        // Preview-button removal in the Live Favorites filter updates the preview to the next
-        // valid channel without taking focus out of the preview action bar.
-        if (
-            previewRemovalInProgress &&
-            state.selectedCategoryId == LIVE_TV_PRO_MAIN_FAVORITES_CATEGORY
-        ) {
-            previewState.value?.let { fallback ->
-                val fallbackIndex = visible.indexOfFirst { it.id == fallback.id }
-                if (fallbackIndex >= 0) {
-                    navigationMemory.save(
-                        MainDestination.LIVE,
-                        liveChannelKey(fallback),
-                        fallbackIndex,
-                    )
-                }
-            }
-            previewRemovalInProgress = false
             return@LaunchedEffect
         }
         if (categoryRequest != null && visible.isEmpty()) {
@@ -4482,19 +4558,26 @@ private fun LiveCatalogScreen(
                                     },
                                     isFavorite = favorites.contains(channel),
                                     onLongClick = {
-                                        pendingLiveRemoval = null
+                                        liveFavoriteMutation = liveFavoriteMutation.clear()
                                         onToggleFavorite(channel)
                                     },
                                     onRemoteLongClick = {
                                         if (liveFavoriteRemoval) {
-                                            pendingLiveRemoval = liveRemovalHandoff(visible, key)
+                                            val fallbackKey = liveRemovalHandoff(visible, key)
+                                                ?.fallbackKey
                                             beginFavoritesRemovalLongPress(
                                                 enabled = true,
                                                 beginGuard = onFavoritesRemovalStarted,
-                                                toggleFavorite = { onToggleFavorite(channel) },
+                                                toggleFavorite = {
+                                                    beginLiveFavoriteRemoval(
+                                                        origin = LiveFavoriteMutationOrigin.ROW,
+                                                        channel = channel,
+                                                        fallbackKey = fallbackKey,
+                                                    )
+                                                },
                                             )
                                         } else {
-                                            pendingLiveRemoval = null
+                                            liveFavoriteMutation = liveFavoriteMutation.clear()
                                             onToggleFavorite(channel)
                                         }
                                     },
@@ -4522,10 +4605,15 @@ private fun LiveCatalogScreen(
                                 state.selectedCategoryId == FAVORITES_CATEGORY_ID &&
                                 favorites.contains(channel)
                             ) {
-                                previewRemovalInProgress = true
+                                beginLiveFavoriteRemoval(
+                                    origin = LiveFavoriteMutationOrigin.PREVIEW,
+                                    channel = channel,
+                                    fallbackKey = null,
+                                )
+                            } else {
+                                liveFavoriteMutation = liveFavoriteMutation.clear()
+                                onToggleFavorite(channel)
                             }
-                            pendingLiveRemoval = null
-                            onToggleFavorite(channel)
                         },
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -4540,7 +4628,10 @@ private fun LiveCatalogScreen(
                         onFocused = { navigationMemory.save(MainDestination.LIVE, "${channel.type}:${channel.id}", index) },
                         onClick = { onOpen(channel) },
                         isFavorite = favorites.contains(channel),
-                        onLongClick = { onToggleFavorite(channel) },
+                        onLongClick = {
+                            liveFavoriteMutation = liveFavoriteMutation.clear()
+                            onToggleFavorite(channel)
+                        },
                     )
                 }
             }
