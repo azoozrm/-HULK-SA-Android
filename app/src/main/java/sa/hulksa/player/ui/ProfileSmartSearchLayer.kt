@@ -1813,7 +1813,11 @@ private fun SmartSearchCatalogGrid(
                                         cardRequester = requesters[index],
                                         isTv = isTelevision,
                                         onDelete = {
-                                            suppressSelectKeyUp = true
+                                            // FocusButton's normal click is delivered on the
+                                            // deleting KeyUp, after this ancestor preview. There
+                                            // is no remaining gesture to guard; arming here would
+                                            // consume the next independent SELECT press.
+                                            suppressSelectKeyUp = false
                                             deleteRow(row)
                                         },
                                         onFocused = {

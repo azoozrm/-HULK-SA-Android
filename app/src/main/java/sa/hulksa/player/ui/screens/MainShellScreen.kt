@@ -748,8 +748,15 @@ private fun rememberHomeModelForPresentation(
                 ?: navigationMemory.lastGoodHomeModel(),
         )
     }
-    LaunchedEffect(navigationMemory, input) {
-        navigationMemory.cachedHomeModel(input)?.let { exact ->
+    var acceptedInput by remember(navigationMemory) { mutableStateOf(input) }
+    val presentationInput = stableHomePresentationInput(acceptedInput, input)
+    LaunchedEffect(input) {
+        if (!homePresentationSourcesEqual(acceptedInput, input)) {
+            acceptedInput = input
+        }
+    }
+    LaunchedEffect(navigationMemory, presentationInput) {
+        navigationMemory.cachedHomeModel(presentationInput)?.let { exact ->
             presented = exact
             return@LaunchedEffect
         }
@@ -758,8 +765,8 @@ private fun rememberHomeModelForPresentation(
                 presented = lastGood
             }
         }
-        val exact = navigationMemory.homeModel(input)
-        if (exact.input == input) presented = exact
+        val exact = navigationMemory.homeModel(presentationInput)
+        if (exact.input == presentationInput) presented = exact
     }
     return presented
 }
@@ -1594,7 +1601,7 @@ private fun DestinationContent(
             navigationMemory = navigationMemory,
             homeContent = requireNotNull(homeContent),
             homeModelSettled = homeModelSettled,
-            isFavorite = isFavorite,
+            favorites = favoriteSnapshot,
             onOpen = onOpen,
             onOpenHistory = onOpenHistory,
             onRemoveHistoryEntry = onRemoveHistoryEntry,
@@ -1717,7 +1724,7 @@ private fun CinemaHomeScreen(
     navigationMemory: NavigationMemoryStore,
     homeContent: HomeContentSnapshot,
     homeModelSettled: Boolean,
-    isFavorite: (ContentItem) -> Boolean,
+    favorites: CatalogFavoriteSnapshot,
     onOpen: (ContentItem) -> Unit,
     onOpenHistory: (HistoryEntry) -> Unit,
     onRemoveHistoryEntry: (String, (Boolean) -> Unit) -> Unit,
@@ -1970,7 +1977,7 @@ private fun CinemaHomeScreen(
                     }
                 }
                 CinemaHero(
-                    featured, isTv, isFavorite(featured), { onOpen(featured) },
+                    featured, isTv, favorites.contains(featured), { onOpen(featured) },
                     { onToggleFavorite(featured) }, onRefresh, loading,
                     unreadNotificationCount = state.unreadNotificationCount,
                     onOpenNotifications = onOpenNotifications,
@@ -2048,28 +2055,28 @@ private fun CinemaHomeScreen(
         }
         if (activeDownloads.isNotEmpty()) item(key = "downloads") { HomeSectionPadding(isTv) { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads, rowFocusRequester("downloads"), rowFocusTarget("downloads")) } }
         if (becauseYouWatched.isNotEmpty()) {
-            item(key = "because-watched") { HomeSectionPadding(isTv) { HomeBoxedSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("because-watched"), rowFocusTarget("because-watched")) } }
+            item(key = "because-watched") { HomeSectionPadding(isTv) { HomeBoxedSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, rowFocusRequester("because-watched"), rowFocusTarget("because-watched")) } }
         }
         if (suggested.isNotEmpty()) {
-            item(key = "recommended") { HomeSectionPadding(isTv) { HomeBoxedSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("recommended"), rowFocusTarget("recommended")) } }
+            item(key = "recommended") { HomeSectionPadding(isTv) { HomeBoxedSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, rowFocusRequester("recommended"), rowFocusTarget("recommended")) } }
         }
         if (homeMovies.isNotEmpty()) {
-            item(key = "recent-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("recent-movies"), rowFocusTarget("recent-movies")) } }
+            item(key = "recent-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, rowFocusRequester("recent-movies"), rowFocusTarget("recent-movies")) } }
         }
         if (homeSeries.isNotEmpty()) {
-            item(key = "recent-series") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("recent-series"), rowFocusTarget("recent-series")) } }
+            item(key = "recent-series") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, rowFocusRequester("recent-series"), rowFocusTarget("recent-series")) } }
         }
         if (popularMovies.isNotEmpty()) {
-            item(key = "top-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("top-movies"), rowFocusTarget("top-movies")) } }
+            item(key = "top-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, rowFocusRequester("top-movies"), rowFocusTarget("top-movies")) } }
         }
         if (popularSeries.isNotEmpty()) {
-            item(key = "top-series") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("top-series"), rowFocusTarget("top-series")) } }
+            item(key = "top-series") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, rowFocusRequester("top-series"), rowFocusTarget("top-series")) } }
         }
         if (lastLive != null) {
             item(key = "last-live") { HomeSectionPadding(isTv) { HomeLastChannelSection("last-live", lastLiveRow, lastLive, isTv, navigationMemory, onOpenHistory, rowFocusRequester("last-live"), rowFocusTarget("last-live")) } }
         }
         if (suggestedLive.isNotEmpty()) {
-            item(key = "popular-live") { HomeSectionPadding(isTv) { HomeBoxedSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite, rowFocusRequester("popular-live"), rowFocusTarget("popular-live")) } }
+            item(key = "popular-live") { HomeSectionPadding(isTv) { HomeBoxedSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, rowFocusRequester("popular-live"), rowFocusTarget("popular-live")) } }
         }
     }
 }
@@ -3280,7 +3287,7 @@ private fun HomeBoxedSection(
     content: List<ContentItem>,
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
-    isFavorite: (ContentItem) -> Boolean,
+    favorites: CatalogFavoriteSnapshot,
     onOpen: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     firstItemFocusRequester: FocusRequester? = null,
@@ -3355,7 +3362,7 @@ private fun HomeBoxedSection(
                 when (item.type) {
                     ContentType.MOVIE -> MoviesCatalogBoxedCard(
                         item = item,
-                        isFavorite = isFavorite(item),
+                        isFavorite = favorites.contains(item),
                         onClick = { onOpen(item) },
                         modifier = itemModifier.width(boxedCardWidth),
                         onLongClick = { onToggleFavorite(item) },
@@ -3364,7 +3371,7 @@ private fun HomeBoxedSection(
 
                     ContentType.SERIES -> SeriesCatalogBoxedCard(
                         item = item,
-                        isFavorite = isFavorite(item),
+                        isFavorite = favorites.contains(item),
                         onClick = { onOpen(item) },
                         modifier = itemModifier.width(boxedCardWidth),
                         onLongClick = { onToggleFavorite(item) },
@@ -3374,7 +3381,7 @@ private fun HomeBoxedSection(
                     ContentType.LIVE -> LiveChannelHomeCard(
                         name = item.name,
                         artworkUrl = item.posterUrl,
-                        isFavorite = isFavorite(item),
+                        isFavorite = favorites.contains(item),
                         onClick = { onOpen(item) },
                         modifier = itemModifier.width(liveCardWidth),
                         onLongClick = { onToggleFavorite(item) },

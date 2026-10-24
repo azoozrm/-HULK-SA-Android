@@ -158,6 +158,19 @@ class SearchModel01ContractTest(unittest.TestCase):
         self.assertIn("moveDown()", input_block)
         self.assertIn("imeVisibleOnTv", input_block)
 
+    def test_normal_history_delete_does_not_arm_the_next_select_press(self) -> None:
+        # FocusButton's delete click is delivered on KeyUp. The ancestor preview already passed
+        # that release, so arming a held-gesture guard here would swallow the next independent
+        # SELECT press. A normal click must leave the arm clear; long-hold ownership stays in the
+        # Favorites shell guard.
+        delete_start = self.source.index("SmartSearchHistoryDeleteAction(")
+        delete_block = self.source[
+            delete_start : self.source.index("onFocused = {", delete_start)
+        ]
+        self.assertIn("onDelete = {", delete_block)
+        self.assertIn("suppressSelectKeyUp = false", delete_block)
+        self.assertNotIn("suppressSelectKeyUp = true", delete_block)
+
     def test_last_card_delete_left_stays_on_delete(self) -> None:
         self.assertNotIn("?: clearAllRequester", self.source)
         self.assertIn("moveFocusTo(deleteRequesters.getOrNull(nextIndex))", self.source)
