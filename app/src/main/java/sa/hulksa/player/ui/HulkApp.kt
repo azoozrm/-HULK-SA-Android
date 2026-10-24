@@ -661,6 +661,7 @@ fun HulkApp(
                                 onToggleFavorite = { item, result ->
                                     viewModel.toggleFavorite(item, result)
                                 },
+                                onActionNotice = postActionNotice,
                                 onBack = viewModel::back,
                                 onProgress = viewModel::onPlaybackProgress,
                                 previousEpisode = episodeNeighbors.previous,

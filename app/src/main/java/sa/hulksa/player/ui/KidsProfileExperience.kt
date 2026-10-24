@@ -101,6 +101,7 @@ fun KidsProfileExperience(
     sourceError: String?,
     onRetrySource: () -> Unit,
     onSwitchProfile: () -> Unit,
+    onActionNotice: (String, ImageVector) -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
     val (adaptiveUi, inputController) = rememberAdaptiveUiState(isTelevisionDevice)
@@ -366,6 +367,7 @@ fun KidsProfileExperience(
                                     viewModel.toggleFavorite(item, result)
                                 }
                             },
+                            onActionNotice = onActionNotice,
                             onBack = viewModel::back,
                             onProgress = viewModel::onPlaybackProgress,
                             nextEpisodeTitle = nextEpisode?.let {

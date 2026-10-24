@@ -1296,6 +1296,7 @@ fun ProfileAwareHulkApp(
             sourceError = kidsSourceError,
             onRetrySource = ::requestKidsSourceReload,
             onSwitchProfile = ::openProfilePickerFromApp,
+            onActionNotice = { message, icon -> postAppNotice(message, icon) },
         )
 
             else -> CompositionLocalProvider(

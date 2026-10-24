@@ -1622,7 +1622,7 @@ private fun DestinationContent(
             state = state,
             isTv = isTv,
             navigationMemory = navigationMemory,
-            isFavorite = isFavorite,
+            favorites = favoriteSnapshot,
             onSelectCategory = onSelectCategory,
             onSearch = onSearch,
             onOpen = onOpen,
@@ -4024,7 +4024,7 @@ private fun LiveCatalogScreen(
     state: HulkUiState,
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
-    isFavorite: (ContentItem) -> Boolean,
+    favorites: CatalogFavoriteSnapshot,
     onSelectCategory: (String?) -> Unit,
     onSearch: (String) -> Unit,
     onOpen: (ContentItem) -> Unit,
@@ -4036,9 +4036,11 @@ private fun LiveCatalogScreen(
     val colors = LocalHulkColors.current
     val context = LocalContext.current
     val catalog = state.catalogs[ContentType.LIVE]
-    val visible = remember(catalog, state.selectedCategoryId, state.searchQuery, state.favorites) {
+    // The explicit snapshot is the observed favorite revision for both membership and hearts;
+    // the opaque view-model callback is not a Compose state read in this subtree.
+    val visible = remember(catalog, state.selectedCategoryId, state.searchQuery, favorites.persisted) {
         catalog?.items.orEmpty().filter { item ->
-            categoryMatches(item, state.selectedCategoryId, isFavorite) &&
+            categoryMatches(item, state.selectedCategoryId, favorites::contains) &&
                 item.matchesSearch(state.searchQuery)
         }
     }
@@ -4143,11 +4145,14 @@ private fun LiveCatalogScreen(
             visible.getOrNull(index)?.let { navigationMemory.save(MainDestination.LIVE, "${it.type}:${it.id}", index) }
         }
     }
+    // Keying this effect on remembered.itemKey made an ordinary favorite/notice recomposition
+    // replay entry restoration after focus had saved a newer channel. Navigation memory is an
+    // input, not a trigger: only entry composition, category/search transitions, a real content
+    // change, or an explicit category handoff may restart this effect.
     LaunchedEffect(
         visible,
         state.selectedCategoryId,
         state.searchQuery,
-        remembered.itemKey,
         categoryContentFocusRequest,
     ) {
         previewState.value = resolveLivePreview(
@@ -4328,7 +4333,7 @@ private fun LiveCatalogScreen(
                                     modifier = Modifier.restoreFocus(restore, channelRequester).focusProperties {
                                         left = playRequester
                                     },
-                                    isFavorite = isFavorite(channel),
+                                    isFavorite = favorites.contains(channel),
                                     onLongClick = { onToggleFavorite(channel) },
                                 )
                             }
@@ -4343,7 +4348,7 @@ private fun LiveCatalogScreen(
                 ) {
                     LivePreviewStage(
                         previewState = previewState,
-                        isFavorite = isFavorite,
+                        favorites = favorites,
                         channelRequester = channelRequester,
                         playRequester = playRequester,
                         favoriteRequester = favoriteRequester,
@@ -4361,7 +4366,7 @@ private fun LiveCatalogScreen(
                         selected = false,
                         onFocused = { navigationMemory.save(MainDestination.LIVE, "${channel.type}:${channel.id}", index) },
                         onClick = { onOpen(channel) },
-                        isFavorite = isFavorite(channel),
+                        isFavorite = favorites.contains(channel),
                         onLongClick = { onToggleFavorite(channel) },
                     )
                 }
@@ -4392,7 +4397,7 @@ private fun LiveCatalogScreen(
 @Composable
 private fun LivePreviewStage(
     previewState: State<ContentItem?>,
-    isFavorite: (ContentItem) -> Boolean,
+    favorites: CatalogFavoriteSnapshot,
     channelRequester: FocusRequester,
     playRequester: FocusRequester,
     favoriteRequester: FocusRequester,
@@ -4403,7 +4408,7 @@ private fun LivePreviewStage(
     val preview = previewState.value
     LiveStage(
         item = preview,
-        isFavorite = preview?.let(isFavorite) == true,
+        isFavorite = preview?.let(favorites::contains) == true,
         channelRequester = channelRequester,
         playRequester = playRequester,
         favoriteRequester = favoriteRequester,

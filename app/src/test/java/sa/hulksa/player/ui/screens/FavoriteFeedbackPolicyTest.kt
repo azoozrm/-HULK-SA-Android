@@ -1,7 +1,9 @@
 package sa.hulksa.player.ui.screens
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import sa.hulksa.player.data.FavoriteMutationOutcome
 import sa.hulksa.player.data.FavoriteMutationStatus
@@ -44,6 +46,42 @@ class FavoriteFeedbackPolicyTest {
                 favoriteMutationFeedback(outcome("MOVIE:1", status), "Movie 1"),
             )
         }
+    }
+
+    @Test
+    fun `browser feedback is gated by the current visible browser and playback owner`() {
+        assertTrue(
+            liveBrowserFavoriteFeedbackIsCurrent(
+                browserVisible = true,
+                samePlaybackRequest = true,
+                expectedSessionId = 4L,
+                currentSessionId = 4L,
+            ),
+        )
+        assertFalse(
+            liveBrowserFavoriteFeedbackIsCurrent(
+                browserVisible = false,
+                samePlaybackRequest = true,
+                expectedSessionId = 4L,
+                currentSessionId = 4L,
+            ),
+        )
+        assertFalse(
+            liveBrowserFavoriteFeedbackIsCurrent(
+                browserVisible = true,
+                samePlaybackRequest = false,
+                expectedSessionId = 4L,
+                currentSessionId = 4L,
+            ),
+        )
+        assertFalse(
+            liveBrowserFavoriteFeedbackIsCurrent(
+                browserVisible = true,
+                samePlaybackRequest = true,
+                expectedSessionId = 3L,
+                currentSessionId = 4L,
+            ),
+        )
     }
 
     @Test

@@ -78,6 +78,29 @@ class LiveTvFocusMemoryOwnershipContractTest(unittest.TestCase):
             normalized_grid,
         )
 
+    def test_favorite_recomposition_cannot_rekey_navigation_restore(self) -> None:
+        live = self.live()
+        start = live.index("LaunchedEffect(\n        visible,")
+        keys = live[start : live.index(") {", start)]
+        # A focus save is navigation state, not a restoration trigger. A favorite/notice
+        # recomposition must not replay entry restoration after focus saved a newer key.
+        self.assertNotIn("remembered.itemKey", keys)
+        self.assertIn("state.selectedCategoryId", keys)
+        self.assertIn("state.searchQuery", keys)
+        self.assertIn("categoryContentFocusRequest", keys)
+
+    def test_live_heart_reads_the_explicit_favorite_snapshot(self) -> None:
+        source = self.read(MAIN_SHELL)
+        live = self.live()
+        stage_start = source.index("private fun LivePreviewStage(")
+        stage = source[stage_start : source.index("private fun LiveStage(", stage_start)]
+        self.assertIn("favorites: CatalogFavoriteSnapshot", live)
+        self.assertIn("favorites::contains", live)
+        self.assertIn("favorites.contains(channel)", live)
+        self.assertIn("preview?.let(favorites::contains)", stage)
+        self.assertNotIn("isFavorite(channel)", live)
+
+
 
 if __name__ == "__main__":
     unittest.main()

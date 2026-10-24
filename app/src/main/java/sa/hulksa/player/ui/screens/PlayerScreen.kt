@@ -14,7 +14,6 @@ import android.os.Looper
 import android.view.KeyEvent as AndroidKeyEvent
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -532,6 +531,7 @@ fun PlayerScreen(
     vodItem: ContentItem? = null,
     onSelectLiveChannel: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem, (sa.hulksa.player.data.FavoriteMutationOutcome) -> Unit) -> Unit,
+    onActionNotice: (String, ImageVector) -> Unit = { _, _ -> },
     onLastChannel: (() -> Unit)? = null,
     onBack: () -> Unit,
     onProgress: (request: PlaybackRequest, positionMs: Long, durationMs: Long) -> Unit,
@@ -636,6 +636,13 @@ fun PlayerScreen(
     }
     var browserVisible by remember(request) { mutableStateOf(false) }
     var browserOrigin by remember(request) { mutableStateOf(LiveChannelBrowserOrigin.NORMAL_LIVE) }
+    // A favorite result is asynchronous. This session identity is advanced on every browser
+    // open/close/replacement so a late callback cannot paint a notice over a dismissed or newer
+    // browser; the outcome policy remains the owner of success/failure wording.
+    var browserFeedbackSession by remember(request) { mutableLongStateOf(0L) }
+    val latestBrowserVisible by rememberUpdatedState(browserVisible)
+    val latestBrowserFeedbackSession by rememberUpdatedState(browserFeedbackSession)
+    val latestPlaybackRequest by rememberUpdatedState(request)
     var activePanel by remember(request) { mutableStateOf<PlayerPanel?>(null) }
     var liveMorePanel by remember(request) { mutableStateOf<PlayerLiveMorePanelView?>(null) }
     var liveMoreMenuFocusRow by remember(request) { mutableStateOf(PlayerLiveMoreRow.MUTE) }
@@ -942,7 +949,14 @@ fun PlayerScreen(
         suspendedFinalError = null
     }
 
+    fun openBrowser(origin: LiveChannelBrowserOrigin) {
+        browserFeedbackSession += 1L
+        browserOrigin = origin
+        browserVisible = true
+    }
+
     fun closeBrowserAndRestoreError() {
+        browserFeedbackSession += 1L
         browserVisible = false
         when (playerErrorSurfaceRelease(liveErrorSurfaceSuppressed)) {
             PlayerErrorSurfaceRelease.CLEAR_LIVE_SUPPRESSION -> liveErrorSurfaceSuppressed = false
@@ -2248,8 +2262,7 @@ fun PlayerScreen(
                             -> {
                                 controlsVisible = false
                                 activePanel = null
-                                browserOrigin = LiveChannelBrowserOrigin.NORMAL_LIVE
-                                browserVisible = true
+                                openBrowser(LiveChannelBrowserOrigin.NORMAL_LIVE)
                                 return@onPreviewKeyEvent true
                             }
                             AndroidKeyEvent.KEYCODE_DPAD_LEFT,
@@ -2443,8 +2456,7 @@ fun PlayerScreen(
                                 controlsVisible = false
                                 activePanel = null
                                 liveMorePanel = null
-                                browserOrigin = LiveChannelBrowserOrigin.NORMAL_LIVE
-                                browserVisible = true
+                                openBrowser(LiveChannelBrowserOrigin.NORMAL_LIVE)
                             },
                             primaryFocus = primaryFocus,
                             moreTriggerFocus = moreTriggerFocus,
@@ -2744,8 +2756,7 @@ fun PlayerScreen(
                     // behind the browser and the first Back can restore a still-valid error.
                     liveErrorSurfaceSuppressed = true
                     controlsVisible = false
-                    browserOrigin = LiveChannelBrowserOrigin.ERROR_RECOVERY
-                    browserVisible = true
+                    openBrowser(LiveChannelBrowserOrigin.ERROR_RECOVERY)
                 },
                 onChooseServer = {
                     if (request.isLive) {
@@ -2809,9 +2820,23 @@ fun PlayerScreen(
                 isFavorite = isFavorite,
                 favoriteKeys = favoriteKeys,
                 onToggleFavorite = { channel ->
+                    val requestAtDispatch = request
+                    val sessionAtDispatch = latestBrowserFeedbackSession
                     onToggleFavorite(channel) { outcome ->
-                        favoriteMutationFeedback(outcome, "القناة")?.let { feedback ->
-                            Toast.makeText(context, feedback.message, Toast.LENGTH_SHORT).show()
+                        if (
+                            liveBrowserFavoriteFeedbackIsCurrent(
+                                browserVisible = latestBrowserVisible,
+                                samePlaybackRequest = latestPlaybackRequest === requestAtDispatch,
+                                expectedSessionId = sessionAtDispatch,
+                                currentSessionId = latestBrowserFeedbackSession,
+                            )
+                        ) {
+                            favoriteMutationFeedback(outcome, channel.name)?.let { feedback ->
+                                onActionNotice(
+                                    feedback.message,
+                                    favoriteFeedbackIcon(feedback.glyph),
+                                )
+                            }
                         }
                     }
                 },
@@ -2821,6 +2846,7 @@ fun PlayerScreen(
                     // the replacement request owns its own failure presentation if it fails.
                     clearFinalErrorState()
                     liveErrorSurfaceSuppressed = false
+                    browserFeedbackSession += 1L
                     browserVisible = false
                     onSelectLiveChannel(channel)
                 },

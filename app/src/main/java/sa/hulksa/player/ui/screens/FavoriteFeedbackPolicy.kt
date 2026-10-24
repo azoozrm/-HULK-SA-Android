@@ -52,3 +52,15 @@ internal fun favoriteMutationFeedback(
     FavoriteMutationStatus.THROTTLED,
     -> null
 }
+
+/**
+ * A browser favorite result is presented only while the same browser session and playback request
+ * still own the surface. This drops late results from a dismissed/reopened browser or a replaced
+ * player request; the outcome policy still decides whether the result itself is notice-worthy.
+ */
+internal fun liveBrowserFavoriteFeedbackIsCurrent(
+    browserVisible: Boolean,
+    samePlaybackRequest: Boolean,
+    expectedSessionId: Long,
+    currentSessionId: Long,
+): Boolean = browserVisible && samePlaybackRequest && expectedSessionId == currentSessionId
