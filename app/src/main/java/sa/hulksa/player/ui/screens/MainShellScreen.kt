@@ -3043,9 +3043,13 @@ internal fun resolveHeroCopyPlacement(
         if (actionsTop < 0) return null
         val factsBottom = factsTop + factsHeight
         if (factsBottom + normalSpacing.factsActionsGapPx > actionsTop) return null
-        val visiblePlotLines = (
-            (actionsTop - normalSpacing.factsActionsGapPx - factsBottom) / safeLineHeight
-            ).coerceIn(0, maxPlotLines.coerceAtLeast(0))
+        // Keep the accepted plot reservation: unused facts space never invents an extra plot
+        // line, so a hero that previously showed no plot keeps the same composition.
+        val visiblePlotLines = minOf(
+            reservedPlotLines,
+            ((actionsTop - normalSpacing.factsActionsGapPx - factsBottom) / safeLineHeight)
+                .coerceIn(0, maxPlotLines.coerceAtLeast(0)),
+        )
         val plotTop = if (visiblePlotLines > 0) {
             factsBottom + normalSpacing.factsActionsGapPx
         } else {
