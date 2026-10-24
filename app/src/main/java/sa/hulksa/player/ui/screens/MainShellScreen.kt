@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -2646,13 +2647,75 @@ private fun CinemaHero(
         mutableStateOf(HERO_PHONE_HEADER_OFFSET_DP.dp)
     }
     val isPortraitPhone = !isTv && configuration.screenWidthDp < 600 && configuration.screenHeightDp > configuration.screenWidthDp
+    // Header/copy measurements are viewport/font-scale facts, not item facts. They let the hero
+    // reserve a real non-overlapping band instead of trusting a fixed 288dp/46dp assumption.
+    val headerBaseTextStyle = LocalTextStyle.current
+    val headerTextMeasurer = rememberTextMeasurer()
+    val headerTitleHeightDp = remember(headerTextMeasurer, headerBaseTextStyle, density) {
+        with(density) {
+            headerTextMeasurer.measure(
+                text = AnnotatedString("الرئيسية"),
+                style = headerBaseTextStyle.copy(
+                    fontSize = 21.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+                maxLines = 1,
+            ).size.height.toDp()
+        }
+    }
+    val headerSubtitleHeightDp = remember(headerTextMeasurer, headerBaseTextStyle, density) {
+        with(density) {
+            headerTextMeasurer.measure(
+                text = AnnotatedString("توصيات ومحتوى جديد"),
+                style = headerBaseTextStyle.copy(fontSize = 11.sp),
+                maxLines = 1,
+            ).size.height.toDp()
+        }
+    }
+    val statusBarInsetDp = with(density) {
+        WindowInsets.statusBars.getTop(this).toDp()
+    }
+    val heroTitleSlotDp = with(density) {
+        (if (isTv) 42.sp else 34.sp).toDp() * 2f
+    }
+    val heroFactsRowHeightDp = maxOf(
+        24.dp,
+        with(density) { (if (isTv) 20.sp else 18.sp).toDp() },
+    )
+    val heroFactsRowGapDp = if (isTv) 8.dp else 6.dp
+    val heroActionsRowHeightDp = maxOf(
+        46.dp,
+        with(density) { 13.sp.toDp() + 18.dp },
+    )
+    val heroActionsHeightDp = if (isTv || configuration.screenWidthDp >= 600) {
+        heroActionsRowHeightDp
+    } else {
+        heroActionsRowHeightDp * 2f + 9.dp
+    }
+    val heroHeaderMinHeightDp = heroHeaderMinimumHeightDp(
+        statusBarInsetDp = if (isTv) 0.dp else statusBarInsetDp,
+        verticalPaddingDp = if (isTv) 18.dp else 10.dp,
+        titleHeightDp = headerTitleHeightDp,
+        subtitleHeightDp = headerSubtitleHeightDp,
+        topActionsMinHeightDp = if (isTv) 40.dp else 48.dp,
+    )
     // Model 1 derives the wide hero from the actual viewport (about two thirds, bounded) instead
-    // of the old fixed 410dp; phone/short windows keep their accepted adaptive heights.
-    val heroHeight = when {
+    // of the old fixed 410dp; phone/short windows keep their accepted adaptive heights. The
+    // viewport/font-derived floor only grows a hero that cannot carry the full metadata band.
+    val heroPolicyHeightDp = when {
         isTv -> (configuration.screenHeightDp * 2f / 3f).coerceIn(350f, 420f).dp
         isPortraitPhone -> (configuration.screenHeightDp * .58f).coerceIn(420f, 520f).dp
         else -> 288.dp
     }
+    val heroHeight = effectiveHeroHeightDp(
+        policyHeightDp = heroPolicyHeightDp,
+        headerMinHeightDp = heroHeaderMinHeightDp,
+        titleSlotDp = heroTitleSlotDp,
+        factsRowHeightDp = heroFactsRowHeightDp,
+        factsRowGapDp = heroFactsRowGapDp,
+        maxFactsRows = if (isTv) 4 else 5,
+        actionsHeightDp = heroActionsHeightDp,
+    )
     // One selected-hero load: technical facts plus the bounded presentation backfill, shared with
     // the facts row so artwork and copy never start competing requests.
     val metadataStore = remember(context) { HomeHeroMetadataStore.get(context) }
@@ -2686,13 +2749,11 @@ private fun CinemaHero(
         val compactHeaderSingleRow = if (!compactHeaderActions) {
             true
         } else {
-            val baseTextStyle = LocalTextStyle.current
-            val textMeasurer = rememberTextMeasurer()
-            val titleWidth = remember(textMeasurer, baseTextStyle, density) {
+            val titleWidth = remember(headerTextMeasurer, headerBaseTextStyle, density) {
                 with(density) {
-                    textMeasurer.measure(
+                    headerTextMeasurer.measure(
                         text = AnnotatedString("الرئيسية"),
-                        style = baseTextStyle.copy(
+                        style = headerBaseTextStyle.copy(
                             fontSize = 21.sp,
                             fontWeight = FontWeight.Bold,
                         ),
@@ -2700,11 +2761,11 @@ private fun CinemaHero(
                     ).size.width.toDp()
                 }
             }
-            val subtitleWidth = remember(textMeasurer, baseTextStyle, density) {
+            val subtitleWidth = remember(headerTextMeasurer, headerBaseTextStyle, density) {
                 with(density) {
-                    textMeasurer.measure(
+                    headerTextMeasurer.measure(
                         text = AnnotatedString("توصيات ومحتوى جديد"),
-                        style = baseTextStyle.copy(fontSize = 11.sp),
+                        style = headerBaseTextStyle.copy(fontSize = 11.sp),
                         maxLines = 1,
                     ).size.width.toDp()
                 }
@@ -2853,100 +2914,205 @@ private const val HERO_PHONE_HEADER_OFFSET_DP = 64
 private const val HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP = 18
 
 /**
- * Measured hero-copy anchors. The header owns the space above [titleTopPx]; the title gets one
- * reserved two-line slot, the facts row gets a reserved two-row budget, and the actions are
- * anchored from the bottom. `reservedPlotLines` is derived from the actual remaining height so the
- * same viewport/font scale keeps the title, facts and action positions stable while plot lines
- * yield first.
+ * Header height floor derived from the real header typography, the actual status-bar inset and
+ * the top-action minimum. It is a deterministic viewport/font-scale value, never item-dependent.
  */
-internal data class HeroCopyLayoutMetrics(
+internal fun heroHeaderMinimumHeightDp(
+    statusBarInsetDp: Dp,
+    verticalPaddingDp: Dp,
+    titleHeightDp: Dp,
+    subtitleHeightDp: Dp,
+    topActionsMinHeightDp: Dp,
+): Dp = statusBarInsetDp + verticalPaddingDp * 2f +
+    maxOf(titleHeightDp + subtitleHeightDp, topActionsMinHeightDp)
+
+/**
+ * Hard hero height floor for the worst valid metadata wrap: every HomeHeroFacts entry can occupy
+ * one row, so a five-entry row can need five rows. The floor uses the real typography row height
+ * and the minimal non-overlapping gaps, independent of the current title length or metadata.
+ */
+internal fun heroRequiredHeightDp(
+    headerMinHeightDp: Dp,
+    titleSlotDp: Dp,
+    factsRowHeightDp: Dp,
+    factsRowGapDp: Dp,
+    maxFactsRows: Int,
+    actionsHeightDp: Dp,
+    minTitleFactsGapDp: Dp = 2.dp,
+    minFactsActionsGapDp: Dp = 4.dp,
+): Dp {
+    val rows = maxFactsRows.coerceAtLeast(1)
+    val factsHeight = factsRowHeightDp * rows.toFloat() +
+        factsRowGapDp * (rows - 1).toFloat()
+    return headerMinHeightDp + titleSlotDp + factsHeight +
+        minTitleFactsGapDp + minFactsActionsGapDp + actionsHeightDp
+}
+
+/** Preserve the accepted policy height whenever it can carry the real worst-case copy band. */
+internal fun effectiveHeroHeightDp(
+    policyHeightDp: Dp,
+    headerMinHeightDp: Dp,
+    titleSlotDp: Dp,
+    factsRowHeightDp: Dp,
+    factsRowGapDp: Dp,
+    maxFactsRows: Int,
+    actionsHeightDp: Dp,
+): Dp = maxOf(
+    policyHeightDp,
+    heroRequiredHeightDp(
+        headerMinHeightDp = headerMinHeightDp,
+        titleSlotDp = titleSlotDp,
+        factsRowHeightDp = factsRowHeightDp,
+        factsRowGapDp = factsRowGapDp,
+        maxFactsRows = maxFactsRows,
+        actionsHeightDp = actionsHeightDp,
+    ),
+)
+
+/** Gap profile used by one copy-placement attempt. */
+internal data class HeroCopySpacing(
+    val topGapPx: Int,
+    val titleFactsGapPx: Int,
+    val factsActionsGapPx: Int,
+    val bottomPaddingPx: Int,
+)
+
+internal enum class HeroCopyFallback {
+    NONE,
+    COMPACT,
+    MINIMAL,
+}
+
+/**
+ * Final, executable copy placement. The title/facts block is bottom-anchored from the reserved
+ * band when it fits; when the measured facts exceed that band, the plot yields, then a compact and
+ * finally a minimal gap profile are used. The returned rectangles are the ones production places.
+ */
+internal data class HeroCopyPlacement(
     val titleTopPx: Int,
     val factsTopPx: Int,
     val plotTopPx: Int,
     val actionsTopPx: Int,
     val titleSlotPx: Int,
-    val factsSlotPx: Int,
+    val factsHeightPx: Int,
     val actionsHeightPx: Int,
-    val reservedPlotLines: Int,
+    val plotLines: Int,
     val plotLineHeightPx: Int,
+    val spacing: HeroCopySpacing,
+    val fallback: HeroCopyFallback,
     val fitsContent: Boolean,
-)
+) {
+    val titleBottomPx: Int get() = titleTopPx + titleSlotPx
+    val factsBottomPx: Int get() = factsTopPx + factsHeightPx
+    val actionsBottomPx: Int get() = actionsTopPx + actionsHeightPx
+}
 
-internal fun heroCopyLayoutMetrics(
+internal fun resolveHeroCopyPlacement(
     availableHeightPx: Int,
     titleSlotPx: Int,
-    factsSlotPx: Int,
+    reservedFactsSlotPx: Int,
+    measuredFactsHeightPx: Int,
     actionsHeightPx: Int,
-    topGapPx: Int,
-    bottomPaddingPx: Int,
-    titleFactsGapPx: Int,
-    plotGapPx: Int,
+    normalSpacing: HeroCopySpacing,
+    compactSpacing: HeroCopySpacing,
+    minimalSpacing: HeroCopySpacing,
     plotLineHeightPx: Int,
     maxPlotLines: Int = 2,
-): HeroCopyLayoutMetrics {
+): HeroCopyPlacement {
     val height = availableHeightPx.coerceAtLeast(0)
+    val factsHeight = measuredFactsHeightPx.coerceAtLeast(0)
+    val actionsHeight = actionsHeightPx.coerceAtLeast(0)
     val safeLineHeight = plotLineHeightPx.coerceAtLeast(1)
-    val fixedBand = titleSlotPx + titleFactsGapPx + factsSlotPx + plotGapPx +
-        bottomPaddingPx + actionsHeightPx
-    val usableHeight = (height - topGapPx).coerceAtLeast(0)
-    val reservedPlotLines = if (usableHeight <= fixedBand) {
-        0
-    } else {
-        ((usableHeight - fixedBand) / safeLineHeight)
-            .coerceIn(0, maxPlotLines.coerceAtLeast(0))
+
+    fun normalPlacement(): HeroCopyPlacement? {
+        val usableHeight = (height - normalSpacing.topGapPx).coerceAtLeast(0)
+        val fixedBand = titleSlotPx + normalSpacing.titleFactsGapPx +
+            reservedFactsSlotPx + normalSpacing.factsActionsGapPx +
+            normalSpacing.bottomPaddingPx + actionsHeight
+        val reservedPlotLines = if (usableHeight <= fixedBand) {
+            0
+        } else {
+            ((usableHeight - fixedBand) / safeLineHeight)
+                .coerceIn(0, maxPlotLines.coerceAtLeast(0))
+        }
+        val bandHeight = fixedBand + reservedPlotLines * safeLineHeight
+        val titleTop = height - bandHeight
+        if (titleTop < normalSpacing.topGapPx) return null
+        val factsTop = titleTop + titleSlotPx + normalSpacing.titleFactsGapPx
+        val actionsTop = height - normalSpacing.bottomPaddingPx - actionsHeight
+        if (actionsTop < 0) return null
+        val factsBottom = factsTop + factsHeight
+        if (factsBottom + normalSpacing.factsActionsGapPx > actionsTop) return null
+        val visiblePlotLines = (
+            (actionsTop - normalSpacing.factsActionsGapPx - factsBottom) / safeLineHeight
+            ).coerceIn(0, maxPlotLines.coerceAtLeast(0))
+        val plotTop = if (visiblePlotLines > 0) {
+            factsBottom + normalSpacing.factsActionsGapPx
+        } else {
+            actionsTop
+        }
+        return HeroCopyPlacement(
+            titleTopPx = titleTop,
+            factsTopPx = factsTop,
+            plotTopPx = plotTop,
+            actionsTopPx = actionsTop,
+            titleSlotPx = titleSlotPx,
+            factsHeightPx = factsHeight,
+            actionsHeightPx = actionsHeight,
+            plotLines = visiblePlotLines,
+            plotLineHeightPx = safeLineHeight,
+            spacing = normalSpacing,
+            fallback = HeroCopyFallback.NONE,
+            fitsContent = true,
+        )
     }
-    val bandHeight = fixedBand + reservedPlotLines * safeLineHeight
-    val unclampedTitleTop = height - bandHeight
-    val titleTop = unclampedTitleTop.coerceAtLeast(topGapPx)
-    val factsTop = titleTop + titleSlotPx + titleFactsGapPx
-    val actionsTop = (height - bottomPaddingPx - actionsHeightPx).coerceAtLeast(0)
-    val plotTop = actionsTop - plotGapPx - reservedPlotLines * safeLineHeight
-    return HeroCopyLayoutMetrics(
-        titleTopPx = titleTop,
-        factsTopPx = factsTop,
-        plotTopPx = plotTop,
-        actionsTopPx = actionsTop,
-        titleSlotPx = titleSlotPx,
-        factsSlotPx = factsSlotPx,
-        actionsHeightPx = actionsHeightPx,
-        reservedPlotLines = reservedPlotLines,
-        plotLineHeightPx = safeLineHeight,
-        fitsContent = unclampedTitleTop >= topGapPx,
-    )
-}
 
-/**
- * Facts may exceed the reserved two-row budget on dense Series metadata or a large font scale.
- * The plot is lower priority, so its reserved lines are reduced first; the caller only moves the
- * title/facts block upward when there is no plot left to give.
- */
-internal fun heroCopyVisiblePlotLines(
-    reservedPlotLines: Int,
-    measuredFactsHeightPx: Int,
-    factsSlotPx: Int,
-    plotLineHeightPx: Int,
-): Int {
-    if (reservedPlotLines <= 0) return 0
-    val safeLineHeight = plotLineHeightPx.coerceAtLeast(1)
-    val factsOverflow = (measuredFactsHeightPx - factsSlotPx).coerceAtLeast(0)
-    val remainingPlotHeight = reservedPlotLines * safeLineHeight - factsOverflow
-    return (remainingPlotHeight / safeLineHeight).coerceIn(0, reservedPlotLines)
-}
+    fun fallbackPlacement(
+        spacing: HeroCopySpacing,
+        fallback: HeroCopyFallback,
+    ): HeroCopyPlacement? {
+        val fixedBand = titleSlotPx + spacing.titleFactsGapPx + factsHeight +
+            spacing.factsActionsGapPx + spacing.bottomPaddingPx + actionsHeight
+        val titleTop = height - fixedBand
+        if (titleTop < spacing.topGapPx) return null
+        val factsTop = titleTop + titleSlotPx + spacing.titleFactsGapPx
+        val actionsTop = height - spacing.bottomPaddingPx - actionsHeight
+        val factsBottom = factsTop + factsHeight
+        if (factsBottom + spacing.factsActionsGapPx > actionsTop) return null
+        return HeroCopyPlacement(
+            titleTopPx = titleTop,
+            factsTopPx = factsTop,
+            plotTopPx = actionsTop,
+            actionsTopPx = actionsTop,
+            titleSlotPx = titleSlotPx,
+            factsHeightPx = factsHeight,
+            actionsHeightPx = actionsHeight,
+            plotLines = 0,
+            plotLineHeightPx = safeLineHeight,
+            spacing = spacing,
+            fallback = fallback,
+            fitsContent = true,
+        )
+    }
 
-/**
- * Last-resort upward shift of the title/facts block when the measured facts exceed the reserved
- * facts-plus-plot space. It is bounded by the real gap below the header, and actions never move.
- */
-internal fun heroCopyFactsShiftPx(
-    measuredFactsHeightPx: Int,
-    factsTopPx: Int,
-    actionsTopPx: Int,
-    plotGapPx: Int,
-    availableTopShiftPx: Int,
-): Int {
-    val factsRoom = (actionsTopPx - plotGapPx - factsTopPx).coerceAtLeast(0)
-    val overflow = (measuredFactsHeightPx - factsRoom).coerceAtLeast(0)
-    return overflow.coerceIn(0, availableTopShiftPx.coerceAtLeast(0))
+    return normalPlacement()
+        ?: fallbackPlacement(compactSpacing, HeroCopyFallback.COMPACT)
+        ?: fallbackPlacement(minimalSpacing, HeroCopyFallback.MINIMAL)
+        ?: HeroCopyPlacement(
+            titleTopPx = 0,
+            factsTopPx = titleSlotPx + minimalSpacing.titleFactsGapPx,
+            plotTopPx = height,
+            actionsTopPx = (height - minimalSpacing.bottomPaddingPx - actionsHeight)
+                .coerceAtLeast(0),
+            titleSlotPx = titleSlotPx,
+            factsHeightPx = factsHeight,
+            actionsHeightPx = actionsHeight,
+            plotLines = 0,
+            plotLineHeightPx = safeLineHeight,
+            spacing = minimalSpacing,
+            fallback = HeroCopyFallback.MINIMAL,
+            fitsContent = false,
+        )
 }
 
 /** Non-phone hero artwork always uses the same full-bleed background window. */
@@ -2963,11 +3129,12 @@ internal enum class HeroArtworkLayoutMode {
  * layout only receives the space that is genuinely left below the measured header.
  *
  * Title: fixed two-line slot, bottom-aligned inside the slot, so one-line and two-line titles
- * start the facts at the same y. Facts: wrapped at the real width inside a reserved two-row
- * budget; dense groups may use the plot budget next. Actions: measured and anchored from the
- * bottom. Plot: two lines when the viewport allows, one line on short TV heroes, none when the
- * facts consume the available budget. Every anchor depends on the viewport/font scale and the
- * measured action height, never on asynchronous metadata arriving at a different time.
+ * start the facts at the same y. Facts: wrapped at the real width inside a reserved three-row
+ * (non-TV) or two-row (TV) budget; the plot yields first, then a compact and finally a minimal
+ * gap profile consume the measured facts height. Actions: measured and anchored from the bottom.
+ * Plot: only when the real facts leave room. Every anchor depends on the viewport/font scale and
+ * the measured content, and the hero height floor is derived from the real typography and the
+ * worst valid five-entry wrap, never from an individual carousel item.
  */
 @Composable
 private fun HeroCopy(
@@ -2987,14 +3154,36 @@ private fun HeroCopy(
     val titleFontSize = if (isTv) 36.sp else 28.sp
     val titleLineHeight = if (isTv) 42.sp else 34.sp
     val titleSlotPx = with(density) { (titleLineHeight.toDp() * 2f).roundToPx() }
-    val factsRowHeightPx = with(density) { (if (isTv) 24.sp else 20.sp).toDp().roundToPx() }
+    val factsRowHeightPx = with(density) {
+        maxOf(24.dp, (if (isTv) 20.sp else 18.sp).toDp()).roundToPx()
+    }
     val factsRowGapPx = with(density) { (if (isTv) 8.dp else 6.dp).roundToPx() }
-    val factsSlotPx = factsRowHeightPx * 2 + factsRowGapPx
+    val reservedFactsRows = if (isTv) 2 else 3
+    val factsSlotPx = factsRowHeightPx * reservedFactsRows +
+        factsRowGapPx * (reservedFactsRows - 1)
     val plotLineHeightPx = with(density) { (if (isTv) 17.sp else 18.sp).toDp().roundToPx() }
     val titleFactsGapPx = with(density) { (if (isTv) 8.dp else 9.dp).roundToPx() }
-    val plotGapPx = with(density) { (if (isTv) 8.dp else 10.dp).roundToPx() }
+    val factsActionsGapPx = with(density) { (if (isTv) 8.dp else 10.dp).roundToPx() }
     val bottomPaddingPx = with(density) { (if (isTv) 40.dp else 24.dp).roundToPx() }
     val topGapPx = with(density) { (if (isTv) 16.dp else 12.dp).roundToPx() }
+    val normalSpacing = HeroCopySpacing(
+        topGapPx = topGapPx,
+        titleFactsGapPx = titleFactsGapPx,
+        factsActionsGapPx = factsActionsGapPx,
+        bottomPaddingPx = bottomPaddingPx,
+    )
+    val compactSpacing = HeroCopySpacing(
+        topGapPx = with(density) { 4.dp.roundToPx() },
+        titleFactsGapPx = with(density) { 4.dp.roundToPx() },
+        factsActionsGapPx = with(density) { 4.dp.roundToPx() },
+        bottomPaddingPx = with(density) { 8.dp.roundToPx() },
+    )
+    val minimalSpacing = HeroCopySpacing(
+        topGapPx = 0,
+        titleFactsGapPx = with(density) { 2.dp.roundToPx() },
+        factsActionsGapPx = with(density) { 4.dp.roundToPx() },
+        bottomPaddingPx = 0,
+    )
 
     SubcomposeLayout(modifier = modifier) { constraints ->
         val width = constraints.maxWidth
@@ -3012,18 +3201,6 @@ private fun HeroCopy(
             )
         }.first().measure(Constraints(maxWidth = width))
 
-        val metrics = heroCopyLayoutMetrics(
-            availableHeightPx = height,
-            titleSlotPx = titleSlotPx,
-            factsSlotPx = factsSlotPx,
-            actionsHeightPx = actionsPlaceable.height,
-            topGapPx = topGapPx,
-            bottomPaddingPx = bottomPaddingPx,
-            titleFactsGapPx = titleFactsGapPx,
-            plotGapPx = plotGapPx,
-            plotLineHeightPx = plotLineHeightPx,
-        )
-
         val factsPlaceable = subcompose("hero-facts") {
             HomeHeroFacts(
                 item = item,
@@ -3034,25 +3211,17 @@ private fun HeroCopy(
         }.firstOrNull()?.measure(Constraints(maxWidth = width))
         val factsHeight = factsPlaceable?.height ?: 0
 
-        val factsShift = heroCopyFactsShiftPx(
+        val placement = resolveHeroCopyPlacement(
+            availableHeightPx = height,
+            titleSlotPx = titleSlotPx,
+            reservedFactsSlotPx = factsSlotPx,
             measuredFactsHeightPx = factsHeight,
-            factsTopPx = metrics.factsTopPx,
-            actionsTopPx = metrics.actionsTopPx,
-            plotGapPx = plotGapPx,
-            availableTopShiftPx = metrics.titleTopPx - topGapPx,
+            actionsHeightPx = actionsPlaceable.height,
+            normalSpacing = normalSpacing,
+            compactSpacing = compactSpacing,
+            minimalSpacing = minimalSpacing,
+            plotLineHeightPx = plotLineHeightPx,
         )
-        val titleTop = metrics.titleTopPx - factsShift
-        val factsTop = metrics.factsTopPx - factsShift
-        val visiblePlotLines = if (factsShift > 0) {
-            0
-        } else {
-            heroCopyVisiblePlotLines(
-                reservedPlotLines = metrics.reservedPlotLines,
-                measuredFactsHeightPx = factsHeight,
-                factsSlotPx = factsSlotPx,
-                plotLineHeightPx = metrics.plotLineHeightPx,
-            )
-        }
 
         val titlePlaceable = subcompose("hero-title") {
             Text(
@@ -3066,20 +3235,20 @@ private fun HeroCopy(
             )
         }.first().measure(Constraints(maxWidth = width, maxHeight = titleSlotPx))
 
-        val plotPlaceable = if (heroPlot != null && visiblePlotLines > 0) {
+        val plotPlaceable = if (heroPlot != null && placement.plotLines > 0) {
             subcompose("hero-plot") {
                 Text(
                     text = heroPlot,
                     color = Color(0xFFD4D0C5),
                     fontSize = 12.sp,
                     lineHeight = if (isTv) 17.sp else 18.sp,
-                    maxLines = visiblePlotLines,
+                    maxLines = placement.plotLines,
                     overflow = TextOverflow.Ellipsis,
                 )
             }.first().measure(
                 Constraints(
                     maxWidth = width,
-                    maxHeight = visiblePlotLines * metrics.plotLineHeightPx,
+                    maxHeight = placement.plotLines * placement.plotLineHeightPx,
                 ),
             )
         } else {
@@ -3089,14 +3258,11 @@ private fun HeroCopy(
         layout(width, height) {
             titlePlaceable.placeRelative(
                 x = 0,
-                y = titleTop + titleSlotPx - titlePlaceable.height,
+                y = placement.titleTopPx + titleSlotPx - titlePlaceable.height,
             )
-            factsPlaceable?.placeRelative(x = 0, y = factsTop)
-            plotPlaceable?.placeRelative(
-                x = 0,
-                y = metrics.actionsTopPx - plotGapPx - plotPlaceable.height,
-            )
-            actionsPlaceable.placeRelative(x = 0, y = metrics.actionsTopPx)
+            factsPlaceable?.placeRelative(x = 0, y = placement.factsTopPx)
+            plotPlaceable?.placeRelative(x = 0, y = placement.plotTopPx)
+            actionsPlaceable.placeRelative(x = 0, y = placement.actionsTopPx)
         }
     }
 }

@@ -649,6 +649,25 @@ It preserves all accepted dialog, Details, player and focus contracts.
   Resume/From Beginning/Back callbacks, saved-position persistence, offline/recovery behavior and
   pending-Resume blocking are unchanged.
 
+### 12.7 Hero insufficient-height correction (2026-10-25)
+
+The owner-visible hero copy must never overlap its header or action row when the viewport cannot
+carry the full reserved band. This supersedes only the fixed-copy-height assumption.
+
+- Header height is measured from the real title/subtitle typography, the actual status-bar inset
+  and the top-action minimum. The hero keeps its accepted viewport policy whenever that policy can
+  carry the copy band.
+- The minimum hero height is derived from the real HomeHeroFacts row height (24dp floor,
+  font-scale-aware), the worst valid five-entry metadata wrap, and the measured/guarded action
+  height. It is a viewport/font-scale floor, not an individual item or metadata dependent height.
+- The final copy placement is executable: normal bottom-anchored band first, plot yields, then
+  compact gaps and finally minimal gaps when measured facts exceed the reservation. The placed
+  rectangles keep the title below the header, facts below the title and facts plus a gap before
+  the actions; actions stay inside the usable hero.
+- TV and portrait-phone heights are preserved when the band fits. A necessary fallback grows the
+  hero item within the existing Home scrolling owner; no second scroll/focus owner, clipping,
+  hidden buttons, universal font shrink or synthetic metadata is introduced.
+
 ## 13. Login / Who's Watching / entry-subflows adoption record (2026-10-11)
 
 The owner accepted the R03 Login model (`HULK-SA-LOGIN-PROFILES-DESIGN-R03.zip`, SHA-256

@@ -1,134 +1,214 @@
 package sa.hulksa.player.ui.screens
 
+import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HomeHeroCopyLayoutPolicyTest {
-    private val tvTitleSlot = 84
-    private val tvFactsSlot = 56
-    private val tvActionsHeight = 46
-    private val tvTopGap = 16
-    private val tvBottomPadding = 40
-    private val tvTitleFactsGap = 8
-    private val tvPlotGap = 8
-    private val tvPlotLine = 17
-
-    private fun tvMetrics(
-        availableHeightPx: Int,
-        actionsHeightPx: Int = tvActionsHeight,
-    ): HeroCopyLayoutMetrics = heroCopyLayoutMetrics(
-        availableHeightPx = availableHeightPx,
-        titleSlotPx = tvTitleSlot,
-        factsSlotPx = tvFactsSlot,
-        actionsHeightPx = actionsHeightPx,
-        topGapPx = tvTopGap,
-        bottomPaddingPx = tvBottomPadding,
-        titleFactsGapPx = tvTitleFactsGap,
-        plotGapPx = tvPlotGap,
-        plotLineHeightPx = tvPlotLine,
+    private val normalNonTv = HeroCopySpacing(
+        topGapPx = 12,
+        titleFactsGapPx = 9,
+        factsActionsGapPx = 10,
+        bottomPaddingPx = 24,
+    )
+    private val compact = HeroCopySpacing(
+        topGapPx = 4,
+        titleFactsGapPx = 4,
+        factsActionsGapPx = 4,
+        bottomPaddingPx = 8,
+    )
+    private val minimal = HeroCopySpacing(
+        topGapPx = 0,
+        titleFactsGapPx = 2,
+        factsActionsGapPx = 4,
+        bottomPaddingPx = 0,
     )
 
-    @Test
-    fun `two-line title slot and facts anchor do not depend on title line count`() {
-        val metrics = tvMetrics(availableHeightPx = 345)
+    private fun nonTvPlacement(
+        copyHeightPx: Int,
+        factsHeightPx: Int,
+        reservedFactsSlotPx: Int = 84,
+        titleSlotPx: Int = 68,
+        actionsHeightPx: Int = 46,
+        plotLineHeightPx: Int = 18,
+    ): HeroCopyPlacement = resolveHeroCopyPlacement(
+        availableHeightPx = copyHeightPx,
+        titleSlotPx = titleSlotPx,
+        reservedFactsSlotPx = reservedFactsSlotPx,
+        measuredFactsHeightPx = factsHeightPx,
+        actionsHeightPx = actionsHeightPx,
+        normalSpacing = normalNonTv,
+        compactSpacing = compact,
+        minimalSpacing = minimal,
+        plotLineHeightPx = plotLineHeightPx,
+    )
 
-        assertEquals(2 * 42, tvTitleSlot)
-        assertEquals(metrics.titleTopPx + tvTitleSlot + tvTitleFactsGap, metrics.factsTopPx)
-        assertEquals(69, metrics.titleTopPx)
-        assertEquals(161, metrics.factsTopPx)
-        assertEquals(259, metrics.actionsTopPx)
+    private fun assertNonOverlapping(
+        placement: HeroCopyPlacement,
+        availableHeightPx: Int,
+    ) {
+        assertTrue(placement.fitsContent)
+        assertTrue(placement.titleTopPx >= 0)
+        assertTrue(placement.titleBottomPx <= placement.factsTopPx)
+        assertTrue(
+            placement.factsBottomPx + placement.spacing.factsActionsGapPx <=
+                placement.actionsTopPx,
+        )
+        assertTrue(placement.actionsBottomPx <= availableHeightPx)
+        if (placement.plotLines > 0) {
+            assertTrue(placement.plotTopPx >= placement.factsBottomPx)
+            assertTrue(
+                placement.plotTopPx + placement.plotLines * placement.plotLineHeightPx <=
+                    placement.actionsTopPx,
+            )
+        }
     }
 
     @Test
-    fun `facts and actions stay inside the copy region on a short tv hero`() {
-        val metrics = tvMetrics(availableHeightPx = 275)
+    fun `600x960 non-tv header floor uses measured title subtitle and action height`() {
+        val header = heroHeaderMinimumHeightDp(
+            statusBarInsetDp = 24.dp,
+            verticalPaddingDp = 10.dp,
+            titleHeightDp = 25.dp,
+            subtitleHeightDp = 13.dp,
+            topActionsMinHeightDp = 48.dp,
+        )
 
-        assertEquals(1, metrics.reservedPlotLines)
-        assertEquals(16, metrics.titleTopPx)
-        assertEquals(108, metrics.factsTopPx)
-        assertEquals(164, metrics.plotTopPx)
-        assertEquals(189, metrics.actionsTopPx)
-        assertTrue(metrics.fitsContent)
-        assertTrue(metrics.factsTopPx + metrics.factsSlotPx <= metrics.plotTopPx)
-        assertTrue(metrics.plotTopPx + metrics.plotLineHeightPx <= metrics.actionsTopPx)
-        assertTrue(metrics.actionsTopPx + metrics.actionsHeightPx <= 275 - tvBottomPadding)
+        assertEquals(92f, header.value, 0.01f)
     }
 
     @Test
-    fun `plot yields from two lines to one to none as copy height shrinks`() {
-        assertEquals(2, tvMetrics(availableHeightPx = 345).reservedPlotLines)
-        assertEquals(1, tvMetrics(availableHeightPx = 275).reservedPlotLines)
-        assertEquals(0, tvMetrics(availableHeightPx = 259).reservedPlotLines)
-    }
+    fun `600x960 non-tv hero grows to the real five-row copy floor`() {
+        val effective = effectiveHeroHeightDp(
+            policyHeightDp = 288.dp,
+            headerMinHeightDp = 92.dp,
+            titleSlotDp = 68.dp,
+            factsRowHeightDp = 24.dp,
+            factsRowGapDp = 6.dp,
+            maxFactsRows = 5,
+            actionsHeightDp = 46.dp,
+        )
+        val copyRegion = effective.value - 92f
 
-    @Test
-    fun `a taller measured action block keeps the copy above it without overlap`() {
-        val regular = tvMetrics(availableHeightPx = 345, actionsHeightPx = 46)
-        val stacked = tvMetrics(availableHeightPx = 345, actionsHeightPx = 101)
-
-        assertTrue(stacked.actionsTopPx < regular.actionsTopPx)
-        assertEquals(1, stacked.reservedPlotLines)
-        assertTrue(stacked.fitsContent)
-        assertTrue(stacked.factsTopPx + stacked.factsSlotPx <= stacked.plotTopPx)
-        assertTrue(stacked.plotTopPx + stacked.plotLineHeightPx <= stacked.actionsTopPx)
-    }
-
-    @Test
-    fun `dense facts consume plot lines before moving the title`() {
-        assertEquals(
-            2,
-            heroCopyVisiblePlotLines(
-                reservedPlotLines = 2,
-                measuredFactsHeightPx = tvFactsSlot,
-                factsSlotPx = tvFactsSlot,
-                plotLineHeightPx = tvPlotLine,
+        assertEquals(356f, effective.value, 0.01f)
+        assertEquals(264f, copyRegion, 0.01f)
+        assertNonOverlapping(
+            placement = nonTvPlacement(
+                copyHeightPx = 264,
+                factsHeightPx = 54,
             ),
-        )
-        assertEquals(
-            1,
-            heroCopyVisiblePlotLines(
-                reservedPlotLines = 2,
-                measuredFactsHeightPx = tvFactsSlot + 14,
-                factsSlotPx = tvFactsSlot,
-                plotLineHeightPx = tvPlotLine,
-            ),
-        )
-        assertEquals(
-            0,
-            heroCopyVisiblePlotLines(
-                reservedPlotLines = 2,
-                measuredFactsHeightPx = tvFactsSlot + 34,
-                factsSlotPx = tvFactsSlot,
-                plotLineHeightPx = tvPlotLine,
-            ),
+            availableHeightPx = 264,
         )
     }
 
     @Test
-    fun `facts beyond the reserved plus plot budget shift title up but never overlap actions`() {
-        val metrics = tvMetrics(availableHeightPx = 345)
-        val factsHeight = 100
-        val shift = heroCopyFactsShiftPx(
-            measuredFactsHeightPx = factsHeight,
-            factsTopPx = metrics.factsTopPx,
-            actionsTopPx = metrics.actionsTopPx,
-            plotGapPx = tvPlotGap,
-            availableTopShiftPx = metrics.titleTopPx - tvTopGap,
-        )
+    fun `two wrapped facts rows fit without moving title or actions`() {
+        val placement = nonTvPlacement(copyHeightPx = 264, factsHeightPx = 54)
 
-        assertEquals(10, shift)
-        assertTrue(metrics.factsTopPx - shift + factsHeight <= metrics.actionsTopPx - tvPlotGap)
-        assertTrue(metrics.titleTopPx - shift >= tvTopGap)
+        assertEquals(HeroCopyFallback.NONE, placement.fallback)
+        assertEquals(23, placement.titleTopPx)
+        assertEquals(100, placement.factsTopPx)
+        assertEquals(154, placement.factsBottomPx)
+        assertEquals(194, placement.actionsTopPx)
+        assertNonOverlapping(placement, 264)
     }
 
     @Test
-    fun `an impossibly short copy region reports that it does not fit instead of pretending`() {
-        val metrics = tvMetrics(availableHeightPx = 240)
+    fun `two and three wrapped facts rows keep the same title and facts anchors`() {
+        val twoRows = nonTvPlacement(copyHeightPx = 264, factsHeightPx = 54)
+        val threeRows = nonTvPlacement(copyHeightPx = 264, factsHeightPx = 84)
 
-        assertFalse(metrics.fitsContent)
-        assertEquals(tvTopGap, metrics.titleTopPx)
-        assertEquals(0, metrics.reservedPlotLines)
+        assertEquals(HeroCopyFallback.NONE, twoRows.fallback)
+        assertEquals(HeroCopyFallback.NONE, threeRows.fallback)
+        assertEquals(twoRows.titleTopPx, threeRows.titleTopPx)
+        assertEquals(twoRows.factsTopPx, threeRows.factsTopPx)
+        assertEquals(twoRows.actionsTopPx, threeRows.actionsTopPx)
+        assertNonOverlapping(threeRows, 264)
+    }
+
+    @Test
+    fun `fixed two-line title slot keeps facts below the title regardless of title line count`() {
+        val placement = nonTvPlacement(copyHeightPx = 264, factsHeightPx = 54)
+
+        assertEquals(68, placement.titleSlotPx)
+        assertEquals(
+            placement.titleTopPx + 68 + normalNonTv.titleFactsGapPx,
+            placement.factsTopPx,
+        )
+        assertTrue(placement.titleBottomPx <= placement.factsTopPx)
+    }
+
+    @Test
+    fun `measured facts beyond the initial reservation use compact and minimal placement`() {
+        val fourRows = nonTvPlacement(copyHeightPx = 264, factsHeightPx = 102)
+        val fiveRows = nonTvPlacement(copyHeightPx = 264, factsHeightPx = 144)
+
+        assertEquals(HeroCopyFallback.COMPACT, fourRows.fallback)
+        assertEquals(HeroCopyFallback.MINIMAL, fiveRows.fallback)
+        assertEquals(0, fourRows.plotLines)
+        assertEquals(0, fiveRows.plotLines)
+        assertNonOverlapping(fourRows, 264)
+        assertNonOverlapping(fiveRows, 264)
+    }
+
+    @Test
+    fun `ordinary tv hero keeps the accepted band while three rows fall back cleanly`() {
+        val normalTv = HeroCopySpacing(
+            topGapPx = 16,
+            titleFactsGapPx = 8,
+            factsActionsGapPx = 8,
+            bottomPaddingPx = 40,
+        )
+        fun tvPlacement(factsHeightPx: Int) = resolveHeroCopyPlacement(
+            availableHeightPx = 284,
+            titleSlotPx = 84,
+            reservedFactsSlotPx = 56,
+            measuredFactsHeightPx = factsHeightPx,
+            actionsHeightPx = 46,
+            normalSpacing = normalTv,
+            compactSpacing = compact,
+            minimalSpacing = minimal,
+            plotLineHeightPx = 17,
+        )
+
+        val ordinary = tvPlacement(56)
+        assertEquals(HeroCopyFallback.NONE, ordinary.fallback)
+        assertEquals(25, ordinary.titleTopPx)
+        assertEquals(117, ordinary.factsTopPx)
+        assertEquals(173, ordinary.factsBottomPx)
+        assertEquals(198, ordinary.actionsTopPx)
+        assertEquals(1, ordinary.plotLines)
+        assertNonOverlapping(ordinary, 284)
+
+        val dense = tvPlacement(88)
+        assertEquals(HeroCopyFallback.COMPACT, dense.fallback)
+        assertEquals(0, dense.plotLines)
+        assertNonOverlapping(dense, 284)
+    }
+
+    @Test
+    fun `tv and portrait phone keep their accepted heights when the real band fits`() {
+        val tv = effectiveHeroHeightDp(
+            policyHeightDp = 360.dp,
+            headerMinHeightDp = 76.dp,
+            titleSlotDp = 84.dp,
+            factsRowHeightDp = 24.dp,
+            factsRowGapDp = 8.dp,
+            maxFactsRows = 4,
+            actionsHeightDp = 46.dp,
+        )
+        val phone = effectiveHeroHeightDp(
+            policyHeightDp = 420.dp,
+            headerMinHeightDp = 92.dp,
+            titleSlotDp = 68.dp,
+            factsRowHeightDp = 24.dp,
+            factsRowGapDp = 6.dp,
+            maxFactsRows = 5,
+            actionsHeightDp = 101.dp,
+        )
+
+        assertEquals(360f, tv.value, 0.01f)
+        assertEquals(420f, phone.value, 0.01f)
     }
 }
