@@ -295,7 +295,8 @@ All have equal compact outer height and vertically centered contents. The accept
 larger text. Narrow layout measures full captions: Watch first/full width, secondary pair when
 it fits, otherwise stacked. Do not reintroduce oversized controls or blank telemetry space.
 
-Inline Resume retains actual saved position/progress, ivory wording and gold clock.
+Inline Resume retains actual saved position/progress, ivory wording and gold clock; the gold
+played segment starts at the physical LEFT and grows rightward under RTL and LTR.
 Movies tabs remain `القصة` / `معلومات الفلم` / `افلام مشابهة`, all ivory with an ivory
 selected underline. Information labels are gold, real values ivory. Selecting a tab reveals its
 usable section and preserves the page's scrolling owner. Series retains its own real tabs,
@@ -326,9 +327,10 @@ once and restore the download trigger. Preserve scheduler, storage and persisten
 ## 7. Resume and errors
 
 Resume is one centered bounded dark dialog containing History, `اكمل المشاهدة`, real title,
-`توقفت عند` plus saved time and truthful progress when duration is known. Measure complete
-captions: fitting three-action row, otherwise Resume above a secondary pair/stack as accepted.
-Initial focus is Resume; the directional graph is closed on all actions.
+`توقفت عند` plus saved time and truthful progress when duration is known. The gold progress fill
+starts at the physical LEFT and grows rightward under RTL and LTR. Measure complete captions:
+fitting three-action row, otherwise Resume above a secondary pair/stack as accepted. Initial
+focus is Resume; the directional graph is closed on all actions.
 
 While a Resume decision is pending, header, timeline, transport and background input are hidden
 or ineligible. BACK exits on the FIRST press through one existing owner; it must not merely clear
@@ -630,6 +632,22 @@ selection/rotation, favorite callbacks, focus and D-pad ownership.
   `AbsoluteAlignment.CenterLeft` and grows rightward. The track, colors, truthful
   `movieRecentPlayedFraction`, invalid/unknown-duration behavior, Arabic text, time row, artwork,
   identity slots, removal and focus behavior are unchanged.
+
+### 12.6 Resume progress direction continuation (2026-10-25)
+
+The owner extended the physical-left watched-progress direction to the remaining resume surfaces.
+This supersedes only the old physical-right/independent orientation wording for those indicators.
+It preserves all accepted dialog, Details, player and focus contracts.
+
+- The shared `PhysicalLeftProgressFill` atom is the production played fill for the Home/Movies/
+  Series Continue Watching card, the shared `MovieInlineResumeStrip` used by Movie and Series
+  Details on phone and TV, and the shared `ResumePrompt` used by Movie and Series playback.
+- Track geometry, colors, labels, truthful `positionMs / durationMs` fraction, clamping and
+  per-component visibility rules are unchanged. The unplayed remainder stays on the physical
+  RIGHT; the fraction is never inverted.
+- Dialog dimensions, typography, icons, action arrangement, initial focus, closed D-pad graph,
+  Resume/From Beginning/Back callbacks, saved-position persistence, offline/recovery behavior and
+  pending-Resume blocking are unchanged.
 
 ## 13. Login / Who's Watching / entry-subflows adoption record (2026-10-11)
 

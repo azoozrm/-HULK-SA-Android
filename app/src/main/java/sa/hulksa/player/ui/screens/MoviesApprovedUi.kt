@@ -106,6 +106,7 @@ import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.components.FocusButton
+import sa.hulksa.player.ui.components.PhysicalLeftProgressFill
 import sa.hulksa.player.ui.components.SeriesEpisodeCountInline
 import sa.hulksa.player.ui.components.SeriesSeasonCountInline
 import sa.hulksa.player.ui.components.goldFocusEdge
@@ -623,9 +624,10 @@ internal fun movieDownloadActionIcon(download: OfflineDownload?): ImageVector = 
 }
 
 /**
- * Shallow Movie-only inline continue-watching panel. Progress is the clamped authoritative saved
- * position; the track starts at the RTL page start (physical right) and the clock trails the
- * wording on the physical left. Missing or invalid durations render nothing.
+ * Shallow shared Movie/Series inline continue-watching panel. Progress is the clamped
+ * authoritative saved position; the gold fill starts at the physical LEFT and grows rightward
+ * under RTL and LTR, matching the player timeline, while the clock trails the wording on the
+ * physical left. Missing or invalid durations render nothing.
  */
 @Composable
 internal fun MovieInlineResumeStrip(
@@ -673,12 +675,10 @@ internal fun MovieInlineResumeStrip(
                 .clip(RoundedCornerShape(4.dp))
                 .background(Color.White.copy(alpha = .16f)),
         ) {
-            // RTL layout start is the physical right, matching the details page direction.
-            Box(
-                Modifier
-                    .fillMaxWidth(progress.coerceIn(0f, 1f))
-                    .height(if (isTv) 4.dp else 3.dp)
-                    .background(colors.gold),
+            // Physical-left fill, matching the player timeline under RTL and LTR.
+            PhysicalLeftProgressFill(
+                fraction = progress,
+                color = colors.gold,
             )
         }
     }

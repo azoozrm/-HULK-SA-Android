@@ -202,6 +202,7 @@ import sa.hulksa.player.ui.components.ChannelLogo
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.LoadingRing
+import sa.hulksa.player.ui.components.PhysicalLeftProgressFill
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
 
@@ -5661,11 +5662,10 @@ private fun ResumePrompt(
                     .clip(CircleShape)
                     .background(Color.White.copy(alpha = .16f)),
             ) {
-                Box(
-                    Modifier
-                        .fillMaxWidth(progress)
-                        .fillMaxHeight()
-                        .background(colors.goldBright),
+                // Shared Movie/Series Resume fill: physical LEFT, truthful position/duration.
+                PhysicalLeftProgressFill(
+                    fraction = progress,
+                    color = colors.goldBright,
                 )
             }
         }

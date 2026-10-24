@@ -9,14 +9,16 @@ import org.junit.Test
 class HistoryProgressAlignmentTest {
     @Test
     fun `played fill starts at the physical left under ltr and rtl`() {
-        val fill = IntSize(66, 3)
-        val track = IntSize(100, 3)
+        for (fractionWidth in listOf(1, 66, 100)) {
+            val fill = IntSize(fractionWidth, 3)
+            val track = IntSize(100, 3)
 
-        val ltr = historyProgressPhysicalLeftAlignment.align(fill, track, LayoutDirection.Ltr)
-        val rtl = historyProgressPhysicalLeftAlignment.align(fill, track, LayoutDirection.Rtl)
+            val ltr = physicalLeftProgressAlignment.align(fill, track, LayoutDirection.Ltr)
+            val rtl = physicalLeftProgressAlignment.align(fill, track, LayoutDirection.Rtl)
 
-        assertEquals(IntOffset(0, 0), ltr)
-        assertEquals(ltr, rtl)
+            assertEquals(IntOffset(0, 0), ltr)
+            assertEquals(ltr, rtl)
+        }
     }
 
     @Test

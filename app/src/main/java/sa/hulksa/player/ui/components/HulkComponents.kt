@@ -18,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -1578,11 +1579,31 @@ internal fun movieRecentPlayedFraction(positionMs: Long, durationMs: Long): Floa
 }
 
 /**
- * Physical-left fill origin for the informational Recent/Continue Watching track. Absolute
- * alignment is direction-independent, so the gold segment always starts at the physical left and
- * grows rightward exactly like the player timeline under both RTL and LTR.
+ * Physical-left fill origin for every watched-progress indicator (Continue Watching, inline
+ * Details resume strips and the Resume decision dialog). Absolute alignment is
+ * direction-independent, so the gold segment always starts at the physical left and grows
+ * rightward exactly like the player timeline under both RTL and LTR.
  */
-internal val historyProgressPhysicalLeftAlignment: Alignment = AbsoluteAlignment.CenterLeft
+internal val physicalLeftProgressAlignment: Alignment = AbsoluteAlignment.CenterLeft
+
+/**
+ * One production played-fill atom shared by the Continue Watching card, the Movie/Series inline
+ * Details resume strip and the Movie/Series Resume dialog. The caller owns the track; this atom
+ * only paints the truthful fraction from the physical left with no layout-direction inversion.
+ */
+@Composable
+internal fun BoxScope.PhysicalLeftProgressFill(
+    fraction: Float,
+    color: Color,
+) {
+    Box(
+        Modifier
+            .align(physicalLeftProgressAlignment)
+            .fillMaxWidth(fraction.coerceIn(0f, 1f))
+            .fillMaxHeight()
+            .background(color),
+    )
+}
 
 /** Real Series season/episode identity for the Recent card; null when the entry carries none. */
 internal fun seriesHistoryIdentityText(entry: HistoryEntry): String? {
@@ -1793,12 +1814,9 @@ fun BoxedHistoryCard(
                     .clip(RoundedCornerShape(4.dp))
                     .background(Color.White.copy(alpha = .16f)),
             ) {
-                Box(
-                    Modifier
-                        .align(historyProgressPhysicalLeftAlignment)
-                        .fillMaxWidth(playedFraction)
-                        .fillMaxHeight()
-                        .background(colors.gold),
+                PhysicalLeftProgressFill(
+                    fraction = playedFraction,
+                    color = colors.gold,
                 )
             }
         }
