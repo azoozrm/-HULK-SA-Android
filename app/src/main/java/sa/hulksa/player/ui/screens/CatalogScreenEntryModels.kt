@@ -112,6 +112,31 @@ internal data class KeyedHomeContentModel(
 )
 
 /**
+ * Presentation identity for a Home visit. Favorites remain a real recommendation input for the
+ * builder, but a favorites-only commit must not replace the rows the owner is interacting with.
+ * Catalog, history, Live and profile-owned source changes still define a new presentation revision.
+ */
+internal fun homePresentationSourcesEqual(
+    accepted: HomeContentModelInput,
+    current: HomeContentModelInput,
+): Boolean =
+    accepted.movieCatalog === current.movieCatalog &&
+        accepted.seriesCatalog === current.seriesCatalog &&
+        accepted.liveCatalog === current.liveCatalog &&
+        accepted.history === current.history
+
+/**
+ * Keeps the accepted presentation input (including its favorites revision) for a favorites-only
+ * change during the current Home visit. A genuine source change returns the current input and
+ * therefore rebuilds recommendations normally.
+ */
+internal fun stableHomePresentationInput(
+    accepted: HomeContentModelInput,
+    current: HomeContentModelInput,
+): HomeContentModelInput =
+    if (homePresentationSourcesEqual(accepted, current)) accepted else current
+
+/**
  * Cheap first-frame Home presentation for a fresh profile-owned store.
  *
  * It only references the already-loaded account catalogs and deliberately excludes history,

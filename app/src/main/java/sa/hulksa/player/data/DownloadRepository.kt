@@ -178,6 +178,7 @@ class DownloadRepository internal constructor(
     internal val accountId: String,
     private val preferences: SharedPreferences,
     legacyOwners: (String) -> Set<String>? = { null },
+    private val injectedNetworkConstraint: (() -> String?)? = null,
 ) {
     private val appContext = context.applicationContext
     private val accountScopeStore = AccountScopeStore(appContext)
@@ -535,9 +536,12 @@ class DownloadRepository internal constructor(
     fun resume(downloadId: Long): Boolean {
         val resumable = synchronized(lock) {
             val item = cache.firstOrNull { it.downloadId == downloadId } ?: return@synchronized false
-            if (item.status == OfflineStatus.COMPLETED) {
+            if (downloadResumeBlocked(item.status)) {
                 return@synchronized false
             }
+            // An explicit retry of a FAILED record starts a fresh bounded cycle. Automatic
+            // scheduling/recovery never calls resume, so its stored budget stays authoritative.
+            val freshRetryBudget = item.status == OfflineStatus.FAILED
             mutateLocked(downloadId) {
                 it.copy(
                     status = OfflineStatus.QUEUED,
@@ -546,6 +550,7 @@ class DownloadRepository internal constructor(
                     scheduledAtEpochMs = 0L,
                     errorMessage = null,
                     integrityVerified = false,
+                    retryCount = if (freshRetryBudget) 0 else it.retryCount,
                 )
             }
             true
@@ -1313,6 +1318,7 @@ class DownloadRepository internal constructor(
     }
 
     private fun networkConstraintMessage(): String? {
+        injectedNetworkConstraint?.let { return it() }
         val manager = connectivity ?: return "لا يوجد اتصال بالشبكة."
         val activeNetwork = manager.activeNetwork ?: return "لا يوجد اتصال بالشبكة."
         val capabilities = manager.getNetworkCapabilities(activeNetwork)
@@ -1660,6 +1666,10 @@ internal data class DownloadPauseResult(
     val persisted: Boolean,
     val invalidatedAttempt: DownloadTransportAttemptRegistry.Attempt? = null,
 )
+
+/** Completed records are terminal for explicit resume; only FAILED starts a fresh budget. */
+internal fun downloadResumeBlocked(status: OfflineStatus): Boolean =
+    status == OfflineStatus.COMPLETED
 
 internal fun pausedDownloadRecord(item: OfflineDownload): OfflineDownload = item.copy(
     status = OfflineStatus.PAUSED,

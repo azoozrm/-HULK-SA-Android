@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import sa.hulksa.player.data.DownloadActionIntent
 import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
 
@@ -136,6 +137,27 @@ class DownloadTvRowPolicyTest {
         assertEquals("اعادة التحميل", downloadTvRowActionCaption(DownloadTvRowAction.RETRY))
         assertEquals("استئناف", downloadTvRowActionCaption(DownloadTvRowAction.RESUME))
         assertEquals("ايقاف", downloadTvRowActionCaption(DownloadTvRowAction.PAUSE))
+    }
+
+    @Test
+    fun `captured row action maps to one explicit intent`() {
+        assertNull(downloadTvRowActionIntent(DownloadTvRowAction.PLAY))
+        assertEquals(
+            DownloadActionIntent.RETRY,
+            downloadTvRowActionIntent(DownloadTvRowAction.RETRY),
+        )
+        assertEquals(
+            DownloadActionIntent.RESUME,
+            downloadTvRowActionIntent(DownloadTvRowAction.RESUME),
+        )
+        assertEquals(
+            DownloadActionIntent.PAUSE,
+            downloadTvRowActionIntent(DownloadTvRowAction.PAUSE),
+        )
+        assertEquals(DownloadActionIntent.RETRY, downloadPrimaryActionIntent(OfflineStatus.FAILED))
+        assertEquals(DownloadActionIntent.RESUME, downloadPrimaryActionIntent(OfflineStatus.PAUSED))
+        assertEquals(DownloadActionIntent.PAUSE, downloadPrimaryActionIntent(OfflineStatus.DOWNLOADING))
+        assertNull(downloadPrimaryActionIntent(OfflineStatus.COMPLETED))
     }
 
     @Test

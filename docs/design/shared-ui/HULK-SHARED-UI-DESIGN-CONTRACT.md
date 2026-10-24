@@ -1133,7 +1133,7 @@ Downloads merge, signing, tag or release is authorized or implied.
   and a restrained separator. No poster-card columns, hero or second selected-item panel.
 - Actions keep the existing authoritative routing: COMPLETED `تشغيل`, FAILED `اعادة التحميل`,
   PAUSED/eligible WAITING_* `استئناف`, QUEUED/CHECKING/DOWNLOADING `ايقاف`, through the existing
-  `onPlayDownload` / `onRetryDownload` owners; the Tune priority control keeps its real selected
+  `onPlayDownload` / `onDownloadPrimaryAction` owners; the Tune priority control keeps its real selected
   state and the Delete/Cancel control keeps distinct `حذف التنزيل` / `الغاء التنزيل` semantics.
   The primary action is the accepted gold fill with the dark caption and one glyph at physical
   LEFT immediately beside the physically-RIGHT caption, one 6dp gap.

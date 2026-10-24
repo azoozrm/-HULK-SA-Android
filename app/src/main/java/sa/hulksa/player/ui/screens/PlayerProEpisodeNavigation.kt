@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -204,7 +205,8 @@ fun PlayerProScreen(
     favoriteKeys: Set<String>,
     vodItem: ContentItem? = null,
     onSelectLiveChannel: (ContentItem) -> Unit,
-    onToggleFavorite: (ContentItem) -> Unit,
+    onToggleFavorite: (ContentItem, (sa.hulksa.player.data.FavoriteMutationOutcome) -> Unit) -> Unit,
+    onActionNotice: (String, ImageVector) -> Unit,
     onBack: () -> Unit,
     onProgress: (request: PlaybackRequest, positionMs: Long, durationMs: Long) -> Unit,
     previousEpisode: Episode?,
@@ -649,6 +651,7 @@ fun PlayerProScreen(
             vodItem = vodItem,
             onSelectLiveChannel = ::queuePlayerRequestedLiveChannel,
             onToggleFavorite = onToggleFavorite,
+            onActionNotice = onActionNotice,
             onLastChannel = if (
                 playerProLiveLastChannelActionEnabled(
                     isLive = request.isLive,

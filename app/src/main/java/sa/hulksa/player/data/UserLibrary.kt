@@ -20,6 +20,55 @@ internal data class UserLibrarySnapshot(
     val history: List<HistoryEntry>,
 )
 
+enum class FavoriteMutationStatus {
+    APPLIED_ADDED,
+    APPLIED_REMOVED,
+    UNCHANGED,
+    KIDS_REJECTED,
+    OWNER_CHANGED,
+    PERSISTENCE_FAILED,
+    THROTTLED,
+}
+
+/**
+ * One authoritative favorite-toggle result. `favorites` is the safe owner-scoped set that may be
+ * published; owner changes deliberately expose no other profile's data.
+ */
+data class FavoriteMutationOutcome(
+    val status: FavoriteMutationStatus,
+    val key: String,
+    val favorites: Set<String> = emptySet(),
+)
+
+/** Per-item remote duplicate protection without rejecting a legitimate different action. */
+internal class FavoriteMutationGate(
+    private val throttleMs: Long = FAVORITE_TOGGLE_THROTTLE_MS,
+    private val nowMs: () -> Long = { System.nanoTime() / 1_000_000L },
+) {
+    internal class Ticket internal constructor(val key: String)
+
+    private val lastAcceptedAtMs = mutableMapOf<String, Long>()
+    private val inFlight = mutableSetOf<String>()
+
+    @Synchronized
+    fun admit(key: String): Ticket? {
+        if (key in inFlight) return null
+        val now = nowMs()
+        val previous = lastAcceptedAtMs[key]
+        if (previous != null && now - previous < throttleMs) return null
+        lastAcceptedAtMs[key] = now
+        inFlight += key
+        return Ticket(key)
+    }
+
+    @Synchronized
+    fun finish(ticket: Ticket) {
+        inFlight -= ticket.key
+    }
+}
+
+internal const val FAVORITE_TOGGLE_THROTTLE_MS = 700L
+
 internal suspend fun <T> runUserLibraryStartupOffMain(operation: () -> T): T =
     withContext(Dispatchers.IO) { operation() }
 
@@ -27,6 +76,9 @@ internal suspend fun <T> runUserLibraryProgressPersistenceOffMain(operation: sus
     withContext(Dispatchers.IO) { operation() }
 
 internal suspend fun <T> runUserLibraryHistoryPersistenceOffMain(operation: suspend () -> T): T =
+    withContext(Dispatchers.IO) { operation() }
+
+internal suspend fun <T> runFavoriteMutationOffMain(operation: () -> T): T =
     withContext(Dispatchers.IO) { operation() }
 
 internal fun userLibraryProgressWriteAllowed(
@@ -78,6 +130,7 @@ class UserLibrary internal constructor(
     private val historyMutationGate = UserLibraryHistoryMutationGate()
     private val historyPersistenceLock = Any()
     private val historyFinalWriteLock = Any()
+    private val favoritesMutationLock = Any()
 
     internal fun beginProgressMutation(): UserLibraryHistoryMutationGate.ProgressAttempt =
         historyMutationGate.beginProgress()
@@ -136,6 +189,79 @@ class UserLibrary internal constructor(
             favorites.toSet()
         }
         preferences.edit().putStringSet(activeKey(KEY_FAVORITES), safeFavorites).apply()
+    }
+
+    /**
+     * Owner-bound favorite toggle used by the production ViewModel. The persisted value and the
+     * returned set are derived here, after Kids filtering, so callers never promote a requested
+     * set over the authoritative safe result.
+     */
+    internal fun toggleFavoriteForOwner(
+        expectedOwner: AuthenticatedSessionOwner,
+        expectedAccountId: String,
+        expectedProfileId: String,
+        item: ContentItem,
+    ): FavoriteMutationOutcome {
+        val key = keyFor(item)
+        synchronized(favoritesMutationLock) {
+            if (!favoriteOwnerMatches(expectedOwner, expectedAccountId, expectedProfileId)) {
+                return FavoriteMutationOutcome(FavoriteMutationStatus.OWNER_CHANGED, key)
+            }
+            val profile = profileStore.activeProfile()
+            if (profile.id != expectedProfileId) {
+                return FavoriteMutationOutcome(FavoriteMutationStatus.OWNER_CHANGED, key)
+            }
+            val accountPreferences = accountScope.preferences(PREFERENCES_NAME, expectedAccountId)
+            val current = favorites(accountPreferences, profile)
+            if (profile.kind == ProfileKind.KIDS && !kidsContentFilterStore.isAllowed(item)) {
+                return if (favoriteOwnerMatches(expectedOwner, expectedAccountId, expectedProfileId)) {
+                    FavoriteMutationOutcome(
+                        status = FavoriteMutationStatus.KIDS_REJECTED,
+                        key = key,
+                        favorites = current,
+                    )
+                } else {
+                    FavoriteMutationOutcome(FavoriteMutationStatus.OWNER_CHANGED, key)
+                }
+            }
+            val target = if (key in current) {
+                current - key
+            } else {
+                current + key
+            }
+            if (target == current) {
+                return FavoriteMutationOutcome(
+                    status = FavoriteMutationStatus.UNCHANGED,
+                    key = key,
+                    favorites = current,
+                )
+            }
+            if (!favoriteOwnerMatches(expectedOwner, expectedAccountId, expectedProfileId)) {
+                return FavoriteMutationOutcome(FavoriteMutationStatus.OWNER_CHANGED, key)
+            }
+            val storageKey = profileKey(profile.id, KEY_FAVORITES)
+            val persisted = accountPreferences.edit()
+                .putStringSet(storageKey, target)
+                .commit()
+            if (!persisted) {
+                // Do not publish a false applied heart when the durable write failed.
+                accountPreferences.edit().putStringSet(storageKey, current).commit()
+                return FavoriteMutationOutcome(
+                    status = FavoriteMutationStatus.PERSISTENCE_FAILED,
+                    key = key,
+                    favorites = current,
+                )
+            }
+            return FavoriteMutationOutcome(
+                status = if (key in current) {
+                    FavoriteMutationStatus.APPLIED_REMOVED
+                } else {
+                    FavoriteMutationStatus.APPLIED_ADDED
+                },
+                key = key,
+                favorites = target,
+            )
+        }
     }
 
     fun isFavorite(item: ContentItem, favorites: Set<String>): Boolean = keyFor(item) in favorites
@@ -433,6 +559,18 @@ class UserLibrary internal constructor(
 
     private fun matchesOwner(expectedAccountId: String, expectedProfileId: String): Boolean =
         accountScope.activeAccountId() == expectedAccountId &&
+            profileStore.activeProfileId() == expectedProfileId
+
+    private fun favoriteOwnerMatches(
+        expectedOwner: AuthenticatedSessionOwner,
+        expectedAccountId: String,
+        expectedProfileId: String,
+    ): Boolean =
+        expectedAccountId.isNotBlank() &&
+            expectedProfileId.isNotBlank() &&
+            expectedAccountId == expectedOwner.accountId &&
+            AuthenticatedSessionRegistry.isCurrent(expectedOwner) &&
+            accountScope.activeAccountId() == expectedAccountId &&
             profileStore.activeProfileId() == expectedProfileId
 
     private fun migrateLegacyLibraryIfNeeded(preferences: SharedPreferences) {

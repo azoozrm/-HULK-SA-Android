@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui.screens
 
+import sa.hulksa.player.data.DownloadActionIntent
 import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
 
@@ -37,6 +38,22 @@ internal fun downloadTvRowActionCaption(action: DownloadTvRowAction): String = w
     DownloadTvRowAction.RESUME -> "استئناف"
     DownloadTvRowAction.PAUSE -> "ايقاف"
 }
+
+/**
+ * Captures the user's displayed primary action as an explicit intent. `PLAY` is not a download
+ * mutation and is dispatched separately by the existing play owner.
+ */
+internal fun downloadTvRowActionIntent(action: DownloadTvRowAction): DownloadActionIntent? =
+    when (action) {
+        DownloadTvRowAction.PLAY -> null
+        DownloadTvRowAction.RETRY -> DownloadActionIntent.RETRY
+        DownloadTvRowAction.RESUME -> DownloadActionIntent.RESUME
+        DownloadTvRowAction.PAUSE -> DownloadActionIntent.PAUSE
+    }
+
+/** The intent that matches the status a details/player download control is currently showing. */
+internal fun downloadPrimaryActionIntent(status: OfflineStatus): DownloadActionIntent? =
+    downloadTvRowActionIntent(downloadTvRowAction(status))
 
 internal fun downloadTvRowStatusLabel(status: OfflineStatus): String = when (status) {
     OfflineStatus.QUEUED -> "في انتظار التحميل"

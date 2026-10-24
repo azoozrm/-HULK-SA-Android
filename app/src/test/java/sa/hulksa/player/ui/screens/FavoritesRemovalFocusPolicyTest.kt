@@ -97,7 +97,7 @@ class FavoritesRemovalFocusPolicyTest {
     }
 
     @Test
-    fun releaseGuard_consumesOnce_survivesHeldRepeats_andClearsOnFreshPress() {
+    fun releaseGuard_consumesHeldRepeatsAndRelease_andOnlyReleaseClearsIt() {
         // The release of the removing long press is consumed exactly once.
         assertEquals(
             FavoritesSelectGuardDecision.CONSUME_RELEASE,
@@ -108,9 +108,9 @@ class FavoritesRemovalFocusPolicyTest {
                 keyDownRepeatCount = 0,
             ),
         )
-        // Held repeats of that same press must not clear the arm before the release arrives.
+        // Held repeats of that same press are consumed, not passed to a replacement card.
         assertEquals(
-            FavoritesSelectGuardDecision.PASS,
+            FavoritesSelectGuardDecision.CONSUME_PRESS,
             favoritesSelectGuardDecision(
                 armed = true,
                 isSelectKey = true,
@@ -118,9 +118,9 @@ class FavoritesRemovalFocusPolicyTest {
                 keyDownRepeatCount = 4,
             ),
         )
-        // A fresh press clears a stale arm without consuming its own release.
+        // Even a repeat count of zero is consumed until the physical release clears the arm.
         assertEquals(
-            FavoritesSelectGuardDecision.CLEAR_ARMED_ON_PRESS,
+            FavoritesSelectGuardDecision.CONSUME_PRESS,
             favoritesSelectGuardDecision(
                 armed = true,
                 isSelectKey = true,

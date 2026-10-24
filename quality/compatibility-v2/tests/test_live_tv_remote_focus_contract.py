@@ -61,8 +61,8 @@ class LiveTvRemoteFocusQualificationTest(unittest.TestCase):
         text = self.read(PLAYER_SCREEN)
         # Exactly one canonical browser render site, driven by one explicit launch origin.
         self.assertEqual(1, text.count("LiveChannelBrowser("))
-        self.assertIn("browserOrigin = LiveChannelBrowserOrigin.NORMAL_LIVE", text)
-        self.assertIn("browserOrigin = LiveChannelBrowserOrigin.ERROR_RECOVERY", text)
+        self.assertIn("openBrowser(LiveChannelBrowserOrigin.NORMAL_LIVE)", text)
+        self.assertIn("openBrowser(LiveChannelBrowserOrigin.ERROR_RECOVERY)", text)
         self.assertIn("origin = browserOrigin", text)
         # Error-origin close returns to the suspended error, normal close to the player surface.
         self.assertIn("fun closeBrowserAndRestoreError()", text)
