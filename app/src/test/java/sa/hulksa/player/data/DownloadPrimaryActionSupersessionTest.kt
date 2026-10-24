@@ -1,6 +1,8 @@
 package sa.hulksa.player.data
 
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -8,6 +10,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -23,7 +26,7 @@ import kotlin.coroutines.CoroutineContext
  * invalidate) advances ownership, and only then is A's queued caller continuation allowed to run.
  */
 class DownloadPrimaryActionSupersessionTest {
-    @Test
+    @Test(timeout = 30_000)
     fun `a newer action supersedes A after IO and before caller delivery`() = runBlocking {
         val store = BarrierActionStore()
         val dispatcher = DownloadPrimaryActionDispatcher(store)
@@ -43,7 +46,9 @@ class DownloadPrimaryActionSupersessionTest {
         }
         try {
             caller.runNext()
-            store.persistenceDone.await()
+            store.awaitResumeStarted()
+            store.releasePersistence()
+            withTimeout(10_000) { store.persistenceDone.await() }
 
             // B is admitted while A's caller continuation is still held.
             val b = dispatcher.dispatch(
@@ -56,7 +61,7 @@ class DownloadPrimaryActionSupersessionTest {
             assertEquals(1, store.resumeCalls)
 
             caller.runNext()
-            val a = aResult.await()
+            val a = withTimeout(10_000) { aResult.await() }
             assertEquals(DownloadActionClaim.SUPERSEDED, a.claim)
             assertTrue(a.downloads.isEmpty())
             assertEquals(OfflineStatus.QUEUED, store.record(DOWNLOAD_ID, ACCOUNT_ID, PROFILE_ID)?.status)
@@ -66,7 +71,7 @@ class DownloadPrimaryActionSupersessionTest {
         }
     }
 
-    @Test
+    @Test(timeout = 30_000)
     fun `dispatcher invalidation supersedes A after IO and before caller delivery`() = runBlocking {
         val store = BarrierActionStore()
         val dispatcher = DownloadPrimaryActionDispatcher(store)
@@ -86,12 +91,14 @@ class DownloadPrimaryActionSupersessionTest {
         }
         try {
             caller.runNext()
-            store.persistenceDone.await()
+            store.awaitResumeStarted()
+            store.releasePersistence()
+            withTimeout(10_000) { store.persistenceDone.await() }
 
             dispatcher.invalidate()
 
             caller.runNext()
-            val a = aResult.await()
+            val a = withTimeout(10_000) { aResult.await() }
             assertEquals(DownloadActionClaim.SUPERSEDED, a.claim)
             assertTrue(a.downloads.isEmpty())
             assertEquals(1, store.resumeCalls)
@@ -100,7 +107,7 @@ class DownloadPrimaryActionSupersessionTest {
         }
     }
 
-    @Test
+    @Test(timeout = 30_000)
     fun `an ordinary current action still returns its actual outcome`() = runBlocking {
         val store = BarrierActionStore()
         val dispatcher = DownloadPrimaryActionDispatcher(store)
@@ -120,10 +127,12 @@ class DownloadPrimaryActionSupersessionTest {
         }
         try {
             caller.runNext()
-            store.persistenceDone.await()
+            store.awaitResumeStarted()
+            store.releasePersistence()
+            withTimeout(10_000) { store.persistenceDone.await() }
             caller.runNext()
 
-            val a = aResult.await()
+            val a = withTimeout(10_000) { aResult.await() }
             assertEquals(DownloadActionClaim.APPLIED, a.claim)
             assertEquals(OfflineStatus.QUEUED, a.status)
             assertEquals(1, a.downloads.size)
@@ -137,7 +146,19 @@ class DownloadPrimaryActionSupersessionTest {
         val persistenceDone = CompletableDeferred<Unit>()
         var resumeCalls: Int = 0
 
+        private val resumeStarted = CountDownLatch(1)
+        private val allowPersistence = CountDownLatch(1)
         private var status: OfflineStatus = OfflineStatus.FAILED
+
+        fun awaitResumeStarted() {
+            check(resumeStarted.await(10, TimeUnit.SECONDS)) {
+                "download IO did not start within the test barrier"
+            }
+        }
+
+        fun releasePersistence() {
+            allowPersistence.countDown()
+        }
 
         override fun record(
             downloadId: Long,
@@ -171,6 +192,10 @@ class DownloadPrimaryActionSupersessionTest {
             expectedProfileId: String,
         ): ProfileDownloadResumeOutcome {
             resumeCalls += 1
+            resumeStarted.countDown()
+            check(allowPersistence.await(10, TimeUnit.SECONDS)) {
+                "download persistence barrier timed out"
+            }
             status = OfflineStatus.QUEUED
             persistenceDone.complete(Unit)
             return ProfileDownloadResumeOutcome(
@@ -200,7 +225,9 @@ class DownloadPrimaryActionSupersessionTest {
         }
 
         fun runNext() {
-            queue.take().run()
+            val task = queue.poll(10, TimeUnit.SECONDS)
+                ?: throw AssertionError("caller continuation was not queued within 10s")
+            task.run()
         }
     }
 
