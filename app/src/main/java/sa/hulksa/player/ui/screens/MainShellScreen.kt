@@ -1627,6 +1627,7 @@ private fun DestinationContent(
             onSearch = onSearch,
             onOpen = onOpen,
             onToggleFavorite = onToggleFavorite,
+            onFavoritesRemovalStarted = onFavoritesRemovalStarted,
             onRefresh = onRefresh,
             initialAllFocusRequester = initialAllFocusRequester,
             initialAllFocusPending = initialAllFocusPending,
@@ -4000,6 +4001,50 @@ internal fun isLivePreviewSelected(
     channel: ContentItem,
 ): Boolean = preview?.id == channel.id
 
+internal fun liveChannelKey(item: ContentItem): String = "${item.type}:${item.id}"
+
+/** A focused-row removal and the stable surviving row that must receive focus after it disappears. */
+internal data class LiveRemovalHandoff(
+    val removedKey: String,
+    val fallbackKey: String?,
+)
+
+/**
+ * Resolve the removal fallback from the pre-removal order: next surviving stable key first,
+ * previous surviving key when the removed row was last, and null when no row survives.
+ */
+internal fun liveRemovalHandoff(
+    visible: List<ContentItem>,
+    removedKey: String,
+): LiveRemovalHandoff? {
+    val removedIndex = visible.indexOfFirst { liveChannelKey(it) == removedKey }
+    if (removedIndex < 0) return null
+    val remaining = visible.filterNot { liveChannelKey(it) == removedKey }
+    val fallbackIndex = favoritesRemovalFocusIndex(removedIndex, remaining.size)
+    return LiveRemovalHandoff(
+        removedKey = removedKey,
+        fallbackKey = fallbackIndex?.let { remaining.getOrNull(it)?.let(::liveChannelKey) },
+    )
+}
+
+/**
+ * Delta needed to reveal a removal fallback without aligning an already-visible row to the top.
+ * Null means the row is not currently laid out; callers may then request one measured reveal.
+ */
+internal fun liveRemovalRevealDelta(
+    itemStart: Int?,
+    itemEnd: Int?,
+    viewportStart: Int,
+    viewportEnd: Int,
+): Int? {
+    if (itemStart == null || itemEnd == null) return null
+    return when {
+        itemStart < viewportStart -> itemStart - viewportStart
+        itemEnd > viewportEnd -> itemEnd - viewportEnd
+        else -> 0
+    }
+}
+
 internal data class LiveCatalogErrorCopy(val title: String, val body: String)
 
 /**
@@ -4029,6 +4074,7 @@ private fun LiveCatalogScreen(
     onSearch: (String) -> Unit,
     onOpen: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
+    onFavoritesRemovalStarted: () -> Unit,
     onRefresh: () -> Unit,
     initialAllFocusRequester: FocusRequester? = null,
     initialAllFocusPending: Boolean = false,
@@ -4090,6 +4136,12 @@ private fun LiveCatalogScreen(
     val channelRequester = remember { FocusRequester() }
     val playRequester = remember { FocusRequester() }
     val favoriteRequester = remember { FocusRequester() }
+    var pendingLiveRemoval by remember { mutableStateOf<LiveRemovalHandoff?>(null) }
+    var previewRemovalInProgress by remember { mutableStateOf(false) }
+    LaunchedEffect(state.selectedCategoryId, catalog) {
+        pendingLiveRemoval = null
+        previewRemovalInProgress = false
+    }
     val categoryFocusRestoreController = remember { CategoryFocusRestoreController() }
     // Accepted Live catalog error classification: typed validated connectivity plus the real
     // server error, rendered by the shared MoviesErrorNotice family with the actual Live refresh
@@ -4149,6 +4201,21 @@ private fun LiveCatalogScreen(
     // replay entry restoration after focus had saved a newer channel. Navigation memory is an
     // input, not a trigger: only entry composition, category/search transitions, a real content
     // change, or an explicit category handoff may restart this effect.
+    val removalHandoff = pendingLiveRemoval
+    val removalApplied = removalHandoff != null &&
+        visible.none { liveChannelKey(it) == removalHandoff.removedKey }
+    val removalFallbackIndex = if (removalApplied) {
+        removalHandoff?.fallbackKey
+            ?.let { key -> visible.indexOfFirst { liveChannelKey(it) == key } }
+            ?.takeIf { it >= 0 }
+    } else {
+        null
+    }
+    val liveFocusKey = if (removalApplied) {
+        removalFallbackIndex?.let { liveChannelKey(visible[it]) }.orEmpty()
+    } else {
+        remembered.itemKey
+    }
     LaunchedEffect(
         visible,
         state.selectedCategoryId,
@@ -4163,6 +4230,82 @@ private fun LiveCatalogScreen(
         )
         val categoryRequest = categoryContentFocusRequest
             ?.takeIf { it.categoryId == state.selectedCategoryId }
+        val handoff = pendingLiveRemoval
+        val handoffApplied = handoff != null &&
+            visible.none { liveChannelKey(it) == handoff.removedKey }
+        if (handoffApplied) {
+            if (visible.isEmpty()) {
+                navigationMemory.save(MainDestination.LIVE, itemKey = "", itemIndex = 0)
+                pendingLiveRemoval = null
+                withFrameNanos { }
+                categoryFocusRestoreController.requestFromSource()
+                return@LaunchedEffect
+            }
+            // A preview-button removal must keep focus on that button. A row-held removal has
+            // already claimed the shell gesture guard and is the only path that takes list focus.
+            if (previewRemovalInProgress) {
+                pendingLiveRemoval = null
+                return@LaunchedEffect
+            }
+            val targetIndex = removalFallbackIndex ?: rememberedIndex
+            if (targetIndex in visible.indices) {
+                val targetKey = liveChannelKey(visible[targetIndex])
+                navigationMemory.save(MainDestination.LIVE, targetKey, targetIndex)
+                val layout = listState.layoutInfo
+                val targetInfo = layout.visibleItemsInfo.firstOrNull { it.index == targetIndex }
+                val revealDelta = liveRemovalRevealDelta(
+                    itemStart = targetInfo?.offset,
+                    itemEnd = targetInfo?.let { it.offset + it.size },
+                    viewportStart = layout.viewportStartOffset,
+                    viewportEnd = layout.viewportEndOffset,
+                )
+                if (targetInfo == null) {
+                    listState.scrollToItem(targetIndex)
+                    snapshotFlow {
+                        listState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex }
+                    }.first { it }
+                } else if (revealDelta != null && revealDelta != 0) {
+                    listState.scrollBy(revealDelta.toFloat())
+                }
+                withFrameNanos { }
+                val focused = runCatching { channelRequester.requestFocus() }.getOrDefault(false)
+                pendingLiveRemoval = null
+                if (!focused) categoryFocusRestoreController.requestFromSource()
+            } else {
+                navigationMemory.save(MainDestination.LIVE, itemKey = "", itemIndex = 0)
+                pendingLiveRemoval = null
+                withFrameNanos { }
+                categoryFocusRestoreController.requestFromSource()
+            }
+            return@LaunchedEffect
+        }
+        if (visible.isEmpty()) {
+            if (previewRemovalInProgress || pendingLiveRemoval != null) {
+                previewRemovalInProgress = false
+                withFrameNanos { }
+                categoryFocusRestoreController.requestFromSource()
+            }
+            return@LaunchedEffect
+        }
+        // Preview-button removal in the Live Favorites filter updates the preview to the next
+        // valid channel without taking focus out of the preview action bar.
+        if (
+            previewRemovalInProgress &&
+            state.selectedCategoryId == LIVE_TV_PRO_MAIN_FAVORITES_CATEGORY
+        ) {
+            previewState.value?.let { fallback ->
+                val fallbackIndex = visible.indexOfFirst { it.id == fallback.id }
+                if (fallbackIndex >= 0) {
+                    navigationMemory.save(
+                        MainDestination.LIVE,
+                        liveChannelKey(fallback),
+                        fallbackIndex,
+                    )
+                }
+            }
+            previewRemovalInProgress = false
+            return@LaunchedEffect
+        }
         if (categoryRequest != null && visible.isEmpty()) {
             if (
                 ContentType.LIVE !in state.loadingTypes &&
@@ -4316,11 +4459,15 @@ private fun LiveCatalogScreen(
                             contentPadding = PaddingValues(bottom = 24.dp),
                         ) {
                             itemsIndexed(visible, key = { _, channel -> channel.id }) { index, channel ->
-                                val key = "${channel.type}:${channel.id}"
-                                val restore = key == remembered.itemKey || (remembered.itemKey.isBlank() && index == rememberedIndex)
+                                val key = liveChannelKey(channel)
+                                val restore = key == liveFocusKey ||
+                                    (liveFocusKey.isBlank() && index == rememberedIndex)
                                 val selected by remember(previewState, channel.id) {
                                     derivedStateOf { isLivePreviewSelected(previewState.value, channel) }
                                 }
+                                val liveFavoriteRemoval = isTv &&
+                                    state.selectedCategoryId == FAVORITES_CATEGORY_ID &&
+                                    favorites.contains(channel)
                                 ChannelListItem(
                                     item = channel,
                                     selected = selected,
@@ -4334,7 +4481,23 @@ private fun LiveCatalogScreen(
                                         left = playRequester
                                     },
                                     isFavorite = favorites.contains(channel),
-                                    onLongClick = { onToggleFavorite(channel) },
+                                    onLongClick = {
+                                        pendingLiveRemoval = null
+                                        onToggleFavorite(channel)
+                                    },
+                                    onRemoteLongClick = {
+                                        if (liveFavoriteRemoval) {
+                                            pendingLiveRemoval = liveRemovalHandoff(visible, key)
+                                            beginFavoritesRemovalLongPress(
+                                                enabled = true,
+                                                beginGuard = onFavoritesRemovalStarted,
+                                                toggleFavorite = { onToggleFavorite(channel) },
+                                            )
+                                        } else {
+                                            pendingLiveRemoval = null
+                                            onToggleFavorite(channel)
+                                        }
+                                    },
                                 )
                             }
                         }
@@ -4353,7 +4516,17 @@ private fun LiveCatalogScreen(
                         playRequester = playRequester,
                         favoriteRequester = favoriteRequester,
                         onOpen = onOpen,
-                        onToggleFavorite = onToggleFavorite,
+                        onToggleFavorite = { channel ->
+                            if (
+                                isTv &&
+                                state.selectedCategoryId == FAVORITES_CATEGORY_ID &&
+                                favorites.contains(channel)
+                            ) {
+                                previewRemovalInProgress = true
+                            }
+                            pendingLiveRemoval = null
+                            onToggleFavorite(channel)
+                        },
                         modifier = Modifier.fillMaxSize(),
                     )
                 }

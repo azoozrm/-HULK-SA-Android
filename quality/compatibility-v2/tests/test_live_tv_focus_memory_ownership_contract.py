@@ -21,7 +21,7 @@ class LiveTvFocusMemoryOwnershipContractTest(unittest.TestCase):
 
     def test_live_logical_focus_memory_is_written_by_actual_channel_focus(self) -> None:
         live = self.live()
-        self.assertIn('val key = "${channel.type}:${channel.id}"', live)
+        self.assertIn('val key = liveChannelKey(channel)', live)
         self.assertIn("onFocused = {", live)
         self.assertIn("focusedChannelIndex[0] = index", live)
         self.assertIn("navigationMemory.save(MainDestination.LIVE, key, index)", live)
@@ -44,9 +44,10 @@ class LiveTvFocusMemoryOwnershipContractTest(unittest.TestCase):
         )
         self.assertIn("rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)", live)
         self.assertIn(
-            "val restore = key == remembered.itemKey || (remembered.itemKey.isBlank() && index == rememberedIndex)",
+            "val restore = key == liveFocusKey ||",
             live,
         )
+        self.assertIn("liveFocusKey.isBlank() && index == rememberedIndex", live)
         self.assertIn(
             "state.searchQuery.isBlank() && remembered.itemKey.isNotBlank() && visible.isNotEmpty() -> rememberedIndex",
             live,
@@ -88,6 +89,15 @@ class LiveTvFocusMemoryOwnershipContractTest(unittest.TestCase):
         self.assertIn("state.selectedCategoryId", keys)
         self.assertIn("state.searchQuery", keys)
         self.assertIn("categoryContentFocusRequest", keys)
+
+    def test_live_favorites_row_removal_wires_shell_guard_and_handoff(self) -> None:
+        live = self.live()
+        self.assertIn("onRemoteLongClick = {", live)
+        self.assertIn("beginFavoritesRemovalLongPress(", live)
+        self.assertIn("onFavoritesRemovalStarted", live)
+        self.assertIn("liveRemovalHandoff(visible, key)", live)
+        self.assertIn("previewRemovalInProgress", live)
+
 
     def test_live_heart_reads_the_explicit_favorite_snapshot(self) -> None:
         source = self.read(MAIN_SHELL)

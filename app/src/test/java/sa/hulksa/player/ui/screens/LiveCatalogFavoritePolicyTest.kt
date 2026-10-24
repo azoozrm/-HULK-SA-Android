@@ -72,6 +72,72 @@ class LiveCatalogFavoritePolicyTest {
         )
     }
 
+    @Test
+    fun `removal handoff chooses next first then previous last and empty`() {
+        val first = liveChannel(1)
+        val middle = liveChannel(2)
+        val last = liveChannel(3)
+        val ordered = listOf(first, middle, last)
+
+        assertEquals("LIVE:2", liveRemovalHandoff(ordered, "LIVE:1")?.fallbackKey)
+        assertEquals("LIVE:3", liveRemovalHandoff(ordered, "LIVE:2")?.fallbackKey)
+        assertEquals("LIVE:2", liveRemovalHandoff(ordered, "LIVE:3")?.fallbackKey)
+        assertNull(liveRemovalHandoff(listOf(first), "LIVE:1")?.fallbackKey)
+        assertNull(liveRemovalHandoff(ordered, "LIVE:99"))
+    }
+
+    @Test
+    fun `already visible removal fallback has no forced top alignment delta`() {
+        assertEquals(0, liveRemovalRevealDelta(100, 180, 0, 300))
+        assertEquals(-100, liveRemovalRevealDelta(-100, -20, 0, 300))
+        assertEquals(40, liveRemovalRevealDelta(260, 340, 0, 300))
+        assertNull(liveRemovalRevealDelta(null, null, 0, 300))
+    }
+
+    @Test
+    fun `row removal guard consumes repeats and release then admits a fresh press`() {
+        val guard = FavoritesRemovalInputGuard()
+        var mutations = 0
+        var replacementActions = 0
+        beginFavoritesRemovalLongPress(
+            enabled = true,
+            beginGuard = guard::begin,
+            toggleFavorite = { mutations += 1 },
+        )
+        assertTrue(guard.active)
+        repeat(3) {
+            assertTrue(guard.onSelectKey(androidx.compose.ui.input.key.KeyEventType.KeyDown))
+            if (!guard.active) replacementActions += 1
+        }
+        assertTrue(guard.onSelectKey(androidx.compose.ui.input.key.KeyEventType.KeyUp))
+        assertFalse(guard.active)
+        assertEquals(1, mutations)
+        assertEquals(0, replacementActions)
+        assertFalse(guard.onSelectKey(androidx.compose.ui.input.key.KeyEventType.KeyDown))
+        beginFavoritesRemovalLongPress(
+            enabled = true,
+            beginGuard = guard::begin,
+            toggleFavorite = { mutations += 1 },
+        )
+        assertTrue(guard.onSelectKey(androidx.compose.ui.input.key.KeyEventType.KeyUp))
+        assertEquals(2, mutations)
+    }
+
+    @Test
+    fun `normal preview-style toggle does not arm the shell guard`() {
+        val guard = FavoritesRemovalInputGuard()
+        var mutations = 0
+        beginFavoritesRemovalLongPress(
+            enabled = false,
+            beginGuard = guard::begin,
+            toggleFavorite = { mutations += 1 },
+        )
+        assertFalse(guard.active)
+        assertFalse(guard.onSelectKey(androidx.compose.ui.input.key.KeyEventType.KeyDown))
+        assertFalse(guard.onSelectKey(androidx.compose.ui.input.key.KeyEventType.KeyUp))
+        assertEquals(1, mutations)
+    }
+
     private fun liveChannel(id: Int): ContentItem = ContentItem(
         id = id,
         name = "Channel $id",

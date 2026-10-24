@@ -1962,6 +1962,7 @@ fun ChannelListItem(
     modifier: Modifier = Modifier,
     isFavorite: Boolean = false,
     onLongClick: (() -> Unit)? = null,
+    onRemoteLongClick: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -2007,7 +2008,7 @@ fun ChannelListItem(
                         !remoteLongPressHandled
                     ) {
                         remoteLongPressHandled = true
-                        onLongClick()
+                        (onRemoteLongClick ?: onLongClick)?.invoke()
                     }
                     true
                 } else if (event.type == KeyEventType.KeyUp) {
