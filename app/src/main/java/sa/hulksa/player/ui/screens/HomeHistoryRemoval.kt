@@ -35,9 +35,11 @@ internal class HomeHistoryRemovalController(
     private val removeHistory: (String, (Boolean) -> Unit) -> Unit,
     private val onSuccessfulRemoval: (wasLastCard: Boolean) -> Unit,
     private val canPublishSuccess: () -> Boolean = { true },
-    private val onSuccessNotice: () -> Unit = {},
+    private val onSuccessNotice: (String) -> Unit = {},
 ) {
     var pendingKey by mutableStateOf<String?>(null)
+        private set
+    var capturedTitle by mutableStateOf("")
         private set
     var previousKeys by mutableStateOf<List<String>>(emptyList())
         private set
@@ -46,10 +48,11 @@ internal class HomeHistoryRemovalController(
 
     private var resultConsumed = false
 
-    fun begin(key: String, keys: List<String>): Boolean {
+    fun begin(key: String, keys: List<String>, displayTitle: String = key): Boolean {
         if (pendingKey != null) return false
         pendingKey = key
         previousKeys = keys
+        capturedTitle = displayTitle
         succeeded = false
         resultConsumed = false
         removeHistory(key) { success ->
@@ -57,11 +60,12 @@ internal class HomeHistoryRemovalController(
             resultConsumed = true
             if (success) {
                 succeeded = true
-                if (canPublishSuccess()) onSuccessNotice()
+                if (canPublishSuccess()) onSuccessNotice(capturedTitle)
                 onSuccessfulRemoval(keys.size == 1)
             } else {
                 pendingKey = null
                 previousKeys = emptyList()
+                capturedTitle = ""
             }
         }
         return true
@@ -77,6 +81,7 @@ internal class HomeHistoryRemovalController(
     fun finish() {
         pendingKey = null
         previousKeys = emptyList()
+        capturedTitle = ""
         succeeded = false
         resultConsumed = false
     }
@@ -100,6 +105,54 @@ internal class HomeRemovalInputGuard {
         if (type == KeyEventType.KeyUp) active = false
         return true
     }
+}
+
+internal fun homeRemovalNotice(displayTitle: String): String =
+    "تمت إزالة «$displayTitle» من متابعة المشاهدة"
+
+internal fun recentRemovalNotice(displayTitle: String): String =
+    "تمت إزالة «$displayTitle» من آخر مشاهدة"
+
+/**
+ * Arms the shell select guard before a Movies/Series Recent removal reaches the authoritative
+ * mutation. The guard survives disposal of the card, grid and last item; the controller keeps the
+ * captured stable key and its pre-removal order. This is the same transaction shape used by Home.
+ */
+internal fun beginRecentHistoryRemoval(
+    remote: Boolean,
+    controller: HomeHistoryRemovalController,
+    capturedKey: String,
+    capturedKeys: List<String>,
+    capturedTitle: String,
+    onRemoteRemovalStarted: () -> Unit,
+): Boolean {
+    if (controller.pendingKey != null) return false
+    if (remote) onRemoteRemovalStarted()
+    return controller.begin(capturedKey, capturedKeys, capturedTitle)
+}
+
+/**
+ * Focus ownership for one settled Movies/Series Recent removal. The captured surviving stable key
+ * remains owned while scroll observation and ordinary navigation restoration settle. A real user
+ * move to a different card releases the lock; the removal itself never clears the key implicitly.
+ */
+internal class RecentRemovalFocusLock {
+    var ownedKey by mutableStateOf<String?>(null)
+        private set
+
+    fun own(key: String) {
+        ownedKey = key
+    }
+
+    fun clear() {
+        ownedKey = null
+    }
+
+    fun onFocused(key: String) {
+        if (ownedKey != null && ownedKey != key) ownedKey = null
+    }
+
+    fun yieldsScrollObservation(): Boolean = ownedKey != null
 }
 
 /** A single pending handoff of focus after the Continue Watching row empties. */

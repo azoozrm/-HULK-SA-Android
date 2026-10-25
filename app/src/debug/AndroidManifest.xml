@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Disposable debug-only rendered fixture; never part of release/preview/benchmark. -->
+        <activity
+            android:name=".ui.screens.RecentFocusFixtureActivity"
+            android:exported="true"
+            android:label="Recent Focus Fixture"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.HulkSA" />
+    </application>
+</manifest>

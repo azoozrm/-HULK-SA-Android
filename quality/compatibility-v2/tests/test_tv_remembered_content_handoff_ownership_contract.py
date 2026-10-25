@@ -110,7 +110,7 @@ class TvRememberedContentHandoffOwnershipContractTest(unittest.TestCase):
 
     def test_category_content_handoff_remains_intact(self) -> None:
         poster = self.section(
-            "private fun PosterCatalogScreen(",
+            "internal fun PosterCatalogScreen(",
             "internal fun resolveLivePreview(",
         )
         self.assertIn("val categoryChanged = state.selectedCategoryId != categoryId", poster)

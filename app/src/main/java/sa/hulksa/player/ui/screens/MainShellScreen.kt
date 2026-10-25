@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.StatFs
+import android.util.Log
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -242,6 +243,7 @@ import sa.hulksa.player.ui.components.MoviesCatalogBoxedCard
 import sa.hulksa.player.ui.components.SeriesCatalogBoxedCard
 import sa.hulksa.player.ui.components.BoxedHistoryCard
 import sa.hulksa.player.ui.components.seriesHistoryIdentityText
+import sa.hulksa.player.ui.components.historyPrimaryTitle
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.components.HulkTextField
@@ -360,6 +362,8 @@ internal class CategoryFocusRestoreController {
     var restore: ((() -> Unit) -> Boolean)? = null
     var pendingRequest by mutableStateOf<CategoryFocusRestoreRequest?>(null)
         private set
+    var focusedCategoryId by mutableStateOf<String?>(null)
+        private set
 
     private var nextRequestId = 0L
     private val placedTargets = mutableSetOf<String?>()
@@ -368,6 +372,14 @@ internal class CategoryFocusRestoreController {
     private var focusDispatchCategoryId: String? = null
 
     fun requestFromSource(): Boolean = restore?.invoke({}) == true
+
+    fun onTargetFocusChanged(categoryId: String?, isFocused: Boolean) {
+        if (isFocused) {
+            focusedCategoryId = categoryId
+        } else if (focusedCategoryId == categoryId) {
+            focusedCategoryId = null
+        }
+    }
 
     fun hasPendingTarget(categoryId: String?): Boolean =
         pendingRequest?.let { it.categoryId == categoryId } == true
@@ -391,6 +403,7 @@ internal class CategoryFocusRestoreController {
 
     fun markTargetDetached(categoryId: String?) {
         placedTargets -= categoryId
+        if (focusedCategoryId == categoryId) focusedCategoryId = null
         val request = pendingRequest ?: return
         if (request.categoryId == categoryId && request.targetPlaced) {
             pendingRequest = request.copy(targetPlaced = false)
@@ -493,6 +506,7 @@ internal fun Modifier.categoryFocusTarget(
                 .bringIntoViewRequester(bringIntoViewRequester)
                 .onGloballyPositioned { controller.markTargetPlaced(categoryId) }
                 .onFocusChanged { focusState ->
+                    controller.onTargetFocusChanged(categoryId, focusState.isFocused)
                     if (focusState.isFocused && !controller.consumeBringIntoViewSuppression(categoryId)) {
                         scope.launch { bringIntoViewRequester.bringIntoView() }
                     }
@@ -1231,6 +1245,7 @@ fun MainShellScreen(
         }
     val homeRemovalInputGuard = remember { HomeRemovalInputGuard() }
     val favoritesRemovalInputGuard = remember { FavoritesRemovalInputGuard() }
+    val recentRemovalInputGuard = remember { HomeRemovalInputGuard() }
     val currentTvCatalogInitialFocusPending =
         pendingTvContentFocusHandoff?.destination == state.destination &&
             state.destination in tvCatalogAllFocusRequesters
@@ -1260,6 +1275,7 @@ fun MainShellScreen(
         enabled = isTv,
         homeGuard = homeRemovalInputGuard,
         favoritesGuard = favoritesRemovalInputGuard,
+        recentGuard = recentRemovalInputGuard,
     ) {
         Box(Modifier.fillMaxSize().background(colors.background)) {
         if (useNavigationRail) {
@@ -1293,6 +1309,7 @@ fun MainShellScreen(
                         onToggleFavorite = toggleFavoriteWithFeedback,
                         onToggleFavoriteWithResult = toggleFavoriteWithFeedbackAndResult,
                         onFavoritesRemovalStarted = favoritesRemovalInputGuard::begin,
+                        onRecentRemovalStarted = recentRemovalInputGuard::begin,
                         onRefresh = onRefresh,
                         onOpenNotifications = onOpenNotifications,
                         onGrowthAction = openGrowthDestination,
@@ -1351,6 +1368,7 @@ fun MainShellScreen(
                         onToggleFavorite = toggleFavoriteWithFeedback,
                         onToggleFavoriteWithResult = toggleFavoriteWithFeedbackAndResult,
                         onFavoritesRemovalStarted = favoritesRemovalInputGuard::begin,
+                        onRecentRemovalStarted = recentRemovalInputGuard::begin,
                         onRefresh = onRefresh,
                         onOpenNotifications = onOpenNotifications,
                         onGrowthAction = openGrowthDestination,
@@ -1410,6 +1428,7 @@ private fun TvRemovalInputBoundary(
     enabled: Boolean,
     homeGuard: HomeRemovalInputGuard,
     favoritesGuard: FavoritesRemovalInputGuard,
+    recentGuard: HomeRemovalInputGuard,
     content: @Composable () -> Unit,
 ) {
     Box(
@@ -1421,7 +1440,8 @@ private fun TvRemovalInputBoundary(
                 } else {
                     val homeConsumed = homeGuard.onSelectKey(event.type)
                     val favoritesConsumed = favoritesGuard.onSelectKey(event.type)
-                    homeConsumed || favoritesConsumed
+                    val recentConsumed = recentGuard.onSelectKey(event.type)
+                    homeConsumed || favoritesConsumed || recentConsumed
                 }
             },
     ) {
@@ -1577,6 +1597,7 @@ private fun DestinationContent(
     onToggleFavorite: (ContentItem) -> Unit,
     onToggleFavoriteWithResult: (ContentItem, (FavoriteMutationOutcome) -> Unit) -> Unit,
     onFavoritesRemovalStarted: () -> Unit,
+    onRecentRemovalStarted: () -> Unit,
     onRefresh: () -> Unit,
     onOpenNotifications: () -> Unit,
     onGrowthAction: (GrowthDestination) -> Unit,
@@ -1659,8 +1680,11 @@ private fun DestinationContent(
             onSearch = onSearch,
             onOpen = onOpen,
             onOpenHistory = onOpenHistory,
+            onRemoveHistoryEntry = onRemoveHistoryEntry,
+            onRecentRemovalStarted = onRecentRemovalStarted,
             onToggleFavorite = onToggleFavorite,
             onRefresh = onRefresh,
+            onActionNotice = onActionNotice,
             initialAllFocusRequester = initialAllFocusRequester,
             initialAllFocusPending = initialAllFocusPending,
         )
@@ -1677,8 +1701,11 @@ private fun DestinationContent(
             onSearch = onSearch,
             onOpen = onOpen,
             onOpenHistory = onOpenHistory,
+            onRemoveHistoryEntry = onRemoveHistoryEntry,
+            onRecentRemovalStarted = onRecentRemovalStarted,
             onToggleFavorite = onToggleFavorite,
             onRefresh = onRefresh,
+            onActionNotice = onActionNotice,
             initialAllFocusRequester = initialAllFocusRequester,
             initialAllFocusPending = initialAllFocusPending,
         )
@@ -1807,8 +1834,11 @@ private fun CinemaHomeScreen(
                 }
             },
             canPublishSuccess = { homeRemovalSessionActive.value },
-            onSuccessNotice = {
-                actionNoticeRef.value("تمت ازالة المشاهدة", Icons.Rounded.DeleteOutline)
+            onSuccessNotice = { title ->
+                actionNoticeRef.value(
+                    homeRemovalNotice(title),
+                    Icons.Rounded.DeleteOutline,
+                )
             },
         )
     }
@@ -3897,7 +3927,11 @@ private fun HomeContinueWatchingSection(
                     onRemoveRequested = { _, remote ->
                         if (removalController.pendingKey == null) {
                             if (remote) onRemoteRemovalStarted()
-                            removalController.begin(entry.key, entries.map { it.key })
+                            removalController.begin(
+                                entry.key,
+                                entries.map { it.key },
+                                historyPrimaryTitle(entry),
+                            )
                         }
                     },
                 )
@@ -3991,7 +4025,7 @@ internal fun homeLiveCardWidth(isTv: Boolean, screenWidthDp: Int, screenHeightDp
 }
 
 @Composable
-private fun PosterCatalogScreen(
+internal fun PosterCatalogScreen(
     title: String,
     type: ContentType,
     destination: MainDestination,
@@ -4004,8 +4038,11 @@ private fun PosterCatalogScreen(
     onSearch: (String) -> Unit,
     onOpen: (ContentItem) -> Unit,
     onOpenHistory: (HistoryEntry) -> Unit,
+    onRemoveHistoryEntry: (String, (Boolean) -> Unit) -> Unit,
+    onRecentRemovalStarted: () -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
+    onActionNotice: (String, ImageVector) -> Unit,
     initialAllFocusRequester: FocusRequester? = null,
     initialAllFocusPending: Boolean = false,
 ) {
@@ -4124,6 +4161,96 @@ private fun PosterCatalogScreen(
     var categoryContentFocusRequest by remember(destination) { mutableStateOf<CategoryContentFocusRequest?>(null) }
     var armedCategoryContentFocusRequestId by remember(destination) { mutableLongStateOf(0L) }
     val categoryFocusRestoreController = remember(destination) { CategoryFocusRestoreController() }
+    // Movies/Series Recent share the proven Home removal transaction: the screen owns the
+    // captured key/order and survives grid disposal, while the shell owns the physical select
+    // gesture guard. The success notice is posted only from the authoritative result callback.
+    val onRemoveHistoryEntryRef = rememberUpdatedState(onRemoveHistoryEntry)
+    val onActionNoticeRef = rememberUpdatedState(onActionNotice)
+    val recentRemovalSessionActive = remember(destination) { mutableStateOf(true) }
+    DisposableEffect(destination) {
+        onDispose { recentRemovalSessionActive.value = false }
+    }
+    var pendingRecentEmptyFocus by remember(destination) { mutableStateOf<Long?>(null) }
+    var nextRecentEmptyFocusRequestId by remember(destination) { mutableLongStateOf(0L) }
+    var emptyRecentFocusRetry by remember(destination) { mutableIntStateOf(0) }
+    val recentHistoryFocusRequesterCache =
+        remember(destination) { mutableMapOf<String, FocusRequester>() }
+    val recentHistoryFocusLock = remember(destination) { RecentRemovalFocusLock() }
+    val recentRemovalController = remember(destination) {
+        HomeHistoryRemovalController(
+            removeHistory = { key, result -> onRemoveHistoryEntryRef.value(key, result) },
+            onSuccessfulRemoval = { wasLastCard ->
+                if (wasLastCard) {
+                    emptyRecentFocusRetry = 0
+                    nextRecentEmptyFocusRequestId += 1L
+                    pendingRecentEmptyFocus = nextRecentEmptyFocusRequestId
+                }
+            },
+            canPublishSuccess = { recentRemovalSessionActive.value },
+            onSuccessNotice = { title ->
+                onActionNoticeRef.value(
+                    recentRemovalNotice(title),
+                    Icons.Rounded.DeleteOutline,
+                )
+            },
+        )
+    }
+    DisposableEffect(recentRemovalController) {
+        onDispose { recentRemovalController.finish() }
+    }
+    LaunchedEffect(
+        pendingRecentEmptyFocus,
+        showingContinue,
+        continueWatching.isEmpty(),
+        state.selectedCategoryId,
+        emptyRecentFocusRetry,
+    ) {
+        val requestId = pendingRecentEmptyFocus ?: return@LaunchedEffect
+        if (!showingContinue || continueWatching.isNotEmpty()) return@LaunchedEffect
+        withFrameNanos { }
+        if (pendingRecentEmptyFocus != requestId) return@LaunchedEffect
+        if (!isTv) {
+            // Mobile has no TV category keyboard/focus owner. The authoritative empty presented
+            // list is enough to close the removal transaction; clear the pending handoff before
+            // a search-clear can reveal a later card.
+            logRecentFocus("empty handoff mobile completion request=$requestId")
+            categoryContentFocusRequest = null
+            pendingRecentEmptyFocus = null
+            emptyRecentFocusRetry = 0
+            recentHistoryFocusLock.clear()
+            recentRemovalController.finish()
+            return@LaunchedEffect
+        }
+        if (emptyRecentFocusRetry >= 3) {
+            logRecentFocus("empty handoff failed request=$requestId retries=$emptyRecentFocusRetry")
+            return@LaunchedEffect
+        }
+        // The selected Recent control remains in the existing category-focus owner after the
+        // grid empties. Do not clear the transaction until that control reports actual focus.
+        var focused = false
+        for (attempt in 0 until 3) {
+            categoryFocusRestoreController.requestFromSource()
+            withFrameNanos { }
+            if (categoryFocusRestoreController.focusedCategoryId == CONTINUE_CATEGORY_ID) {
+                focused = true
+                break
+            }
+        }
+        if (focused) {
+            logRecentFocus("empty handoff confirmed request=$requestId")
+            categoryContentFocusRequest = null
+            pendingRecentEmptyFocus = null
+            emptyRecentFocusRetry = 0
+            recentHistoryFocusLock.clear()
+            recentRemovalController.finish()
+        } else {
+            logRecentFocus(
+                "empty handoff unconfirmed request=$requestId retry=$emptyRecentFocusRetry " +
+                    "focusedCategory=${categoryFocusRestoreController.focusedCategoryId}",
+            )
+            if (emptyRecentFocusRetry < 3) emptyRecentFocusRetry += 1
+        }
+    }
     LaunchedEffect(moviesError, resultCount) {
         val visible = moviesError && resultCount > 0
         if (noticeWasVisible.value && !visible && noticeRetryFocused) {
@@ -4295,6 +4422,15 @@ private fun PosterCatalogScreen(
                     isTv = isTv,
                     navigationMemory = navigationMemory,
                     onOpen = onOpenHistory,
+                    removalController = recentRemovalController,
+                    focusRequesterCache = recentHistoryFocusRequesterCache,
+                    focusLock = recentHistoryFocusLock,
+                    onRemoteRemovalStarted = onRecentRemovalStarted,
+                    onCategoryEntryFocusApplied = { requestId ->
+                        if (categoryContentFocusRequest?.requestId == requestId) {
+                            categoryContentFocusRequest = null
+                        }
+                    },
                     focusFirstItemRequestId = categoryContentFocusRequest
                         ?.takeIf { categoryContentFocusReady && it.focusFirstItem }
                         ?.requestId
@@ -7011,6 +7147,12 @@ private class MovieHistoryFocusRevealState {
     var job: Job? = null
 }
 
+private const val RECENT_FOCUS_LOG = "HulkRecentFocus"
+
+private fun logRecentFocus(message: String) {
+    if (BuildConfig.DEBUG) Log.i(RECENT_FOCUS_LOG, message)
+}
+
 /**
  * Boxed Recent grid for Movies and Series. Uses the adopted catalog slot policy (the same shared
  * column calculation and TV safe physical-left end padding, or the mobile adaptive slot) together
@@ -7025,6 +7167,11 @@ private fun BoxedHistoryGrid(
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
     onOpen: (HistoryEntry) -> Unit,
+    removalController: HomeHistoryRemovalController,
+    focusRequesterCache: MutableMap<String, FocusRequester>,
+    focusLock: RecentRemovalFocusLock,
+    onRemoteRemovalStarted: () -> Unit,
+    onCategoryEntryFocusApplied: (Long) -> Unit,
     focusFirstItemRequestId: Long = 0L,
     focusContentRequestId: Long = 0L,
     onMoveToCategories: (() -> Boolean)? = null,
@@ -7039,31 +7186,129 @@ private fun BoxedHistoryGrid(
         )
     }
     val remembered = navigationMemory.position(destination)
+    // The existing category handoff sets focusFirstItemRequestId and therefore targets
+    // index == 0; the removal transaction below owns later stable-key focus.
     val targetIndex = if (focusFirstItemRequestId != 0L) {
         0
     } else {
         remembered.itemIndex.coerceIn(0, entries.lastIndex.coerceAtLeast(0))
     }
     val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = targetIndex)
+    // A surviving card must keep the same FocusRequester object across list updates and across
+    // grid recreation. The cache is owned by PosterCatalogScreen, which survives disposal.
+    val focusRequesters = remember(entries.map { it.key }) {
+        entries.associate { entry ->
+            entry.key to focusRequesterCache.getOrPut(entry.key) { FocusRequester() }
+        }
+    }
+    var focusedEntryIndex by remember(entries) { mutableStateOf(-1) }
+    var focusedEntryKey by remember(entries) { mutableStateOf<String?>(null) }
+    // The removal handoff lock is owned by PosterCatalogScreen and survives grid recreation.
+    var removalFocusRetry by remember(destination) { mutableStateOf(0) }
+    var restoreFocusRetry by remember(destination) { mutableStateOf(0) }
+    var lastExplicitFocusContentRequestId by remember(destination) { mutableLongStateOf(0L) }
     LaunchedEffect(gridState, entries) {
         snapshotFlow { gridState.firstVisibleItemIndex }.collect { index ->
+            if (
+                focusLock.yieldsScrollObservation() ||
+                removalController.pendingKey != null ||
+                removalController.succeeded
+            ) {
+                return@collect
+            }
             entries.getOrNull(index)?.let { navigationMemory.save(destination, it.key, index) }
         }
     }
-    val targetRequester = remember { FocusRequester() }
-    LaunchedEffect(entries, remembered.itemKey, focusFirstItemRequestId, focusContentRequestId) {
+    LaunchedEffect(focusFirstItemRequestId) {
+        if (focusFirstItemRequestId != 0L) focusLock.clear()
+    }
+    LaunchedEffect(focusContentRequestId) {
+        if (focusContentRequestId != 0L && focusContentRequestId != lastExplicitFocusContentRequestId) {
+            lastExplicitFocusContentRequestId = focusContentRequestId
+            focusLock.clear()
+        }
+    }
+    LaunchedEffect(entries, focusFirstItemRequestId, focusContentRequestId) {
+        removalFocusRetry = 0
+        restoreFocusRetry = 0
+    }
+    LaunchedEffect(
+        entries,
+        remembered.itemKey,
+        focusFirstItemRequestId,
+        focusContentRequestId,
+        removalController.pendingKey,
+        removalController.succeeded,
+        restoreFocusRetry,
+    ) {
+        // A new explicit entry request supersedes completed removal ownership, including a
+        // same-category re-entry where focusFirstItemRequestId is zero.
+        if (focusContentRequestId != 0L && focusContentRequestId != lastExplicitFocusContentRequestId) {
+            lastExplicitFocusContentRequestId = focusContentRequestId
+            focusLock.clear()
+        }
+        // The removal transaction owns focus/scroll while it is pending or awaiting its one
+        // post-update handoff. The owned key also survives finish() so the ordinary restore
+        // cannot overwrite it with the stale category/first-item request.
+        if (
+            focusLock.ownedKey != null ||
+            removalController.pendingKey != null ||
+            removalController.succeeded
+        ) {
+            logRecentFocus(
+                "restore skip lock=${focusLock.ownedKey} pending=${removalController.pendingKey} " +
+                    "succeeded=${removalController.succeeded} first=$focusFirstItemRequestId content=$focusContentRequestId",
+            )
+            return@LaunchedEffect
+        }
         val shouldRestore = focusContentRequestId != 0L || remembered.itemKey.isNotBlank()
-        if (shouldRestore && entries.isNotEmpty()) {
+        val targetEntry = entries.getOrNull(targetIndex)
+        if (shouldRestore && targetEntry != null) {
+            logRecentFocus(
+                "restore start first=$focusFirstItemRequestId content=$focusContentRequestId " +
+                    "remembered=${remembered.itemKey} index=$targetIndex key=${targetEntry.key}",
+            )
             gridState.scrollToItem(targetIndex)
             snapshotFlow { gridState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex } }
                 .first { it }
             withFrameNanos { }
-            runCatching { targetRequester.requestFocus() }
+            var focused = focusedEntryKey == targetEntry.key
+            if (!focused) {
+                for (attempt in 0 until 8) {
+                    withFrameNanos { }
+                    val requestResult = runCatching {
+                        focusRequesters[targetEntry.key]?.requestFocus()
+                    }.getOrDefault(false)
+                    withFrameNanos { }
+                    logRecentFocus(
+                        "restore request key=${targetEntry.key} result=$requestResult " +
+                            "observedKey=$focusedEntryKey observedIndex=$focusedEntryIndex index=$targetIndex",
+                    )
+                    if (focusedEntryKey == targetEntry.key) {
+                        focused = true
+                        break
+                    }
+                }
+            }
+            if (focused) {
+                logRecentFocus(
+                    "restore focused key=${targetEntry.key} first=$focusFirstItemRequestId content=$focusContentRequestId",
+                )
+                val appliedRequestId = focusContentRequestId.takeIf { it != 0L }
+                    ?: focusFirstItemRequestId.takeIf { it != 0L }
+                if (appliedRequestId != null) {
+                    onCategoryEntryFocusApplied(appliedRequestId)
+                }
+            } else {
+                logRecentFocus(
+                    "restore failed key=${targetEntry.key} observedKey=$focusedEntryKey retry=$restoreFocusRetry",
+                )
+                if (restoreFocusRetry < 8) restoreFocusRetry += 1
+            }
         }
     }
     val focusRevealScope = rememberCoroutineScope()
     val focusRevealState = remember { MovieHistoryFocusRevealState() }
-    var focusedEntryIndex by remember(entries) { mutableStateOf(-1) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
         val focusInsetPx = with(density) { metrics.focusViewportInsetDp.dp.roundToPx() }
@@ -7112,9 +7357,17 @@ private fun BoxedHistoryGrid(
         // notice appears/clears) without resetting identity or moving to the first item. The
         // focused index is read via rememberUpdatedState so focus moves do not duplicate the work.
         val latestFocusedEntryIndex by rememberUpdatedState(focusedEntryIndex)
-        LaunchedEffect(maxHeight) {
+        LaunchedEffect(
+            maxHeight,
+            removalController.pendingKey,
+            removalController.succeeded,
+            focusLock.ownedKey,
+        ) {
             val index = latestFocusedEntryIndex
-            if (isTv && index >= 0) {
+            if (
+                isTv && index >= 0 && focusLock.ownedKey == null &&
+                removalController.pendingKey == null && !removalController.succeeded
+            ) {
                 withFrameNanos { }
                 revealFocusedGridItem(
                     gridState = gridState,
@@ -7124,6 +7377,85 @@ private fun BoxedHistoryGrid(
                     extraMarginPx = focusInsetPx,
                 )
             }
+        }
+        LaunchedEffect(
+            removalController.succeeded,
+            removalController.pendingKey,
+            entries,
+            removalFocusRetry,
+        ) {
+            if (!removalController.succeeded) return@LaunchedEffect
+            val removedKey = removalController.pendingKey ?: return@LaunchedEffect
+            // The old list remains presented until the owner-guarded model update lands.
+            if (entries.any { it.key == removedKey }) return@LaunchedEffect
+            // A pending category-entry handoff is superseded by the removal target. Consume it
+            // before finish() can restart the ordinary restoration effect.
+            if (focusFirstItemRequestId != 0L) {
+                onCategoryEntryFocusApplied(focusFirstItemRequestId)
+            }
+            val targetKey = removalController.focusTarget(entries.map { it.key })
+            logRecentFocus(
+                "removal update removed=$removedKey target=$targetKey keys=${entries.map { it.key }}",
+            )
+            if (targetKey == null) {
+                // The last-card path is owned by the parent category handoff. Do not report a
+                // completed focus handoff here; it must observe the category control's focus.
+                logRecentFocus("removal target null; yielding to parent empty handoff")
+                return@LaunchedEffect
+            }
+            val targetIndexAfterRemoval = entries.indexOfFirst { it.key == targetKey }
+            if (targetIndexAfterRemoval < 0) {
+                logRecentFocus("removal target missing from presented list key=$targetKey")
+                return@LaunchedEffect
+            }
+            if (gridState.layoutInfo.visibleItemsInfo.none { it.index == targetIndexAfterRemoval }) {
+                gridState.scrollToItem(targetIndexAfterRemoval)
+            }
+            snapshotFlow {
+                gridState.layoutInfo.visibleItemsInfo.any { it.index == targetIndexAfterRemoval }
+            }.first { it }
+            revealFocusedGridItem(
+                gridState = gridState,
+                index = targetIndexAfterRemoval,
+                focusInsetPx = focusInsetPx,
+                safeBottomInsetPx = safeBottomInsetPx,
+                extraMarginPx = focusInsetPx,
+            )
+            withFrameNanos { }
+            // Own the surviving key before requesting focus. The navigation observer and the
+            // ordinary restore effect both yield until a real different card receives focus.
+            focusLock.own(targetKey)
+            var focused = focusedEntryKey == targetKey
+            if (!focused) {
+                for (attempt in 0 until 8) {
+                    withFrameNanos { }
+                    val requestResult = runCatching {
+                        focusRequesters[targetKey]?.requestFocus()
+                    }.getOrDefault(false)
+                    withFrameNanos { }
+                    logRecentFocus(
+                        "removal request key=$targetKey result=$requestResult " +
+                            "observedKey=$focusedEntryKey observedIndex=$focusedEntryIndex index=$targetIndexAfterRemoval",
+                    )
+                    if (focusedEntryKey == targetKey) {
+                        focused = true
+                        break
+                    }
+                }
+            }
+            if (!focused) {
+                // Do not claim a completed handoff on a failed request. One bounded retry pass
+                // through the layout/effect owner; the shell guard still releases on KeyUp.
+                logRecentFocus(
+                    "removal focus failed key=$targetKey retry=$removalFocusRetry observedKey=$focusedEntryKey",
+                )
+                if (removalFocusRetry < 8) removalFocusRetry += 1
+                return@LaunchedEffect
+            }
+            logRecentFocus("removal focus confirmed key=$targetKey index=$targetIndexAfterRemoval")
+            navigationMemory.save(destination, targetKey, targetIndexAfterRemoval)
+            removalFocusRetry = 0
+            removalController.finish()
         }
         LazyVerticalGrid(
             state = gridState,
@@ -7143,17 +7475,11 @@ private fun BoxedHistoryGrid(
             modifier = Modifier.fillMaxSize(),
         ) {
             itemsIndexed(entries, key = { _, entry -> entry.key }) { index, entry ->
-                val restore = if (focusFirstItemRequestId != 0L) {
-                    index == 0
-                } else {
-                    remembered.itemKey == entry.key || (remembered.itemKey.isBlank() && index == targetIndex)
-                }
                 BoxedHistoryCard(
                     entry,
                     { onOpen(entry) },
                     Modifier
                         .fillMaxWidth()
-                        .restoreFocus(restore, targetRequester)
                         .then(
                             if (isTv && onMoveToCategories != null) {
                                 Modifier.onPreviewKeyEvent { event ->
@@ -7171,8 +7497,30 @@ private fun BoxedHistoryGrid(
                         ),
                     identityText = seriesHistoryIdentityText(entry).takeIf { seriesCards },
                     reserveIdentitySlot = seriesCards,
+                    focusRequester = focusRequesters.getValue(entry.key),
                     onFocused = {
+                        logRecentFocus(
+                            "card focused key=${entry.key} index=$index lock=${focusLock.ownedKey} " +
+                                "pending=${removalController.pendingKey} succeeded=${removalController.succeeded}",
+                        )
                         focusedEntryIndex = index
+                        focusedEntryKey = entry.key
+                        // A real move to a different card ends the removal-owned focus lock.
+                        focusLock.onFocused(entry.key)
+                        // If the user moves away from the intended entry target while a handoff
+                        // is still armed, the user's move wins and the handoff is consumed.
+                        val pendingEntryRequestId = focusContentRequestId.takeIf { it != 0L }
+                            ?: focusFirstItemRequestId.takeIf { it != 0L }
+                        if (pendingEntryRequestId != null) {
+                            val expectedKey = if (focusFirstItemRequestId != 0L) {
+                                entries.firstOrNull()?.key
+                            } else {
+                                remembered.itemKey
+                            }
+                            if (entry.key != expectedKey) {
+                                onCategoryEntryFocusApplied(pendingEntryRequestId)
+                            }
+                        }
                         navigationMemory.save(destination, entry.key, index)
                         if (isTv) {
                             // One bounded correction after focus settles, matching the catalog's
@@ -7194,6 +7542,21 @@ private fun BoxedHistoryGrid(
                         with(density) { heightPx.toDp() }
                     },
                     onFooterHeightMeasured = { boxedFooterHeightPx = it },
+                    onFocusLost = {
+                        if (focusedEntryKey == entry.key) focusedEntryKey = null
+                        if (focusedEntryIndex == index) focusedEntryIndex = -1
+                        logRecentFocus("card focus lost key=${entry.key} index=$index")
+                    },
+                    onRemoveRequested = { _, remote ->
+                        beginRecentHistoryRemoval(
+                            remote = remote,
+                            controller = removalController,
+                            capturedKey = entry.key,
+                            capturedKeys = entries.map { it.key },
+                            capturedTitle = historyPrimaryTitle(entry),
+                            onRemoteRemovalStarted = onRemoteRemovalStarted,
+                        )
+                    },
                 )
             }
         }
