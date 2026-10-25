@@ -10,6 +10,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
+import androidx.media3.common.VideoSize
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.DecoderCounters
 import androidx.media3.exoplayer.DecoderReuseEvaluation
@@ -22,6 +23,17 @@ import sa.hulksa.player.model.PlaybackRequest
 
 private const val HULK_PLAYER_LOG_TAG = "HulkPlayer"
 private const val AUDIO_TRACK_TRANSITION_GUARD_MS = 1_200L
+
+/** Bounded, credential-safe video color diagnostics; no stream URLs or request data. */
+private fun Format.safeColorDiagnostics(): String {
+    val info = colorInfo ?: return "none"
+    return "space=${info.colorSpace} transfer=${info.colorTransfer} range=${info.colorRange} " +
+        "hdrStatic=${info.hdrStaticInfo?.isNotEmpty() == true} " +
+        "lumaBitdepth=${info.lumaBitdepth} chromaBitdepth=${info.chromaBitdepth} " +
+        "transferHdr=${androidx.media3.common.ColorInfo.isTransferHdr(info)}"
+}
+
+private fun safeDecoderName(name: String): String = name.take(80)
 
 private data class DeferredRecovery(
     val failureClass: RecoveryFailureClass,
@@ -164,9 +176,52 @@ internal class PlayerSessionController(
                         HULK_PLAYER_LOG_TAG,
                         "first frame rendered t=${SystemClock.elapsedRealtime()} renderTimeMs=$renderTimeMs " +
                             "generation=${generation.safeLogId} streamId=${request.streamId} " +
-                            "candidate=$boundCandidateIndex",
+                            "candidate=$boundCandidateIndex output=${output.javaClass.simpleName}",
                     )
                 }
+            }
+
+            override fun onVideoInputFormatChanged(
+                eventTime: AnalyticsListener.EventTime,
+                format: Format,
+                decoderReuseEvaluation: DecoderReuseEvaluation?,
+            ) {
+                if (!accepts(player)) return
+                Log.i(
+                    HULK_PLAYER_LOG_TAG,
+                    "video format generation=${generation.safeLogId} candidate=$boundCandidateIndex " +
+                        "mime=${format.sampleMimeType.orEmpty()} container=${format.containerMimeType.orEmpty()} " +
+                        "codecs=${format.codecs.orEmpty()} size=${format.width}x${format.height} " +
+                        "frameRate=${format.frameRate} pixelRatio=${format.pixelWidthHeightRatio} " +
+                        "color=${format.safeColorDiagnostics()}",
+                )
+            }
+
+            override fun onVideoDecoderInitialized(
+                eventTime: AnalyticsListener.EventTime,
+                decoderName: String,
+                initializedTimestampMs: Long,
+                initializationDurationMs: Long,
+            ) {
+                if (!accepts(player)) return
+                Log.i(
+                    HULK_PLAYER_LOG_TAG,
+                    "video decoder generation=${generation.safeLogId} candidate=$boundCandidateIndex " +
+                        "name=${safeDecoderName(decoderName)} initMs=$initializationDurationMs",
+                )
+            }
+
+            override fun onVideoSizeChanged(
+                eventTime: AnalyticsListener.EventTime,
+                videoSize: VideoSize,
+            ) {
+                if (!accepts(player)) return
+                Log.i(
+                    HULK_PLAYER_LOG_TAG,
+                    "video size generation=${generation.safeLogId} candidate=$boundCandidateIndex " +
+                        "width=${videoSize.width} height=${videoSize.height} " +
+                        "pixelRatio=${videoSize.pixelWidthHeightRatio} unappliedRotation=${videoSize.unappliedRotationDegrees}",
+                )
             }
 
             override fun onAudioEnabled(
