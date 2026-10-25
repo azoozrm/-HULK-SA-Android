@@ -7108,6 +7108,8 @@ private fun BoxedHistoryGrid(
         )
     }
     val remembered = navigationMemory.position(destination)
+    // The existing category handoff sets focusFirstItemRequestId and therefore targets
+    // index == 0; the removal transaction below owns later stable-key focus.
     val targetIndex = if (focusFirstItemRequestId != 0L) {
         0
     } else {
