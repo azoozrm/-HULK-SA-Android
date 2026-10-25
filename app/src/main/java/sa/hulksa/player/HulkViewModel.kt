@@ -111,6 +111,7 @@ import sa.hulksa.player.security.CredentialEnvelopeRemovalException
 import sa.hulksa.player.tv.TvDeepLinkDispatchDecision
 import sa.hulksa.player.ui.screens.DownloadFeedback
 import sa.hulksa.player.ui.screens.DownloadFeedbackGlyph
+import sa.hulksa.player.ui.screens.compactHomeCatalogForHome
 import sa.hulksa.player.ui.screens.downloadAlreadyCompletedFeedback
 import sa.hulksa.player.ui.screens.downloadAlreadyQueuedFeedback
 import sa.hulksa.player.ui.screens.downloadCancelConfirmedFeedback
@@ -446,7 +447,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             val snapshot = mutableState.value
             val home = if (type == ContentType.MOVIE || type == ContentType.SERIES) {
                 withContext(Dispatchers.Default) {
-                    compactHomeCatalog(full, snapshot.favorites, snapshot.history)
+                    compactHomeCatalogForHome(full, snapshot.favorites, snapshot.history)
                 }
             } else {
                 full
@@ -745,7 +746,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             if (sourceCatalogs.isEmpty()) return@launch
             val rebuiltHomeCatalogs = withContext(Dispatchers.Default) {
                 sourceCatalogs.mapValues { (_, catalog) ->
-                    compactHomeCatalog(catalog, favorites, history)
+                    compactHomeCatalogForHome(catalog, favorites, history)
                 }
             }
             rebuiltHomeCatalogs.forEach { (type, catalog) ->
@@ -775,30 +776,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         loaded = loadedCatalogs,
         home = homeCatalogs,
     )
-
-    private fun compactHomeCatalog(
-        catalog: Catalog,
-        favorites: Set<String>,
-        history: List<HistoryEntry>,
-    ): Catalog {
-        if (catalog.items.size <= HOME_CATALOG_LIMIT) return catalog
-        val pinned = favorites + history.asSequence().map(HistoryEntry::key).toSet()
-        val retained = buildList {
-            addAll(catalog.items.filter { "${it.type.name}:${it.id}" in pinned })
-            addAll(
-                catalog.items.asSequence()
-                    .sortedByDescending { it.addedAtEpochSeconds ?: 0L }
-                    .take(HOME_RECENT_LIMIT),
-            )
-            addAll(
-                catalog.items.asSequence()
-                    .filter { it.rating?.toDoubleOrNull() != null }
-                    .sortedByDescending { it.rating?.toDoubleOrNull() ?: 0.0 }
-                    .take(HOME_RATED_LIMIT),
-            )
-        }.distinctBy { "${it.type.name}:${it.id}" }.take(HOME_CATALOG_LIMIT)
-        return catalog.copy(items = retained)
-    }
 
     private fun ensureDestinationCatalogs(destination: MainDestination) {
         catalogTypesForDestination(destination).forEach(::ensureCatalog)
@@ -3788,9 +3765,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
 
-        private const val HOME_RECENT_LIMIT = 240
-        private const val HOME_RATED_LIMIT = 120
-        private const val HOME_CATALOG_LIMIT = 320
         private const val MOVIE_CARD_PROBE_CONCURRENCY = 2
         private const val EPISODE_NOTIFICATION_SCAN_CONCURRENCY = 3
         private const val TV_PLATFORM_SYNC_DEBOUNCE_MS = 350L

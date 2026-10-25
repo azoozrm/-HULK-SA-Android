@@ -179,6 +179,7 @@ class DownloadRepository internal constructor(
     private val preferences: SharedPreferences,
     legacyOwners: (String) -> Set<String>? = { null },
     private val injectedNetworkConstraint: (() -> String?)? = null,
+    private val fileUri: (File) -> String = { file -> Uri.fromFile(file).toString() },
 ) {
     private val appContext = context.applicationContext
     private val accountScopeStore = AccountScopeStore(appContext)
@@ -222,9 +223,12 @@ class DownloadRepository internal constructor(
                 useLegacyOwnership = !storageCurrent,
                 legacyOwners = legacyOwners,
             ).toMutableList()
+            val pathReconciliation = reconcileSharedDownloadPaths(cache, fileUri)
+            val sharedPathMigration = pathReconciliation != cache
+            cache = pathReconciliation.toMutableList()
             normalizeQueueLocked()
             if (initialIndexRead.state.allowsIndexWrite()) {
-                writeStoredLocked(synchronous = !storageCurrent)
+                writeStoredLocked(synchronous = !storageCurrent || sharedPathMigration)
             }
         }
         schedule()
@@ -441,7 +445,12 @@ class DownloadRepository internal constructor(
         }
 
         val extension = safeExtension(request.extension)
-        val fileName = buildFileName(request.title, request.streamId, extension)
+        val fileName = buildDownloadFileName(
+            historyKey = request.historyKey,
+            title = request.title,
+            streamId = request.streamId,
+            extension = extension,
+        )
         val finalFile = File(target.directory, fileName)
 
         val result = synchronized(lock) {
@@ -466,7 +475,7 @@ class DownloadRepository internal constructor(
                 fileName = fileName,
                 storagePath = target.directory.absolutePath,
                 storageLabel = target.label,
-                localUri = Uri.fromFile(finalFile).toString(),
+                localUri = fileUri(finalFile),
                 status = if (scheduledAt > 0L) OfflineStatus.WAITING_SCHEDULE else OfflineStatus.QUEUED,
                 errorMessage = if (scheduledAt > 0L) "مجدول للتحميل الليلي." else null,
                 queuePosition = queuePosition,
@@ -840,7 +849,7 @@ class DownloadRepository internal constructor(
 
         val target = storageTarget(startItem) ?: throw StorageUnavailableException()
         if (!target.directory.exists() && !target.directory.mkdirs()) throw StorageUnavailableException()
-        val fileName = startItem.fileName ?: buildFileName(startItem.title, startItem.streamId, startItem.extension)
+        val fileName = safeDownloadFileNameFor(startItem)
         val finalFile = File(target.directory, fileName)
         val partFile = File(target.directory, "$fileName.part")
 
@@ -875,7 +884,7 @@ class DownloadRepository internal constructor(
                 supportsRange = probe.supportsRange,
                 totalBytes = totalBytes,
                 bytesDownloaded = existingBytes,
-                localUri = Uri.fromFile(finalFile).toString(),
+                localUri = fileUri(finalFile),
                 status = OfflineStatus.DOWNLOADING,
                 errorMessage = null,
             )
@@ -1094,7 +1103,12 @@ class DownloadRepository internal constructor(
         val current = item(downloadId) ?: return false
         val expectedBytes = current.totalBytes.takeIf { it > 0L } ?: return false
         val target = storageTarget(current) ?: return false
-        val fileName = current.fileName ?: return false
+        val fileName = current.fileName ?: buildDownloadFileName(
+            historyKey = current.historyKey,
+            title = current.title,
+            streamId = current.streamId,
+            extension = current.extension,
+        )
         val finalFile = File(target.directory, fileName)
         if (finalFile.exists() && finalFile.length() == expectedBytes) {
             markCompleted(downloadId, transportAttempt, finalFile, expectedBytes, current.supportsRange ?: false)
@@ -1233,7 +1247,7 @@ class DownloadRepository internal constructor(
                 totalBytes = bytes,
                 bytesPerSecond = 0L,
                 etaSeconds = 0L,
-                localUri = Uri.fromFile(file).toString(),
+                localUri = fileUri(file),
                 supportsRange = supportsRange,
                 errorMessage = null,
                 retryCount = 0,
@@ -1363,7 +1377,9 @@ class DownloadRepository internal constructor(
                     downloadAccountDirectoryName(accountId),
                 )
                 if (!directory.exists()) directory.mkdirs()
-                val removable = Environment.isExternalStorageRemovable(directory)
+                val removable = runCatching {
+                    Environment.isExternalStorageRemovable(directory)
+                }.getOrDefault(false)
                 StorageTarget(
                     directory = directory,
                     label = when {
@@ -1401,12 +1417,12 @@ class DownloadRepository internal constructor(
             files += File(storage, name)
             files += File(storage, "$name.part")
         }
-        return files.all(::deleteDownloadFileIfPresent)
+        return files
+            .filterNot { downloadPathIsOwnedByAnotherRecord(cache, item, it) }
+            .all(::deleteDownloadFileIfPresent)
     }
 
-    private fun fileFromUri(uri: String): File? = runCatching {
-        if (uri.startsWith("file:")) Uri.parse(uri).path?.let(::File) else null
-    }.getOrNull()
+    private fun fileFromUri(uri: String): File? = downloadFilePathFromUri(uri)?.let(::File)
 
     private fun ensureTransportAttemptCurrent(
         attempt: DownloadTransportAttemptRegistry.Attempt,
@@ -1585,14 +1601,22 @@ class DownloadRepository internal constructor(
         .take(8)
         .ifBlank { "mp4" }
 
-    private fun buildFileName(title: String, streamId: Int, extension: String): String {
-        val safeTitle = title
-            .replace(Regex("[^\\p{L}\\p{N}._ -]+"), "")
-            .trim()
-            .replace(Regex("\\s+"), "_")
-            .take(96)
-            .ifBlank { "hulk_content" }
-        return "${safeTitle}_$streamId.$extension"
+    private fun safeDownloadFileNameFor(item: OfflineDownload): String {
+        val configured = item.fileName?.trim()?.takeIf(String::isNotEmpty)
+        val storage = item.storagePath?.trim()?.takeIf(String::isNotEmpty)
+        if (
+            configured != null &&
+            storage != null &&
+            !downloadPathIsOwnedByAnotherRecord(cache, item, File(storage, configured))
+        ) {
+            return configured
+        }
+        return buildDownloadFileName(
+            historyKey = item.historyKey,
+            title = item.title,
+            streamId = item.streamId,
+            extension = item.extension,
+        )
     }
 
     private fun formatBytes(bytes: Long): String {

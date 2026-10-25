@@ -32,7 +32,9 @@ import sa.hulksa.player.model.SeriesBundle
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-class XtreamClient {
+class XtreamClient(
+    private val nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1_000L },
+) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -52,6 +54,7 @@ class XtreamClient {
         val expires = user.optNullableString("exp_date")
             ?.toLongOrNull()
             ?.takeIf { it > 0L }
+        requireUnexpiredAccountSession(expires, nowEpochSeconds())
         val account = AccountInfo(
             username = user.optString("username", credentials.username),
             status = status.ifEmpty { "Active" },

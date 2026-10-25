@@ -23,8 +23,17 @@ sealed interface OperationsFetchResult {
 
 class OperationsClient(
     private val endpoint: String = BuildConfig.OPERATIONS_CONFIG_URL,
-    private val client: OkHttpClient = defaultOperationsHttpClient(),
+    client: OkHttpClient = defaultOperationsHttpClient(),
 ) {
+    /**
+     * Operations configuration is fetched from one pinned HTTPS URL. A caller-injected client must
+     * not be able to turn that fetch into a redirect-following request to another destination.
+     */
+    private val effectiveClient: OkHttpClient = client.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
+
     suspend fun fetch(): OperationsFetchResult = withContext(Dispatchers.IO) {
         val parsedEndpoint = runCatching { URI(endpoint) }.getOrNull()
         if (
@@ -43,8 +52,10 @@ class OperationsClient(
                 .header("Accept", "application/json")
                 .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} Operations")
                 .build()
-            client.executeCancellable(request) { response ->
-                if (!response.isSuccessful) return@executeCancellable OperationsFetchResult.Failure
+            effectiveClient.executeCancellable(request) { response ->
+                if (response.code in 300..399 || !response.isSuccessful) {
+                    return@executeCancellable OperationsFetchResult.Failure
+                }
                 val body = response.body ?: return@executeCancellable OperationsFetchResult.Failure
                 val contentLength = body.contentLength()
                 if (contentLength > MAX_CONFIG_BYTES) return@executeCancellable OperationsFetchResult.Failure

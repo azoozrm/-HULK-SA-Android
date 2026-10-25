@@ -230,6 +230,19 @@ internal fun isAccountSessionExpired(
 ): Boolean = expiresAtEpochSeconds != null && expiresAtEpochSeconds > 0L &&
     nowEpochSeconds >= expiresAtEpochSeconds
 
+/**
+ * Single expiry gate for fresh authentication, refresh/restore and deferred identity decisions.
+ * Missing, zero and non-positive expiry values keep the provider's unlimited semantics.
+ */
+internal fun requireUnexpiredAccountSession(
+    expiresAtEpochSeconds: Long?,
+    nowEpochSeconds: Long,
+) {
+    if (isAccountSessionExpired(expiresAtEpochSeconds, nowEpochSeconds)) {
+        throw XtreamException.SubscriptionInactive
+    }
+}
+
 internal const val SUBSCRIPTION_RESUME_REVALIDATION_INTERVAL_MS = 10 * 60_000L
 
 /**
@@ -438,6 +451,10 @@ class AccountSessionStore internal constructor(
         accountId: String,
         trustHost: Boolean = true,
     ): AccountSessionMetadata {
+        requireUnexpiredAccountSession(
+            expiresAtEpochSeconds = session.account.expiresAtEpochSeconds,
+            nowEpochSeconds = System.currentTimeMillis() / 1_000L,
+        )
         val username = session.credentials.username.trim()
         val normalizedAccountId = accountId.trim().takeIf(String::isNotBlank)
             ?: throw IllegalArgumentException("Authenticated accountId must not be blank")
