@@ -275,6 +275,29 @@ private enum class NotificationScanTrigger(val minimumAgeMs: Long) {
     MASTER_REENABLE(0L),
 }
 
+internal fun pendingEpisodeNotificationPopup(
+    notificationUiReady: Boolean,
+    currentPopup: EpisodeNotificationPopup?,
+    episodeNotificationsEnabled: Boolean,
+    operationsEpisodeNotificationsEnabled: Boolean,
+    screen: HulkScreen,
+    activeProfileId: String,
+    notifications: List<LocalEpisodeNotification>,
+): EpisodeNotificationPopup? {
+    if (
+        !notificationUiReady ||
+        currentPopup != null ||
+        !episodeNotificationsEnabled ||
+        !operationsEpisodeNotificationsEnabled ||
+        screen == HulkScreen.PLAYER ||
+        screen == HulkScreen.LOGIN ||
+        screen == HulkScreen.NOTIFICATION_CENTER
+    ) return null
+    return buildEpisodeNotificationPopups(notifications)
+        .firstOrNull()
+        ?.takeIf { it.profileId == activeProfileId }
+}
+
 private fun Application.isTelevisionDevice(): Boolean {
     val uiMode = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
     return uiMode?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
@@ -2698,22 +2721,19 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun maybeShowPendingNotificationPopup() {
         val state = mutableState.value
-        if (
-            !notificationUiReady ||
-            state.notificationPopup != null ||
-            !state.episodeNotificationsEnabled ||
-            !state.operations.features.episodeNotificationsEnabled ||
-            state.screen == HulkScreen.PLAYER ||
-            state.screen == HulkScreen.LOGIN ||
-            state.screen == HulkScreen.NOTIFICATION_CENTER
-        ) return
-        val profileId = profileStore.activeProfileId()
         val episodeNotifications = state.localNotifications.mapNotNull { item ->
             (item as? LocalNotificationItem.Episode)?.notification
         }
-        val popup = buildEpisodeNotificationPopups(episodeNotifications).firstOrNull()
-            ?.takeIf { it.profileId == profileId }
-            ?: return
+        val popup = pendingEpisodeNotificationPopup(
+            notificationUiReady = notificationUiReady,
+            currentPopup = state.notificationPopup,
+            episodeNotificationsEnabled = state.episodeNotificationsEnabled,
+            operationsEpisodeNotificationsEnabled =
+                state.operations.features.episodeNotificationsEnabled,
+            screen = state.screen,
+            activeProfileId = profileStore.activeProfileId(),
+            notifications = episodeNotifications,
+        ) ?: return
         mutableState.update { it.copy(notificationPopup = popup) }
     }
 
