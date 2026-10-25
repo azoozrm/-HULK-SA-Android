@@ -232,9 +232,12 @@ private class HulkColorSafeVideoRenderer(
     eventListener,
     DefaultRenderersFactory.MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY,
 ) {
+    private var forceSoftwareVideoDecoder = false
+
     override fun onInputFormatChanged(formatHolder: FormatHolder): DecoderReuseEvaluation? {
         val current = formatHolder.format
         if (current != null) {
+            forceSoftwareVideoDecoder = isAmbiguousSdrVideoColor(current)
             val normalized = normalizeAmbiguousSdrVideoColor(current)
             if (normalized !== current) {
                 Log.i(
@@ -242,27 +245,52 @@ private class HulkColorSafeVideoRenderer(
                     "video color normalized mime=${current.sampleMimeType.orEmpty()} " +
                         "codecs=${current.codecs.orEmpty()} size=${current.width}x${current.height} " +
                         "from=space:${current.colorInfo?.colorSpace} transfer:${current.colorInfo?.colorTransfer} " +
-                        "to=space:${C.COLOR_SPACE_BT709} transfer:${C.COLOR_TRANSFER_SDR}",
+                        "to=space:${C.COLOR_SPACE_BT709} transfer:${C.COLOR_TRANSFER_SDR} " +
+                        "decoderPath=SOFTWARE_COMPAT",
                 )
                 formatHolder.format = normalized
             }
         }
         return super.onInputFormatChanged(formatHolder)
     }
+
+    override fun getDecoderInfos(
+        selector: MediaCodecSelector,
+        format: Format,
+        requiresSecureDecoder: Boolean,
+    ): List<MediaCodecInfo> {
+        val decoders = super.getDecoderInfos(selector, format, requiresSecureDecoder)
+        if (!forceSoftwareVideoDecoder) return decoders
+        val software = decoders.filter { it.softwareOnly }
+        if (software.isEmpty()) return decoders
+        Log.i(
+            "HulkPlayerFactory",
+            "video decoder path=SOFTWARE_COMPAT mime=${format.sampleMimeType.orEmpty()} " +
+                "size=${format.width}x${format.height} candidates=${software.size}",
+        )
+        return software
+    }
 }
 
-internal fun normalizeAmbiguousSdrVideoColor(format: Format): Format {
-    val info = format.colorInfo ?: return format
-    if (format.sampleMimeType != MimeTypes.VIDEO_H264) return format
-    if (info.colorSpace != C.COLOR_SPACE_BT2020) return format
-    if (info.colorTransfer >= 0) return format
-    if (info.hdrStaticInfo?.isNotEmpty() == true) return format
-    if (ColorInfo.isTransferHdr(info)) return format
-    if (info.lumaBitdepth > 8) return format
-    return format.buildUpon()
-        .setColorInfo(ColorInfo.SDR_BT709_LIMITED)
-        .build()
+internal fun isAmbiguousSdrVideoColor(format: Format): Boolean {
+    val info = format.colorInfo ?: return false
+    if (format.sampleMimeType != MimeTypes.VIDEO_H264) return false
+    if (info.colorSpace != C.COLOR_SPACE_BT2020) return false
+    if (info.colorTransfer >= 0) return false
+    if (info.hdrStaticInfo?.isNotEmpty() == true) return false
+    if (ColorInfo.isTransferHdr(info)) return false
+    if (info.lumaBitdepth > 8) return false
+    return true
 }
+
+internal fun normalizeAmbiguousSdrVideoColor(format: Format): Format =
+    if (isAmbiguousSdrVideoColor(format)) {
+        format.buildUpon()
+            .setColorInfo(ColorInfo.SDR_BT709_LIMITED)
+            .build()
+    } else {
+        format
+    }
 
 private object AudioOnlySoftwareFirstCodecSelector : MediaCodecSelector {
     override fun getDecoderInfos(
