@@ -13,10 +13,14 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import sa.hulksa.player.HulkScreen
+import sa.hulksa.player.HulkUiState
+import sa.hulksa.player.finishExpiredOwnerFailure
 import sa.hulksa.player.model.AccountInfo
 import sa.hulksa.player.model.AuthenticatedSession
 import sa.hulksa.player.model.Credentials
 import sa.hulksa.player.model.PortalConfig
+import sa.hulksa.player.security.CredentialEnvelopeRemovalException
 
 class SessionPublicationGateTest {
     @Before
@@ -136,6 +140,7 @@ class SessionPublicationGateTest {
         var visibleStateReset = false
         val cleanupGate = SessionOwnershipCleanupGate(
             ownershipEpoch = { epoch },
+            currentOwner = { null },
             logoutIfOwnedBy = {
                 cleanupEntered.complete(Unit)
                 releaseCleanup.await()
@@ -154,7 +159,7 @@ class SessionPublicationGateTest {
         epoch += 1 // a newer session publishes while cleanup is delayed
         releaseCleanup.complete(Unit)
 
-        assertFalse(cleanup.await())
+        assertEquals(SessionOwnershipCleanupResult.Stale, cleanup.await())
         assertFalse("B's visible state must not be reset", visibleStateReset)
     }
 
@@ -164,11 +169,13 @@ class SessionPublicationGateTest {
         var resets = 0
         val cleanupGate = SessionOwnershipCleanupGate(
             ownershipEpoch = { epoch },
+            currentOwner = { null },
             logoutIfOwnedBy = { true },
         )
         val expectedOwner = owner(session(expiry = 2_000L), sessionId = "session-a")
 
-        assertTrue(
+        assertEquals(
+            SessionOwnershipCleanupResult.Cleared,
             cleanupGate.clearIfOwnerStillCurrent(expectedOwner) {
                 resets += 1
                 epoch += 1
@@ -177,6 +184,74 @@ class SessionPublicationGateTest {
 
         assertEquals(1, resets)
         assertEquals(1L, epoch)
+    }
+
+    @Test
+    fun `credential removal failure is surfaced while owner state remains intact`() = runBlocking {
+        var epoch = 0L
+        val expectedOwner = owner(session(expiry = 2_000L), sessionId = "session-a")
+        var currentOwner: AuthenticatedSessionOwner? = expectedOwner
+        val removalFailure = CredentialEnvelopeRemovalException()
+        var visibleStateReset = false
+        val cleanupGate = SessionOwnershipCleanupGate(
+            ownershipEpoch = { epoch },
+            currentOwner = { currentOwner },
+            logoutIfOwnedBy = { throw removalFailure },
+        )
+
+        val result = cleanupGate.clearIfOwnerStillCurrent(expectedOwner) {
+            visibleStateReset = true
+        }
+
+        assertEquals(SessionOwnershipCleanupResult.CredentialRemovalFailed(removalFailure), result)
+        assertFalse(visibleStateReset)
+        assertEquals(expectedOwner, currentOwner)
+        assertEquals(0L, epoch)
+    }
+
+    @Test
+    fun `credential removal failure after newer owner becomes stale`() = runBlocking {
+        var epoch = 0L
+        val expectedOwner = owner(session(expiry = 2_000L), sessionId = "session-a")
+        val newerOwner = owner(session(expiry = 9_000L, username = "newer"), sessionId = "session-b")
+        var currentOwner: AuthenticatedSessionOwner? = expectedOwner
+        val cleanupGate = SessionOwnershipCleanupGate(
+            ownershipEpoch = { epoch },
+            currentOwner = { currentOwner },
+            logoutIfOwnedBy = {
+                currentOwner = newerOwner
+                epoch += 1
+                throw CredentialEnvelopeRemovalException()
+            },
+        )
+
+        val result = cleanupGate.clearIfOwnerStillCurrent(expectedOwner) {
+            error("visible state must not be reset")
+        }
+
+        assertEquals(SessionOwnershipCleanupResult.Stale, result)
+        assertEquals(newerOwner, currentOwner)
+    }
+
+    @Test
+    fun `expired failure transition clears busy state without replacing account state`() {
+        val existing = HulkUiState(
+            screen = HulkScreen.MAIN,
+            isStarting = true,
+            isLoading = true,
+            isAccountRefreshing = true,
+            errorMessage = null,
+            account = AccountInfo("owner", "Active", 9_000L, 0, 1, false),
+        )
+
+        val updated = existing.finishExpiredOwnerFailure("credential removal failed")
+
+        assertFalse(updated.isStarting)
+        assertFalse(updated.isLoading)
+        assertFalse(updated.isAccountRefreshing)
+        assertEquals("credential removal failed", updated.errorMessage)
+        assertEquals(HulkScreen.MAIN, updated.screen)
+        assertEquals(existing.account, updated.account)
     }
 
     @Test

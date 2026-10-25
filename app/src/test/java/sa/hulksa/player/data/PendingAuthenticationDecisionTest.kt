@@ -157,6 +157,37 @@ class PendingAuthenticationDecisionTest {
     }
 
     @Test
+    fun `credential removal failure is surfaced by the real owner-bound cleanup`() = runBlocking {
+        fixture.installCurrentA()
+        val owner = checkNotNull(AuthenticatedSessionRegistry.currentOwner())
+        fixture.envelopePreferences.commitResult = false
+        var visibleStateReset = false
+        val cleanupGate = SessionOwnershipCleanupGate(
+            ownershipEpoch = { 0L },
+            currentOwner = { AuthenticatedSessionRegistry.currentOwner() },
+            logoutIfOwnedBy = fixture.repository::logoutIfOwnedBy,
+        )
+
+        val result = cleanupGate.clearIfOwnerStillCurrent(owner) {
+            visibleStateReset = true
+        }
+
+        assertTrue(result is SessionOwnershipCleanupResult.CredentialRemovalFailed)
+        assertFalse(visibleStateReset)
+        assertEquals(owner.sessionId, AuthenticatedSessionRegistry.currentOwner()?.sessionId)
+        assertEquals("account-a", fixture.store.metadata()?.accountId)
+        assertEquals("account-a", fixture.store.activeAccountId())
+        assertEquals(
+            "synthetic-a-iv",
+            fixture.envelopePreferences.durableValue(CredentialVault.KEY_IV),
+        )
+        assertEquals(
+            "synthetic-a-payload",
+            fixture.envelopePreferences.durableValue(CredentialVault.KEY_PAYLOAD),
+        )
+    }
+
+    @Test
     fun `owner-scoped cleanup clears the current expired owner`() = runBlocking {
         fixture.installCurrentA()
         val owner = checkNotNull(AuthenticatedSessionRegistry.currentOwner())

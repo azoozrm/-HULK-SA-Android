@@ -38,6 +38,7 @@ import sa.hulksa.player.data.DownloadRepository
 import sa.hulksa.player.data.EpisodeNotificationPopup
 import sa.hulksa.player.data.EpisodeNotificationSubscription
 import sa.hulksa.player.data.SessionOwnershipCleanupGate
+import sa.hulksa.player.data.SessionOwnershipCleanupResult
 import sa.hulksa.player.data.SessionPublicationGate
 import sa.hulksa.player.data.SessionPublicationResult
 import sa.hulksa.player.data.EpisodeNotificationStoreResult
@@ -222,6 +223,13 @@ data class HulkUiState(
     companion object {
     }
 }
+
+internal fun HulkUiState.finishExpiredOwnerFailure(message: String?): HulkUiState = copy(
+    isStarting = false,
+    isLoading = false,
+    isAccountRefreshing = false,
+    errorMessage = message,
+)
 
 /**
  * UI-safe ambiguity options. Keys are opaque positional tokens; accountIds and credentials never
@@ -434,6 +442,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val sessionPublicationGate = SessionPublicationGate()
     private val sessionCleanupGate = SessionOwnershipCleanupGate(
         ownershipEpoch = { sessionOwnershipEpoch },
+        currentOwner = { AuthenticatedSessionRegistry.currentOwner() },
         logoutIfOwnedBy = repository::logoutIfOwnedBy,
     )
     private val diagnosticsCoordinator = DiagnosticsCoordinator()
@@ -2791,8 +2800,17 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                             onResult("تم تحديث بيانات الاشتراك من السيرفر.")
                         }
                         SessionPublicationResult.Expired -> {
-                            if (handleExpiredOwner(expectedOwner)) {
-                                onResult("تعذر تحديث الاشتراك. اعد تسجيل الدخول")
+                            when (val cleanup = handleExpiredOwner(expectedOwner)) {
+                                SessionOwnershipCleanupResult.Cleared -> {
+                                    onResult("تعذر تحديث الاشتراك. اعد تسجيل الدخول")
+                                }
+                                is SessionOwnershipCleanupResult.CredentialRemovalFailed -> {
+                                    onResult(
+                                        cleanup.error.message
+                                            ?: "تعذر إزالة بيانات الجلسة. حاول مرة اخرى.",
+                                    )
+                                }
+                                SessionOwnershipCleanupResult.Stale -> Unit
                             }
                         }
                         SessionPublicationResult.Stale -> Unit
@@ -3333,7 +3351,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         when (publication) {
             is SessionPublicationResult.Published -> Unit
             SessionPublicationResult.Expired -> {
-                handleExpiredOwner(expectedOwner)
+                handleExpiredOwner(
+                    expectedOwner = expectedOwner,
+                    attemptCurrent = { authenticationAttemptGate.isCurrent(attemptGeneration) },
+                )
                 return
             }
             SessionPublicationResult.Stale -> return
@@ -3351,38 +3372,52 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
      * session/credential/scope mutation, then resets visible state only if no newer publication
      * happened while cleanup was in flight.
      */
-    private suspend fun handleExpiredOwner(expectedOwner: AuthenticatedSessionOwner?): Boolean {
-        if (expectedOwner == null) return false
-        return try {
-            sessionCleanupGate.clearIfOwnerStillCurrent(expectedOwner) {
-                sessionOwnershipEpoch += 1
-                session = null
-                sessionRestorationComplete = true
-                invalidateAccountRefresh()
-                invalidateCatalogRequests()
-                clearCatalogMemory()
-                invalidateDetailsRequest()
-                invalidateDiagnosticsForSessionChange()
-                invalidatePlayerProgressPersistence()
-                downloadSettingsMutationGate.invalidate()
-                downloadSnapshotPublicationGate.invalidate()
-                downloadPrimaryActionDispatcher.invalidate()
-                downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
-                downloadPriorityMutationQueues.clear()
-                presenceLifecycleOwner.logout()
-                val state = mutableState.value
-                mutableState.value = HulkUiState(
-                    isStarting = false,
-                    downloads = emptyList(),
-                    downloadSettings = state.downloadSettings,
-                    operations = state.operations,
-                    pairing = state.pairing,
-                    errorMessage = XtreamException.SubscriptionInactive.message,
+    private suspend fun handleExpiredOwner(
+        expectedOwner: AuthenticatedSessionOwner?,
+        attemptCurrent: () -> Boolean = { true },
+    ): SessionOwnershipCleanupResult {
+        if (expectedOwner == null || !attemptCurrent()) {
+            return SessionOwnershipCleanupResult.Stale
+        }
+        val result = sessionCleanupGate.clearIfOwnerStillCurrent(expectedOwner) {
+            sessionOwnershipEpoch += 1
+            session = null
+            sessionRestorationComplete = true
+            invalidateAccountRefresh()
+            invalidateCatalogRequests()
+            clearCatalogMemory()
+            invalidateDetailsRequest()
+            invalidateDiagnosticsForSessionChange()
+            invalidatePlayerProgressPersistence()
+            downloadSettingsMutationGate.invalidate()
+            downloadSnapshotPublicationGate.invalidate()
+            downloadPrimaryActionDispatcher.invalidate()
+            downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
+            downloadPriorityMutationQueues.clear()
+            presenceLifecycleOwner.logout()
+            val state = mutableState.value
+            mutableState.value = HulkUiState(
+                isStarting = false,
+                downloads = emptyList(),
+                downloadSettings = state.downloadSettings,
+                operations = state.operations,
+                pairing = state.pairing,
+                errorMessage = XtreamException.SubscriptionInactive.message,
+            )
+        }
+        if (
+            result is SessionOwnershipCleanupResult.CredentialRemovalFailed &&
+            attemptCurrent()
+        ) {
+            mutableState.update { state ->
+                state.finishExpiredOwnerFailure(
+                    result.error.message ?: "تعذر إزالة بيانات الجلسة. حاول مرة اخرى.",
                 )
             }
-        } catch (_: CredentialEnvelopeRemovalException) {
-            false
+        } else if (result is SessionOwnershipCleanupResult.CredentialRemovalFailed) {
+            return SessionOwnershipCleanupResult.Stale
         }
+        return result
     }
 
     private suspend fun publishPresenceOwnership(authenticated: AuthenticatedSession) {
