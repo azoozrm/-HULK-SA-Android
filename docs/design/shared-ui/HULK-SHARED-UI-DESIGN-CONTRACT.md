@@ -668,6 +668,25 @@ carry the full reserved band. This supersedes only the fixed-copy-height assumpt
   hero item within the existing Home scrolling owner; no second scroll/focus owner, clipping,
   hidden buttons, universal font shrink or synthetic metadata is introduced.
 
+### 12.8 Movies/Series Recent removal ownership (2026-10-25)
+
+The shell-level select-gesture ownership proven by Home and Favorites now also protects the
+Movies and Series `اخر مشاهدة` grids. This is a removal/focus correction; history keys, deletion
+semantics and persistence are unchanged.
+
+- One physical hold removes exactly one captured stable history key. The shell guard is armed
+  before the parent-owned mutation, consumes every remaining select-key repeat and the final
+  KeyUp, survives card/grid/last-item disposal and releases only on the real release.
+- The grid waits for the owner-guarded updated list, then focuses the next surviving stable key or
+  the nearest previous one, preserving the grid's scroll ownership. When no card remains, the
+  selected Recent/category control receives focus through the existing category-focus owner; the
+  held input cannot activate Refresh or another control.
+- The ordinary navigation-memory restoration effect yields to the removal transaction. The
+  existing `تمت ازالة المشاهدة` notice is posted once only after the authoritative success result.
+  Failed, stale or rejected operations post nothing.
+- Short press still opens the card. Touch long-press uses the same one-key controller and does not
+  create a second post-long-press click. Home and Favorites removal behavior is unchanged.
+
 ## 13. Login / Who's Watching / entry-subflows adoption record (2026-10-11)
 
 The owner accepted the R03 Login model (`HULK-SA-LOGIN-PROFILES-DESIGN-R03.zip`, SHA-256

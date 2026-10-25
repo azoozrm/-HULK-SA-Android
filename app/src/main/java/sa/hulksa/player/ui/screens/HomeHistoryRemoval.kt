@@ -102,6 +102,23 @@ internal class HomeRemovalInputGuard {
     }
 }
 
+/**
+ * Arms the shell select guard before a Movies/Series Recent removal reaches the authoritative
+ * mutation. The guard survives disposal of the card, grid and last item; the controller keeps the
+ * captured stable key and its pre-removal order. This is the same transaction shape used by Home.
+ */
+internal fun beginRecentHistoryRemoval(
+    remote: Boolean,
+    controller: HomeHistoryRemovalController,
+    capturedKey: String,
+    capturedKeys: List<String>,
+    onRemoteRemovalStarted: () -> Unit,
+): Boolean {
+    if (controller.pendingKey != null) return false
+    if (remote) onRemoteRemovalStarted()
+    return controller.begin(capturedKey, capturedKeys)
+}
+
 /** A single pending handoff of focus after the Continue Watching row empties. */
 internal data class HomeEmptyRowFocusRequest(val id: Long)
 
