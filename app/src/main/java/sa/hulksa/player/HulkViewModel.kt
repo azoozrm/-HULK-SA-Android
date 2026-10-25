@@ -37,6 +37,10 @@ import sa.hulksa.player.data.DownloadPrimaryActionDispatcher
 import sa.hulksa.player.data.DownloadRepository
 import sa.hulksa.player.data.EpisodeNotificationPopup
 import sa.hulksa.player.data.EpisodeNotificationSubscription
+import sa.hulksa.player.data.SessionOwnershipCleanupGate
+import sa.hulksa.player.data.SessionOwnershipCleanupResult
+import sa.hulksa.player.data.SessionPublicationGate
+import sa.hulksa.player.data.SessionPublicationResult
 import sa.hulksa.player.data.EpisodeNotificationStoreResult
 import sa.hulksa.player.data.FavoriteMutationGate
 import sa.hulksa.player.data.FavoriteMutationOutcome
@@ -111,6 +115,7 @@ import sa.hulksa.player.security.CredentialEnvelopeRemovalException
 import sa.hulksa.player.tv.TvDeepLinkDispatchDecision
 import sa.hulksa.player.ui.screens.DownloadFeedback
 import sa.hulksa.player.ui.screens.DownloadFeedbackGlyph
+import sa.hulksa.player.ui.screens.compactHomeCatalogForHome
 import sa.hulksa.player.ui.screens.downloadAlreadyCompletedFeedback
 import sa.hulksa.player.ui.screens.downloadAlreadyQueuedFeedback
 import sa.hulksa.player.ui.screens.downloadCancelConfirmedFeedback
@@ -218,6 +223,13 @@ data class HulkUiState(
     companion object {
     }
 }
+
+internal fun HulkUiState.finishExpiredOwnerFailure(message: String?): HulkUiState = copy(
+    isStarting = false,
+    isLoading = false,
+    isAccountRefreshing = false,
+    errorMessage = message,
+)
 
 /**
  * UI-safe ambiguity options. Keys are opaque positional tokens; accountIds and credentials never
@@ -427,6 +439,12 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         onState = { pairing -> mutableState.update { it.copy(pairing = pairing) } },
     )
     private val accountRefreshCoordinator = AccountRefreshCoordinator()
+    private val sessionPublicationGate = SessionPublicationGate()
+    private val sessionCleanupGate = SessionOwnershipCleanupGate(
+        ownershipEpoch = { sessionOwnershipEpoch },
+        currentOwner = { AuthenticatedSessionRegistry.currentOwner() },
+        logoutIfOwnedBy = repository::logoutIfOwnedBy,
+    )
     private val diagnosticsCoordinator = DiagnosticsCoordinator()
     private val profileLibraryStartupGate = ProfileLibraryStartupGate()
     private val detailsRequestGate = DetailsRequestGate()
@@ -436,6 +454,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val downloadPriorityMutationQueues = mutableMapOf<Long, DownloadPriorityMutationQueue>()
     private var loginJob: Job? = null
     private var logoutJob: Job? = null
+    private var sessionOwnershipEpoch = 0L
     private var pendingAccountDecision: PendingAccountDecision? = null
     private val loadedCatalogs = mutableMapOf<ContentType, Catalog>()
     private val homeCatalogs = mutableMapOf<ContentType, Catalog>()
@@ -446,7 +465,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             val snapshot = mutableState.value
             val home = if (type == ContentType.MOVIE || type == ContentType.SERIES) {
                 withContext(Dispatchers.Default) {
-                    compactHomeCatalog(full, snapshot.favorites, snapshot.history)
+                    compactHomeCatalogForHome(full, snapshot.favorites, snapshot.history)
                 }
             } else {
                 full
@@ -745,7 +764,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             if (sourceCatalogs.isEmpty()) return@launch
             val rebuiltHomeCatalogs = withContext(Dispatchers.Default) {
                 sourceCatalogs.mapValues { (_, catalog) ->
-                    compactHomeCatalog(catalog, favorites, history)
+                    compactHomeCatalogForHome(catalog, favorites, history)
                 }
             }
             rebuiltHomeCatalogs.forEach { (type, catalog) ->
@@ -775,30 +794,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         loaded = loadedCatalogs,
         home = homeCatalogs,
     )
-
-    private fun compactHomeCatalog(
-        catalog: Catalog,
-        favorites: Set<String>,
-        history: List<HistoryEntry>,
-    ): Catalog {
-        if (catalog.items.size <= HOME_CATALOG_LIMIT) return catalog
-        val pinned = favorites + history.asSequence().map(HistoryEntry::key).toSet()
-        val retained = buildList {
-            addAll(catalog.items.filter { "${it.type.name}:${it.id}" in pinned })
-            addAll(
-                catalog.items.asSequence()
-                    .sortedByDescending { it.addedAtEpochSeconds ?: 0L }
-                    .take(HOME_RECENT_LIMIT),
-            )
-            addAll(
-                catalog.items.asSequence()
-                    .filter { it.rating?.toDoubleOrNull() != null }
-                    .sortedByDescending { it.rating?.toDoubleOrNull() ?: 0.0 }
-                    .take(HOME_RATED_LIMIT),
-            )
-        }.distinctBy { "${it.type.name}:${it.id}" }.take(HOME_CATALOG_LIMIT)
-        return catalog.copy(items = retained)
-    }
 
     private fun ensureDestinationCatalogs(destination: MainDestination) {
         catalogTypesForDestination(destination).forEach(::ensureCatalog)
@@ -2778,22 +2773,48 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 is AccountRefreshOutcome.Success -> {
                     accountRefreshJob = null
                     val refreshed = outcome.value
-                    invalidateDiagnosticsForSessionChange()
-                    invalidatePlayerProgressPersistence()
-                    session = refreshed
-                    mutableState.update {
-                        it.copy(
-                            account = refreshed.account,
-                            isAccountRefreshing = false,
-                            errorMessage = null,
-                        )
+                    val expectedOwner = AuthenticatedSessionRegistry.currentOwner()
+                    val publication = sessionPublicationGate.publishIfCurrent(
+                        authenticated = refreshed,
+                        expectedOwner = expectedOwner,
+                    ) {
+                        invalidateDiagnosticsForSessionChange()
+                        invalidatePlayerProgressPersistence()
+                        sessionOwnershipEpoch += 1
+                        session = refreshed
+                        mutableState.update {
+                            it.copy(
+                                account = refreshed.account,
+                                isAccountRefreshing = false,
+                                errorMessage = null,
+                            )
+                        }
                     }
-                    catalogRequestOwner.replaceSession(
-                        session = refreshed,
-                        requiredTypes = catalogTypesForDestination(mutableState.value.destination),
-                    )
-                    publishPresenceOwnership(refreshed)
-                    onResult("تم تحديث بيانات الاشتراك من السيرفر.")
+                    when (publication) {
+                        is SessionPublicationResult.Published -> {
+                            catalogRequestOwner.replaceSession(
+                                session = refreshed,
+                                requiredTypes = catalogTypesForDestination(mutableState.value.destination),
+                            )
+                            publishPresenceOwnership(refreshed)
+                            onResult("تم تحديث بيانات الاشتراك من السيرفر.")
+                        }
+                        SessionPublicationResult.Expired -> {
+                            when (val cleanup = handleExpiredOwner(expectedOwner)) {
+                                SessionOwnershipCleanupResult.Cleared -> {
+                                    onResult("تعذر تحديث الاشتراك. اعد تسجيل الدخول")
+                                }
+                                is SessionOwnershipCleanupResult.CredentialRemovalFailed -> {
+                                    onResult(
+                                        cleanup.error.message
+                                            ?: "تعذر إزالة بيانات الجلسة. حاول مرة اخرى.",
+                                    )
+                                }
+                                SessionOwnershipCleanupResult.Stale -> Unit
+                            }
+                        }
+                        SessionPublicationResult.Stale -> Unit
+                    }
                 }
                 is AccountRefreshOutcome.Failure -> {
                     accountRefreshJob = null
@@ -3001,6 +3022,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     downloadRepository.suspendActiveAccountForLogout()
                 }
                 repository.logout()
+                sessionOwnershipEpoch += 1
                 session = null
                 sessionRestorationComplete = true
                 mutableState.update {
@@ -3150,7 +3172,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             when (val outcome = repository.beginAuthentication(credentials, remember)) {
                 is AuthenticationStartResult.Completed -> {
                     if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return false
-                    completeAuthenticatedLogin(outcome.session)
+                    completeAuthenticatedLogin(
+                        authenticated = outcome.session,
+                        expectedOwner = AuthenticatedSessionRegistry.currentOwner(),
+                        attemptGeneration = attemptGeneration,
+                    )
                     return false
                 }
                 is AuthenticationStartResult.DecisionRequired -> {
@@ -3210,9 +3236,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 mutableState.update {
                     it.copy(accountDecision = null, isLoading = false, isStarting = false)
                 }
-                viewModelScope.launch {
+                loginJob = viewModelScope.launch {
                     try {
-                        repository.abandonPendingAuthentication()
+                        repository.abandonPendingAuthentication(pending.outcome)
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (error: CredentialEnvelopeRemovalException) {
@@ -3243,7 +3269,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 mutableState.update {
                     it.copy(accountDecision = null, isLoading = true, errorMessage = null)
                 }
-                viewModelScope.launch {
+                loginJob = viewModelScope.launch {
                     try {
                         val authenticated = repository.completeAuthenticationDecision(
                             pending = pending.outcome,
@@ -3251,7 +3277,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                             remember = pending.remember,
                         )
                         if (authenticationAttemptGate.isCurrent(pending.generation)) {
-                            completeAuthenticatedLogin(authenticated)
+                            completeAuthenticatedLogin(
+                                authenticated = authenticated,
+                                expectedOwner = AuthenticatedSessionRegistry.currentOwner(),
+                                attemptGeneration = pending.generation,
+                            )
                         }
                     } catch (cancelled: CancellationException) {
                         throw cancelled
@@ -3271,7 +3301,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun completeAuthenticatedLogin(authenticated: AuthenticatedSession) {
+    private suspend fun completeAuthenticatedLogin(
+        authenticated: AuthenticatedSession,
+        expectedOwner: AuthenticatedSessionOwner?,
+        attemptGeneration: Long,
+    ) {
         pairingController.cancel()
         invalidateCatalogRequests()
         invalidateDiagnosticsForSessionChange()
@@ -3281,31 +3315,49 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         downloadPrimaryActionDispatcher.invalidate()
         downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
         downloadPriorityMutationQueues.clear()
-        session = authenticated
-        sessionRestorationComplete = true
         clearCatalogMemory()
         val downloads = loadDownloadUiSnapshot(downloadRepository::snapshot)
         val downloadSettings = withContext(Dispatchers.IO) {
             downloadRepository.settings()
         }
-        mutableState.update {
-            it.copy(
-                screen = HulkScreen.MAIN,
-                destination = MainDestination.HOME,
-                isLoading = false,
-                account = authenticated.account,
-                isAccountRefreshing = false,
-                catalogs = emptyMap(),
-                selectedCategoryId = null,
-                searchQuery = "",
-                favorites = emptySet(),
-                history = emptyList(),
-                isProfileLibraryReady = false,
-                downloads = downloads,
-                downloadSettings = downloadSettings,
-                errorMessage = null,
-                accountDecision = null,
-            )
+        val publication = sessionPublicationGate.publishIfCurrent(
+            authenticated = authenticated,
+            expectedOwner = expectedOwner,
+            attemptCurrent = { authenticationAttemptGate.isCurrent(attemptGeneration) },
+        ) {
+            sessionOwnershipEpoch += 1
+            session = authenticated
+            sessionRestorationComplete = true
+            mutableState.update {
+                it.copy(
+                    screen = HulkScreen.MAIN,
+                    destination = MainDestination.HOME,
+                    isLoading = false,
+                    account = authenticated.account,
+                    isAccountRefreshing = false,
+                    catalogs = emptyMap(),
+                    selectedCategoryId = null,
+                    searchQuery = "",
+                    favorites = emptySet(),
+                    history = emptyList(),
+                    isProfileLibraryReady = false,
+                    downloads = downloads,
+                    downloadSettings = downloadSettings,
+                    errorMessage = null,
+                    accountDecision = null,
+                )
+            }
+        }
+        when (publication) {
+            is SessionPublicationResult.Published -> Unit
+            SessionPublicationResult.Expired -> {
+                handleExpiredOwner(
+                    expectedOwner = expectedOwner,
+                    attemptCurrent = { authenticationAttemptGate.isCurrent(attemptGeneration) },
+                )
+                return
+            }
+            SessionPublicationResult.Stale -> return
         }
         publishPresenceOwnership(authenticated)
         ensureDestinationCatalogs(MainDestination.HOME)
@@ -3313,6 +3365,59 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         refreshNotificationState(clearPopup = true)
         scanSubscribedSeries(NotificationScanTrigger.APP_START)
         resolvePendingTvDeepLink()
+    }
+
+    /**
+     * Clears an expired session only if the exact owner is still current at the actual
+     * session/credential/scope mutation, then resets visible state only if no newer publication
+     * happened while cleanup was in flight.
+     */
+    private suspend fun handleExpiredOwner(
+        expectedOwner: AuthenticatedSessionOwner?,
+        attemptCurrent: () -> Boolean = { true },
+    ): SessionOwnershipCleanupResult {
+        if (expectedOwner == null || !attemptCurrent()) {
+            return SessionOwnershipCleanupResult.Stale
+        }
+        val result = sessionCleanupGate.clearIfOwnerStillCurrent(expectedOwner) {
+            sessionOwnershipEpoch += 1
+            session = null
+            sessionRestorationComplete = true
+            invalidateAccountRefresh()
+            invalidateCatalogRequests()
+            clearCatalogMemory()
+            invalidateDetailsRequest()
+            invalidateDiagnosticsForSessionChange()
+            invalidatePlayerProgressPersistence()
+            downloadSettingsMutationGate.invalidate()
+            downloadSnapshotPublicationGate.invalidate()
+            downloadPrimaryActionDispatcher.invalidate()
+            downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
+            downloadPriorityMutationQueues.clear()
+            presenceLifecycleOwner.logout()
+            val state = mutableState.value
+            mutableState.value = HulkUiState(
+                isStarting = false,
+                downloads = emptyList(),
+                downloadSettings = state.downloadSettings,
+                operations = state.operations,
+                pairing = state.pairing,
+                errorMessage = XtreamException.SubscriptionInactive.message,
+            )
+        }
+        if (
+            result is SessionOwnershipCleanupResult.CredentialRemovalFailed &&
+            attemptCurrent()
+        ) {
+            mutableState.update { state ->
+                state.finishExpiredOwnerFailure(
+                    result.error.message ?: "تعذر إزالة بيانات الجلسة. حاول مرة اخرى.",
+                )
+            }
+        } else if (result is SessionOwnershipCleanupResult.CredentialRemovalFailed) {
+            return SessionOwnershipCleanupResult.Stale
+        }
+        return result
     }
 
     private suspend fun publishPresenceOwnership(authenticated: AuthenticatedSession) {
@@ -3788,9 +3893,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
 
-        private const val HOME_RECENT_LIMIT = 240
-        private const val HOME_RATED_LIMIT = 120
-        private const val HOME_CATALOG_LIMIT = 320
         private const val MOVIE_CARD_PROBE_CONCURRENCY = 2
         private const val EPISODE_NOTIFICATION_SCAN_CONCURRENCY = 3
         private const val TV_PLATFORM_SYNC_DEBOUNCE_MS = 350L
