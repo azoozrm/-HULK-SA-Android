@@ -686,8 +686,11 @@ semantics and persistence are unchanged.
   observation and ordinary restoration cannot overwrite it. A real move to a different card
   releases the ownership.
 - When no card remains, the selected Recent/category control must report actual focus before the
-  parent clears the pending handoff or finishes. Failure never falls through to Refresh and is
-  not reported as complete.
+  parent clears the pending handoff or finishes on TV. On non-TV presentation there is no TV
+  category focus owner: after the authoritative empty presented-list update, clear the pending
+  empty handoff, retry state and removal lock, then finish the controller. This is required when a
+  search query filters Recent to one card and a later query clear reveals another card.
+- Failure never falls through to Refresh and is not reported as complete.
 - A new explicit `focusContentRequestId` supersedes completed removal ownership even when
   `focusFirstItemRequestId` is zero. Deletion → Up → OK on the already-selected Recent returns to
   the remembered surviving card, not index zero.

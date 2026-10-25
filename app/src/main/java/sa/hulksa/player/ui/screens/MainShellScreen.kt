@@ -4209,6 +4209,18 @@ internal fun PosterCatalogScreen(
         if (!showingContinue || continueWatching.isNotEmpty()) return@LaunchedEffect
         withFrameNanos { }
         if (pendingRecentEmptyFocus != requestId) return@LaunchedEffect
+        if (!isTv) {
+            // Mobile has no TV category keyboard/focus owner. The authoritative empty presented
+            // list is enough to close the removal transaction; clear the pending handoff before
+            // a search-clear can reveal a later card.
+            logRecentFocus("empty handoff mobile completion request=$requestId")
+            categoryContentFocusRequest = null
+            pendingRecentEmptyFocus = null
+            emptyRecentFocusRetry = 0
+            recentHistoryFocusLock.clear()
+            recentRemovalController.finish()
+            return@LaunchedEffect
+        }
         if (emptyRecentFocusRetry >= 3) {
             logRecentFocus("empty handoff failed request=$requestId retries=$emptyRecentFocusRetry")
             return@LaunchedEffect

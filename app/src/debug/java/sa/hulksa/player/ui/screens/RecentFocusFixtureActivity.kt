@@ -45,19 +45,21 @@ class RecentFocusFixtureActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val scenario = intent.getStringExtra("scenario").orEmpty().ifBlank { "middle" }
+        val isTv = intent.getBooleanExtra("isTv", true)
+        val media = intent.getStringExtra("media").orEmpty().ifBlank { "series" }
         setContent {
             HulkTheme {
                 CompositionLocalProvider(
                     LocalAdaptiveUi provides AdaptiveUiState(
-                        deviceClass = HulkDeviceClass.TELEVISION,
-                        windowWidthClass = HulkWindowWidthClass.EXPANDED,
-                        navigationType = HulkNavigationType.RAIL,
-                        inputMode = HulkInputMode.REMOTE,
-                        screenWidthDp = 960,
-                        screenHeightDp = 540,
+                        deviceClass = if (isTv) HulkDeviceClass.TELEVISION else HulkDeviceClass.MOBILE,
+                        windowWidthClass = if (isTv) HulkWindowWidthClass.EXPANDED else HulkWindowWidthClass.COMPACT,
+                        navigationType = if (isTv) HulkNavigationType.RAIL else HulkNavigationType.TOP_BAR,
+                        inputMode = if (isTv) HulkInputMode.REMOTE else HulkInputMode.TOUCH,
+                        screenWidthDp = if (isTv) 960 else 412,
+                        screenHeightDp = if (isTv) 540 else 915,
                     ),
                 ) {
-                    RecentFocusFixture(scenario)
+                    RecentFocusFixture(scenario, isTv, media)
                 }
             }
         }
@@ -65,45 +67,53 @@ class RecentFocusFixtureActivity : ComponentActivity() {
 }
 
 @Composable
-private fun RecentFocusFixture(scenario: String) {
+private fun RecentFocusFixture(scenario: String, isTv: Boolean, media: String) {
     val scope = rememberCoroutineScope()
     val entryMode = scenario.startsWith("entry-")
+    val mobileSearch = scenario == "mobile-search"
     val baseScenario = scenario.removePrefix("entry-")
-    val entries = remember(scenario) { fixtureHistory(if (entryMode) baseScenario else scenario) }
+    val type = if (media == "movie") ContentType.MOVIE else ContentType.SERIES
+    val destination = if (type == ContentType.MOVIE) MainDestination.MOVIES else MainDestination.SERIES
+    val series = type == ContentType.SERIES
+    val entries = remember(scenario, media) {
+        fixtureHistory(if (entryMode) baseScenario else scenario, media)
+    }
     val focusIndex = remember(scenario, entries) {
-        when (if (entryMode) baseScenario else scenario) {
-            "first" -> 0
-            "last" -> entries.lastIndex
-            "reentry" -> 1
-            "failure" -> 1
-            "reorder" -> 1
+        when {
+            mobileSearch -> 0
+            (if (entryMode) baseScenario else scenario) == "first" -> 0
+            (if (entryMode) baseScenario else scenario) == "last" -> entries.lastIndex
+            (if (entryMode) baseScenario else scenario) == "reentry" -> 1
+            (if (entryMode) baseScenario else scenario) == "failure" -> 1
+            (if (entryMode) baseScenario else scenario) == "reorder" -> 1
             else -> (entries.size / 2).coerceAtLeast(0)
         }
     }
-    val navigationMemory = remember(scenario) {
+    val navigationMemory = remember(scenario, media) {
         NavigationMemoryStore().also { memory ->
             if (entryMode) {
-                memory.save(MainDestination.SERIES, "SERIES:900", 0)
+                memory.save(destination, "${if (series) "SERIES" else "MOVIE"}:900", 0)
             } else {
                 entries.getOrNull(focusIndex)?.let { entry ->
-                    memory.save(MainDestination.SERIES, entry.key, focusIndex)
+                    memory.save(destination, entry.key, focusIndex)
                 }
             }
         }
     }
-    var state by remember(scenario) {
+    var state by remember(scenario, media) {
         mutableStateOf(
             HulkUiState(
                 screen = HulkScreen.MAIN,
                 isStarting = false,
                 isLoading = false,
-                destination = MainDestination.SERIES,
-                selectedType = ContentType.SERIES,
+                destination = destination,
+                selectedType = type,
                 selectedCategoryId = if (entryMode) null else CONTINUE_CATEGORY_ID,
+                searchQuery = if (mobileSearch) "Alpha" else "",
                 history = entries,
                 isProfileLibraryReady = true,
                 catalogs = mapOf(
-                    ContentType.SERIES to Catalog(
+                    type to Catalog(
                         categories = emptyList(),
                         items = if (entryMode) fixtureCatalog() else emptyList(),
                     ),
@@ -138,11 +148,11 @@ private fun RecentFocusFixture(scenario: String) {
                 .focusGroup(),
         ) {
             PosterCatalogScreen(
-            title = "المسلسلات",
-            type = ContentType.SERIES,
-            destination = MainDestination.SERIES,
+            title = if (series) "المسلسلات" else "الافلام",
+            type = type,
+            destination = destination,
             state = state,
-            isTv = true,
+            isTv = isTv,
             navigationMemory = navigationMemory,
             favoriteSnapshot = favoriteSnapshot,
             isFavorite = { false },
@@ -150,7 +160,10 @@ private fun RecentFocusFixture(scenario: String) {
                 Log.i(FIXTURE_TAG, "selectCategory=$categoryId")
                 state = state.copy(selectedCategoryId = categoryId)
             },
-            onSearch = {},
+            onSearch = { query ->
+                Log.i(FIXTURE_TAG, "searchQuery=$query scenario=$scenario")
+                state = state.copy(searchQuery = query)
+            },
             onOpen = {},
             onOpenHistory = {},
             onRemoveHistoryEntry = { key, result ->
@@ -172,6 +185,16 @@ private fun RecentFocusFixture(scenario: String) {
                         "removeResult key=$key success=true remaining=${remaining.map { it.key }}",
                     )
                     result(true)
+                    if (mobileSearch) {
+                        // Fixture driver for the reviewed sequence: the empty search result must
+                        // be presented and the transaction completed before the query clears and
+                        // reveals the second card.
+                        scope.launch {
+                            delay(1_200)
+                            state = state.copy(searchQuery = "")
+                            Log.i(FIXTURE_TAG, "clearSearch scenario=$scenario")
+                        }
+                    }
                 }
             },
             onRecentRemovalStarted = {
@@ -204,8 +227,9 @@ private fun fixtureCatalog(): List<ContentItem> = (0 until 4).map { index ->
     )
 }
 
-private fun fixtureHistory(scenario: String): List<HistoryEntry> {
+private fun fixtureHistory(scenario: String, media: String): List<HistoryEntry> {
     val names = when (scenario) {
+        "mobile-search" -> listOf("Alpha", "Beta")
         "only" -> listOf("الحلقة أ")
         "many" -> (1..12).map { "الحلقة $it" }
         else -> listOf(
@@ -215,23 +239,25 @@ private fun fixtureHistory(scenario: String): List<HistoryEntry> {
             "الحلقة د",
         )
     }
+    val series = media != "movie"
+    val prefix = if (series) "SERIES" else "MOVIE"
     return names.mapIndexed { index, title ->
         HistoryEntry(
-            key = "SERIES:${100 + index}",
+            key = "$prefix:${100 + index}",
             title = title,
             posterUrl = null,
-            streamKind = "series",
+            streamKind = if (series) "series" else "movie",
             streamId = 1000 + index,
             extension = "mkv",
             isLive = false,
             positionMs = 1_000L + index * 1_000L,
             durationMs = 10_000L,
             updatedAtEpochMs = 10_000L - index,
-            seriesTitle = "مسلسل التجربة ${index + 1}",
-            season = 1,
-            episodeNumber = index + 1,
-            episodeTitle = title,
-            parentContentId = 500 + index,
+            seriesTitle = if (series) title else null,
+            season = if (series) 1 else null,
+            episodeNumber = if (series) index + 1 else null,
+            episodeTitle = if (series) title else null,
+            parentContentId = if (series) 500 + index else null,
         )
     }
 }
