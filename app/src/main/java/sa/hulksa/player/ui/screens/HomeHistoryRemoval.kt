@@ -119,6 +119,30 @@ internal fun beginRecentHistoryRemoval(
     return controller.begin(capturedKey, capturedKeys)
 }
 
+/**
+ * Focus ownership for one settled Movies/Series Recent removal. The captured surviving stable key
+ * remains owned while scroll observation and ordinary navigation restoration settle. A real user
+ * move to a different card releases the lock; the removal itself never clears the key implicitly.
+ */
+internal class RecentRemovalFocusLock {
+    var ownedKey by mutableStateOf<String?>(null)
+        private set
+
+    fun own(key: String) {
+        ownedKey = key
+    }
+
+    fun clear() {
+        ownedKey = null
+    }
+
+    fun onFocused(key: String) {
+        if (ownedKey != null && ownedKey != key) ownedKey = null
+    }
+
+    fun yieldsScrollObservation(): Boolean = ownedKey != null
+}
+
 /** A single pending handoff of focus after the Continue Watching row empties. */
 internal data class HomeEmptyRowFocusRequest(val id: Long)
 

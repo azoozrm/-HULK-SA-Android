@@ -87,6 +87,20 @@ class RecentHistoryRemovalTest {
     }
 
     @Test
+    fun recentRemoval_focusLockSurvivesFinishAndReleasesOnlyOnARealDifferentFocus() {
+        val lock = RecentRemovalFocusLock()
+        lock.own("SERIES:2")
+        assertTrue(lock.yieldsScrollObservation())
+        lock.onFocused("SERIES:2")
+        assertTrue(lock.yieldsScrollObservation())
+        lock.onFocused("MOVIE:3")
+        assertFalse(lock.yieldsScrollObservation())
+        lock.own("MOVIE:3")
+        lock.clear()
+        assertFalse(lock.yieldsScrollObservation())
+    }
+
+    @Test
     fun recentRemoval_releaseEndsTheHoldAndAFreshPressStartsImmediately() {
         val guard = HomeRemovalInputGuard()
         assertFalse(guard.onSelectKey(KeyEventType.KeyDown))

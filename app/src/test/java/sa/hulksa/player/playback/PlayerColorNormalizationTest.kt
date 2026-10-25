@@ -5,49 +5,80 @@ import androidx.media3.common.ColorInfo
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlayerColorNormalizationTest {
     private fun videoFormat(
         mimeType: String = MimeTypes.VIDEO_H264,
+        codecs: String = "avc1.64001F",
         colorInfo: ColorInfo?,
     ): Format = Format.Builder()
         .setSampleMimeType(mimeType)
         .setWidth(1280)
         .setHeight(720)
-        .setCodecs("avc1.64001F")
+        .setCodecs(codecs)
         .apply { colorInfo?.let(::setColorInfo) }
         .build()
 
     private fun bt2020(
         transfer: Int,
+        range: Int = C.COLOR_RANGE_LIMITED,
         lumaBitdepth: Int = -1,
         hdrStatic: ByteArray? = null,
     ): ColorInfo = ColorInfo.Builder()
         .setColorSpace(C.COLOR_SPACE_BT2020)
-        .setColorRange(C.COLOR_RANGE_LIMITED)
+        .setColorRange(range)
         .setColorTransfer(transfer)
         .setLumaBitdepth(lumaBitdepth)
         .setHdrStaticInfo(hdrStatic)
         .build()
 
     @Test
-    fun ambiguousBt2020H264WithoutTransferIsNormalizedToSdrBt709() {
+    fun limitedRangeKnownEightBitBt2020H264WithoutTransferIsCompatibilityCandidate() {
         val format = videoFormat(colorInfo = bt2020(transfer = -1))
 
-        val normalized = normalizeAmbiguousSdrVideoColor(format)
+        assertTrue(isAmbiguousSdrVideoColor(format))
+        assertEquals(ColorInfo.SDR_BT709_LIMITED, normalizeAmbiguousSdrVideoColor(format).colorInfo)
+        assertTrue(shouldApplyAmlogicColorCompatibility(format, isAmlogicPlatform = true))
+        assertFalse(shouldApplyAmlogicColorCompatibility(format, isAmlogicPlatform = false))
+    }
 
-        assertEquals(ColorInfo.SDR_BT709_LIMITED, normalized.colorInfo)
-        assertEquals(format.sampleMimeType, normalized.sampleMimeType)
-        assertEquals(format.codecs, normalized.codecs)
-        assertEquals(format.width, normalized.width)
+    @Test
+    fun fullRangeIsNeverRewritten() {
+        val format = videoFormat(colorInfo = bt2020(transfer = -1, range = C.COLOR_RANGE_FULL))
+
+        assertFalse(isAmbiguousSdrVideoColor(format))
+        assertSame(format, normalizeAmbiguousSdrVideoColor(format))
+    }
+
+    @Test
+    fun unknownBitDepthRequiresAnIndependentEightBitAvcProfile() {
+        val highProfile = videoFormat(
+            codecs = "avc1.64001F",
+            colorInfo = bt2020(transfer = -1, lumaBitdepth = -1),
+        )
+        val high10Profile = videoFormat(
+            codecs = "avc1.6E001F",
+            colorInfo = bt2020(transfer = -1, lumaBitdepth = -1),
+        )
+        val high10BitDepth = videoFormat(
+            codecs = "avc1.64001F",
+            colorInfo = bt2020(transfer = -1, lumaBitdepth = 10),
+        )
+
+        assertTrue(isAmbiguousSdrVideoColor(highProfile))
+        assertFalse(isAmbiguousSdrVideoColor(high10Profile))
+        assertFalse(isAmbiguousSdrVideoColor(high10BitDepth))
     }
 
     @Test
     fun explicitSdrBt2020IsNotRewritten() {
         val format = videoFormat(colorInfo = bt2020(transfer = C.COLOR_TRANSFER_SDR))
 
+        assertFalse(isAmbiguousSdrVideoColor(format))
         assertSame(format, normalizeAmbiguousSdrVideoColor(format))
     }
 
@@ -65,9 +96,18 @@ class PlayerColorNormalizationTest {
     }
 
     @Test
+    fun decoderReuseIsRejectedOnlyWhenTheCompatibilityPolicyChanges() {
+        assertTrue(shouldRejectVideoCodecReuse(false, true))
+        assertTrue(shouldRejectVideoCodecReuse(true, false))
+        assertFalse(shouldRejectVideoCodecReuse(false, false))
+        assertFalse(shouldRejectVideoCodecReuse(true, true))
+    }
+
+    @Test
     fun nonH264AndMissingColorInfoAreUntouched() {
         val hevc = videoFormat(
             mimeType = MimeTypes.VIDEO_H265,
+            codecs = "hvc1.2.4.L153.B0",
             colorInfo = bt2020(transfer = -1),
         )
         val noColor = videoFormat(colorInfo = null)

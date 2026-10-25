@@ -3,6 +3,7 @@
 package sa.hulksa.player.playback
 
 import android.content.Context
+import android.os.Build
 import android.os.Handler
 import android.util.Log
 import androidx.media3.common.AudioAttributes
@@ -24,6 +25,7 @@ import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.mediacodec.MediaCodecAdapter
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -232,25 +234,24 @@ private class HulkColorSafeVideoRenderer(
     eventListener,
     DefaultRenderersFactory.MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY,
 ) {
-    private var forceSoftwareVideoDecoder = false
+    private var inputRequiresCompatibility = false
+    private var activeCodecCompatibility = false
 
     override fun onInputFormatChanged(formatHolder: FormatHolder): DecoderReuseEvaluation? {
         val current = formatHolder.format
-        if (current != null) {
-            forceSoftwareVideoDecoder = isAmbiguousSdrVideoColor(current)
-            val normalized = normalizeAmbiguousSdrVideoColor(current)
-            if (normalized !== current) {
-                Log.i(
-                    "HulkPlayerFactory",
-                    "video color normalized mime=${current.sampleMimeType.orEmpty()} " +
-                        "codecs=${current.codecs.orEmpty()} size=${current.width}x${current.height} " +
-                        "from=space:${current.colorInfo?.colorSpace} transfer:${current.colorInfo?.colorTransfer} " +
-                        "to=space:${C.COLOR_SPACE_BT709} transfer:${C.COLOR_TRANSFER_SDR} " +
-                        "decoderPath=SOFTWARE_COMPAT",
-                )
-                formatHolder.format = normalized
-            }
+        inputRequiresCompatibility =
+            current != null && shouldApplyAmlogicColorCompatibility(current)
+        if (inputRequiresCompatibility && current != null) {
+            Log.i(
+                "HulkPlayerFactory",
+                "video color compatibility mime=${current.sampleMimeType.orEmpty()} " +
+                    "codecs=${current.codecs.orEmpty()} size=${current.width}x${current.height} " +
+                    "from=space:${current.colorInfo?.colorSpace} transfer:${current.colorInfo?.colorTransfer} " +
+                    "range:${current.colorInfo?.colorRange} assumption=BT709_LIMITED",
+            )
         }
+        // Keep the original Format in the holder so capability queries and reuse evaluate the
+        // actual incoming stream, not the normalized decoder configuration.
         return super.onInputFormatChanged(formatHolder)
     }
 
@@ -260,9 +261,17 @@ private class HulkColorSafeVideoRenderer(
         requiresSecureDecoder: Boolean,
     ): List<MediaCodecInfo> {
         val decoders = super.getDecoderInfos(selector, format, requiresSecureDecoder)
-        if (!forceSoftwareVideoDecoder) return decoders
+        if (!shouldApplyAmlogicColorCompatibility(format)) return decoders
+        if (decoders.none { it.name.contains("amlogic", ignoreCase = true) }) return decoders
         val software = decoders.filter { it.softwareOnly }
-        if (software.isEmpty()) return decoders
+        if (software.isEmpty()) {
+            Log.w(
+                "HulkPlayerFactory",
+                "video decoder path=SOFTWARE_COMPAT unavailable mime=${format.sampleMimeType.orEmpty()} " +
+                    "size=${format.width}x${format.height} fallback=DEFAULT",
+            )
+            return decoders
+        }
         Log.i(
             "HulkPlayerFactory",
             "video decoder path=SOFTWARE_COMPAT mime=${format.sampleMimeType.orEmpty()} " +
@@ -270,18 +279,114 @@ private class HulkColorSafeVideoRenderer(
         )
         return software
     }
+
+    override fun getMediaFormat(
+        format: Format,
+        codecMimeType: String,
+        codecMaxValues: CodecMaxValues,
+        codecOperatingRate: Float,
+        deviceNeedsNoPostProcessWorkaround: Boolean,
+        tunnelingAudioSessionId: Int,
+    ): android.media.MediaFormat {
+        // Compatibility assumption: the evidenced stream is limited-range 8-bit H.264 carrying
+        // BT.2020 primaries without a transfer. Normalize only the decoder configuration; the
+        // original Format remains available for reuse/capability classification.
+        val configured = if (shouldApplyAmlogicColorCompatibility(format)) {
+            normalizeAmbiguousSdrVideoColor(format)
+        } else {
+            format
+        }
+        return super.getMediaFormat(
+            configured,
+            codecMimeType,
+            codecMaxValues,
+            codecOperatingRate,
+            deviceNeedsNoPostProcessWorkaround,
+            tunnelingAudioSessionId,
+        )
+    }
+
+    override fun onCodecInitialized(
+        name: String,
+        configuration: MediaCodecAdapter.Configuration,
+        initializedTimestampMs: Long,
+        initializationDurationMs: Long,
+    ) {
+        super.onCodecInitialized(
+            name,
+            configuration,
+            initializedTimestampMs,
+            initializationDurationMs,
+        )
+        activeCodecCompatibility = inputRequiresCompatibility
+    }
+
+    override fun canReuseCodec(
+        codecInfo: MediaCodecInfo,
+        oldFormat: Format,
+        newFormat: Format,
+        isAdaptiveFormatChange: Boolean,
+    ): DecoderReuseEvaluation {
+        val newCompatibility = shouldApplyAmlogicColorCompatibility(newFormat)
+        if (shouldRejectVideoCodecReuse(activeCodecCompatibility, newCompatibility)) {
+            // Force the supported Media3 reinitialization path when the current decoder does not
+            // satisfy the new policy (hardware -> compatibility software, or the reverse).
+            return DecoderReuseEvaluation(
+                codecInfo.name,
+                oldFormat,
+                newFormat,
+                DecoderReuseEvaluation.REUSE_RESULT_NO,
+                DecoderReuseEvaluation.DISCARD_REASON_APP_OVERRIDE,
+            )
+        }
+        return super.canReuseCodec(codecInfo, oldFormat, newFormat, isAdaptiveFormatChange)
+    }
 }
 
+/** Platform bound evidenced by the Amlogic vendor video/CPQ path on the Xiaomi surface. */
+internal fun isAffectedAmlogicPlatform(): Boolean =
+    Build.HARDWARE.contains("amlogic", ignoreCase = true)
+
+/**
+ * Narrow compatibility assumption for the evidenced limited-range, known-8-bit H.264 stream with
+ * BT.2020 primaries, unspecified transfer and no HDR metadata. Unknown bit depth alone is not
+ * sufficient; the AVC profile must independently identify an 8-bit profile.
+ */
 internal fun isAmbiguousSdrVideoColor(format: Format): Boolean {
     val info = format.colorInfo ?: return false
     if (format.sampleMimeType != MimeTypes.VIDEO_H264) return false
     if (info.colorSpace != C.COLOR_SPACE_BT2020) return false
     if (info.colorTransfer >= 0) return false
+    if (info.colorRange != C.COLOR_RANGE_LIMITED) return false
     if (info.hdrStaticInfo?.isNotEmpty() == true) return false
     if (ColorInfo.isTransferHdr(info)) return false
     if (info.lumaBitdepth > 8) return false
+    if (info.lumaBitdepth < 1 && !isKnownEightBitAvcProfile(format)) return false
     return true
 }
+
+/** H.264 profile_idc values that identify 8-bit profiles; High10/422/444 are excluded. */
+internal fun isKnownEightBitAvcProfile(format: Format): Boolean {
+    val codecs = format.codecs?.trim()?.lowercase() ?: return false
+    val prefix = when {
+        codecs.startsWith("avc1.") -> "avc1."
+        codecs.startsWith("avc3.") -> "avc3."
+        else -> return false
+    }
+    val profile = codecs.removePrefix(prefix).take(2).toIntOrNull(16) ?: return false
+    return profile in setOf(44, 66, 77, 88, 100, 118, 128)
+}
+
+internal fun shouldApplyAmlogicColorCompatibility(
+    format: Format,
+    isAmlogicPlatform: Boolean = isAffectedAmlogicPlatform(),
+): Boolean = isAmlogicPlatform && isAmbiguousSdrVideoColor(format)
+
+/** Reuse is allowed only when the current decoder and the incoming format share one policy. */
+internal fun shouldRejectVideoCodecReuse(
+    activeCodecCompatibility: Boolean,
+    newFormatRequiresCompatibility: Boolean,
+): Boolean = activeCodecCompatibility != newFormatRequiresCompatibility
 
 internal fun normalizeAmbiguousSdrVideoColor(format: Format): Format =
     if (isAmbiguousSdrVideoColor(format)) {

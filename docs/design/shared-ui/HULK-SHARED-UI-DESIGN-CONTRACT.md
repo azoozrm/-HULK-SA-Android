@@ -684,8 +684,23 @@ semantics and persistence are unchanged.
 - The ordinary navigation-memory restoration effect yields to the removal transaction. The
   existing `تمت ازالة المشاهدة` notice is posted once only after the authoritative success result.
   Failed, stale or rejected operations post nothing.
+- A category-entry focus request is consumable: it is cleared only after the intended attached
+  item actually obtains focus (or the user deliberately moves elsewhere). The captured surviving
+  removal key remains owned after the controller finishes; scroll observation and ordinary
+  restoration cannot overwrite it. A real move to a different card releases the ownership.
 - Short press still opens the card. Touch long-press uses the same one-key controller and does not
   create a second post-long-press click. Home and Favorites removal behavior is unchanged.
+
+### 12.9 Ambiguous SDR player-color compatibility (2026-10-25)
+
+A compatibility assumption, not a universal decoder rule: only on the evidenced Amlogic platform,
+for limited-range H.264 whose codec profile independently identifies an 8-bit profile, with
+BT.2020 primaries, unspecified transfer, no HDR static data and no HDR transfer, the player may
+treat the stream as SDR BT.709 limited and select a software H.264 decoder. The original incoming
+format remains the classification input; decoder reuse is rejected when the active codec and the
+new format do not share the compatibility policy. Full-range, explicit SDR, PQ/HLG, HDR static,
+high-bit-depth, non-AVC and no-colorInfo content are not rewritten. The assumption does not claim
+visual color correctness; it removes the evidenced vendor HDR promotion.
 
 ## 13. Login / Who's Watching / entry-subflows adoption record (2026-10-11)
 
