@@ -29,6 +29,7 @@ class RecentHistoryRemovalTest {
             controller = controller,
             capturedKey = "SERIES:2",
             capturedKeys = keys,
+            capturedTitle = "حبتين",
             onRemoteRemovalStarted = { events += "guard" },
         )
         assertEquals(listOf("guard", "remove:SERIES:2"), events)
@@ -43,6 +44,7 @@ class RecentHistoryRemovalTest {
                 controller = controller,
                 capturedKey = "MOVIE:3",
                 capturedKeys = keys,
+                capturedTitle = "عنصر آخر",
                 onRemoteRemovalStarted = { events += "guard-again" },
             ),
         )
@@ -57,6 +59,71 @@ class RecentHistoryRemovalTest {
     }
 
     @Test
+    fun recentRemoval_capturesTitleBeforeMutationAndPublishesItOnceOnSuccess() {
+        var callback: ((Boolean) -> Unit)? = null
+        val notices = mutableListOf<String>()
+        val controller = HomeHistoryRemovalController(
+            removeHistory = { _, result -> callback = result },
+            onSuccessfulRemoval = {},
+            onSuccessNotice = { title -> notices += title },
+        )
+
+        assertTrue(
+            beginRecentHistoryRemoval(
+                remote = true,
+                controller = controller,
+                capturedKey = "SERIES:2",
+                capturedKeys = keys,
+                capturedTitle = "حبتين",
+                onRemoteRemovalStarted = {},
+            ),
+        )
+        assertEquals("حبتين", controller.capturedTitle)
+        callback?.invoke(true)
+        callback?.invoke(true)
+        assertEquals(listOf("حبتين"), notices)
+        controller.finish()
+        assertEquals("", controller.capturedTitle)
+    }
+
+    @Test
+    fun removalNoticeCopyNamesTheCapturedItemForBothDestinations() {
+        assertEquals(
+            "تمت إزالة «حبتين» من آخر مشاهدة",
+            recentRemovalNotice("حبتين"),
+        )
+        assertEquals(
+            "تمت إزالة «حبتين» من متابعة المشاهدة",
+            homeRemovalNotice("حبتين"),
+        )
+    }
+
+    @Test
+    fun recentRemoval_failurePublishesNoNamedNotice() {
+        var callback: ((Boolean) -> Unit)? = null
+        val notices = mutableListOf<String>()
+        val controller = HomeHistoryRemovalController(
+            removeHistory = { _, result -> callback = result },
+            onSuccessfulRemoval = {},
+            onSuccessNotice = { title -> notices += title },
+        )
+
+        assertTrue(
+            beginRecentHistoryRemoval(
+                remote = false,
+                controller = controller,
+                capturedKey = "SERIES:2",
+                capturedKeys = keys,
+                capturedTitle = "حبتين",
+                onRemoteRemovalStarted = {},
+            ),
+        )
+        callback?.invoke(false)
+        assertTrue(notices.isEmpty())
+        assertNull(controller.pendingKey)
+    }
+
+    @Test
     fun recentRemoval_lastCardRequestsCategoryHandoffOnlyAfterAuthoritativeSuccess() {
         var callback: ((Boolean) -> Unit)? = null
         var successCount = 0
@@ -68,7 +135,7 @@ class RecentHistoryRemovalTest {
                 successCount += 1
                 wasLastCard = last
             },
-            onSuccessNotice = { noticeCount += 1 },
+            onSuccessNotice = { _ -> noticeCount += 1 },
         )
 
         assertTrue(controller.begin("SERIES:2", listOf("SERIES:2")))
@@ -141,6 +208,7 @@ class RecentHistoryRemovalTest {
                 controller = controller,
                 capturedKey = "MOVIE:1",
                 capturedKeys = keys,
+                capturedTitle = "فيلم",
                 onRemoteRemovalStarted = { guardCalls += 1 },
             ),
         )

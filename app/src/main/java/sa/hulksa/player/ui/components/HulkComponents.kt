@@ -15,6 +15,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,6 +56,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -1629,6 +1632,8 @@ fun BoxedHistoryCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onFocused: (() -> Unit)? = null,
+    onFocusLost: (() -> Unit)? = null,
+    focusRequester: FocusRequester? = null,
     artworkHeightDp: Dp? = null,
     onFooterHeightMeasured: ((Int) -> Unit)? = null,
     identityText: String? = null,
@@ -1695,7 +1700,7 @@ fun BoxedHistoryCard(
             )
             .onFocusChanged {
                 focused = it.isFocused
-                if (it.isFocused) onFocused?.invoke()
+                if (it.isFocused) onFocused?.invoke() else onFocusLost?.invoke()
             }
             .onPreviewKeyEvent { event ->
                 if (!canDismiss || !event.nativeKeyEvent.isRemoteSelectKey()) {
@@ -1722,6 +1727,13 @@ fun BoxedHistoryCard(
                     false
                 }
             }
+            .then(
+                if (focusRequester != null) {
+                    Modifier.focusRequester(focusRequester).focusable(enabled = true)
+                } else {
+                    Modifier
+                },
+            )
             .combinedClickable(
                 role = Role.Button,
                 onClick = onClick,
@@ -2213,7 +2225,7 @@ private fun InfoPillBox(text: String, modifier: Modifier = Modifier) {
     }
 }
 
-private fun historyPrimaryTitle(entry: HistoryEntry): String {
+internal fun historyPrimaryTitle(entry: HistoryEntry): String {
     if (!entry.streamKind.equals("series", ignoreCase = true)) return entry.title
     return entry.seriesTitle
         ?.trim()

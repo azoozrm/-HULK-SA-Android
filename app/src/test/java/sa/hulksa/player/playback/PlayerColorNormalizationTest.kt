@@ -68,10 +68,16 @@ class PlayerColorNormalizationTest {
             codecs = "avc1.64001F",
             colorInfo = bt2020(transfer = -1, lumaBitdepth = 10),
         )
+        val cavlc444 = videoFormat(
+            codecs = "avc1.2C101F",
+            colorInfo = bt2020(transfer = -1, lumaBitdepth = -1),
+        )
 
         assertTrue(isAmbiguousSdrVideoColor(highProfile))
         assertFalse(isAmbiguousSdrVideoColor(high10Profile))
         assertFalse(isAmbiguousSdrVideoColor(high10BitDepth))
+        assertFalse(isAmbiguousSdrVideoColor(cavlc444))
+        assertSame(cavlc444, normalizeAmbiguousSdrVideoColor(cavlc444))
     }
 
     @Test

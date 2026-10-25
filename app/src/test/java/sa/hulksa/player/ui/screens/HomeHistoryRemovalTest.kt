@@ -75,7 +75,7 @@ class HomeHistoryRemovalTest {
                 successOutcomes += 1
                 wasLast = last
             },
-            onSuccessNotice = { noticePosts += 1 },
+            onSuccessNotice = { _ -> noticePosts += 1 },
         )
 
         assertTrue(controller.begin("SERIES:2", keys))
@@ -102,6 +102,23 @@ class HomeHistoryRemovalTest {
     }
 
     @Test
+    fun removalController_publishesTheTitleCapturedBeforeMutation() {
+        var callback: ((Boolean) -> Unit)? = null
+        val notices = mutableListOf<String>()
+        val controller = HomeHistoryRemovalController(
+            removeHistory = { _, result -> callback = result },
+            onSuccessfulRemoval = {},
+            onSuccessNotice = { title -> notices += title },
+        )
+
+        assertTrue(controller.begin("SERIES:2", keys, "حبتين"))
+        assertEquals("حبتين", controller.capturedTitle)
+        callback?.invoke(true)
+        callback?.invoke(true)
+        assertEquals(listOf("حبتين"), notices)
+    }
+
+    @Test
     fun removalController_failureNeverPostsSuccessOrFocusTarget() {
         var callback: ((Boolean) -> Unit)? = null
         var successOutcomes = 0
@@ -109,7 +126,7 @@ class HomeHistoryRemovalTest {
         val controller = HomeHistoryRemovalController(
             removeHistory = { _, result -> callback = result },
             onSuccessfulRemoval = { successOutcomes += 1 },
-            onSuccessNotice = { noticePosts += 1 },
+            onSuccessNotice = { _ -> noticePosts += 1 },
         )
 
         assertTrue(controller.begin("MOVIE:1", keys))
@@ -130,7 +147,7 @@ class HomeHistoryRemovalTest {
             removeHistory = { _, result -> callback = result },
             onSuccessfulRemoval = {},
             canPublishSuccess = { current },
-            onSuccessNotice = { noticePosts += 1 },
+            onSuccessNotice = { _ -> noticePosts += 1 },
         )
 
         assertTrue(controller.begin("MOVIE:1", keys))

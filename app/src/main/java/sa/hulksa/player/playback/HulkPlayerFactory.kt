@@ -374,7 +374,7 @@ internal fun isKnownEightBitAvcProfile(format: Format): Boolean {
         else -> return false
     }
     val profile = codecs.removePrefix(prefix).take(2).toIntOrNull(16) ?: return false
-    return profile in setOf(44, 66, 77, 88, 100, 118, 128)
+    return profile in setOf(66, 77, 88, 100, 118, 128)
 }
 
 internal fun shouldApplyAmlogicColorCompatibility(

@@ -678,18 +678,30 @@ semantics and persistence are unchanged.
   before the parent-owned mutation, consumes every remaining select-key repeat and the final
   KeyUp, survives card/grid/last-item disposal and releases only on the real release.
 - The grid waits for the owner-guarded updated list, then focuses the next surviving stable key or
-  the nearest previous one, preserving the grid's scroll ownership. When no card remains, the
-  selected Recent/category control receives focus through the existing category-focus owner; the
-  held input cannot activate Refresh or another control.
-- The ordinary navigation-memory restoration effect yields to the removal transaction. The
-  existing `تمت ازالة المشاهدة` notice is posted once only after the authoritative success result.
-  Failed, stale or rejected operations post nothing.
+  the nearest previous one, preserving the grid's scroll ownership. The card's `FocusRequester`
+  is bound to an explicit focusable node; a request is never treated as success until the intended
+  key reports current focus. The stale past-index is not proof of current focus.
+- Surviving requesters are retained by stable key in a parent-owned cache across list updates and
+  grid recreation. The handoff target remains owned after the controller finishes; scroll
+  observation and ordinary restoration cannot overwrite it. A real move to a different card
+  releases the ownership.
+- When no card remains, the selected Recent/category control must report actual focus before the
+  parent clears the pending handoff or finishes. Failure never falls through to Refresh and is
+  not reported as complete.
+- A new explicit `focusContentRequestId` supersedes completed removal ownership even when
+  `focusFirstItemRequestId` is zero. Deletion → Up → OK on the already-selected Recent returns to
+  the remembered surviving card, not index zero.
+- The ordinary navigation-memory restoration effect yields to the removal transaction. The named
+  notice is posted once only after the authoritative success result:
+  `تمت إزالة «<display title>» من آخر مشاهدة` for Recent and
+  `تمت إزالة «<display title>» من متابعة المشاهدة` for Home Continue Watching. The display title is
+  captured with the exact key before mutation using the card's primary-title rule (Series prefers
+  its real `seriesTitle`). Failed, stale or rejected operations post nothing.
 - A category-entry focus request is consumable: it is cleared only after the intended attached
-  item actually obtains focus (or the user deliberately moves elsewhere). The captured surviving
-  removal key remains owned after the controller finishes; scroll observation and ordinary
-  restoration cannot overwrite it. A real move to a different card releases the ownership.
+  item actually obtains focus (or the user deliberately moves elsewhere). A real move to a
+  different card releases removal ownership.
 - Short press still opens the card. Touch long-press uses the same one-key controller and does not
-  create a second post-long-press click. Home and Favorites removal behavior is unchanged.
+  create a second post-long-press click. Home and Favorites navigation behavior is unchanged.
 
 ### 12.9 Ambiguous SDR player-color compatibility (2026-10-25)
 
@@ -699,8 +711,10 @@ BT.2020 primaries, unspecified transfer, no HDR static data and no HDR transfer,
 treat the stream as SDR BT.709 limited and select a software H.264 decoder. The original incoming
 format remains the classification input; decoder reuse is rejected when the active codec and the
 new format do not share the compatibility policy. Full-range, explicit SDR, PQ/HLG, HDR static,
-high-bit-depth, non-AVC and no-colorInfo content are not rewritten. The assumption does not claim
-visual color correctness; it removes the evidenced vendor HDR promotion.
+high-bit-depth, non-AVC and no-colorInfo content are not rewritten. CAVLC 4:4:4 Intra
+(`avc1.2C…`, profile_idc 44) is also excluded because it does not independently establish 8-bit
+input. The assumption does not claim visual color correctness; it removes the evidenced vendor
+HDR promotion.
 
 ## 13. Login / Who's Watching / entry-subflows adoption record (2026-10-11)
 
