@@ -58,7 +58,7 @@ class HomeCatalogCompactionTest {
     fun `movie history continues to pin its own catalog item`() {
         val catalog = Catalog(
             categories = emptyList(),
-            items = (1..HOME_CATALOG_LIMIT).map { id ->
+            items = (1..HOME_CATALOG_LIMIT + 1).map { id ->
                 movie(id, addedAt = if (id == 17) 0L else 1_000L + id)
             },
         )

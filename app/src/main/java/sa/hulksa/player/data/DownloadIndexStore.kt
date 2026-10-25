@@ -35,6 +35,7 @@ internal data class DownloadIndexRead(
     val state: DownloadIndexState,
     val safeRawDocument: String?,
     val retainedProgressDownloadIds: Set<Long>,
+    val protectedPhysicalPathKeys: Set<String> = emptySet(),
 )
 
 private data class StoredDownloadProgress(
@@ -146,6 +147,7 @@ internal class DownloadIndexStore(
             add(DurableDownloadPreferenceStore.KEY_STORAGE_VERSION)
             add(KEY_RETAINED_PROGRESS_IDS)
             add(KEY_RETAIN_ALL_PROGRESS)
+            add(KEY_PROTECTED_PATHS)
             addAll(activeProgressKeys)
             if (!retainAllProgressKeys) {
                 addAll(
@@ -176,6 +178,10 @@ internal class DownloadIndexStore(
             .putString(
                 KEY_RETAINED_PROGRESS_IDS,
                 JSONArray(retainedProgressDownloadIds.sorted()).toString(),
+            )
+            .putString(
+                KEY_PROTECTED_PATHS,
+                JSONArray(read.protectedPhysicalPathKeys.sorted()).toString(),
             )
         if (retainAllProgressKeys) {
             editor.putBoolean(KEY_RETAIN_ALL_PROGRESS, true)
@@ -222,6 +228,7 @@ internal class DownloadIndexStore(
     }
 
     private fun readInternal(): DownloadIndexRead {
+        val persistedProtectedPaths = readPersistedProtectedPhysicalPathKeys()
         val raw = try {
             preferences.getString(KEY_DOWNLOADS, null)
         } catch (_: Exception) {
@@ -230,6 +237,7 @@ internal class DownloadIndexStore(
                 state = DownloadIndexState.STORAGE_FAILURE,
                 safeRawDocument = null,
                 retainedProgressDownloadIds = emptySet(),
+                protectedPhysicalPathKeys = emptySet(),
             )
         } ?: return DownloadIndexRead(
             records = emptyList(),
@@ -240,6 +248,7 @@ internal class DownloadIndexStore(
             },
             safeRawDocument = null,
             retainedProgressDownloadIds = readPersistedRetainedProgressIds(),
+            protectedPhysicalPathKeys = persistedProtectedPaths,
         )
         if (raw.isBlank()) {
             return DownloadIndexRead(
@@ -247,6 +256,7 @@ internal class DownloadIndexStore(
                 state = DownloadIndexState.UNREADABLE,
                 safeRawDocument = null,
                 retainedProgressDownloadIds = readPersistedRetainedProgressIds(),
+                protectedPhysicalPathKeys = persistedProtectedPaths,
             )
         }
         val array = runCatching { JSONArray(raw) }.getOrNull()
@@ -255,6 +265,7 @@ internal class DownloadIndexStore(
                 state = DownloadIndexState.UNREADABLE,
                 safeRawDocument = null,
                 retainedProgressDownloadIds = readPersistedRetainedProgressIds(),
+                protectedPhysicalPathKeys = persistedProtectedPaths,
             )
         if (array.length() == 0) {
             return DownloadIndexRead(
@@ -262,6 +273,7 @@ internal class DownloadIndexStore(
                 state = DownloadIndexState.VALID,
                 safeRawDocument = raw,
                 retainedProgressDownloadIds = readPersistedRetainedProgressIds(),
+                protectedPhysicalPathKeys = persistedProtectedPaths,
             )
         }
         val safeRaw = sanitizePersistedDownloadJson(raw) ?: return DownloadIndexRead(
@@ -269,8 +281,10 @@ internal class DownloadIndexStore(
             state = DownloadIndexState.UNREADABLE,
             safeRawDocument = null,
             retainedProgressDownloadIds = readPersistedRetainedProgressIds(),
+            protectedPhysicalPathKeys = persistedProtectedPaths,
         )
         val retained = readPersistedRetainedProgressIds().toMutableSet()
+        val protectedPaths = persistedProtectedPaths.toMutableSet()
         val records = mutableListOf<OfflineDownload>()
         var damaged = false
         for (index in 0 until array.length()) {
@@ -287,6 +301,7 @@ internal class DownloadIndexStore(
                 data.optLong("downloadId", 0L)
                     .takeIf { it > 0L }
                     ?.let(retained::add)
+                protectedPaths += damagedDownloadPhysicalPathKeys(data)
             } else {
                 records += decoded
             }
@@ -297,6 +312,7 @@ internal class DownloadIndexStore(
                 state = DownloadIndexState.UNREADABLE,
                 safeRawDocument = safeRaw,
                 retainedProgressDownloadIds = retained,
+                protectedPhysicalPathKeys = protectedPaths,
             )
         }
         return DownloadIndexRead(
@@ -304,6 +320,7 @@ internal class DownloadIndexStore(
             state = if (damaged) DownloadIndexState.PARTIAL_DAMAGE else DownloadIndexState.VALID,
             safeRawDocument = safeRaw,
             retainedProgressDownloadIds = retained,
+            protectedPhysicalPathKeys = protectedPaths,
         )
     }
 
@@ -431,6 +448,24 @@ internal class DownloadIndexStore(
         }.orEmpty()
     }.getOrDefault(emptySet())
 
+    private fun readPersistedProtectedPhysicalPathKeys(): Set<String> = runCatching {
+        preferences.getString(KEY_PROTECTED_PATHS, null)?.let { raw ->
+            val array = JSONArray(raw)
+            buildSet {
+                for (index in 0 until array.length()) {
+                    array.optString(index).trim().takeIf(String::isNotEmpty)?.let(::add)
+                }
+            }
+        }.orEmpty()
+    }.getOrDefault(emptySet())
+
+    private fun damagedDownloadPhysicalPathKeys(data: JSONObject): Set<String> =
+        downloadPhysicalPathKeys(
+            storagePath = data.optNullableString("storagePath"),
+            fileName = data.optNullableString("fileName"),
+            localUri = data.optNullableString("localUri"),
+        )
+
     private fun progressKey(downloadId: Long): String =
         "${DurableDownloadPreferenceStore.KEY_PROGRESS_PREFIX}$downloadId"
 
@@ -467,6 +502,7 @@ internal class DownloadIndexStore(
         const val KEY_DOWNLOADS = DurableDownloadPreferenceStore.KEY_DOWNLOADS
         const val KEY_RETAINED_PROGRESS_IDS = "__integrity_retained_progress_ids__"
         const val KEY_RETAIN_ALL_PROGRESS = "__integrity_retain_all_progress__"
+        const val KEY_PROTECTED_PATHS = "__integrity_protected_download_paths__"
     }
 }
 

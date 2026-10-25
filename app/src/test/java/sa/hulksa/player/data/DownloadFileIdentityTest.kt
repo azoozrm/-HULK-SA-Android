@@ -3,6 +3,10 @@ package sa.hulksa.player.data
 import java.io.File
 import java.nio.file.Files
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -138,6 +142,54 @@ class DownloadFileIdentityTest {
             movieLease?.let(DurableDownloadExecutionLeaseRegistry::release)
             episodeLease?.let(DurableDownloadExecutionLeaseRegistry::release)
             server.shutdown()
+            AuthenticatedSessionRegistry.clear()
+        }
+    }
+
+    @Test
+    fun `launch filename selection waits for repository cache mutation lock`() = runBlocking<Unit> {
+        val fixture = Fixture()
+        fixture.seedRecord(
+            downloadId = 1L,
+            historyKey = "MOVIE:1",
+            fileName = "first.mp4",
+            status = OfflineStatus.QUEUED,
+        )
+        fixture.seedRecord(
+            downloadId = 2L,
+            historyKey = "MOVIE:2",
+            fileName = "second.mp4",
+            status = OfflineStatus.QUEUED,
+        )
+        val repository = fixture.repository()
+        val mutationEntered = CountDownLatch(1)
+        val releaseMutation = CountDownLatch(1)
+        val selectionReturned = CountDownLatch(1)
+        fixture.preferences.afterMemoryMutationBeforeCommit = {
+            mutationEntered.countDown()
+            releaseMutation.await(5, TimeUnit.SECONDS)
+        }
+        try {
+            val removal = async(Dispatchers.Default) {
+                repository.removeOwner(2L, PROFILE_ID)
+            }
+            assertTrue(mutationEntered.await(5, TimeUnit.SECONDS))
+
+            val selection = async(Dispatchers.Default) {
+                repository.downloadLaunchFileName(1L).also { selectionReturned.countDown() }
+            }
+            assertFalse(
+                "filename selection must wait for the repository cache lock",
+                selectionReturned.await(300, TimeUnit.MILLISECONDS),
+            )
+            releaseMutation.countDown()
+            assertTrue(selectionReturned.await(5, TimeUnit.SECONDS))
+            assertEquals("first.mp4", selection.await())
+            removal.await()
+        } finally {
+            releaseMutation.countDown()
+            fixture.preferences.afterMemoryMutationBeforeCommit = null
+            repository.suspendForAccountBoundary()
             AuthenticatedSessionRegistry.clear()
         }
     }

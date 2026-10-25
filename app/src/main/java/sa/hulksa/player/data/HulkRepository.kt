@@ -45,7 +45,17 @@ private data class AccountSessionOwner(
     val sessionId: String,
 )
 
-class HulkRepository(context: Context) {
+class HulkRepository internal constructor(
+    context: Context,
+    private val vault: CredentialVault,
+    private val accountSessionStore: AccountSessionStore,
+) {
+    constructor(context: Context) : this(
+        context = context,
+        vault = CredentialVault(context.applicationContext),
+        accountSessionStore = AccountSessionStore(context.applicationContext),
+    )
+
     private val appContext = context.applicationContext
     private val portalResolver = PortalResolver()
     private val client = XtreamClient()
@@ -53,8 +63,6 @@ class HulkRepository(context: Context) {
     private val kidsContentFilterStore = KidsContentFilterStore(appContext)
     private val movieCardMetadataClient = MovieCardMetadataClient()
     private val seriesCardMetadataClient = SeriesCardMetadataClient()
-    private val vault = CredentialVault(appContext)
-    private val accountSessionStore = AccountSessionStore(appContext)
     private val diagnostics = ServerDiagnosticsEngine(appContext)
 
     suspend fun login(credentials: Credentials, remember: Boolean): AuthenticatedSession =
@@ -74,6 +82,14 @@ class HulkRepository(context: Context) {
         credentials: Credentials,
         remember: Boolean,
     ): AuthenticationStartResult {
+        // Any new authentication attempt supersedes an older deferred decision. Serialize the
+        // invalidation with the session commit lock so a stale decision cannot validate and
+        // commit across a newer attempt's start; keep the wait off the caller thread.
+        withContext(Dispatchers.IO) {
+            synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                PendingAuthenticationDecisionRegistry.invalidate()
+            }
+        }
         val session = try {
             val portal = portalResolver.resolve(credentials.accessCode)
             client.authenticate(portal, credentials)
@@ -98,6 +114,8 @@ class HulkRepository(context: Context) {
                             username = session.credentials.username.trim(),
                             portalBaseUrl = accountTrustedHostKey(session.portal.baseUrl),
                             candidates = resolution.candidates,
+                            attempt = PendingAuthenticationDecisionRegistry.begin(),
+                            priorSessionId = accountSessionStore.metadata()?.sessionId,
                         )
                         null
                     } else {
@@ -154,40 +172,45 @@ class HulkRepository(context: Context) {
         selectedAccountId: String?,
         remember: Boolean,
     ): AuthenticatedSession {
+        var recordedMetadata: AccountSessionMetadata? = null
         val metadata = try {
             withContext(Dispatchers.IO) {
                 synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                    requireCurrentPendingDecisionLocked(pending)
                     val recorded = accountSessionStore.commitAccountIdentityDecision(
                         username = pending.username,
                         portalBaseUrl = pending.portalBaseUrl,
                         selectedAccountId = selectedAccountId,
                         session = pending.session,
                     )
+                    recordedMetadata = recorded
                     AuthenticatedSessionRegistry.update(pending.session, recorded)
                     if (remember) vault.save(pending.session.credentials) else vault.clear()
+                    PendingAuthenticationDecisionRegistry.invalidate(pending.attempt)
                     recorded
                 }
             }
         } catch (stale: StaleAccountIdentityDecisionException) {
             // The decision no longer applies to current ownership. Fail closed without touching
             // any session or scope state that may belong to a newer valid owner.
+            PendingAuthenticationDecisionRegistry.invalidate(pending.attempt)
             ManualParentAuthProofRegistry.completeAuthenticationFailure()
             throw stale
+        } catch (cancelled: CancellationException) {
+            ManualParentAuthProofRegistry.completeAuthenticationFailure()
+            cleanupFailedDecision(
+                pending = pending,
+                recorded = recordedMetadata,
+                error = cancelled,
+            )
+            throw cancelled
         } catch (error: Throwable) {
             ManualParentAuthProofRegistry.completeAuthenticationFailure()
-            withContext(NonCancellable + Dispatchers.IO) {
-                synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
-                    try {
-                        vault.clear()
-                    } catch (removalFailure: CredentialEnvelopeRemovalException) {
-                        // The operation is already failing; keep the original cause primary and
-                        // record that the durable credential envelope could not be removed.
-                        error.addSuppressed(removalFailure)
-                    }
-                    accountSessionStore.clearActiveSession()
-                    AuthenticatedSessionRegistry.clear()
-                }
-            }
+            cleanupFailedDecision(
+                pending = pending,
+                recorded = recordedMetadata,
+                error = error,
+            )
             throw error
         }
         ManualParentAuthProofRegistry.completeAuthenticationSuccess(
@@ -200,14 +223,69 @@ class HulkRepository(context: Context) {
     /**
      * Cancel/Back leaves no completed association: no binding, no trusted host and no persisted
      * credentials for the undecided identity. The retained access code is preserved separately.
+     * A stale decision returns false without touching the newer session it no longer owns.
      */
-    internal suspend fun abandonPendingAuthentication() = withContext(Dispatchers.IO) {
+    internal suspend fun abandonPendingAuthentication(
+        pending: PendingAccountIdentityDecision,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val owned = synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+            runCatching { requireCurrentPendingDecisionLocked(pending) }.isSuccess
+        }
+        if (!owned) {
+            PendingAuthenticationDecisionRegistry.invalidate(pending.attempt)
+            return@withContext false
+        }
         ManualParentAuthProofRegistry.completeAuthenticationFailure()
         synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+            if (runCatching { requireCurrentPendingDecisionLocked(pending) }.isFailure) {
+                PendingAuthenticationDecisionRegistry.invalidate(pending.attempt)
+                return@synchronized false
+            }
+            PendingAuthenticationDecisionRegistry.invalidate(pending.attempt)
             suspendExistingDownloadOwner()
             withDurableCredentialsRemoved(vault::clear) {
                 accountSessionStore.clearActiveSession()
                 AuthenticatedSessionRegistry.clear()
+            }
+            true
+        }
+    }
+
+    private fun requireCurrentPendingDecisionLocked(pending: PendingAccountIdentityDecision) {
+        if (!PendingAuthenticationDecisionRegistry.isCurrent(pending.attempt)) {
+            throw StaleAccountIdentityDecisionException()
+        }
+        if (accountSessionStore.metadata()?.sessionId != pending.priorSessionId) {
+            throw StaleAccountIdentityDecisionException()
+        }
+    }
+
+    private suspend fun cleanupFailedDecision(
+        pending: PendingAccountIdentityDecision,
+        recorded: AccountSessionMetadata?,
+        error: Throwable,
+    ) {
+        withContext(NonCancellable + Dispatchers.IO) {
+            synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                val currentSessionId = accountSessionStore.metadata()?.sessionId
+                val ownsCurrentSession = if (recorded != null) {
+                    currentSessionId == recorded.sessionId
+                } else {
+                    currentSessionId == pending.priorSessionId && pending.priorSessionId == null
+                }
+                val attemptStillCurrent = PendingAuthenticationDecisionRegistry.isCurrent(pending.attempt)
+                if (attemptStillCurrent && ownsCurrentSession) {
+                    try {
+                        vault.clear()
+                    } catch (removalFailure: CredentialEnvelopeRemovalException) {
+                        // The operation is already failing; keep the original cause primary and
+                        // record that the durable credential envelope could not be removed.
+                        error.addSuppressed(removalFailure)
+                    }
+                    accountSessionStore.clearActiveSession()
+                    AuthenticatedSessionRegistry.clear()
+                }
+                PendingAuthenticationDecisionRegistry.invalidate(pending.attempt)
             }
         }
     }
@@ -222,6 +300,7 @@ class HulkRepository(context: Context) {
         accountId: String,
         remember: Boolean,
     ): AccountSessionMetadata {
+        PendingAuthenticationDecisionRegistry.invalidate()
         if (remember) {
             val recorded = accountSessionStore.recordAuthenticated(session, accountId)
             AuthenticatedSessionRegistry.update(session, recorded)
@@ -266,6 +345,7 @@ class HulkRepository(context: Context) {
                     continuationAccountId,
                 )
                 AuthenticatedSessionRegistry.update(refreshed, recorded)
+                PendingAuthenticationDecisionRegistry.invalidate()
                 recorded
             }
         }
@@ -281,6 +361,7 @@ class HulkRepository(context: Context) {
         if (credentials == null) {
             ManualParentAuthProofRegistry.invalidateAll()
             synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                PendingAuthenticationDecisionRegistry.invalidate()
                 suspendExistingDownloadOwner()
                 accountSessionStore.clearActiveSession()
                 AuthenticatedSessionRegistry.clear()
@@ -365,6 +446,7 @@ class HulkRepository(context: Context) {
                                     continuationAccountId,
                                 )
                                 AuthenticatedSessionRegistry.update(restored, recorded)
+                                PendingAuthenticationDecisionRegistry.invalidate()
                                 recorded
                             }
                         }
@@ -422,6 +504,7 @@ class HulkRepository(context: Context) {
                             continuationAccountId,
                         )
                         AuthenticatedSessionRegistry.update(restored, recorded)
+                        PendingAuthenticationDecisionRegistry.invalidate()
                         recorded
                     }
                 }
@@ -437,6 +520,7 @@ class HulkRepository(context: Context) {
     suspend fun logout() = withContext(Dispatchers.IO) {
         ManualParentAuthProofRegistry.invalidateAll()
         synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+            PendingAuthenticationDecisionRegistry.invalidate()
             suspendExistingDownloadOwner()
             withDurableCredentialsRemoved(vault::clear) {
                 accountSessionStore.clearActiveSession()
@@ -586,6 +670,8 @@ internal data class PendingAccountIdentityDecision(
     val username: String,
     val portalBaseUrl: String,
     val candidates: List<TrustedAccountIdentity>,
+    val attempt: AuthenticationDecisionAttempt,
+    val priorSessionId: String?,
 )
 
 internal fun durableDownloadSessionRestoreFailure(

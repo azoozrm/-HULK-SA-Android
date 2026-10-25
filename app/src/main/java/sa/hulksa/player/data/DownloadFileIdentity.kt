@@ -35,16 +35,27 @@ internal fun buildDownloadFileName(
     return "${safeTitle}_${identityKind}_${streamId}_$identityDigest.$extension"
 }
 
-internal fun downloadPhysicalPathKeys(item: OfflineDownload): Set<String> {
+internal fun downloadPhysicalPathKeys(item: OfflineDownload): Set<String> =
+    downloadPhysicalPathKeys(
+        storagePath = item.storagePath,
+        fileName = item.fileName,
+        localUri = item.localUri,
+    )
+
+internal fun downloadPhysicalPathKeys(
+    storagePath: String?,
+    fileName: String?,
+    localUri: String?,
+): Set<String> {
     val paths = linkedSetOf<String>()
-    val storagePath = item.storagePath?.trim().orEmpty()
-    val fileName = item.fileName?.trim().orEmpty()
-    if (storagePath.isNotEmpty() && fileName.isNotEmpty()) {
-        val finalPath = File(storagePath, fileName).absolutePath
+    val normalizedStoragePath = storagePath?.trim().orEmpty()
+    val normalizedFileName = fileName?.trim().orEmpty()
+    if (normalizedStoragePath.isNotEmpty() && normalizedFileName.isNotEmpty()) {
+        val finalPath = File(normalizedStoragePath, normalizedFileName).absolutePath
         paths += finalPath
         paths += "$finalPath.part"
     }
-    downloadFilePathFromUri(item.localUri)?.let { localPath ->
+    downloadFilePathFromUri(localUri)?.let { localPath ->
         val finalPath = File(localPath).absolutePath
         paths += finalPath
         paths += "$finalPath.part"
@@ -83,8 +94,17 @@ internal fun sharedDownloadIdentityIds(records: List<OfflineDownload>): Set<Long
 internal fun reconcileSharedDownloadPaths(
     records: List<OfflineDownload>,
     localUriForFile: (File) -> String,
+    protectedPathKeys: Set<String> = emptySet(),
 ): List<OfflineDownload> {
     val ambiguousIds = sharedDownloadIdentityIds(records)
+        .toMutableSet()
+        .apply {
+            records.forEach { item ->
+                if (downloadPhysicalPathKeys(item).any { it in protectedPathKeys }) {
+                    add(item.downloadId)
+                }
+            }
+        }
     if (ambiguousIds.isEmpty()) return records
     return records.map { item ->
         if (item.downloadId !in ambiguousIds) {
@@ -118,8 +138,10 @@ internal fun downloadPathIsOwnedByAnotherRecord(
     records: List<OfflineDownload>,
     item: OfflineDownload,
     path: File,
+    protectedPathKeys: Set<String> = emptySet(),
 ): Boolean {
     val normalized = path.absolutePath
+    if (normalized in protectedPathKeys) return true
     return records.any { other ->
         other.downloadId != item.downloadId && normalized in downloadPhysicalPathKeys(other)
     }
