@@ -32,7 +32,7 @@ import sa.hulksa.player.model.SeriesBundle
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-class XtreamClient(
+open class XtreamClient(
     private val nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1_000L },
 ) {
     private val client = OkHttpClient.Builder()
@@ -42,7 +42,7 @@ class XtreamClient(
         .retryOnConnectionFailure(true)
         .build()
 
-    suspend fun authenticate(portal: PortalConfig, credentials: Credentials): AuthenticatedSession {
+    open suspend fun authenticate(portal: PortalConfig, credentials: Credentials): AuthenticatedSession {
         val root = requestObject(portal, credentials)
         val user = root.optJSONObject("user_info") ?: throw XtreamException.InvalidResponse
         val status = user.optString("status").trim()
@@ -71,7 +71,7 @@ class XtreamClient(
         )
     }
 
-    suspend fun catalog(session: AuthenticatedSession, type: ContentType): Catalog =
+    open suspend fun catalog(session: AuthenticatedSession, type: ContentType): Catalog =
         withContext(Dispatchers.IO) {
             coroutineScope {
                 val categoryAction = when (type) {
@@ -113,7 +113,7 @@ class XtreamClient(
             parseDetails(root.optJSONObject("info") ?: root, session.portal.baseUrl)
         }
 
-    suspend fun seriesBundle(session: AuthenticatedSession, seriesId: Int): SeriesBundle =
+    open suspend fun seriesBundle(session: AuthenticatedSession, seriesId: Int): SeriesBundle =
         withContext(Dispatchers.IO) {
             val root = requestObject(
                 portal = session.portal,

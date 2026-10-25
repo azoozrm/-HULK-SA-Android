@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -387,17 +388,24 @@ internal fun playerProgressProfileOwnerAllowed(
     activeProfileId: String,
 ): Boolean = expectedProfileId == activeProfileId
 
-class HulkViewModel(application: Application) : AndroidViewModel(application) {
+class HulkViewModel internal constructor(
+    application: Application,
+    private val repository: HulkRepository,
+    private val operationsClient: OperationsClient,
+) : AndroidViewModel(application) {
+    constructor(application: Application) : this(
+        application = application,
+        repository = HulkRepository(application),
+        operationsClient = OperationsClient(),
+    )
     private val favoriteMutationGate = FavoriteMutationGate()
     private val favoriteMutationMutex = Mutex()
-    private val repository = HulkRepository(application)
     private val userLibrary = UserLibrary(application)
     private val downloadRepository = DownloadRepository(application)
     private val profileStore = ProfileStore(application)
     private val kidsContentFilterStore = KidsContentFilterStore(application)
     private val localEpisodeNotificationStore = LocalEpisodeNotificationStore(application)
     private val operationsStore = OperationsStore(application)
-    private val operationsClient = OperationsClient()
     private val operationsInstaller = OperationsApkInstaller(application)
     private val operationsDeviceIsTv = application.isTelevisionDevice()
     private val presenceDeviceMetadata = application.currentPresenceDeviceMetadata(operationsDeviceIsTv)
@@ -526,6 +534,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var playerProgressPersistenceJob: Job? = null
     private var playerProgressProfileOwner: String? = null
     private var notificationScanJob: Job? = null
+    private var pendingNotificationScanTrigger: NotificationScanTrigger? = null
     private var notificationPopupActionJob: Job? = null
     private var operationsRefreshJob: Job? = null
     private var operationsDownloadJob: Job? = null
@@ -2080,6 +2089,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         downloadPriorityMutationQueues.clear()
         invalidatePlayerProgressPersistence()
         notificationScanJob?.cancel()
+        pendingNotificationScanTrigger = null
         invalidateDetailsRequest()
         invalidateVoiceSearchContext()
         mutableState.update { state ->
@@ -2429,6 +2439,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         refreshNotificationState(clearPopup = false)
+        if (config.features.episodeNotificationsEnabled) drainPendingNotificationScan()
     }
 
     private fun updateOperationsAnnouncementPresentation(acknowledgedMessageIds: Set<String>) {
@@ -2460,6 +2471,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             maybeShowPendingNotificationPopup()
             if (becameReady && profileStore.activeProfile().kind == ProfileKind.KIDS) {
                 scanSubscribedSeries(NotificationScanTrigger.PROFILE_SWITCH)
+            } else {
+                drainPendingNotificationScan()
             }
         } else {
             mutableState.update { it.copy(notificationPopup = null) }
@@ -2597,73 +2610,109 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun scanSubscribedSeries(trigger: NotificationScanTrigger) {
-        if (!mutableState.value.operations.features.episodeNotificationsEnabled) return
+        if (!mutableState.value.operations.features.episodeNotificationsEnabled) {
+            pendingNotificationScanTrigger = trigger
+            return
+        }
         val activeSession = session ?: return
         val profile = profileStore.activeProfile()
         val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
         val snapshot = localEpisodeNotificationStore.snapshot(profile.id)
-        if (
-            !snapshot.settings.enabled ||
-            notificationScanJob?.isActive == true ||
-            (profile.kind == ProfileKind.KIDS && !notificationUiReady)
-        ) return
+        if (!snapshot.settings.enabled) return
+        if (profile.kind == ProfileKind.KIDS && !notificationUiReady) {
+            pendingNotificationScanTrigger = trigger
+            return
+        }
+        if (notificationScanJob?.isActive == true) {
+            pendingNotificationScanTrigger = trigger
+            return
+        }
+        pendingNotificationScanTrigger = null
 
-        notificationScanJob = viewModelScope.launch {
-            if (snapshot.settings.baselineRefreshRequired) {
-                refreshMasterNotificationBaselines(activeSession, accountId, profile.id, profile.kind)
-                return@launch
-            }
-            val now = System.currentTimeMillis()
-            val eligible = snapshot.subscriptions.filter { subscription ->
-                val lastCheckedAt = subscription.lastCheckedAtEpochMs
-                subscription.enabled && (
-                    lastCheckedAt <= 0L ||
-                        now < lastCheckedAt ||
-                        now - lastCheckedAt >= trigger.minimumAgeMs
+        lateinit var job: Job
+        job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                if (snapshot.settings.baselineRefreshRequired) {
+                    refreshMasterNotificationBaselines(
+                        activeSession,
+                        accountId,
+                        profile.id,
+                        profile.kind,
                     )
-            }
-            if (eligible.isEmpty()) {
-                if (profileStore.activeProfileId() == profile.id) maybeShowPendingNotificationPopup()
-                return@launch
-            }
+                    return@launch
+                }
+                val now = System.currentTimeMillis()
+                val eligible = snapshot.subscriptions.filter { subscription ->
+                    val lastCheckedAt = subscription.lastCheckedAtEpochMs
+                    subscription.enabled && (
+                        lastCheckedAt <= 0L ||
+                            now < lastCheckedAt ||
+                            now - lastCheckedAt >= trigger.minimumAgeMs
+                        )
+                }
+                if (eligible.isEmpty()) {
+                    if (profileStore.activeProfileId() == profile.id) {
+                        maybeShowPendingNotificationPopup()
+                    }
+                    return@launch
+                }
 
-            val batchId = UUID.randomUUID().toString()
-            coroutineScope {
-                eligible.map { subscription ->
-                    async {
-                        episodeNotificationScanSemaphore.withPermit {
-                            if (!canUseSeriesNotifications(profile.kind, subscription.seriesId)) {
-                                return@withPermit
-                            }
-                            try {
-                                val bundle = repository.seriesBundle(activeSession, subscription.seriesId)
+                val batchId = UUID.randomUUID().toString()
+                coroutineScope {
+                    eligible.map { subscription ->
+                        async {
+                            episodeNotificationScanSemaphore.withPermit {
                                 if (!canUseSeriesNotifications(profile.kind, subscription.seriesId)) {
                                     return@withPermit
                                 }
-                                withContext(Dispatchers.IO) {
-                                    localEpisodeNotificationStore.recordSuccessfulScan(
-                                        profileId = profile.id,
-                                        seriesId = subscription.seriesId,
-                                        episodes = bundle.episodes,
-                                        detectedAtEpochMs = System.currentTimeMillis(),
-                                        batchId = batchId,
-                                        expectedAccountId = subscription.accountId,
+                                try {
+                                    val bundle = repository.seriesBundle(
+                                        activeSession,
+                                        subscription.seriesId,
                                     )
+                                    if (!canUseSeriesNotifications(
+                                            profile.kind,
+                                            subscription.seriesId,
+                                        )
+                                    ) {
+                                        return@withPermit
+                                    }
+                                    withContext(Dispatchers.IO) {
+                                        localEpisodeNotificationStore.recordSuccessfulScan(
+                                            profileId = profile.id,
+                                            seriesId = subscription.seriesId,
+                                            episodes = bundle.episodes,
+                                            detectedAtEpochMs = System.currentTimeMillis(),
+                                            batchId = batchId,
+                                            expectedAccountId = subscription.accountId,
+                                        )
+                                    }
+                                } catch (error: CancellationException) {
+                                    throw error
+                                } catch (_: Exception) {
+                                    // A failed request must leave both the baseline and event history unchanged.
                                 }
-                            } catch (error: CancellationException) {
-                                throw error
-                            } catch (_: Exception) {
-                                // A failed request must leave both the baseline and event history unchanged.
                             }
                         }
-                    }
-                }.awaitAll()
-            }
-            if (profileStore.activeProfileId() == profile.id) {
-                refreshNotificationState(clearPopup = false)
-                maybeShowPendingNotificationPopup()
+                    }.awaitAll()
+                }
+                if (profileStore.activeProfileId() == profile.id) {
+                    refreshNotificationState(clearPopup = false)
+                    maybeShowPendingNotificationPopup()
+                }
+            } finally {
+                if (notificationScanJob === job) notificationScanJob = null
+                drainPendingNotificationScan()
             }
         }
+        notificationScanJob = job
+        job.start()
+    }
+
+    private fun drainPendingNotificationScan() {
+        val pending = pendingNotificationScanTrigger ?: return
+        pendingNotificationScanTrigger = null
+        scanSubscribedSeries(pending)
     }
 
     private suspend fun refreshMasterNotificationBaselines(
@@ -3025,6 +3074,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         pendingTvDeepLink = null
         notificationScanJob?.cancel()
         notificationScanJob = null
+        pendingNotificationScanTrigger = null
         notificationUiReady = false
         invalidateCatalogRequests()
         clearCatalogMemory()

@@ -21,7 +21,7 @@ sealed interface OperationsFetchResult {
     data object Failure : OperationsFetchResult
 }
 
-class OperationsClient(
+open class OperationsClient(
     private val endpoint: String = BuildConfig.OPERATIONS_CONFIG_URL,
     client: OkHttpClient = defaultOperationsHttpClient(),
 ) {
@@ -34,7 +34,7 @@ class OperationsClient(
         .followSslRedirects(false)
         .build()
 
-    suspend fun fetch(): OperationsFetchResult = withContext(Dispatchers.IO) {
+    open suspend fun fetch(): OperationsFetchResult = withContext(Dispatchers.IO) {
         val parsedEndpoint = runCatching { URI(endpoint) }.getOrNull()
         if (
             parsedEndpoint == null ||

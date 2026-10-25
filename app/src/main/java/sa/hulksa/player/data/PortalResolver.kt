@@ -15,11 +15,11 @@ import org.json.JSONObject
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.model.PortalConfig
 
-class PortalResolver internal constructor(
+open class PortalResolver internal constructor(
     private val apiBaseUrl: String = BuildConfig.RESELLER_API_URL,
     private val client: OkHttpClient = defaultClient(),
 ) {
-    suspend fun resolve(accessCode: String): PortalConfig = withContext(Dispatchers.IO) {
+    open suspend fun resolve(accessCode: String): PortalConfig = withContext(Dispatchers.IO) {
         val validatedCode = normalizeResellerAccessCode(accessCode)
             ?: throw PortalException.InvalidAccessCode
         val endpoint = resolveEndpoint()
