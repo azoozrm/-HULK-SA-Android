@@ -43,12 +43,18 @@ class AccountSessionMetadataCommitAtomicityTest {
         }
 
         assertNull(environment.sessionPreferences.durableValue("account_id"))
+        assertNull(environment.store.activeAccountId())
+        assertNull(environment.store.metadata())
+
+        val restarted = environment.restart()
+        assertNull(restarted.store.activeAccountId())
+        assertNull(restarted.store.metadata())
     }
 
     @Test
-    fun `metadata commit failure plus caller cleanup leaves no durable account split`() {
+    fun `metadata commit failure rolls back to the previous coherent owner`() {
         val environment = environment()
-        val accountB = stableAccountId(PORTAL_BETA, USERNAME_BETA)
+        val accountA = stableAccountId(PORTAL_ALPHA, USERNAME_ALPHA)
         environment.store.recordAuthenticated(alphaSession())
         environment.sessionPreferences.commitResult = false
 
@@ -56,19 +62,23 @@ class AccountSessionMetadataCommitAtomicityTest {
             environment.store.recordAuthenticated(betaSession())
         }
 
-        // A restart at this point observes the durable scope bound to B while metadata
-        // still belongs to A, which is exactly the split the checked commit rejects.
-        val splitReader = environment.restart()
-        assertEquals(accountB, splitReader.store.activeAccountId())
-        assertNull(splitReader.store.metadata())
+        // The failed B transaction restores both process and durable A ownership.
+        assertEquals(accountA, environment.store.activeAccountId())
+        assertEquals(accountA, environment.store.metadata()?.accountId)
+        assertEquals(USERNAME_ALPHA, environment.store.metadata()?.username)
+        assertEquals("CODE-ALPHA", environment.store.lastAccessCode())
 
-        // The existing login catch path clears the active session when recordAuthenticated throws.
+        val restarted = environment.restart()
+        assertEquals(accountA, restarted.store.activeAccountId())
+        assertEquals(accountA, restarted.store.metadata()?.accountId)
+        assertEquals(USERNAME_ALPHA, restarted.store.metadata()?.username)
+        assertEquals("CODE-ALPHA", restarted.store.lastAccessCode())
+
         environment.sessionPreferences.commitResult = true
-        environment.store.clearActiveSession()
-
-        val coherentReader = environment.restart()
-        assertNull(coherentReader.store.activeAccountId())
-        assertNull(coherentReader.store.metadata())
+        assertEquals(
+            stableAccountId(PORTAL_BETA, USERNAME_BETA),
+            environment.store.recordAuthenticated(betaSession()).accountId,
+        )
     }
 
     @Test

@@ -173,6 +173,12 @@ private fun OfflineDownload.progressTelemetry(): DownloadProgressTelemetry =
         etaSeconds = etaSeconds,
     )
 
+internal sealed interface DownloadLaunchFileNameResult {
+    data class Selected(val fileName: String) : DownloadLaunchFileNameResult
+    data object MissingRecord : DownloadLaunchFileNameResult
+    data object Exhausted : DownloadLaunchFileNameResult
+}
+
 class DownloadRepository internal constructor(
     context: Context,
     internal val accountId: String,
@@ -854,7 +860,18 @@ class DownloadRepository internal constructor(
 
         val target = storageTarget(startItem) ?: throw StorageUnavailableException()
         if (!target.directory.exists() && !target.directory.mkdirs()) throw StorageUnavailableException()
-        val fileName = downloadLaunchFileName(downloadId) ?: return
+        val fileName = when (val selection = downloadLaunchFileName(downloadId)) {
+            is DownloadLaunchFileNameResult.Selected -> selection.fileName
+            DownloadLaunchFileNameResult.MissingRecord -> return
+            DownloadLaunchFileNameResult.Exhausted -> {
+                fail(
+                    downloadId = downloadId,
+                    transportAttempt = transportAttempt,
+                    message = "تعذر اختيار اسم ملف آمن للتحميل. أعد المحاولة بعد تنظيف التحميلات.",
+                )
+                return
+            }
+        }
         val finalFile = File(target.directory, fileName)
         val partFile = File(target.directory, "$fileName.part")
 
@@ -1613,13 +1630,20 @@ class DownloadRepository internal constructor(
         .take(8)
         .ifBlank { "mp4" }
 
-    internal fun downloadLaunchFileName(downloadId: Long): String? = synchronized(lock) {
-        val item = cache.firstOrNull { it.downloadId == downloadId } ?: return@synchronized null
-        safeDownloadFileNameFor(item)
-    }
+    internal fun downloadLaunchFileName(downloadId: Long): DownloadLaunchFileNameResult =
+        synchronized(lock) {
+            val item = cache.firstOrNull { it.downloadId == downloadId }
+                ?: return@synchronized DownloadLaunchFileNameResult.MissingRecord
+            val fileName = safeDownloadFileNameFor(item)
+                ?: return@synchronized DownloadLaunchFileNameResult.Exhausted
+            DownloadLaunchFileNameResult.Selected(fileName)
+        }
 
-    /** Caller must hold [lock]: cache path ownership is read as one immutable decision. */
-    private fun safeDownloadFileNameFor(item: OfflineDownload): String {
+    /**
+     * Caller must hold [lock]: cache path ownership is read as one immutable decision.
+     * Null means the bounded safe-name budget is exhausted; callers must not proceed to file IO.
+     */
+    private fun safeDownloadFileNameFor(item: OfflineDownload): String? {
         val configured = item.fileName?.trim()?.takeIf(String::isNotEmpty)
         val storage = item.storagePath?.trim()?.takeIf(String::isNotEmpty)
         if (
@@ -1638,7 +1662,8 @@ class DownloadRepository internal constructor(
         if (storage == null) return baseName
         var candidate = baseName
         var attempt = 0
-        while (downloadFileNameConflicts(item, storage, candidate) && attempt < 100) {
+        while (downloadFileNameConflicts(item, storage, candidate)) {
+            if (attempt >= MAX_SAFE_FILENAME_CANDIDATES) return null
             attempt += 1
             candidate = alternateDownloadFileName(baseName, attempt)
         }
@@ -1715,6 +1740,7 @@ class DownloadRepository internal constructor(
         const val PROGRESS_INTERVAL_NANOS = 500_000_000L
         const val PROGRESS_CHUNK_BYTES = 512 * 1024L
         const val MINIMUM_START_SPACE_BYTES = 64L * 1024L * 1024L
+        private const val MAX_SAFE_FILENAME_CANDIDATES = 100
         const val MINIMUM_SAFETY_BYTES = 96L * 1024L * 1024L
         const val USER_AGENT = DOWNLOAD_USER_AGENT
 

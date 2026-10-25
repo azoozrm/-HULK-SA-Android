@@ -305,6 +305,31 @@ class AccountScopeStore internal constructor(
         ?.trim()
         ?.takeIf(String::isNotBlank)
 
+    internal data class RollbackSnapshot(
+        val activeAccountId: String?,
+        val legacyOwnerAccountId: String?,
+    )
+
+    internal fun rollbackSnapshot(): RollbackSnapshot = RollbackSnapshot(
+        activeAccountId = activeAccountId(),
+        legacyOwnerAccountId = legacyOwnerAccountId(),
+    )
+
+    internal fun restore(snapshot: RollbackSnapshot) {
+        state.edit().apply {
+            if (snapshot.activeAccountId == null) {
+                remove(KEY_ACTIVE_ACCOUNT_ID)
+            } else {
+                putString(KEY_ACTIVE_ACCOUNT_ID, snapshot.activeAccountId)
+            }
+            if (snapshot.legacyOwnerAccountId == null) {
+                remove(KEY_LEGACY_OWNER_ACCOUNT_ID)
+            } else {
+                putString(KEY_LEGACY_OWNER_ACCOUNT_ID, snapshot.legacyOwnerAccountId)
+            }
+        }.commit()
+    }
+
     internal fun registerActiveAccountListener(
         listener: SharedPreferences.OnSharedPreferenceChangeListener,
     ) {
@@ -458,46 +483,56 @@ class AccountSessionStore internal constructor(
         val username = session.credentials.username.trim()
         val normalizedAccountId = accountId.trim().takeIf(String::isNotBlank)
             ?: throw IllegalArgumentException("Authenticated accountId must not be blank")
-        check(accountScope.bind(normalizedAccountId)) { "Unable to bind authenticated account scope" }
+        val previousPreferences = preferences.all.toMap()
+        val previousScope = accountScope.rollbackSnapshot()
+        try {
+            check(accountScope.bind(normalizedAccountId)) {
+                "Unable to bind authenticated account scope"
+            }
 
-        val installationId = preferences.getString(KEY_INSTALLATION_ID, null)
-            ?.takeIf(String::isNotBlank)
-            ?: UUID.randomUUID().toString()
-        val metadata = AccountSessionMetadata(
-            accountId = normalizedAccountId,
-            username = username,
-            portalBaseUrl = session.portal.baseUrl.trim().trimEnd('/'),
-            authenticatedAtEpochMs = System.currentTimeMillis(),
-            expiresAtEpochSeconds = session.account.expiresAtEpochSeconds,
-            status = session.account.status,
-            installationId = installationId,
-            sessionId = UUID.randomUUID().toString(),
-        )
-
-        val editor = preferences.edit()
-            .putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
-            .putString(accountIdentityAliasKey(username), metadata.accountId)
-            .putString(KEY_ACCOUNT_ID, metadata.accountId)
-            .putString(KEY_USERNAME, metadata.username)
-            .putString(KEY_PORTAL_BASE_URL, metadata.portalBaseUrl)
-            .putLong(KEY_AUTHENTICATED_AT, metadata.authenticatedAtEpochMs)
-            .putLong(KEY_EXPIRES_AT, metadata.expiresAtEpochSeconds ?: NO_EXPIRY)
-            .putString(KEY_STATUS, metadata.status)
-            .putString(KEY_INSTALLATION_ID, metadata.installationId)
-            .putString(KEY_SESSION_ID, metadata.sessionId)
-            .putString(KEY_LAST_ACCOUNT_ID, metadata.accountId)
-            .putString(KEY_LAST_USERNAME, metadata.username)
-            .putString(KEY_LAST_ACCESS_CODE, session.credentials.accessCode)
-        if (trustHost) {
-            applyTrustedHost(
-                editor = editor,
-                username = username,
-                portalBaseUrl = session.portal.baseUrl,
+            val installationId = preferences.getString(KEY_INSTALLATION_ID, null)
+                ?.takeIf(String::isNotBlank)
+                ?: UUID.randomUUID().toString()
+            val metadata = AccountSessionMetadata(
                 accountId = normalizedAccountId,
+                username = username,
+                portalBaseUrl = session.portal.baseUrl.trim().trimEnd('/'),
+                authenticatedAtEpochMs = System.currentTimeMillis(),
+                expiresAtEpochSeconds = session.account.expiresAtEpochSeconds,
+                status = session.account.status,
+                installationId = installationId,
+                sessionId = UUID.randomUUID().toString(),
             )
+
+            val editor = preferences.edit()
+                .putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
+                .putString(accountIdentityAliasKey(username), metadata.accountId)
+                .putString(KEY_ACCOUNT_ID, metadata.accountId)
+                .putString(KEY_USERNAME, metadata.username)
+                .putString(KEY_PORTAL_BASE_URL, metadata.portalBaseUrl)
+                .putLong(KEY_AUTHENTICATED_AT, metadata.authenticatedAtEpochMs)
+                .putLong(KEY_EXPIRES_AT, metadata.expiresAtEpochSeconds ?: NO_EXPIRY)
+                .putString(KEY_STATUS, metadata.status)
+                .putString(KEY_INSTALLATION_ID, metadata.installationId)
+                .putString(KEY_SESSION_ID, metadata.sessionId)
+                .putString(KEY_LAST_ACCOUNT_ID, metadata.accountId)
+                .putString(KEY_LAST_USERNAME, metadata.username)
+                .putString(KEY_LAST_ACCESS_CODE, session.credentials.accessCode)
+            if (trustHost) {
+                applyTrustedHost(
+                    editor = editor,
+                    username = username,
+                    portalBaseUrl = session.portal.baseUrl,
+                    accountId = normalizedAccountId,
+                )
+            }
+            check(editor.commit()) { "Unable to persist authenticated account session metadata" }
+            return metadata
+        } catch (error: Throwable) {
+            restoreSessionPreferencesSnapshot(previousPreferences)
+            accountScope.restore(previousScope)
+            throw error
         }
-        check(editor.commit()) { "Unable to persist authenticated account session metadata" }
-        return metadata
     }
 
     /**
@@ -670,6 +705,21 @@ class AccountSessionStore internal constructor(
 
     fun lastAccessCode(): String? = preferences.getString(KEY_LAST_ACCESS_CODE, null)
         ?.takeIf { it.isNotBlank() }
+
+    private fun restoreSessionPreferencesSnapshot(snapshot: Map<String, *>) {
+        val editor = preferences.edit().clear()
+        snapshot.forEach { (key, value) ->
+            when (value) {
+                is String -> editor.putString(key, value)
+                is Boolean -> editor.putBoolean(key, value)
+                is Int -> editor.putInt(key, value)
+                is Long -> editor.putLong(key, value)
+                is Float -> editor.putFloat(key, value)
+                is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+            }
+        }
+        editor.apply()
+    }
 
     /**
      * Confirms the existing non-secret installation key with a checked commit.

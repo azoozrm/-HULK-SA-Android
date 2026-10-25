@@ -49,6 +49,7 @@ class HulkRepository internal constructor(
     context: Context,
     private val vault: CredentialVault,
     private val accountSessionStore: AccountSessionStore,
+    private val suspendDownloadOwner: ((String) -> Unit)? = null,
 ) {
     constructor(context: Context) : this(
         context = context,
@@ -529,6 +530,28 @@ class HulkRepository internal constructor(
         }
     }
 
+    /**
+     * Owner-scoped expiry cleanup. The registry owner is checked under the same commit lock that
+     * serializes every production session commit, so a newer owner cannot be erased by a delayed
+     * expired-session result.
+     */
+    internal suspend fun logoutIfOwnedBy(expectedOwner: AuthenticatedSessionOwner): Boolean =
+        withContext(Dispatchers.IO) {
+            synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                if (AuthenticatedSessionRegistry.currentOwner() !== expectedOwner) {
+                    return@synchronized false
+                }
+                ManualParentAuthProofRegistry.invalidateAll()
+                PendingAuthenticationDecisionRegistry.invalidate()
+                suspendExistingDownloadOwner()
+                withDurableCredentialsRemoved(vault::clear) {
+                    accountSessionStore.clearActiveSession()
+                    AuthenticatedSessionRegistry.clear()
+                }
+                true
+            }
+        }
+
     suspend fun catalog(session: AuthenticatedSession, type: ContentType): Catalog =
         client.catalog(session, type)
 
@@ -629,7 +652,10 @@ class HulkRepository internal constructor(
         accountSessionStore.metadata()?.accountId
             ?.trim()
             ?.takeIf(String::isNotEmpty)
-            ?.let { DownloadRepositoryProcessOwner.suspendAccount(appContext, it) }
+            ?.let { accountId ->
+                suspendDownloadOwner?.invoke(accountId)
+                    ?: DownloadRepositoryProcessOwner.suspendAccount(appContext, accountId)
+            }
     }
 
     private fun currentSessionOwner(): AccountSessionOwner? =

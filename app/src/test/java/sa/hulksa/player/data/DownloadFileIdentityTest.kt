@@ -184,7 +184,10 @@ class DownloadFileIdentityTest {
             )
             releaseMutation.countDown()
             assertTrue(selectionReturned.await(5, TimeUnit.SECONDS))
-            assertEquals("first.mp4", selection.await())
+            assertEquals(
+                DownloadLaunchFileNameResult.Selected("first.mp4"),
+                selection.await(),
+            )
             removal.await()
         } finally {
             releaseMutation.countDown()

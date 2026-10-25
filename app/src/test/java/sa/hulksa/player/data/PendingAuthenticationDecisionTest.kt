@@ -1,5 +1,8 @@
 package sa.hulksa.player.data
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -97,6 +100,76 @@ class PendingAuthenticationDecisionTest {
     }
 
     @Test
+    fun `failed deferred commit leaves no partial session for a new owner`() {
+        val pendingA = fixture.pendingA(expiry = System.currentTimeMillis() / 1_000L + 3_600L)
+        fixture.sessionPreferences.commitResult = false
+
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking {
+                fixture.repository.completeAuthenticationDecision(
+                    pending = pendingA,
+                    selectedAccountId = null,
+                    remember = false,
+                )
+            }
+        }
+
+        assertNull(fixture.store.metadata())
+        assertNull(fixture.store.activeAccountId())
+        assertNull(AuthenticatedSessionRegistry.currentOwner())
+        assertNull(fixture.sessionPreferences.durableValue("account_id"))
+        assertNull(fixture.scopePreferences.durableValue("active_account_id"))
+    }
+
+    @Test
+    fun `failed deferred commit preserves an existing prior owner`() {
+        val b = fixture.installCurrentB(accountId = "account-b")
+        val pendingA = fixture.pendingA(expiry = System.currentTimeMillis() / 1_000L + 3_600L)
+        fixture.sessionPreferences.commitResult = false
+
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking {
+                fixture.repository.completeAuthenticationDecision(
+                    pending = pendingA,
+                    selectedAccountId = null,
+                    remember = false,
+                )
+            }
+        }
+
+        fixture.assertCurrentB(b)
+    }
+
+    @Test
+    fun `delayed expiry cleanup cannot clear a newer valid session`() = runBlocking {
+        fixture.installCurrentA()
+        val owner = checkNotNull(AuthenticatedSessionRegistry.currentOwner())
+        val releaseCleanup = CompletableDeferred<Unit>()
+        val cleanup = async(Dispatchers.Default) {
+            releaseCleanup.await()
+            fixture.repository.logoutIfOwnedBy(owner)
+        }
+        val b = fixture.installCurrentB(accountId = "account-b")
+        releaseCleanup.complete(Unit)
+
+        assertFalse(cleanup.await())
+        fixture.assertCurrentB(b)
+    }
+
+    @Test
+    fun `owner-scoped cleanup clears the current expired owner`() = runBlocking {
+        fixture.installCurrentA()
+        val owner = checkNotNull(AuthenticatedSessionRegistry.currentOwner())
+
+        assertTrue(fixture.repository.logoutIfOwnedBy(owner))
+
+        assertNull(fixture.store.metadata())
+        assertNull(fixture.store.activeAccountId())
+        assertNull(AuthenticatedSessionRegistry.currentOwner())
+        assertNull(fixture.envelopePreferences.durableValue(CredentialVault.KEY_IV))
+    }
+
+    @Test
     fun `current pending decision that expires fails without publishing a session`() {
         val pendingA = fixture.pendingA(expiry = System.currentTimeMillis() / 1_000L - 1L)
 
@@ -149,6 +222,7 @@ class PendingAuthenticationDecisionTest {
             context = TestAppContext(),
             vault = vault,
             accountSessionStore = store,
+            suspendDownloadOwner = {},
         )
 
         fun pendingA(expiry: Long): PendingAccountIdentityDecision {
@@ -165,6 +239,21 @@ class PendingAuthenticationDecisionTest {
                 attempt = PendingAuthenticationDecisionRegistry.begin(),
                 priorSessionId = store.metadata()?.sessionId,
             )
+        }
+
+        fun installCurrentA(): AccountSessionMetadata {
+            val session = session(
+                username = "alpha",
+                accessCode = "CODE-ALPHA",
+                expiry = System.currentTimeMillis() / 1_000L + 7_200L,
+            )
+            val metadata = store.recordAuthenticated(session, "account-a")
+            AuthenticatedSessionRegistry.update(session, metadata)
+            envelopePreferences.edit()
+                .putString(CredentialVault.KEY_IV, "synthetic-a-iv")
+                .putString(CredentialVault.KEY_PAYLOAD, "synthetic-a-payload")
+                .commit()
+            return metadata
         }
 
         fun installCurrentB(accountId: String): AccountSessionMetadata {

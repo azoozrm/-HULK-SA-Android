@@ -19,23 +19,53 @@ internal class SessionPublicationGate(
     fun <T> publishIfCurrent(
         authenticated: AuthenticatedSession,
         expectedOwner: AuthenticatedSessionOwner?,
-        currentOwner: () -> AuthenticatedSessionOwner?,
         attemptCurrent: () -> Boolean = { true },
         publish: () -> T,
     ): SessionPublicationResult<T> {
-        if (expectedOwner == null || !attemptCurrent()) return SessionPublicationResult.Stale
-        val owner = currentOwner()
-        if (owner !== expectedOwner || owner.session !== authenticated) {
+        if (expectedOwner == null || expectedOwner.session !== authenticated || !attemptCurrent()) {
             return SessionPublicationResult.Stale
         }
-        if (
-            isAccountSessionExpired(
-                expiresAtEpochSeconds = authenticated.account.expiresAtEpochSeconds,
-                nowEpochSeconds = nowEpochSeconds(),
-            )
-        ) {
-            return SessionPublicationResult.Expired
-        }
-        return SessionPublicationResult.Published(publish())
+        val currentOwner = AuthenticatedSessionRegistry.currentOwner()
+            ?.takeIf { owner ->
+                owner.accountId == expectedOwner.accountId &&
+                    owner.providerId == expectedOwner.providerId &&
+                    owner.sessionId == expectedOwner.sessionId &&
+                    owner.session === authenticated
+            }
+            ?: return SessionPublicationResult.Stale
+        // Owner validation, expiry validation and publication are one serialized ownership
+        // operation. A concurrent commit cannot replace the owner between the check and publish.
+        return AuthenticatedSessionRegistry.withCurrentOwner(currentOwner) {
+            if (
+                isAccountSessionExpired(
+                    expiresAtEpochSeconds = authenticated.account.expiresAtEpochSeconds,
+                    nowEpochSeconds = nowEpochSeconds(),
+                )
+            ) {
+                SessionPublicationResult.Expired
+            } else {
+                SessionPublicationResult.Published(publish())
+            }
+        } ?: SessionPublicationResult.Stale
+    }
+}
+
+/**
+ * Applies expired-owner visible cleanup only when the owner-bound repository mutation succeeded
+ * and no newer session publication happened while cleanup was in flight.
+ */
+internal class SessionOwnershipCleanupGate(
+    private val ownershipEpoch: () -> Long,
+    private val logoutIfOwnedBy: suspend (AuthenticatedSessionOwner) -> Boolean,
+) {
+    suspend fun clearIfOwnerStillCurrent(
+        expectedOwner: AuthenticatedSessionOwner,
+        applyClearedState: () -> Unit,
+    ): Boolean {
+        val epochBeforeCleanup = ownershipEpoch()
+        if (!logoutIfOwnedBy(expectedOwner)) return false
+        if (ownershipEpoch() != epochBeforeCleanup) return false
+        applyClearedState()
+        return true
     }
 }

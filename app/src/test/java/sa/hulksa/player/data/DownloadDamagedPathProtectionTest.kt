@@ -173,6 +173,93 @@ class DownloadDamagedPathProtectionTest {
         }
     }
 
+    @Test
+    fun `safe filename fallback remains available when one protected candidate exists`() {
+        val fixture = Fixture()
+        val baseName = buildDownloadFileName("MOVIE:9001", "Same Title", 9001, "mp4")
+        fixture.seed(
+            fixture.recordJson(
+                id = 1L,
+                historyKey = "MOVIE:9001",
+                status = OfflineStatus.QUEUED,
+                fileName = baseName,
+            ),
+            fixture.recordJson(
+                id = 2L,
+                historyKey = "SERIES:9001",
+                status = OfflineStatus.PAUSED,
+                fileName = baseName,
+                includeTitle = false,
+            ),
+        )
+        val repository = fixture.repository()
+        try {
+            assertEquals(
+                DownloadLaunchFileNameResult.Selected(alternateName(baseName, 1)),
+                repository.downloadLaunchFileName(1L),
+            )
+        } finally {
+            repository.suspendForAccountBoundary()
+            AuthenticatedSessionRegistry.clear()
+        }
+    }
+
+    @Test
+    fun `exhausted safe-name budget fails before touching protected bytes`() = runBlocking {
+        val fixture = Fixture()
+        val baseName = buildDownloadFileName("MOVIE:9001", "Same Title", 9001, "mp4")
+        val candidates = listOf(baseName) + (1..100).map { alternateName(baseName, it) }
+        val lastCandidate = candidates.last()
+        val protectedFinal = fixture.createFile(lastCandidate, "PROTECTED")
+        val protectedPart = fixture.createFile("$lastCandidate.part", "PROTECTED-PART")
+        val damaged = candidates.mapIndexed { index, candidate ->
+            fixture.recordJson(
+                id = 1_000L + index,
+                historyKey = "SERIES:${9_000 + index}",
+                status = OfflineStatus.PAUSED,
+                fileName = candidate,
+                includeTitle = false,
+            )
+        }
+        fixture.seed(
+            fixture.recordJson(
+                id = 1L,
+                historyKey = "MOVIE:9001",
+                status = OfflineStatus.QUEUED,
+                fileName = baseName,
+            ),
+            *damaged.toTypedArray(),
+        )
+        val repository = fixture.repository()
+        var lease: DurableDownloadExecutionLeaseRegistry.Lease? = null
+        try {
+            assertEquals(DownloadLaunchFileNameResult.Exhausted, repository.downloadLaunchFileName(1L))
+            lease = DurableDownloadExecutionLeaseRegistry.claim(fixture.accountId, 1L)
+            assertTrue(repository.resume(1L))
+            val failed = awaitRecord(repository, 1L) {
+                it.status == OfflineStatus.FAILED &&
+                    it.errorMessage?.contains("اسم ملف آمن") == true
+            }
+            assertEquals(OfflineStatus.FAILED, failed.status)
+            assertEquals("PROTECTED", protectedFinal.readText())
+            assertEquals("PROTECTED-PART", protectedPart.readText())
+        } finally {
+            repository.suspendForAccountBoundary()
+            lease?.let(DurableDownloadExecutionLeaseRegistry::release)
+            AuthenticatedSessionRegistry.clear()
+        }
+
+        val restarted = fixture.repository()
+        try {
+            assertEquals(OfflineStatus.FAILED, restarted.record(1L)?.status)
+            assertEquals("PROTECTED", protectedFinal.readText())
+            assertEquals("PROTECTED-PART", protectedPart.readText())
+        } finally {
+            restarted.suspendForAccountBoundary()
+            AuthenticatedSessionRegistry.clear()
+        }
+    }
+
     private suspend fun awaitRecord(
         repository: DownloadRepository,
         downloadId: Long,
@@ -253,6 +340,12 @@ class DownloadDamagedPathProtectionTest {
                 )
                 .apply()
         }
+    }
+
+    private fun alternateName(baseName: String, attempt: Int): String {
+        val extension = baseName.substringAfterLast('.', missingDelimiterValue = "")
+        val stem = if (extension.isEmpty()) baseName else baseName.dropLast(extension.length + 1)
+        return if (extension.isEmpty()) "${stem}_r$attempt" else "${stem}_r$attempt.$extension"
     }
 
     private companion object {
