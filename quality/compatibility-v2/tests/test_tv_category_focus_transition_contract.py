@@ -20,7 +20,7 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
         return text[start_index : text.index(end, start_index)]
 
     def test_movies_and_series_category_ok_request_first_content_without_same_selection_churn(self) -> None:
-        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        poster = self.section("internal fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
         self.assertIn("val selectCategoryAndEnterContent: (String?) -> Unit", poster)
         self.assertIn("nextCategoryContentFocusRequestId += 1L", poster)
         self.assertIn("val categoryChanged = state.selectedCategoryId != categoryId", poster)
@@ -36,7 +36,7 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
         )
 
     def test_new_catalog_category_waits_for_exact_model_and_nonempty_content_before_handoff(self) -> None:
-        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        poster = self.section("internal fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
         self.assertIn("request.categoryId == state.selectedCategoryId", poster)
         self.assertIn("keyedModel?.input == modelInput", poster)
         self.assertIn("if (showingContinue) continueWatching.isNotEmpty() else visible.isNotEmpty()", poster)
@@ -61,7 +61,7 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
         self.assertNotIn("delay(180)", live)
 
     def test_empty_or_loading_category_never_requests_unbound_content_focus(self) -> None:
-        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        poster = self.section("internal fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
         live = self.section("private fun LiveCatalogScreen(", "private fun LivePreviewStage(")
         self.assertIn("continueWatching.isNotEmpty()", poster)
         self.assertIn("visible.isNotEmpty()", poster)
@@ -74,7 +74,7 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
 
     def test_continue_category_handoff_uses_first_history_item_without_delay(self) -> None:
         history = self.section("private fun BoxedHistoryGrid(", "private fun DiagnosticsCenter(")
-        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        poster = self.section("internal fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
         self.assertIn("focusFirstItemRequestId: Long = 0L", history)
         self.assertIn("focusContentRequestId: Long = 0L", history)
         self.assertIn("if (focusFirstItemRequestId != 0L) {\n        0", history)
@@ -178,7 +178,7 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
         self.assertIn("consumeBringIntoViewSuppression", target)
 
     def test_movies_strip_uses_the_selection_only_live_appearance(self) -> None:
-        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        poster = self.section("internal fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
         movies = self.section("private fun CatalogCategoryBar(", "private fun LiveCategoryBar(")
 
         # One profile-scoped Movies order/hidden owner feeds the selector and the reorder-enabled
@@ -201,7 +201,7 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
         self.assertNotIn("onMoveRight", movies)
 
     def test_main_pages_show_no_strip_guidance_and_manager_owns_reorder_guidance(self) -> None:
-        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        poster = self.section("internal fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
         live = self.section("private fun LiveCatalogScreen(", "private fun LivePreviewStage(")
         manager = self.section("private fun CategoryManagerDialog(", "private fun LiveCategoryManagerRow(")
 
@@ -221,7 +221,7 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
 
     def test_source_owned_handoffs_cover_search_live_and_catalog_content(self) -> None:
         header = self.section("private fun CatalogHeader(", "@Composable\nprivate fun CategoryBar(")
-        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        poster = self.section("internal fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
         live = self.section("private fun LiveCatalogScreen(", "private fun LivePreviewStage(")
         grid = TV_GRID.read_text(encoding="utf-8")
 
@@ -257,7 +257,7 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
     def test_tv_destination_initial_entry_targets_all_without_changing_selection(self) -> None:
         shell = self.section("fun MainShellScreen(", "@Composable\nprivate fun CinematicNavigationRail(")
         destination = self.section("private fun DestinationContent(", "@Composable\nprivate fun CinemaHomeScreen(")
-        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        poster = self.section("internal fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
         live = self.section("private fun LiveCatalogScreen(", "private fun LivePreviewStage(")
         catalog_bar = self.section("private fun CatalogCategoryBar(", "private fun LiveCategoryBar(")
         live_bar = self.section("private fun LiveCategoryBar(", "private fun LiveCategoryChip(")

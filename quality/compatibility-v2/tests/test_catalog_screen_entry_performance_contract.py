@@ -24,7 +24,7 @@ class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
         source = self.read(MAIN_SHELL)
         poster = self.section(
             source,
-            "private fun PosterCatalogScreen(",
+            "internal fun PosterCatalogScreen(",
             "private fun LiveCatalogScreen(",
         )
 
