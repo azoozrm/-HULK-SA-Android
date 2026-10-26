@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
@@ -28,6 +29,7 @@ import org.junit.runner.RunWith
 import sa.hulksa.player.data.AccountSessionStore
 import sa.hulksa.player.data.AuthenticatedSessionRegistry
 import sa.hulksa.player.data.HulkRepository
+import sa.hulksa.player.data.KidsContentFilterStore
 import sa.hulksa.player.data.EpisodeNotificationStoreResult
 import sa.hulksa.player.data.LocalEpisodeNotificationStore
 import sa.hulksa.player.data.LocalNotificationItem
@@ -40,6 +42,7 @@ import sa.hulksa.player.data.OperationsStore
 import sa.hulksa.player.data.OperationsUpdateConfig
 import sa.hulksa.player.data.PortalResolver
 import sa.hulksa.player.data.ProfileStore
+import sa.hulksa.player.data.VerifiedKidsCatalogSnapshot
 import sa.hulksa.player.data.XtreamClient
 import sa.hulksa.player.data.accountScopedPreferencesName
 import sa.hulksa.player.data.stableAccountId
@@ -81,7 +84,7 @@ class EpisodeNotificationPipelineInstrumentedTest {
     }
 
     @Test
-    fun activeFailedScanRetriesSkippedLibraryTriggerAndPresentsOneEvent() = runBlocking {
+    fun activeFailedScanRetainsStrongestPendingTriggerAndPresentsOneEvent() = runBlocking {
         val accountId = stableAccountId(PORTAL, USERNAME)
         val accountStore = AccountSessionStore(context)
         val metadata = accountStore.recordAuthenticated(session())
@@ -89,13 +92,15 @@ class EpisodeNotificationPipelineInstrumentedTest {
         val profile = requireNotNull(profileStore.load(metadata.accountId))
             .let { profileStore.activeProfile() }
         val notificationStore = LocalEpisodeNotificationStore(context)
+        val baselineCheckedAtEpochMs = System.currentTimeMillis() - SIX_MINUTES_MS
+        assertTrue(baselineCheckedAtEpochMs > 0L)
         assertEquals(
-            sa.hulksa.player.data.EpisodeNotificationStoreResult.SUCCESS,
+            EpisodeNotificationStoreResult.SUCCESS,
             notificationStore.enableSubscription(
                 profileId = profile.id,
                 series = series(),
                 episodes = listOf(episodeA()),
-                nowEpochMs = 0L,
+                nowEpochMs = baselineCheckedAtEpochMs,
                 expectedAccountId = metadata.accountId,
             ),
         )
@@ -126,11 +131,15 @@ class EpisodeNotificationPipelineInstrumentedTest {
 
         model.refreshProfileLibrary(metadata.accountId, profile)
         withTimeout(10_000) { model.state.first { it.isProfileLibraryReady } }
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
 
+        // LIBRARY_REFRESH (5 min) is pending; APP_RESUME (10 min) is weaker and must not
+        // overwrite it. The six-minute-old baseline is eligible only for the 5-minute trigger.
+        model.onAppResumed()
         firstResult.complete(Result.failure(IOException("synthetic series fetch failure")))
 
-        // This is the reproduced defect: the library-refresh trigger was skipped while the
-        // APP_START scan was active, then that scan failed without updating the baseline.
+        // Reproduced defect: the active APP_START scan failed, and the queued trigger could be
+        // overwritten by the weaker APP_RESUME request, rejecting the six-minute-old baseline.
         val detected = withTimeout(5_000) {
             model.state.first { state ->
                 state.localNotifications.any { item ->
@@ -185,9 +194,26 @@ class EpisodeNotificationPipelineInstrumentedTest {
             checkedAtEpochMs = 1L,
             expectedAccountId = metadata.accountId,
         )
+        val callsBeforeRepeat = client.calls.get()
+        val checkedBeforeRepeat = notificationStore.snapshot(profile.id)
+            .subscriptions
+            .single()
+            .lastCheckedAtEpochMs
         model.onAppResumed()
         withTimeout(5_000) {
-            model.state.first { it.unreadNotificationCount == 1 }
+            while (client.calls.get() <= callsBeforeRepeat) {
+                kotlinx.coroutines.delay(50)
+            }
+        }
+        withTimeout(5_000) {
+            while (
+                notificationStore.snapshot(profile.id)
+                    .subscriptions
+                    .single()
+                    .lastCheckedAtEpochMs <= checkedBeforeRepeat
+            ) {
+                kotlinx.coroutines.delay(50)
+            }
         }
         assertEquals(
             1,
@@ -261,6 +287,77 @@ class EpisodeNotificationPipelineInstrumentedTest {
             },
         )
         assertNull(model.state.value.notificationPopup)
+    }
+
+    @Test
+    fun kidsReadinessDoesNotDiscardStrongerPendingManualScan() = runBlocking {
+        val accountStore = AccountSessionStore(context)
+        val metadata = accountStore.recordAuthenticated(session())
+        val profileStore = ProfileStore(context)
+        requireNotNull(profileStore.load(metadata.accountId))
+        val kidsProfile: UserProfile = requireNotNull(
+            profileStore.createProfileForAccount(
+                expectedAccountId = metadata.accountId,
+                displayName = "Synthetic Kids",
+                kind = ProfileKind.KIDS,
+            ),
+        ).value
+        requireNotNull(
+            profileStore.setActiveProfileForAccount(metadata.accountId, kidsProfile.id),
+        )
+        val notificationStore = LocalEpisodeNotificationStore(context)
+        val twoMinutesAgo = System.currentTimeMillis() - TWO_MINUTES_MS
+        assertTrue(twoMinutesAgo > 0L)
+        assertEquals(
+            EpisodeNotificationStoreResult.SUCCESS,
+            notificationStore.enableSubscription(
+                profileId = kidsProfile.id,
+                series = series(),
+                episodes = listOf(episodeA()),
+                nowEpochMs = twoMinutesAgo,
+                expectedAccountId = metadata.accountId,
+            ),
+        )
+
+        val client = CountingXtreamClient(episodes = listOf(episodeA(), episodeB()))
+        val model = modelFor(accountStore, client)
+        viewModel = model
+        withTimeout(10_000) { model.state.first { it.account != null } }
+        assertTrue(
+            KidsContentFilterStore(context).replace(
+                VerifiedKidsCatalogSnapshot(
+                    catalogs = mapOf(
+                        ContentType.SERIES to Catalog(
+                            categories = emptyList(),
+                            items = listOf(series()),
+                        ),
+                    ),
+                    blockedTypes = emptyMap(),
+                ),
+            ),
+        )
+        assertNull(withTimeoutOrNull(1_000) { client.firstCallStarted.await() })
+
+        // Queue MANUAL_REFRESH (1 min) while Kids readiness blocks scanning.
+        model.refresh()
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        assertEquals(0, client.calls.get())
+
+        // Kids readiness now calls PROFILE_SWITCH (5 min) while MANUAL_REFRESH is pending.
+        // The runnable path must retain the stronger 1-minute request; the 2-minute-old
+        // baseline is eligible only for that request.
+        model.setNotificationUiReady(true)
+
+        val detected = withTimeout(10_000) {
+            model.state.first { state ->
+                state.localNotifications.any { item ->
+                    item is LocalNotificationItem.Episode &&
+                        item.notification.episodeNumber == 2
+                }
+            }
+        }
+        assertEquals(1, detected.unreadNotificationCount)
+        assertEquals(1, client.calls.get())
     }
 
     @Test
@@ -506,7 +603,7 @@ class EpisodeNotificationPipelineInstrumentedTest {
         private val firstResult: CompletableDeferred<Result<SeriesBundle>>,
     ) : XtreamClient() {
         val firstCallStarted = CompletableDeferred<Unit>()
-        private val calls = AtomicInteger(0)
+        val calls = AtomicInteger(0)
 
         override suspend fun authenticate(
             portal: PortalConfig,
@@ -611,5 +708,7 @@ class EpisodeNotificationPipelineInstrumentedTest {
         const val PASSWORD = "synthetic-password"
         const val ACCESS_CODE = "synthetic-code"
         const val SERIES_ID = 44
+        const val TWO_MINUTES_MS = 2L * 60L * 1_000L
+        const val SIX_MINUTES_MS = 6L * 60L * 1_000L
     }
 }

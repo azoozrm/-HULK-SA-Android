@@ -266,7 +266,7 @@ data class SeriesEpisodeTarget(
     val episodeId: Int?,
 )
 
-private enum class NotificationScanTrigger(val minimumAgeMs: Long) {
+internal enum class NotificationScanTrigger(val minimumAgeMs: Long) {
     APP_START(5 * 60_000L),
     APP_RESUME(10 * 60_000L),
     PROFILE_SWITCH(5 * 60_000L),
@@ -274,6 +274,15 @@ private enum class NotificationScanTrigger(val minimumAgeMs: Long) {
     MANUAL_REFRESH(60_000L),
     NOTIFICATION_CENTER(2 * 60_000L),
     MASTER_REENABLE(0L),
+}
+
+internal fun coalesceNotificationScanTrigger(
+    pending: NotificationScanTrigger?,
+    incoming: NotificationScanTrigger,
+): NotificationScanTrigger = when {
+    pending == null -> incoming
+    incoming.minimumAgeMs < pending.minimumAgeMs -> incoming
+    else -> pending
 }
 
 internal fun pendingEpisodeNotificationPopup(
@@ -2611,7 +2620,7 @@ class HulkViewModel internal constructor(
 
     private fun scanSubscribedSeries(trigger: NotificationScanTrigger) {
         if (!mutableState.value.operations.features.episodeNotificationsEnabled) {
-            pendingNotificationScanTrigger = trigger
+            enqueueNotificationScanTrigger(trigger)
             return
         }
         val activeSession = session ?: return
@@ -2620,13 +2629,17 @@ class HulkViewModel internal constructor(
         val snapshot = localEpisodeNotificationStore.snapshot(profile.id)
         if (!snapshot.settings.enabled) return
         if (profile.kind == ProfileKind.KIDS && !notificationUiReady) {
-            pendingNotificationScanTrigger = trigger
+            enqueueNotificationScanTrigger(trigger)
             return
         }
         if (notificationScanJob?.isActive == true) {
-            pendingNotificationScanTrigger = trigger
+            enqueueNotificationScanTrigger(trigger)
             return
         }
+        val effectiveTrigger = coalesceNotificationScanTrigger(
+            pendingNotificationScanTrigger,
+            trigger,
+        )
         pendingNotificationScanTrigger = null
 
         lateinit var job: Job
@@ -2647,7 +2660,7 @@ class HulkViewModel internal constructor(
                     subscription.enabled && (
                         lastCheckedAt <= 0L ||
                             now < lastCheckedAt ||
-                            now - lastCheckedAt >= trigger.minimumAgeMs
+                            now - lastCheckedAt >= effectiveTrigger.minimumAgeMs
                         )
                 }
                 if (eligible.isEmpty()) {
@@ -2713,6 +2726,13 @@ class HulkViewModel internal constructor(
         val pending = pendingNotificationScanTrigger ?: return
         pendingNotificationScanTrigger = null
         scanSubscribedSeries(pending)
+    }
+
+    private fun enqueueNotificationScanTrigger(trigger: NotificationScanTrigger) {
+        pendingNotificationScanTrigger = coalesceNotificationScanTrigger(
+            pendingNotificationScanTrigger,
+            trigger,
+        )
     }
 
     private suspend fun refreshMasterNotificationBaselines(
