@@ -670,7 +670,7 @@ fun PlayerScreen(
     var surfaceFocused by remember { mutableStateOf(false) }
     var controlsLocked by remember(request) { mutableStateOf(false) }
     var unlockVisible by remember(request) { mutableStateOf(false) }
-    var seekFeedback by remember(request) { mutableStateOf<String?>(null) }
+    val seekFeedback = remember(request) { VodSeekFeedbackOwner() }
     var focusTimelineOnReveal by remember(request) { mutableStateOf(false) }
     var resumePromptVisible by remember(request) {
         mutableStateOf(playbackSettings.resumePlayback && !request.isLive && request.resumePositionMs > 0L)
@@ -1132,7 +1132,7 @@ fun PlayerScreen(
         currentPositionMs = target
         if (tvRemoteInput) player.seekTo(target)
         val seconds = kotlin.math.abs(deltaMs) / 1_000L
-        seekFeedback = if (deltaMs > 0) "+$seconds ث" else "-$seconds ث"
+        seekFeedback.post(if (deltaMs > 0) "+$seconds ث" else "-$seconds ث")
         controlsVisible = true
     }
 
@@ -1142,7 +1142,7 @@ fun PlayerScreen(
         player.seekTo(target)
         manualSeekTargetMs = target
         currentPositionMs = target
-        seekFeedback = "انتقال الى ${formatTime(target)}"
+        seekFeedback.post("انتقال الى ${formatTime(target)}")
         controlsVisible = true
     }
 
@@ -2000,12 +2000,7 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(seekFeedback) {
-        if (seekFeedback != null) {
-            delay(1_000L)
-            seekFeedback = null
-        }
-    }
+    VodSeekFeedbackExpiry(seekFeedback)
 
     // One countdown owner: while a foreground decision (Resume, error card, panel, unlock, lock,
     // browser) owns input, the timer freezes instead of dispatching an episode change behind it.
@@ -2639,19 +2634,10 @@ fun PlayerScreen(
             )
         }
 
-        seekFeedback?.let { feedback ->
-            Text(
-                feedback,
-                color = Color.White,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Color.Black.copy(alpha = .78f))
-                    .padding(horizontal = 24.dp, vertical = 16.dp),
-            )
-        }
+        VodSeekFeedbackLabel(
+            owner = seekFeedback,
+            modifier = Modifier.align(Alignment.Center),
+        )
 
         // The Live error card derives truthful Live wording and the real connectivity glyph from
         // typed state; non-Live callers keep their existing finalError message unchanged.
