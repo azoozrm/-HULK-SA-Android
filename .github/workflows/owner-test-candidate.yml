@@ -31,18 +31,18 @@ jobs:
     if: >
       github.repository == 'azoozrm/-HULK-SA-Android' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'fix/vod-seek-feedback-r01' &&
+      github.event.pull_request.head.ref == 'release/signed-artifact-1.0.1-69-r01' &&
       github.event.pull_request.base.ref == 'phase-3-v0.9.3.0-adaptive-foundation'
     runs-on: ubuntu-latest
     environment: production-signing
     timeout-minutes: 60
     env:
-      PRODUCT_SHA: ${{ github.event.pull_request.head.sha }}
+      PRODUCT_SHA: 936dce73bf5f6fae9a27eece3481756fd001e236
       WORKFLOW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       WORKFLOW_MERGE_SHA: ${{ github.sha }}
       EXPECTED_PACKAGE: sa.hulksa.player
-      EXPECTED_VERSION_CODE: '68'
-      EXPECTED_VERSION_NAME: 1.0.0
+      EXPECTED_VERSION_CODE: '69'
+      EXPECTED_VERSION_NAME: 1.0.1
       EXPECTED_INSTALLED_CERT_SHA256: 144e0548da502aa8bd060a9a280a98bb9dc6763387bf8b20ea100b5fed652fe0
       GH_TOKEN: ${{ github.token }}
       HULK_RELEASE_KEYSTORE_BASE64: ${{ secrets.HULK_RELEASE_KEYSTORE_BASE64 }}
@@ -52,22 +52,29 @@ jobs:
       EXPECTED_CERT_SHA256: ${{ secrets.HULK_RELEASE_CERT_SHA256 }}
 
     steps:
-      - name: Checkout exact PR head
+      - name: Checkout exact official release source
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: 936dce73bf5f6fae9a27eece3481756fd001e236
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Verify product source and current PR head identity
+      - name: Verify official HEAD, exact source checkout and CI-only workflow scope
         run: |
           set -euo pipefail
           actual="$(git rev-parse HEAD)"
           test -n "$PRODUCT_SHA"
           test "$actual" = "$PRODUCT_SHA"
-          current_pr_head="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${{ github.event.pull_request.number }}" --jq .head.sha)"
-          test "$current_pr_head" = "$PRODUCT_SHA"
-          test "$WORKFLOW_HEAD_SHA" = "$PRODUCT_SHA"
+          official_head="$(gh api "repos/${GITHUB_REPOSITORY}/branches/phase-3-v0.9.3.0-adaptive-foundation" --jq .commit.sha)"
+          test "$official_head" = "$PRODUCT_SHA"
+          test "$WORKFLOW_HEAD_SHA" != "$PRODUCT_SHA"
+          test "$WORKFLOW_MERGE_SHA" != "$PRODUCT_SHA"
+          pr_files="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${{ github.event.pull_request.number }}/files?per_page=100" --jq '.[].filename')"
+          test "$pr_files" = '.github/workflows/owner-test-candidate.yml'
+          workflow_file_sha256="$(gh api -H 'Accept: application/vnd.github.raw' \
+            "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/owner-test-candidate.yml?ref=${WORKFLOW_HEAD_SHA}" \
+            | sha256sum | awk '{print $1}')"
+          test -n "$workflow_file_sha256"
           test -f app/src/main/java/sa/hulksa/player/data/DownloadIndexStore.kt
           test -f app/src/main/java/sa/hulksa/player/data/ProfileStore.kt
           test -f app/src/main/java/sa/hulksa/player/data/HistoryPersistence.kt
@@ -87,12 +94,15 @@ jobs:
           {
             echo "product_source_sha=$PRODUCT_SHA"
             echo "product_checkout_sha=$actual"
-            echo "current_pr_head_sha=$current_pr_head"
+            echo "official_head_sha=$official_head"
             echo "workflow_head_sha=$WORKFLOW_HEAD_SHA"
             echo "workflow_merge_ref_sha=$WORKFLOW_MERGE_SHA"
+            echo "workflow_file_sha256=$workflow_file_sha256"
             echo "workflow_ref=${GITHUB_REF}"
             echo "workflow_run_id=${GITHUB_RUN_ID}"
             echo "pull_request=#${{ github.event.pull_request.number }}"
+            echo "expected_version_code=$EXPECTED_VERSION_CODE"
+            echo "expected_version_name=$EXPECTED_VERSION_NAME"
           } > owner-test-artifacts/SOURCE-PROVENANCE.txt
           cat owner-test-artifacts/SOURCE-PROVENANCE.txt
 
@@ -203,24 +213,31 @@ jobs:
             --require-native-libs \
             --report owner-test-artifacts/APK-ARCHITECTURES.md
 
-      - name: Package owner-test APK and sanitized evidence
+      - name: Package signed APK and sanitized evidence
         run: |
           set -euo pipefail
           cp app/build/outputs/apk/release/app-release.apk \
-            owner-test-artifacts/HULK-SA-VOD-SEEK-FEEDBACK-68-1.0.0.apk
+            owner-test-artifacts/HULK-SA-1.0.1-69.apk
           (
             cd owner-test-artifacts
-            sha256sum HULK-SA-VOD-SEEK-FEEDBACK-68-1.0.0.apk > APK-SHA256.txt
+            sha256sum HULK-SA-1.0.1-69.apk > APK-SHA256.txt
             find . -type f ! -name SHA256SUMS.txt ! -name APK-SHA256.txt -print0 \
               | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
             sha256sum -c SHA256SUMS.txt
             cat APK-SHA256.txt
           )
 
-      - name: Upload only signed owner-test APK and sanitized evidence
+      - name: Re-verify official HEAD immediately before delivery
+        run: |
+          set -euo pipefail
+          official_head="$(gh api "repos/${GITHUB_REPOSITORY}/branches/phase-3-v0.9.3.0-adaptive-foundation" --jq .commit.sha)"
+          test "$official_head" = "$PRODUCT_SHA"
+          echo "PASS: official HEAD is still $PRODUCT_SHA"
+
+      - name: Upload only signed APK and sanitized evidence
         uses: actions/upload-artifact@v7
         with:
-          name: HULK-SA-VOD-SEEK-FEEDBACK-OWNER-TEST-${{ github.run_id }}
+          name: HULK-SA-1.0.1-69-SIGNED-${{ github.run_id }}
           path: owner-test-artifacts/
           if-no-files-found: error
           retention-days: 3
