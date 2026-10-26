@@ -50,6 +50,8 @@ class HulkRepository internal constructor(
     private val vault: CredentialVault,
     private val accountSessionStore: AccountSessionStore,
     private val suspendDownloadOwner: ((String) -> Unit)? = null,
+    private val portalResolver: PortalResolver = PortalResolver(),
+    private val client: XtreamClient = XtreamClient(),
 ) {
     constructor(context: Context) : this(
         context = context,
@@ -58,8 +60,6 @@ class HulkRepository internal constructor(
     )
 
     private val appContext = context.applicationContext
-    private val portalResolver = PortalResolver()
-    private val client = XtreamClient()
     private val kidsCatalogClient = KidsServerCatalogClient()
     private val kidsContentFilterStore = KidsContentFilterStore(appContext)
     private val movieCardMetadataClient = MovieCardMetadataClient()

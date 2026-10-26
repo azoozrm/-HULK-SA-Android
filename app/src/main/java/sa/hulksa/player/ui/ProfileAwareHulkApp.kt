@@ -122,6 +122,16 @@ private sealed interface ParentalCodeAuthorizationAction {
 }
 
 @Composable
+internal fun NotificationProfileReadinessEffect(
+    ready: Boolean,
+    onReadinessChanged: (Boolean) -> Unit,
+) {
+    LaunchedEffect(ready) {
+        onReadinessChanged(ready)
+    }
+}
+
+@Composable
 fun ProfileAwareHulkApp(
     viewModel: HulkViewModel,
     isTelevisionDevice: Boolean,
@@ -930,35 +940,21 @@ fun ProfileAwareHulkApp(
     val securityProfile = pinSecurityProfileId
         ?.let { profileId -> profiles.firstOrNull { it.id == profileId } }
 
-    LaunchedEffect(
-        authenticated,
-        resolvedForSession,
-        showPicker,
-        managingProfiles,
-        profileMutationInProgress,
-        parentalCodeStateReady,
-        parentalCodeBootstrapAction,
-        parentalCodeAuthorizationAction,
-        unlockCredentialProfile?.id,
-        securityProfile?.id,
-        activeProfile?.id,
-        activeProfile?.kind,
-        kidsSnapshot?.isAvailable,
-    ) {
-        val profileReady = authenticated &&
-            state.isProfileLibraryReady &&
-            parentalCodeStateReady &&
-            resolvedForSession &&
-            !showPicker &&
-            !managingProfiles &&
-            !profileMutationInProgress &&
-            parentalCodeBootstrapAction == null &&
-            parentalCodeAuthorizationAction == null &&
-            unlockCredentialProfile == null &&
-            securityProfile == null &&
-            (activeProfile?.kind != ProfileKind.KIDS || kidsSnapshot?.isAvailable == true)
-        viewModel.setNotificationUiReady(ready = profileReady)
-        if (isTelevisionDevice) viewModel.setTvPlatformProfileReady(ready = profileReady)
+    val profileNotificationReady = authenticated &&
+        state.isProfileLibraryReady &&
+        parentalCodeStateReady &&
+        resolvedForSession &&
+        !showPicker &&
+        !managingProfiles &&
+        !profileMutationInProgress &&
+        parentalCodeBootstrapAction == null &&
+        parentalCodeAuthorizationAction == null &&
+        unlockCredentialProfile == null &&
+        securityProfile == null &&
+        (activeProfile?.kind != ProfileKind.KIDS || kidsSnapshot?.isAvailable == true)
+    NotificationProfileReadinessEffect(ready = profileNotificationReady) { ready ->
+        viewModel.setNotificationUiReady(ready = ready)
+        if (isTelevisionDevice) viewModel.setTvPlatformProfileReady(ready = ready)
     }
 
     val appContentFocusRequester = remember { FocusRequester() }
