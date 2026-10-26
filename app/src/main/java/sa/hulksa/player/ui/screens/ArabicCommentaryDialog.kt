@@ -248,6 +248,11 @@ internal fun ArabicCommentaryDialog(
                     }
                 }
 
+                if (state.sessionAvailable && state.selectedChannel != null && !pickerVisible) {
+                    CommentarySummaryCard(state)
+                    Spacer(Modifier.height(6.dp))
+                }
+
                 if (!state.sessionAvailable) {
                     Column(modifier = Modifier.weight(1f)) {
                         ErrorNotice(
@@ -302,6 +307,79 @@ internal fun ArabicCommentaryDialog(
     }
 }
 
+private fun commentaryStatusLabel(state: ArabicCommentaryState): String = when (state.phase) {
+    ArabicCommentaryPhase.PREPARING -> "جاري التحضير…"
+    ArabicCommentaryPhase.ACTIVE -> if (state.commentaryAudible) {
+        "التعليق مسموع"
+    } else {
+        "جاهز"
+    }
+    ArabicCommentaryPhase.INTERRUPTED -> "متوقف"
+    ArabicCommentaryPhase.ERROR -> "تعذر التشغيل"
+    ArabicCommentaryPhase.INACTIVE -> "غير مفعل"
+}
+
+@Composable
+private fun CommentarySummaryCard(state: ArabicCommentaryState) {
+    val colors = LocalHulkColors.current
+    val status = commentaryStatusLabel(state)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF1B1A0E))
+            .border(1.dp, colors.gold.copy(alpha = .30f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.LiveTv,
+                contentDescription = null,
+                tint = colors.gold,
+                modifier = Modifier.size(20.dp),
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "قناة التعليق",
+                    color = colors.textMuted,
+                    fontSize = 10.sp,
+                )
+                Text(
+                    text = state.selectedChannel?.name ?: "قناة التعليق",
+                    color = colors.text,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = status,
+                color = if (state.phase == ArabicCommentaryPhase.ACTIVE) {
+                    colors.goldBright
+                } else {
+                    colors.textMuted
+                },
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "التأخير الحالي: ${arabicCommentaryDelaySummary(state.delays)}",
+            color = colors.text,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
 @Composable
 private fun CommentaryControlContent(
     state: ArabicCommentaryState,
@@ -322,18 +400,6 @@ private fun CommentaryControlContent(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    val channelName = state.selectedChannel?.name ?: "قناة التعليق"
-    val status = when (state.phase) {
-        ArabicCommentaryPhase.PREPARING -> "جاري التحضير…"
-        ArabicCommentaryPhase.ACTIVE -> if (state.commentaryAudible) {
-            "التعليق مسموع"
-        } else {
-            "جاهز"
-        }
-        ArabicCommentaryPhase.INTERRUPTED -> "متوقف"
-        ArabicCommentaryPhase.ERROR -> "تعذر التشغيل"
-        ArabicCommentaryPhase.INACTIVE -> "غير مفعل"
-    }
     val stepFineSelected = state.stepMs == ARABIC_COMMENTARY_FINE_STEP_MS
     val stepCoarseSelected = state.stepMs == ARABIC_COMMENTARY_COARSE_STEP_MS
     val remainingEarly = arabicCommentaryRemainingMs(
@@ -356,46 +422,6 @@ private fun CommentaryControlContent(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF1B1A0E))
-                .border(1.dp, colors.gold.copy(alpha = .30f), RoundedCornerShape(12.dp))
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(9.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.LiveTv,
-                contentDescription = null,
-                tint = colors.gold,
-                modifier = Modifier.size(20.dp),
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "قناة التعليق",
-                    color = colors.textMuted,
-                    fontSize = 10.sp,
-                )
-                Text(
-                    text = channelName,
-                    color = colors.text,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Text(
-                text = status,
-                color = if (state.phase == ArabicCommentaryPhase.ACTIVE) colors.goldBright else colors.textMuted,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-            )
-        }
-
         if (state.phase == ArabicCommentaryPhase.PREPARING) {
             Row(
                 modifier = Modifier
@@ -430,19 +456,6 @@ private fun CommentaryControlContent(
         }
 
         if (active) {
-            Text(
-                text = "التأخير الحالي",
-                color = colors.gold,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = arabicCommentaryDelaySummary(state.delays),
-                color = colors.text,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                lineHeight = 21.sp,
-            )
             Text(
                 text = "المدى المدعوم حتى 10 ث لكل مصدر حسب دعم القناة. يتم تأخير احد المصدرين " +
                     "مؤقتا ثم متابعة التشغيل. ستلاحظ توقفا قصيرا بمقدار الخطوة، وقد يختلف قليلا " +

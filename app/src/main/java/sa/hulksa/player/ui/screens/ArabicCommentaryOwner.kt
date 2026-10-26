@@ -132,7 +132,7 @@ internal class ArabicCommentaryOwner(
         videoPlayer.addListener(videoListener)
     }
 
-    fun start(channel: ContentItem) {
+    fun start(channel: ContentItem, notice: String? = null) {
         if (released || channel.type != ContentType.LIVE) return
         val keptStep = state.stepMs
         val previousNotice = state.connectionNotice
@@ -190,7 +190,7 @@ internal class ArabicCommentaryOwner(
             return
         }
         candidateIndex = firstCandidateIndex
-        val notice = arabicCommentaryConnectionNotice(
+        val connectionNoticeText = arabicCommentaryConnectionNotice(
             activeConnections = resolved.activeConnections,
             maxConnections = resolved.maxConnections,
         )
@@ -198,7 +198,8 @@ internal class ArabicCommentaryOwner(
             phase = ArabicCommentaryPhase.PREPARING,
             selectedChannel = channel,
             stepMs = keptStep,
-            connectionNotice = notice,
+            connectionNotice = connectionNoticeText,
+            message = notice,
         )
         Log.i(
             TAG,
@@ -349,34 +350,18 @@ internal class ArabicCommentaryOwner(
             state = state.copy(message = "لا يوجد تأخير لاعادة ضبطه.")
             return
         }
-        var commentaryReset = true
-        var videoReset = true
-        if (current.commentaryMs > 0L) {
-            val commentary = commentaryPlayer
-            commentaryReset = commentary != null && moveToLiveEdge(commentary)
+        val channel = state.selectedChannel ?: return
+        if (current.videoMs > 0L && !videoPlayer.isCurrentMediaItemSeekable) {
+            state = state.copy(
+                message = "هذه القناة لا تدعم الرجوع للبث المباشر؛ لم يتم ازالة تأخير الصورة.",
+            )
+            return
         }
-        if (current.videoMs > 0L) {
-            videoReset = moveToLiveEdge(videoPlayer)
-        }
-        val remainingCommentary = if (commentaryReset) 0L else current.commentaryMs
-        val remainingVideo = if (videoReset) 0L else current.videoMs
-        state = state.copy(
-            delays = ArabicCommentaryDelays(
-                commentaryMs = remainingCommentary,
-                videoMs = remainingVideo,
-            ),
-            message = when {
-                !commentaryReset || !videoReset ->
-                    "هذه القناة لا تدعم الرجوع للبث المباشر؛ لم يتم ازالة كل التأخير."
-                else -> "تم اعادة الضبط."
-            },
-        )
-        Log.i(
-            TAG,
-            "commentary reset commentaryOk=$commentaryReset videoOk=$videoReset " +
-                "remainingCommentaryMs=$remainingCommentary " +
-                "remainingVideoMs=$remainingVideo",
-        )
+        // Rebuild the commentary at its live/default source instead of seeking the current HLS
+        // reader. A live-edge seek can fail as an HTTP error on providers with a short window;
+        // a bounded fresh start is the same baseline and still falls back to the next candidate.
+        Log.i(TAG, "commentary reset restart channelId=${channel.id}")
+        start(channel, notice = "جاري اعادة الضبط من البث المباشر…")
     }
 
     fun returnToOriginalAudio() {
@@ -552,7 +537,8 @@ internal class ArabicCommentaryOwner(
         Log.i(
             TAG,
             "commentary audio route=${if (useCommentary) "COMMENTARY" else "ORIGINAL"} " +
-                "channelId=${state.selectedChannel?.id}",
+                "channelId=${state.selectedChannel?.id} mainVolume=${videoPlayer.volume} " +
+                "commentaryVolume=${commentary.volume}",
         )
     }
 
