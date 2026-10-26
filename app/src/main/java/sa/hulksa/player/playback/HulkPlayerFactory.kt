@@ -37,7 +37,10 @@ import java.util.ArrayList
 internal class HulkPlayerFactory(context: Context) {
     private val appContext = context.applicationContext
 
-    fun create(outputMode: PlayerAudioOutputMode): ExoPlayer {
+    fun create(
+        outputMode: PlayerAudioOutputMode,
+        handleAudioFocus: Boolean = true,
+    ): ExoPlayer {
         val httpDataSource = DefaultHttpDataSource.Factory()
             .setUserAgent("HULK-SA-Player/0.7.2")
             .setConnectTimeoutMs(10_000)
@@ -62,12 +65,12 @@ internal class HulkPlayerFactory(context: Context) {
             .setTrackSelector(trackSelector)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
-            .setAudioAttributes(audioAttributes, true)
+            .setAudioAttributes(audioAttributes, handleAudioFocus)
             .build()
         android.util.Log.i(
             "HulkPlayer",
             "player created t=${android.os.SystemClock.elapsedRealtime()} mode=$outputMode " +
-                "in ${android.os.SystemClock.uptimeMillis() - createStartMs}ms",
+                "audioFocus=$handleAudioFocus in ${android.os.SystemClock.uptimeMillis() - createStartMs}ms",
         )
         return created
             .also { player ->

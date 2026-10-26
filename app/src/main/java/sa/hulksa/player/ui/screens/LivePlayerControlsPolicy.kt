@@ -22,6 +22,7 @@ internal enum class PlayerLiveMoreRow {
     RELOAD,
     SOURCE,
     RESIZE,
+    COMMENTARY,
 }
 
 /**

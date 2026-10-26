@@ -1,95 +1,106 @@
-# HULK SA Android — Owner Physical Engineering Override
+# HULK SA Android — Owner Device Installation Override
 
-This override supplements root `AGENTS.md` and exists to make the owner's persistent physical
-engineering-instance contract durable across chats, task packets, models and executors.
+This override supplements root `AGENTS.md` and makes the owner's current physical-installation
+policy durable across chats, task packets, models and executors.
 
-It overrides only conflicting Preview-only physical-refresh wording in root `AGENTS.md`.
-All other repository governance, write-safety, protected product, signing, merge, release and
-stop-condition rules remain unchanged.
+It supersedes only the former mandatory Preview/Benchmark dual-refresh and persistent-instance
+wording. All other repository governance, write-safety, protected product, signing, merge, release
+and stop-condition rules remain unchanged.
 
-Read the full specific contract before any physical engineering build/install/instrumentation action:
+Read the full specific contract before any physical build/install/instrumentation action:
 
 `docs/android-engineering-lab/PHYSICAL-ENGINEERING-INSTANCES.md`
 
-## Persistent owner instances
+## Default owner-device package
 
-The fixed persistent physical engineering packages are:
+The single default owner-device target is the original production package:
 
-1. `sa.hulksa.player.benchmark`
-   - primary semi-release physical development/testing instance;
-   - owner-authenticated state/data is persistent and must be preserved;
-   - current qualification identity: versionCode `67`, qualification versionName base `0.9.3.23`.
+- Package: `sa.hulksa.player`
+- Role: the owner's real HULK SA application and daily viewing/engineering copy.
+- Source identity: applicationId `sa.hulksa.player`, versionCode `68`, versionName `1.0.0`.
+- Production signer certificate SHA-256:
+  `144e0548da502aa8bd060a9a280a98bb9dc6763387bf8b20ea100b5fed652fe0`
+  (`CN=HULK SA Base Stable`).
+- State: persistent owner login, session, profiles and data must survive every update.
 
-2. `sa.hulksa.player.preview`
-   - owner's persistent Preview/daily engineering copy;
-   - existing state/data must be preserved;
-   - current qualification identity: versionCode `67`, qualification versionName base `0.9.3.23`.
+`sa.hulksa.player.preview`, `sa.hulksa.player.benchmark`, `sa.hulksa.player.dev` and any other
+alternate-ID application are **not** default owner-device targets. Do not install a new Preview,
+Benchmark, Debug or alternate-ID application on an owner daily device without a new explicit owner
+request.
 
-`sa.hulksa.player.dev` is NOT the default persistent physical engineering instance.
-
-## Persistent approved physical surfaces
-
-The owner-approved persistent qualification surfaces include:
+## Approved physical surfaces
 
 1. Xiaomi Mi Box 4 / `MIBOX4`
    - primary persistent TV runtime/qualification surface;
-   - its installed `sa.hulksa.player.benchmark` authenticated state is owner engineering state and
-     must be preserved across rounds.
+   - the original `sa.hulksa.player` owner state is the state to preserve.
 
 2. Samsung Galaxy A06 / `SM-A065F` / device `a06`
    - persistent mobile/compact-phone qualification surface;
-   - its installed `sa.hulksa.player.benchmark` instance is owner-authenticated persistent
-     engineering state and must be preserved for future mobile testing;
-   - current installed qualification identity: versionCode `67`, versionName
-     `0.9.3.23.benchmark`;
-   - transport address/ADB port is dynamic runtime state and is NOT part of this contract;
-   - future mobile qualification should reuse this Benchmark instance when appropriate rather than
-     replacing it with `sa.hulksa.player.dev` or another disposable package.
+   - the original `sa.hulksa.player` owner state is the state to preserve;
+   - transport address/ADB port is dynamic runtime state and is not part of this contract.
 
-For every persistent surface, the package/data-preservation rules below apply independently. If a
-future implementation round needs to refresh the Galaxy Benchmark for mobile validation, use only a
-same-package/same-signer state-preserving `adb install -r` after the required identity/signature
-checks. Never manufacture a clean phone state by deleting or clearing this persistent instance.
+Pre-existing engineering packages on a surface are not automatically removed. Do not delete a
+pre-existing package on another device merely because it is no longer the default target.
 
-## Mandatory dual refresh after successful implementation
+## In-place original update
 
-At the end of every Android IMPLEMENTATION round that reaches a valid, testable state, unless the
-active task explicitly forbids physical-device refresh, build and refresh BOTH persistent packages
-from the exact same task worktree / PR HEAD.
+At the end of every Android implementation round that reaches a valid, testable state, unless the
+active task explicitly forbids physical refresh:
 
-Use the owner-approved qualification overrides:
+1. Build the original release variant from the exact frozen task worktree through the existing
+   configured, authorized production-signing workflow:
+   `:app:assembleRelease` with applicationId `sa.hulksa.player`, the source version identity and
+   the installed production signing identity.
+2. Before installation verify:
+   - the candidate contains the frozen implementation;
+   - exact package `sa.hulksa.player` and source versionCode/versionName;
+   - full signing-certificate continuity with the installed original;
+   - non-debuggable release-like properties, R8/resource shrinking and APK SHA-256.
+3. Install only with `adb install -r`.
+4. Launch once and verify:
+   - no required-update block;
+   - existing login/session remains present;
+   - the original package is the running application;
+   - no additional task-added application remains.
 
-`-PHULK_QUALIFICATION_VERSION_CODE=67`
-`-PHULK_QUALIFICATION_VERSION_NAME=0.9.3.23`
+An uncommitted LOCAL_ROUND candidate is a valid input when its base HEAD, dirty state, complete
+source/diff hashes and artifact provenance are recorded under the task execution and evidence
+contracts. Do not claim a dirty build is a clean-HEAD build.
 
-Build the actual persistent variants:
-
-- `:app:assemblePreview`
-- `:app:assembleBenchmark`
-
-Before installation verify package, version identity, signer continuity and required release-like
-properties. Install only with `adb install -r`.
-
-For BOTH persistent packages, never:
+For the original package, NEVER:
 
 - uninstall;
 - run `pm clear`;
-- wipe storage / SharedPreferences / databases / session state;
+- wipe storage, SharedPreferences, databases or account/session state;
 - downgrade;
-- change signer;
-- silently install a stale source-baseline version;
-- run instrumentation/orchestrator that can clear target-package data.
+- change the signer or application ID;
+- install an unsigned or debug-signed replacement over it;
+- run instrumentation/orchestrator configuration that can clear target-package data;
+- expose, extract, print or persist credentials from stored state.
 
-Launch both once after a successful refresh and verify no immediate crash and no stale Optional
-Update overlay. Preserve existing authenticated/session state.
+If production signing or the required signer verification is unavailable, keep the last known-good
+original installed and report the exact blocker. Do not substitute a debug signer or an alternate
+package. If a build or required validation fails, do not force-replace the last known-good copy.
 
-If a new build or required validation fails, do not force-replace the last known-good installed copy.
+## Narrow task-added cleanup exception
 
-Any test that requires clean state must use a separate isolated disposable package/surface.
+The two packages `sa.hulksa.player.preview` and `sa.hulksa.player.benchmark` installed on
+`MIBOX4` by the `live-arabic-commentary-r01` task are task-added copies, not owner data. The owner
+explicitly authorized their exact removal in the correction that adopted this policy.
 
-Audit/Review/Diagnosis rounds do not automatically rebuild/reinstall these packages unless the
-active task specifically requires a safe physical action.
+Removal is allowed only when the active task packet proves the exact packages were added by that
+task and explicitly authorizes cleanup:
 
-This owner contract remains in force until the owner explicitly changes it. A future authorized
-qualification-version change must update this override and the dedicated contract in the same
-governance round so subsequent conversations inherit the new values.
+- verify exact package names and installation evidence first;
+- remove only those exact package names, never a wildcard or prefix;
+- never remove `sa.hulksa.player`;
+- never remove a pre-existing engineering package on another device;
+- preserve all source, APK and report evidence on the server.
+
+## Conflict rule
+
+For owner-device package identity, in-place installation and refresh behavior, this contract is the
+specific Android Engineering Lab authority and supersedes older Preview/Benchmark dual-refresh
+wording or historical chat instructions. Repository Git/write protections, data protection,
+signing/release authority and all other root `AGENTS.md` rules remain unchanged. This contract
+grants no merge, tag, public release or deployment authority.

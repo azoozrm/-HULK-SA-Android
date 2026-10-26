@@ -297,27 +297,30 @@ At completion, report verified facts as applicable:
 
 For Audit / Review / Diagnosis, report findings and evidence only, with no mutation.
 
-## 15. Persistent owner refresh (standing rule)
+## 15. Owner-device refresh (standing rule)
 
-`sa.hulksa.player.preview` and `sa.hulksa.player.benchmark` are the owner's persistent physical engineering packages. `sa.hulksa.player.preview` is the owner's live daily viewing copy of the latest **successful in-progress** implementation state, including unmerged PR heads; do not wait for merge.
+The default owner-device target is the original production package `sa.hulksa.player`. Its owner login, session and data are persistent and must be preserved.
 
-The specific authoritative contract for persistent package identity, approved physical surfaces, refresh procedure and data preservation is:
+`sa.hulksa.player.preview`, `sa.hulksa.player.benchmark`, `sa.hulksa.player.dev` and any other alternate-ID application are **not** default owner-device targets. The previous mandatory dual Preview/Benchmark refresh is superseded. No additional Preview, Benchmark, Debug or alternate-ID application may be installed on an owner daily device without a new explicit owner request.
+
+The specific authoritative contract for package identity, approved physical surfaces, in-place update procedure and data preservation is:
 
 - `AGENTS.override.md`;
 - `docs/android-engineering-lab/PHYSICAL-ENGINEERING-INSTANCES.md`.
 
-At the end of any Android implementation round that reaches a valid, testable state, unless the task explicitly forbids touching the device, refresh **both** persistent packages from the exact frozen current task-worktree candidate with the owner-approved qualification overrides `-PHULK_QUALIFICATION_VERSION_CODE=<n>` and `-PHULK_QUALIFICATION_VERSION_NAME=<name>`:
+At the end of any Android implementation round that reaches a valid, testable state, unless the task explicitly forbids touching the device, update the original package in place from the exact frozen current task-worktree candidate through the existing configured, authorized production-signing workflow:
 
-- `./gradlew -PHULK_QUALIFICATION_VERSION_CODE=<n> -PHULK_QUALIFICATION_VERSION_NAME=<name> :app:assemblePreview`;
-- `./gradlew -PHULK_QUALIFICATION_VERSION_CODE=<n> -PHULK_QUALIFICATION_VERSION_NAME=<name> :app:assembleBenchmark`.
+- build the original release variant with applicationId `sa.hulksa.player`, the source version identity (currently versionCode `68` / versionName `1.0.0`) and the installed production signer;
+- verify the exact package/version, full signer-certificate continuity with the installed original, release-like properties and APK hash;
+- install only with `adb install -r`.
 
-An uncommitted local candidate is a valid refresh input when its base HEAD, dirty state, diff/source hashes and artifact provenance are recorded under the execution/evidence contracts. A commit/PR is not a prerequisite for local installation; never claim a dirty build is a clean-HEAD build.
+An uncommitted local candidate is a valid update input when its base HEAD, dirty state, diff/source hashes and artifact provenance are recorded under the execution/evidence contracts. A commit/PR is not a prerequisite; never claim a dirty build is a clean-HEAD build.
 
-The Preview build currently fails closed when either override property is missing; the Benchmark variant has no equivalent build-level guard yet, so its built APK version must always be verified explicitly before installation. Using the overrides keeps each installed versionCode/versionName aligned with the live Operations latest and avoids a stale Optional Update overlay.
+Never uninstall, run `pm clear`, wipe owner login/data, downgrade, change the signer, or substitute an unsigned, debug-signed or alternate-ID package to bypass production signing or an update gate. If production signing or the required signer verification is unavailable, keep the last known-good original installed and report the exact blocker; do not install a substitute. Any test that needs clean state must use a separately authorized disposable surface, never the owner daily package.
 
-For each package: verify package identity, qualification version, release-like properties and signer continuity before installation; install only with `adb install -r`; launch once and verify no immediate crash and no stale Optional Update overlay. Never uninstall, never `pm clear`, never wipe owner login/data, never downgrade, never change the signer, and never install a stale source-baseline version. If a build or required validation fails, do not replace the last known-good installed copy. Any test that needs clean state must use a separate isolated disposable package/surface. Audit/Review/Diagnosis rounds do not automatically rebuild or reinstall these packages.
+A task-added alternate package may be removed only when the active task packet proves it was added by that task and explicitly authorizes exact-package cleanup; no wildcard removal and no removal on another device.
 
-This section grants no merge, signing, tag or release authority; sections 1 and 12 still govern those actions.
+This section grants no merge, signing, tag or release authority; sections 1 and 12 still govern those actions. In-place owner-device production signing, when explicitly granted by an active task, is limited to that correction and does not authorize public release.
 
 ## Final principle
 
