@@ -2132,7 +2132,8 @@ fun PlayerScreen(
         val target = when {
             movieErrorActive -> offlineRetryFocus
             liveErrorForegroundActive -> null
-            browserVisible || activePanel != null || commentaryDialogVisible -> null
+            browserVisible || activePanel != null -> null
+            commentaryDialogVisible -> null
             vodMorePanel != null -> null
             resumePromptVisible -> resumeFocus
             nextCountdown >= 0 -> nextEpisodePlayFocus
