@@ -400,6 +400,42 @@ internal fun playerRetrySeekTarget(
     else -> maxOf(preservedPositionMs, playerPositionMs).coerceAtLeast(0L)
 }
 
+internal data class PlayerReplacementPreparation(
+    val seekTargetMs: Long?,
+    val playWhenReady: Boolean,
+)
+
+/**
+ * Final start policy for an already-prepared replacement player. A pending Resume/Restart
+ * decision owns the start state at this point, not only when Retry was pressed: preparation must
+ * stay at zero and paused until the user accepts a decision.
+ */
+internal fun playerReplacementPreparation(
+    isLive: Boolean,
+    resumePromptPending: Boolean,
+    pendingSeekAuthoritative: Boolean,
+    pendingSeekMs: Long,
+    replacementPositionMs: Long?,
+    restoredPlayWhenReady: Boolean?,
+    replacementPlayWhenReady: Boolean,
+): PlayerReplacementPreparation = PlayerReplacementPreparation(
+    seekTargetMs = when {
+        isLive -> replacementPositionMs
+        resumePromptPending -> 0L
+        pendingSeekAuthoritative -> pendingSeekMs
+        pendingSeekMs > 0L -> pendingSeekMs
+        else -> replacementPositionMs
+    },
+    playWhenReady = !resumePromptPending &&
+        (restoredPlayWhenReady ?: replacementPlayWhenReady),
+)
+
+/** Accepted Resume keeps the saved position; Restart starts from a legitimate zero. */
+internal fun playerResumeDecisionSeekTarget(
+    resumeFromSaved: Boolean,
+    savedPositionMs: Long,
+): Long = if (resumeFromSaved) savedPositionMs.coerceAtLeast(0L) else 0L
+
 internal data class MovieOfflineCardCopy(
     val title: String,
     val body: String,
@@ -1776,22 +1812,26 @@ fun PlayerScreen(
         }
         if (replacement != null) {
             player.trackSelectionParameters = replacement.trackSelectionParameters
-            val restoreSeekTarget = when {
-                request.isLive -> replacement.positionMs
-                resumePromptVisible -> 0L
-                pendingSeekAuthoritative -> pendingSeekMs
-                pendingSeekMs > 0L -> pendingSeekMs
-                else -> replacement.positionMs
-            }
-            restoreSeekTarget?.let(player::seekTo)
+            val preparation = playerReplacementPreparation(
+                isLive = request.isLive,
+                resumePromptPending = resumePromptVisible,
+                pendingSeekAuthoritative = pendingSeekAuthoritative,
+                pendingSeekMs = pendingSeekMs,
+                replacementPositionMs = replacement.positionMs,
+                restoredPlayWhenReady = restoredPlayWhenReady,
+                replacementPlayWhenReady = replacement.playWhenReady,
+            )
+            preparation.seekTargetMs?.let(player::seekTo)
             player.setPlaybackSpeed(replacement.speed)
             player.volume = replacement.volume
+            // Apply the start decision before prepare so a pending Resume/Restart decision never
+            // starts playback in the gap between prepare() and the post-prepare state write.
+            player.playWhenReady = preparation.playWhenReady
             player.prepare()
             android.util.Log.i(
                 "HulkPlayer",
                 "prepare issued t=${android.os.SystemClock.elapsedRealtime()} streamId=${request.streamId}",
             )
-            player.playWhenReady = restoredPlayWhenReady ?: replacement.playWhenReady
             pendingPlayerReplacement = null
             pendingSeekMs = 0L
             pendingSeekAuthoritative = false
@@ -2698,8 +2738,12 @@ fun PlayerScreen(
                         blocked = vodProgressPersistenceBlocked,
                         decisionAccepted = true,
                     )
-                    player.seekTo(request.resumePositionMs)
-                    currentPositionMs = request.resumePositionMs
+                    val resumePositionMs = playerResumeDecisionSeekTarget(
+                        resumeFromSaved = true,
+                        savedPositionMs = request.resumePositionMs,
+                    )
+                    player.seekTo(resumePositionMs)
+                    currentPositionMs = resumePositionMs
                     resumePromptVisible = false
                     controlsVisible = true
                     player.play()
@@ -2709,8 +2753,12 @@ fun PlayerScreen(
                         blocked = vodProgressPersistenceBlocked,
                         decisionAccepted = true,
                     )
-                    player.seekTo(0L)
-                    currentPositionMs = 0L
+                    val restartPositionMs = playerResumeDecisionSeekTarget(
+                        resumeFromSaved = false,
+                        savedPositionMs = request.resumePositionMs,
+                    )
+                    player.seekTo(restartPositionMs)
+                    currentPositionMs = restartPositionMs
                     resumePromptVisible = false
                     controlsVisible = true
                     player.play()
