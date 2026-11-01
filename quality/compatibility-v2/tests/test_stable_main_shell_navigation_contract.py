@@ -111,7 +111,9 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
         presentation = self.read(TV_RAIL_PRESENTATION)
 
         self.assertIn("val expanded = railHasFocus", rail)
-        self.assertIn("onRailFocusChanged = { railHasFocus = it }", rail)
+        self.assertIn("onRailFocusChanged = { focused ->", rail)
+        self.assertIn("railHasFocus = focused", rail)
+        self.assertIn("onRailFocused()", rail)
         self.assertEqual(1, rail.count("railHasFocus ="))
         self.assertNotIn("railHasFocus = false", rail)
         self.assertIn(".onFocusChanged { onRailFocusChanged(it.hasFocus) }", presentation)

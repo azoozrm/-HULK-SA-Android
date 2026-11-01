@@ -108,6 +108,12 @@ class MainActivity : ComponentActivity() {
         ) {
             viewModel.onAppResumed()
         }
+        viewModel.onAppForegroundChanged(true)
+    }
+
+    override fun onPause() {
+        viewModel.onAppForegroundChanged(false)
+        super.onPause()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

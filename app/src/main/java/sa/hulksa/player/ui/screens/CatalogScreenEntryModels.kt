@@ -137,18 +137,39 @@ internal fun stableHomePresentationInput(
     if (homePresentationSourcesEqual(accepted, current)) accepted else current
 
 /**
+ * Continue Watching may be carried into a cheap fallback only while the history source still
+ * contains exactly the same keys in the same order. A removal, addition or reorder changes the
+ * keys and must be reflected, never masked by the previous profile-owned presentation.
+ */
+internal fun retainableHomeContinueWatching(
+    previous: KeyedHomeContentModel?,
+    current: HomeContentModelInput,
+): List<HistoryEntry> {
+    val exact = previous?.takeIf { !it.isFirstFrameFallback } ?: return emptyList()
+    val previousKeys = exact.input.history.map(HistoryEntry::key)
+    val currentKeys = current.history.map(HistoryEntry::key)
+    return if (previousKeys == currentKeys) exact.model.continueWatching else emptyList()
+}
+
+/**
  * Cheap first-frame Home presentation for a fresh profile-owned store.
  *
- * It only references the already-loaded account catalogs and deliberately excludes history,
- * favorites, and every smart/personalized recommendation. No sorting, filtering, grouping, or
- * recommendation work is performed here, so the exact Home model can remain on Dispatchers.Default.
+ * It only references the already-loaded account catalogs and deliberately excludes favorites and
+ * every smart/personalized recommendation. The optional Continue Watching list is supplied only
+ * when [retainableHomeContinueWatching] proved that the history source is unchanged, so an
+ * already-visible row is not retracted while updated catalogs are being prepared. No sorting,
+ * filtering, grouping, or recommendation work is performed here, so the exact Home model can
+ * remain on Dispatchers.Default.
  */
-internal fun initialHomePresentation(input: HomeContentModelInput): HomeContentSnapshot =
+internal fun initialHomePresentation(
+    input: HomeContentModelInput,
+    continueWatching: List<HistoryEntry> = emptyList(),
+): HomeContentSnapshot =
     HomeContentSnapshot(
         movies = input.movieCatalog?.items.orEmpty(),
         series = input.seriesCatalog?.items.orEmpty(),
         live = input.liveCatalog?.items.orEmpty(),
-        continueWatching = emptyList(),
+        continueWatching = continueWatching,
         lastLive = null,
         becauseYouWatched = emptyList(),
         suggested = emptyList(),
@@ -267,7 +288,10 @@ internal class CatalogScreenEntryModelStore(
                 ?.takeIf { it.input == input }
             ?: KeyedHomeContentModel(
                 input = input,
-                model = initialHomePresentation(input),
+                model = initialHomePresentation(
+                    input = input,
+                    continueWatching = retainableHomeContinueWatching(homeModel, input),
+                ),
                 isFirstFrameFallback = true,
             ).also { homePresentationFallback = it }
     }

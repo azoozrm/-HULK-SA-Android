@@ -16,6 +16,97 @@ class HomeHistoryRemovalTest {
     private val keys = listOf("MOVIE:1", "SERIES:2", "MOVIE:3")
 
     @Test
+    fun rowRestore_resolvesStableKeyThenNearbyIndexOnlyAfterSettled() {
+        val remembered = NavigationPosition(
+            rowKey = "recent-movies",
+            rowIndex = 4,
+            itemKey = "MOVIE:2",
+            itemIndex = 1,
+        )
+
+        assertEquals(
+            0,
+            resolveHomeRowRestoreIndex(
+                remembered = remembered,
+                rowKey = "recent-movies",
+                itemKeys = listOf("MOVIE:2", "MOVIE:3"),
+                allowIndexFallback = true,
+            ),
+        )
+        assertEquals(
+            "key resolution follows a reorder",
+            1,
+            resolveHomeRowRestoreIndex(
+                remembered = remembered,
+                rowKey = "recent-movies",
+                itemKeys = listOf("MOVIE:1", "MOVIE:2"),
+                allowIndexFallback = true,
+            ),
+        )
+        assertEquals(
+            "a removed key falls back to the remembered nearby position",
+            1,
+            resolveHomeRowRestoreIndex(
+                remembered = remembered,
+                rowKey = "recent-movies",
+                itemKeys = listOf("MOVIE:1", "MOVIE:3"),
+                allowIndexFallback = true,
+            ),
+        )
+        assertNull(
+            "staged loading must not focus a partial row before the exact target is known",
+            resolveHomeRowRestoreIndex(
+                remembered = remembered,
+                rowKey = "recent-movies",
+                itemKeys = listOf("MOVIE:1", "MOVIE:3"),
+                allowIndexFallback = false,
+            ),
+        )
+        assertNull(
+            resolveHomeRowRestoreIndex(
+                remembered = remembered,
+                rowKey = "continue",
+                itemKeys = listOf("MOVIE:2"),
+                allowIndexFallback = true,
+            ),
+        )
+        assertNull(
+            resolveHomeRowRestoreIndex(
+                remembered = remembered,
+                rowKey = "recent-movies",
+                itemKeys = emptyList(),
+                allowIndexFallback = true,
+            ),
+        )
+    }
+
+    @Test
+    fun liveRailRevisionCancelsAnAlreadyStartedHomeHandoff() {
+        val expected = NavigationPosition(
+            rowKey = "continue",
+            rowIndex = 1,
+            itemKey = "movie:1",
+            itemIndex = 0,
+        )
+        assertFalse(
+            homeFocusOwnershipLost(
+                expected = expected,
+                current = expected,
+                railFocusBaseline = 4L,
+                currentRailFocusRevision = 4L,
+            ),
+        )
+        assertTrue(
+            homeFocusOwnershipLost(
+                expected = expected,
+                current = expected,
+                railFocusBaseline = 4L,
+                currentRailFocusRevision = 5L,
+            ),
+        )
+    }
+
+    @Test
     fun removalTarget_prefersNextThenPreviousThenNull() {
         assertEquals(
             "MOVIE:3",

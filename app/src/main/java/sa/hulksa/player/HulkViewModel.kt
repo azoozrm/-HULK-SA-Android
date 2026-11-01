@@ -18,6 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -26,6 +27,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import sa.hulksa.player.data.AccountIdentityCandidateLabel
 import sa.hulksa.player.data.AuthenticatedSessionOwner
 import sa.hulksa.player.data.AuthenticatedSessionRegistry
@@ -283,6 +285,68 @@ internal fun coalesceNotificationScanTrigger(
     pending == null -> incoming
     incoming.minimumAgeMs < pending.minimumAgeMs -> incoming
     else -> pending
+}
+
+internal sealed interface ForegroundNotificationScanDecision {
+    data object WaitForWake : ForegroundNotificationScanDecision
+    data class WaitForDelay(val delayMs: Long) : ForegroundNotificationScanDecision
+    data object ScanNow : ForegroundNotificationScanDecision
+}
+
+/**
+ * One foreground due-check decision. It reuses the existing automatic minimum-age policy and
+ * backs off from the last attempt so a failed provider fetch cannot create a tight retry loop.
+ */
+internal fun decideForegroundNotificationScan(
+    foreground: Boolean,
+    featureEnabled: Boolean,
+    masterEnabled: Boolean,
+    authenticated: Boolean,
+    accountReady: Boolean,
+    profileReady: Boolean,
+    profileKind: ProfileKind,
+    notificationUiReady: Boolean,
+    scanActive: Boolean,
+    subscriptions: List<EpisodeNotificationSubscription>,
+    nowEpochMs: Long,
+    elapsedSinceLastAttemptMs: Long?,
+    intervalMs: Long = NotificationScanTrigger.LIBRARY_REFRESH.minimumAgeMs,
+): ForegroundNotificationScanDecision {
+    if (
+        !foreground ||
+        !featureEnabled ||
+        !masterEnabled ||
+        !authenticated ||
+        !accountReady ||
+        !profileReady ||
+        scanActive ||
+        (profileKind == ProfileKind.KIDS && !notificationUiReady)
+    ) {
+        return ForegroundNotificationScanDecision.WaitForWake
+    }
+    val enabled = subscriptions.filter(EpisodeNotificationSubscription::enabled)
+    if (enabled.isEmpty()) return ForegroundNotificationScanDecision.WaitForWake
+
+    val earliestSubscriptionDueDelayMs = enabled.minOf { subscription ->
+        val lastCheckedAt = subscription.lastCheckedAtEpochMs
+        when {
+            lastCheckedAt <= 0L -> 0L
+            nowEpochMs < lastCheckedAt -> 0L
+            else -> (lastCheckedAt + intervalMs - nowEpochMs).coerceAtLeast(0L)
+        }
+    }
+    // Process-local elapsed time is immune to wall-clock corrections. A persisted/future epoch
+    // timestamp must never turn a due subscription into an hour-long retry.
+    val retryRemainingMs = elapsedSinceLastAttemptMs
+        ?.takeIf { it in 0 until intervalMs }
+        ?.let { intervalMs - it }
+        ?: 0L
+    val nextDelayMs = maxOf(earliestSubscriptionDueDelayMs, retryRemainingMs)
+    return if (nextDelayMs <= 0L) {
+        ForegroundNotificationScanDecision.ScanNow
+    } else {
+        ForegroundNotificationScanDecision.WaitForDelay(nextDelayMs)
+    }
 }
 
 internal fun pendingEpisodeNotificationPopup(
@@ -544,6 +608,10 @@ class HulkViewModel internal constructor(
     private var playerProgressProfileOwner: String? = null
     private var notificationScanJob: Job? = null
     private var pendingNotificationScanTrigger: NotificationScanTrigger? = null
+    private var foregroundNotificationScanJob: Job? = null
+    private var foregroundNotificationScanWake = MutableStateFlow(0L)
+    private var foregroundNotificationLastAttemptElapsedRealtimeMs = 0L
+    private var appForeground: Boolean = false
     private var notificationPopupActionJob: Job? = null
     private var operationsRefreshJob: Job? = null
     private var operationsDownloadJob: Job? = null
@@ -1777,6 +1845,7 @@ class HulkViewModel internal constructor(
                 }
             }
             refreshNotificationState(clearPopup = false)
+            wakeForegroundNotificationScheduler()
             onResult(
                 when (result) {
                     EpisodeNotificationStoreResult.SUCCESS -> if (currentlyEnabled) {
@@ -1847,6 +1916,7 @@ class HulkViewModel internal constructor(
                 }
                 refreshNotificationState(clearPopup = !enable)
                 if (enable) scanSubscribedSeries(NotificationScanTrigger.MASTER_REENABLE)
+                wakeForegroundNotificationScheduler()
             }
             onResult(
                 if (result != EpisodeNotificationStoreResult.SUCCESS) {
@@ -2130,7 +2200,9 @@ class HulkViewModel internal constructor(
             }
         }
         refreshNotificationState(clearPopup = true)
+        foregroundNotificationLastAttemptElapsedRealtimeMs = 0L
         scanSubscribedSeries(NotificationScanTrigger.PROFILE_SWITCH)
+        wakeForegroundNotificationScheduler()
         scheduleTvPlatformSync(immediate = true)
     }
 
@@ -2159,8 +2231,96 @@ class HulkViewModel internal constructor(
     fun onAppResumed() {
         refreshOperations(force = false)
         scanSubscribedSeries(NotificationScanTrigger.APP_RESUME)
+        wakeForegroundNotificationScheduler()
         scheduleTvPlatformSync(immediate = false)
         resolvePendingTvDeepLink()
+    }
+
+    /**
+     * One lifecycle-owned foreground due-check loop. Activities report foreground ownership; the
+     * loop waits for the existing automatic eligibility deadline or a real state change, and never
+     * starts duplicate jobs across recomposition, navigation or repeated resumes.
+     */
+    fun onAppForegroundChanged(foreground: Boolean) {
+        if (appForeground == foreground) {
+            if (foreground) wakeForegroundNotificationScheduler()
+            return
+        }
+        appForeground = foreground
+        if (!foreground) {
+            foregroundNotificationScanJob?.cancel()
+            foregroundNotificationScanJob = null
+            if (pendingNotificationScanTrigger == NotificationScanTrigger.LIBRARY_REFRESH) {
+                pendingNotificationScanTrigger = null
+            }
+            return
+        }
+        wakeForegroundNotificationScheduler()
+        if (foregroundNotificationScanJob?.isActive == true) return
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                runForegroundNotificationScheduler()
+            } finally {
+                if (foregroundNotificationScanJob === coroutineContext[Job]) {
+                    foregroundNotificationScanJob = null
+                }
+            }
+        }
+        foregroundNotificationScanJob = job
+        job.start()
+    }
+
+    private fun wakeForegroundNotificationScheduler() {
+        foregroundNotificationScanWake.update { it + 1L }
+    }
+
+    private suspend fun runForegroundNotificationScheduler() {
+        while (true) {
+            val now = System.currentTimeMillis()
+            val profile = profileStore.activeProfile()
+            val accountId = localEpisodeNotificationStore.activeAccountId()
+            val decision = decideForegroundNotificationScan(
+                foreground = appForeground,
+                featureEnabled = mutableState.value.operations.features.episodeNotificationsEnabled,
+                masterEnabled = mutableState.value.episodeNotificationsEnabled,
+                authenticated = session != null,
+                accountReady = accountId != null,
+                profileReady = profile.id.isNotBlank(),
+                profileKind = profile.kind,
+                notificationUiReady = notificationUiReady,
+                scanActive = notificationScanJob?.isActive == true,
+                subscriptions = if (accountId == null) {
+                    emptyList()
+                } else {
+                    localEpisodeNotificationStore.snapshot(profile.id).subscriptions
+                },
+                nowEpochMs = now,
+                elapsedSinceLastAttemptMs = foregroundNotificationLastAttemptElapsedRealtimeMs
+                    .takeIf { it > 0L }
+                    ?.let { (android.os.SystemClock.elapsedRealtime() - it).coerceAtLeast(0L) },
+            )
+            when (decision) {
+                ForegroundNotificationScanDecision.WaitForWake -> awaitForegroundSchedulerWake()
+                is ForegroundNotificationScanDecision.WaitForDelay ->
+                    awaitForegroundSchedulerWake(decision.delayMs)
+                ForegroundNotificationScanDecision.ScanNow -> {
+                    foregroundNotificationLastAttemptElapsedRealtimeMs =
+                        android.os.SystemClock.elapsedRealtime()
+                    scanSubscribedSeries(NotificationScanTrigger.LIBRARY_REFRESH)
+                }
+            }
+        }
+    }
+
+    private suspend fun awaitForegroundSchedulerWake(delayMs: Long? = null) {
+        val seen = foregroundNotificationScanWake.value
+        if (delayMs == null) {
+            foregroundNotificationScanWake.first { it != seen }
+            return
+        }
+        withTimeoutOrNull(delayMs.coerceAtLeast(1L)) {
+            foregroundNotificationScanWake.first { it != seen }
+        }
     }
 
     fun retryOperations() {
@@ -2449,6 +2609,7 @@ class HulkViewModel internal constructor(
         }
         refreshNotificationState(clearPopup = false)
         if (config.features.episodeNotificationsEnabled) drainPendingNotificationScan()
+        wakeForegroundNotificationScheduler()
     }
 
     private fun updateOperationsAnnouncementPresentation(acknowledgedMessageIds: Set<String>) {
@@ -2475,7 +2636,10 @@ class HulkViewModel internal constructor(
         val becameReady = ready && !notificationUiReady
         val readinessChanged = notificationUiReady != ready
         notificationUiReady = ready
-        if (readinessChanged) invalidateVoiceSearchContext()
+        if (readinessChanged) {
+            invalidateVoiceSearchContext()
+            wakeForegroundNotificationScheduler()
+        }
         if (ready) {
             maybeShowPendingNotificationPopup()
             if (becameReady && profileStore.activeProfile().kind == ProfileKind.KIDS) {
@@ -2623,9 +2787,21 @@ class HulkViewModel internal constructor(
             enqueueNotificationScanTrigger(trigger)
             return
         }
-        val activeSession = session ?: return
+        // A startup/resume trigger can arrive while the authenticated session or account scope is
+        // still being published. Dropping it here loses the only automatic opportunity until an
+        // unrelated trigger or a manual Home refresh. Retain the strongest trigger and let the
+        // existing readiness/config drain paths run it as soon as the owner is available.
+        val activeSession = session
+        if (activeSession == null) {
+            enqueueNotificationScanTrigger(trigger)
+            return
+        }
         val profile = profileStore.activeProfile()
-        val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
+        val accountId = localEpisodeNotificationStore.activeAccountId()
+        if (accountId == null) {
+            enqueueNotificationScanTrigger(trigger)
+            return
+        }
         val snapshot = localEpisodeNotificationStore.snapshot(profile.id)
         if (!snapshot.settings.enabled) return
         if (profile.kind == ProfileKind.KIDS && !notificationUiReady) {
@@ -2716,6 +2892,7 @@ class HulkViewModel internal constructor(
             } finally {
                 if (notificationScanJob === job) notificationScanJob = null
                 drainPendingNotificationScan()
+                wakeForegroundNotificationScheduler()
             }
         }
         notificationScanJob = job
@@ -3096,6 +3273,8 @@ class HulkViewModel internal constructor(
         notificationScanJob = null
         pendingNotificationScanTrigger = null
         notificationUiReady = false
+        foregroundNotificationLastAttemptElapsedRealtimeMs = 0L
+        wakeForegroundNotificationScheduler()
         invalidateCatalogRequests()
         clearCatalogMemory()
         invalidateDiagnosticsForSessionChange()
@@ -3453,6 +3632,7 @@ class HulkViewModel internal constructor(
         ensureDestinationCatalogs(MainDestination.HOME)
         refreshOperations(force = false)
         refreshNotificationState(clearPopup = true)
+        foregroundNotificationLastAttemptElapsedRealtimeMs = 0L
         scanSubscribedSeries(NotificationScanTrigger.APP_START)
         resolvePendingTvDeepLink()
     }

@@ -1,9 +1,13 @@
 package sa.hulksa.player.ui.screens
 
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.input.key.KeyEventType
+import kotlinx.coroutines.flow.first
 
 /**
  * The one stable-key rule for a removed Home item/row. The next surviving logical key wins;
@@ -157,6 +161,83 @@ internal class RecentRemovalFocusLock {
 
 /** A single pending handoff of focus after the Continue Watching row empties. */
 internal data class HomeEmptyRowFocusRequest(val id: Long)
+
+/**
+ * Resolves the remembered Home card against the current row data. A surviving stable key wins
+ * even after reorder; a genuinely removed key falls back to the nearest remembered position only
+ * after the Home model has settled. During first-frame loading the caller passes
+ * [allowIndexFallback] = false so a partial catalog cannot focus the wrong card before the exact
+ * target is known.
+ */
+internal fun resolveHomeRowRestoreIndex(
+    remembered: NavigationPosition,
+    rowKey: String,
+    itemKeys: List<String>,
+    allowIndexFallback: Boolean,
+): Int? {
+    if (remembered.rowKey != rowKey || itemKeys.isEmpty()) return null
+    val keyIndex = itemKeys.indexOf(remembered.itemKey)
+    if (keyIndex >= 0) return keyIndex
+    if (!allowIndexFallback) return null
+    return remembered.itemIndex.coerceIn(0, itemKeys.lastIndex)
+}
+
+/**
+ * Reveals the Home hero at the top of the vertical list, waits until the item is actually placed,
+ * verifies ownership was not taken over by a deliberate user move, then requests focus. This is
+ * the deterministic fallback for a vanished remembered row, including when the hero starts offscreen.
+ */
+internal suspend fun revealAndFocusHomeHero(
+    listState: LazyListState,
+    isFocusOwnershipLost: () -> Boolean,
+    requestFocus: () -> Boolean,
+): Boolean {
+    if (isFocusOwnershipLost()) return false
+    listState.scrollToItem(0)
+    snapshotFlow {
+        listState.layoutInfo.visibleItemsInfo.any { it.key == "hero" }
+    }.first { it }
+    withFrameNanos { }
+    if (isFocusOwnershipLost()) return false
+    return requestFocus()
+}
+
+/**
+ * Reveals a remembered card inside one Home row, waits for its actual placement, rechecks that
+ * restoration still owns focus, then requests it. A deliberate user move updates navigation
+ * memory and cancels this handoff instead of being overwritten.
+ */
+internal suspend fun focusHomeRowCard(
+    listState: LazyListState,
+    targetIndex: Int,
+    targetKey: String,
+    isFocusOwnershipLost: () -> Boolean,
+    requestFocus: () -> Boolean,
+): Boolean {
+    if (isFocusOwnershipLost()) return false
+    if (listState.layoutInfo.visibleItemsInfo.none {
+            it.key == targetKey || it.index == targetIndex
+        }
+    ) {
+        listState.scrollToItem(targetIndex)
+    }
+    snapshotFlow {
+        listState.layoutInfo.visibleItemsInfo.any {
+            it.key == targetKey || it.index == targetIndex
+        }
+    }.first { it }
+    withFrameNanos { }
+    if (isFocusOwnershipLost()) return false
+    return requestFocus()
+}
+
+/** Live ownership check for one Home restoration handoff. */
+internal fun homeFocusOwnershipLost(
+    expected: NavigationPosition,
+    current: NavigationPosition,
+    railFocusBaseline: Long,
+    currentRailFocusRevision: Long,
+): Boolean = current != expected || currentRailFocusRevision != railFocusBaseline
 
 /** True when a row's first logical card is outside the row's current composed viewport. */
 internal fun homeRowFirstCardNeedsReveal(visibleIndices: Iterable<Int>): Boolean =
