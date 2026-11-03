@@ -153,6 +153,15 @@ $firstAttention = $attentionItems[0] ?? null;
     <a class="btn" href="<?= cc_e(cc_url('service')) ?>">إدارة الخدمة</a>
 </section>
 
+<section class="online-now-card">
+    <div class="online-now-card__head">
+        <span class="online-now-card__label"><span class="dot"></span>المتصلون الآن</span>
+        <a class="btn quiet" href="<?= cc_e(cc_url('live-users')) ?>">عرض المتصلين <?= cc_icon('arrow-left') ?></a>
+    </div>
+    <strong><?= $onlineSubscriptions === null ? '—' : $onlineSubscriptions ?></strong>
+    <small><?= $onlineSubscriptions === null ? 'غير متاح' : 'اشتراك فريد متصل الآن' ?></small>
+</section>
+
 <div class="kpis">
     <article class="kpi"><div class="kpi-label"><span class="kpi-icon"><?= cc_icon('users') ?></span>اشتراكات نشطة</div><strong><?= $onlineSubscriptions === null ? '—' : $onlineSubscriptions ?></strong><small><?= $onlineSubscriptions === null ? 'غير متاح' : 'حسب هوية الاشتراك الحالية' ?></small></article>
     <article class="kpi"><div class="kpi-label"><span class="kpi-icon"><?= cc_icon('screen') ?></span>أجهزة متصلة</div><strong><?= $onlineDevices === null ? '—' : $onlineDevices ?></strong><small><?= $onlineDevices === null ? 'غير متاح' : 'أجهزة مميزة الآن' ?></small></article>
@@ -186,11 +195,10 @@ $firstAttention = $attentionItems[0] ?? null;
             </div>
         <?php endif; ?>
     </section>
-    <section class="card quick-card">
+    <section class="card quick-card quick-card--desktop">
         <header class="card-head"><h2>إجراءات سريعة</h2></header>
         <div class="quick">
-            <a class="quick-btn" href="<?= cc_e(cc_url('hosts') . '?add=code#host-editor') ?>"><span class="action-icon"><?= cc_icon('key') ?></span>إنشاء كود دخول<?= cc_icon('arrow-left') ?></a>
-            <a class="quick-btn" href="<?= cc_e(cc_url('announcements')) ?>"><span class="action-icon"><?= cc_icon('bell') ?></span>كتابة رسالة للمستخدمين<?= cc_icon('arrow-left') ?></a>
+            <a class="quick-btn quick-btn--gold" href="<?= cc_e(cc_url('announcements')) ?>"><span class="action-icon"><?= cc_icon('bell') ?></span>إضافة رسالة<?= cc_icon('arrow-left') ?></a>
             <a class="quick-btn" href="<?= cc_e(cc_url('releases')) ?>"><span class="action-icon"><?= cc_icon('package') ?></span>تحديث التطبيق<?= cc_icon('arrow-left') ?></a>
             <?php if (is_array($firstAttention)): ?>
                 <div class="urgent"><div><b><?= cc_e((string) $firstAttention['title']) ?></b><br><?= cc_e((string) $firstAttention['message']) ?></div><a class="btn quiet" href="<?= cc_e((string) $firstAttention['url']) ?>">عرض</a></div>
@@ -240,5 +248,12 @@ $firstAttention = $attentionItems[0] ?? null;
             </table>
         </div>
     <?php endif; ?>
+</section>
+<section class="card quick-card quick-card--mobile">
+    <header class="card-head"><h2>إجراءات سريعة</h2></header>
+    <div class="quick">
+        <a class="quick-btn quick-btn--gold" href="<?= cc_e(cc_url('announcements')) ?>"><span class="action-icon"><?= cc_icon('bell') ?></span>إضافة رسالة<?= cc_icon('arrow-left') ?></a>
+        <a class="quick-btn" href="<?= cc_e(cc_url('releases')) ?>"><span class="action-icon"><?= cc_icon('package') ?></span>تحديث التطبيق<?= cc_icon('arrow-left') ?></a>
+    </div>
 </section>
 <p class="note" data-source="Presence">مؤشر «المستخدمون اليوم» غير متاح لعدم وجود هوية حساب ثابتة. لا يستنتج المركز هذه القيمة من اسم المستخدم أو الجهاز.</p>

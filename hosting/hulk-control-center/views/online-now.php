@@ -97,7 +97,15 @@ $paginationUrl = static fn (int $target): string => cc_url('live-users') . '?' .
                     $noteDraft = (string) ($group['note_draft'] ?? '');
                     $noteUpdatedAt = (string) ($group['note_updated_at'] ?? '');
                 ?>
-                    <?php $isTarget = $targetToken !== '' && hash_equals($targetToken, cc_presence_subscription_token($resellerId, $host, $username)); ?>
+                    <?php
+                    $subscriptionToken = '';
+                    try {
+                        $subscriptionToken = cc_presence_subscription_token($resellerId, $host, $username);
+                    } catch (Throwable $exception) {
+                        $subscriptionToken = '';
+                    }
+                    $isTarget = $targetToken !== '' && $subscriptionToken !== '' && hash_equals($targetToken, $subscriptionToken);
+                    ?>
                     <details class="subscription-card subscription-row-details" <?= $checkResult !== null || $noteDraft !== '' || $isTarget ? 'open' : '' ?><?= $isTarget ? ' id="subscription-target"' : '' ?>>
                         <summary class="subscription-row"><strong><bdi dir="ltr"><?=cc_e($username)?></bdi></strong><span><?=$deviceCount?> جهاز</span><span><bdi dir="ltr"><?=cc_e($host)?></bdi></span><time dir="ltr"><?=cc_e(cc_presence_display_time($lastActivity))?></time><span>التفاصيل</span></summary>
                         <div class="subscription-expanded">
@@ -130,6 +138,7 @@ $paginationUrl = static fn (int $target): string => cc_url('live-users') . '?' .
                                 <input type="hidden" name="reseller_id" value="<?= $resellerId ?>">
                                 <input type="hidden" name="host_hash" value="<?= cc_e($hostHash) ?>">
                                 <input type="hidden" name="user_hash" value="<?= cc_e($userHash) ?>">
+                                <?php if ($subscriptionToken !== ''): ?><input type="hidden" name="subscription" value="<?= cc_e($subscriptionToken) ?>"><?php endif; ?>
                                 <input type="hidden" name="page" value="<?= $page ?>">
                                 <button class="button button--secondary" type="submit"><?= cc_icon('pulse') ?>فحص المشترك</button>
                             </form>
@@ -192,6 +201,7 @@ $paginationUrl = static fn (int $target): string => cc_url('live-users') . '?' .
                                     <input type="hidden" name="reseller_id" value="<?= $resellerId ?>">
                                     <input type="hidden" name="host_hash" value="<?= cc_e($hostHash) ?>">
                                     <input type="hidden" name="user_hash" value="<?= cc_e($userHash) ?>">
+                                    <?php if ($subscriptionToken !== ''): ?><input type="hidden" name="subscription" value="<?= cc_e($subscriptionToken) ?>"><?php endif; ?>
                                     <input type="hidden" name="page" value="<?= $page ?>">
                                     <label class="form-field"><span>نص الملاحظة</span><textarea name="note" maxlength="2000" required placeholder="ملاحظة خاصة لا تظهر للمشترك"><?= cc_e($noteDraft !== '' ? $noteDraft : $note) ?></textarea></label>
                                     <button class="button button--secondary" type="submit">حفظ الملاحظة</button>

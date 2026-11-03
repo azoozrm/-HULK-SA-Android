@@ -9,6 +9,7 @@ if (!empty($pageData['load_error'])) {
 $rows = $pageData['rows'] ?? [];
 $csrf = cc_csrf_token();
 $focusHost = (int) ($pageData['reseller'] ?? 0);
+$codeOnlineAvailable = (bool) ($pageData['code_online_available'] ?? true);
 $hostPage = (int) $pageData['page'];
 $codePage = max(1, (int) ($_GET['code_page'] ?? 1));
 $form = $_GET['add'] ?? '';
@@ -42,8 +43,8 @@ $hostFields = static function (array $row = []): void { ?>
 
 <section class="module-stack host-code-page">
     <div class="host-actions" aria-label="إجراءات الهوستات والأكواد">
-        <a class="button button--secondary" href="<?= cc_e($hostsUrl($context + ['add' => 'host'], '#host-editor')) ?>"><?= cc_icon('plus') ?>إضافة هوست</a>
-        <a class="button button--primary" href="<?= cc_e($hostsUrl($context + ['add' => 'code'], '#host-editor')) ?>"><?= cc_icon('key') ?>إضافة كود</a>
+        <a class="button button--primary" href="<?= cc_e($hostsUrl($context + ['add' => 'host'], '#host-editor')) ?>"><?= cc_icon('plus') ?>إضافة هوست</a>
+        <a class="button button--secondary" href="<?= cc_e($hostsUrl($context + ['add' => 'code'], '#host-editor')) ?>"><?= cc_icon('key') ?>إضافة كود</a>
     </div>
 
     <?php if ($form === 'host' || $form === 'code'): ?>
@@ -120,7 +121,7 @@ $hostFields = static function (array $row = []): void { ?>
                 <?php else: ?>
                     <div class="table-wrap">
                         <table class="host-code-table" aria-label="أكواد الدخول">
-                            <thead><tr><th scope="col">كود الدخول</th><th scope="col">الحالة</th><th scope="col">آخر استخدام</th><th scope="col">الإجراءات</th></tr></thead>
+                            <thead><tr><th scope="col">كود الدخول</th><th scope="col">الحالة</th><th scope="col">آخر استخدام</th><th scope="col">المتصلون الآن</th><th scope="col">الإجراءات</th></tr></thead>
                             <tbody>
                             <?php foreach ($row['codes'] as $code):
                                 $cid = (int) $code['code_id'];
@@ -128,11 +129,18 @@ $hostFields = static function (array $row = []): void { ?>
                                 $codeUsage = $row['code_usage'][$cid] ?? null;
                             ?>
                                 <tr class="code-row">
-                                    <td><details class="code-reveal"><summary>اظهار الكود #<?= $cid ?></summary><code class="credential-value" dir="ltr"><?= cc_e($code['access_code']) ?></code></details></td>
+                                    <td data-label="كود الدخول"><code class="credential-value" dir="ltr"><?= cc_e($code['access_code'] !== '' ? $code['access_code'] : 'غير متاح') ?></code></td>
                                     <td data-label="الحالة"><?php cc_status_badge($active ? ($row['status'] === 'active' ? 'نشط' : 'نشط، الهوست متوقف') : 'متوقف', $active ? 'success' : 'neutral'); ?></td>
                                     <td data-label="آخر استخدام">
                                         <?= is_array($codeUsage) ? cc_e(cc_presence_display_time($codeUsage['last_used_at'])) : 'غير متاح' ?>
                                         <?php if (is_array($codeUsage)): ?><small class="muted-copy"><?= (int) $codeUsage['online'] ?> جلسة حديثة</small><?php endif; ?>
+                                    </td>
+                                    <td data-label="المتصلون الآن">
+                                        <?php
+                                        $codeOnline = is_array($row['code_online'] ?? null) ? $row['code_online'] : [];
+                                        $onlineSubscriptions = array_key_exists((string) $code['access_code'], $codeOnline) ? (int) $codeOnline[(string) $code['access_code']] : 0;
+                                        ?>
+                                        <?= $codeOnlineAvailable ? $onlineSubscriptions : 'غير متاح' ?>
                                     </td>
                                     <td><details class="inline-editor host-code-actions">
                                         <summary>إدارة الكود</summary>

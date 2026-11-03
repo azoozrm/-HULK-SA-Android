@@ -219,6 +219,11 @@ $onlineNowTotals = cc_presence_online_now_totals($onlineNowControl, $onlineNowCo
 cc_test($onlineNowTotals['subscriptions'] === 13, 'Online Now totals count every grouped subscription');
 cc_test($onlineNowTotals['devices'] === 26, 'Online Now totals count every distinct online device');
 cc_test($onlineNowTotals['connections'] === 26, 'Online Now totals count every online session');
+$dashboardSnapshot = cc_presence_dashboard_snapshot($onlineNowControl, $onlineNowLoader, $onlineNowConfig, $onlineNowTime);
+cc_test(
+    (int) $dashboardSnapshot['online_subscriptions'] === (int) $onlineNowPage['total_subscriptions'],
+    'overview online card matches the unfiltered live list at the same measurement time'
+);
 $subscriptionTokenA = cc_presence_subscription_token(7, 'https://a.invalid', 'shared-user', $onlineNowConfig);
 $subscriptionTokenB = cc_presence_subscription_token(8, 'https://b.invalid', 'shared-user', $onlineNowConfig);
 cc_test(

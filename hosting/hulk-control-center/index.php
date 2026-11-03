@@ -81,6 +81,15 @@ if ($resolved['valid'] && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     if ($moduleKey === 'live-users') {
         $redirectPage = cc_presence_page_number($_POST['page'] ?? 1);
         $context = ['page'=>$redirectPage];
+        $subscriptionToken = is_string($_POST['subscription'] ?? null)
+            ? strtolower(trim((string) $_POST['subscription']))
+            : '';
+        $subscriptionReseller = filter_var($_POST['reseller_id'] ?? null, FILTER_VALIDATE_INT);
+        if (preg_match('/^[0-9a-f]{64}$/', $subscriptionToken) === 1
+            && is_int($subscriptionReseller) && $subscriptionReseller > 0) {
+            $context['reseller'] = $subscriptionReseller;
+            $context['subscription'] = $subscriptionToken;
+        }
         $search = mb_substr(trim(is_string($_GET['q'] ?? null) ? $_GET['q'] : ''), 0, 100);
         if ($search !== '') $context['q'] = $search;
         if (is_string($_GET['platform'] ?? null) && in_array($_GET['platform'], ['TV','PHONE','TABLET','OTHER'],true)) $context['platform'] = $_GET['platform'];
@@ -97,7 +106,6 @@ if ($resolved['valid']) {
             $pageData = cc_dashboard_data();
         } elseif ($moduleKey === 'live-users') {
             $pageData = cc_presence_online_now_data($_GET);
-            $pageData = cc_subscriber_attach_session_state($pageData);
             $targetToken = isset($_GET['subscription']) && is_string($_GET['subscription'])
                 ? strtolower(trim($_GET['subscription']))
                 : '';
@@ -152,6 +160,7 @@ if ($resolved['valid']) {
                     }
                 }
             }
+            $pageData = cc_subscriber_attach_session_state($pageData);
         } elseif (in_array($moduleKey, ['sessions', 'devices'], true)) {
             $pageData = cc_presence_page_data($moduleKey, $_GET);
         } elseif (in_array($moduleKey, ['host-health', 'diagnostics', 'analytics'], true)) {

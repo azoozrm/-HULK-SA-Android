@@ -109,5 +109,20 @@ function cc_reseller_page(string $module): array
             $row['code_usage']=cc_presence_usage_for_resellers(cc_db('control'),$codeRows,'access-codes',$now,(int)$config['online_ttl_seconds']);
         } unset($row);
     } catch(Throwable $error) { $usageAvailable=false; }
-    return ['presence_usage'=>$usage,'presence_usage_available'=>$usageAvailable,'rows'=>$rows,'total'=>$total,'page'=>$page,'pages'=>$pages,'search'=>$search,'status'=>$status,'reseller'=>$hostId];
+    $codeOnlineAvailable=$usageAvailable;
+    if ($usageAvailable) {
+        foreach ($rows as &$row) {
+            try {
+                $row['code_online']=cc_presence_code_online_subscription_counts(
+                    cc_db('control'),$config,(int)$row['host_id'],(string)$row['host'],
+                    array_map(static fn(array $code):string => (string)$code['access_code'],$row['codes']),
+                    $now
+                );
+            } catch(Throwable $error) {
+                $codeOnlineAvailable=false;
+                $row['code_online']=[];
+            }
+        } unset($row);
+    }
+    return ['presence_usage'=>$usage,'presence_usage_available'=>$usageAvailable,'code_online_available'=>$codeOnlineAvailable,'rows'=>$rows,'total'=>$total,'page'=>$page,'pages'=>$pages,'search'=>$search,'status'=>$status,'reseller'=>$hostId];
 }

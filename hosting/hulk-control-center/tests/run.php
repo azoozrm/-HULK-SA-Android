@@ -194,7 +194,8 @@ cc_test(
         !preg_match('/\$details\s*=\s*\[[^\]]*[\'\"](?:password|access_code)[\'\"]\s*=>/i', $resellerAdapter),
     'reseller audit details omit passwords and access-code values'
 );
-cc_test(is_string($resellerView) && str_contains($resellerView, 'code-reveal') && str_contains($resellerView, 'credential-value'), 'reseller access codes are masked with explicit reveal behavior');
+cc_test(is_string($resellerView) && str_contains($resellerView, 'credential-value') && !str_contains($resellerView, 'code-reveal'), 'reseller access codes are shown directly to the authorized owner');
+cc_test(is_string($resellerView) && str_contains($resellerView, 'المتصلون الآن') && str_contains($resellerView, 'code_online_available'), 'hosts show per-code online subscription counts');
 
 $definitions = cc_dashboard_metric_definitions();
 $expectedDashboardDefinitions = [
@@ -328,6 +329,11 @@ cc_test(
     'subscription details resolve by exact identity instead of page rank'
 );
 cc_test(
+    str_contains((string) file_get_contents($root . '/views/online-now.php'), 'name="subscription"') &&
+        str_contains($index, "\$_POST['subscription']"),
+    'subscriber actions retain the selected subscription token'
+);
+cc_test(
     is_string($dashboardView) &&
         str_contains($dashboardView, 'غير متاح لعدم وجود هوية حساب ثابتة') &&
         !str_contains($dashboardView, "users_today'] ?? 0"),
@@ -357,6 +363,7 @@ cc_test(!is_file($root . '/config.php'), 'runtime config is not present in sourc
 
 require __DIR__ . '/presence.php';
 require __DIR__ . '/online-now.php';
+require __DIR__ . '/code-online.php';
 require __DIR__ . '/subscriber.php';
 require __DIR__ . '/phase6.php';
 require __DIR__ . '/phase7.php';

@@ -61,10 +61,7 @@ function cc_page_start(array $resolved, array $admin): void
                 </a>
                 <div class="crumb"><span>إدارة التطبيق</span><span aria-hidden="true">‹</span><b><?= cc_e($label) ?></b></div>
                 <div class="top-tools">
-                    <details class="mobile-sections">
-                        <summary><?= cc_icon('menu') ?>الأقسام</summary>
-                        <nav aria-label="كل أقسام اللوحة"><?php $renderSections(); ?></nav>
-                    </details>
+                    <a class="top-bell" href="<?= cc_e(cc_url('announcements')) ?>" aria-label="الرسائل"><?= cc_icon('bell') ?></a>
                     <span class="top-owner"><?= cc_e((string) $admin['username']) ?></span>
                     <form action="<?= cc_e(cc_base_path() . '/logout.php') ?>" method="post">
                         <input type="hidden" name="csrf_token" value="<?= cc_e(cc_csrf_token()) ?>">
@@ -93,11 +90,28 @@ function cc_page_end(): void
         </div>
     </div>
     <nav class="bottom-nav" aria-label="أقسام الجوال">
-        <?php $bottom = ['dashboard' => 'الرئيسية', 'live-users' => 'المتصلون', 'hosts' => 'الهوستات والأكواد', 'releases' => 'تحديث التطبيق', 'service' => 'الإدارة']; $nav = cc_main_navigation(); foreach ($bottom as $key => $text): ?>
-            <a href="<?= cc_e(cc_url($key)) ?>" <?= ($GLOBALS['cc_active_main_navigation'] ?? 'dashboard') === $key ? 'aria-current="page"' : '' ?>>
+        <?php
+        $nav = cc_main_navigation();
+        $activeBottom = $GLOBALS['cc_active_main_navigation'] ?? 'dashboard';
+        $moreKeys = ['sessions', 'announcements', 'releases', 'service'];
+        $moreActive = in_array($activeBottom, $moreKeys, true);
+        $bottom = ['dashboard' => 'نظرة عامة', 'live-users' => 'المتصلون', 'hosts' => 'الهوستات'];
+        ?>
+        <?php foreach ($bottom as $key => $text): ?>
+            <a href="<?= cc_e(cc_url($key)) ?>" <?= $activeBottom === $key ? 'aria-current="page"' : '' ?>>
                 <?= cc_icon((string) ($nav[$key]['icon'] ?? 'dashboard')) ?><span><?= cc_e($text) ?></span>
             </a>
         <?php endforeach; ?>
+        <details class="more-nav">
+            <summary <?= $moreActive ? 'aria-current="page"' : '' ?>><?= cc_icon('menu') ?><span>المزيد</span></summary>
+            <nav aria-label="المزيد من الأقسام">
+                <?php foreach ($moreKeys as $key): ?>
+                    <a href="<?= cc_e(cc_url($key)) ?>" <?= $activeBottom === $key ? 'aria-current="page"' : '' ?>>
+                        <?= cc_icon((string) ($nav[$key]['icon'] ?? 'dashboard')) ?><span><?= cc_e((string) $nav[$key]['label']) ?></span>
+                    </a>
+                <?php endforeach; ?>
+            </nav>
+        </details>
     </nav>
     <script src="<?= cc_e(cc_asset_url('app.js?v=371.2')) ?>" defer></script>
     </body>

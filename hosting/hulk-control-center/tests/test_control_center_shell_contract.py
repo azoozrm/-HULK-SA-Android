@@ -200,14 +200,14 @@ class ControlCenterShellContractTests(unittest.TestCase):
         self.assertNotIn("$_POST['host']", subscriber)
         self.assertNotIn("$_POST['password']", subscriber)
 
-    def test_access_codes_require_explicit_owner_reveal(self) -> None:
+    def test_access_codes_are_shown_directly_to_the_authorized_owner(self) -> None:
         view = self.read("views/resellers.php")
-        self.assertIn("code-reveal", view)
-        self.assertRegex(view, r'<details class="code-reveal"><summary>اظهار الكود')
-        self.assertNotRegex(view, r'<details class="code-reveal"[^>]*\bopen\b')
         self.assertIn("credential-value", view)
-        self.assertIn("اظهار الكود", view)
-        self.assertNotIn("owner access codes are displayed directly", view)
+        self.assertRegex(view, r'<code class="credential-value" dir="ltr">')
+        self.assertNotIn("code-reveal", view)
+        self.assertNotIn("اظهار الكود", view)
+        self.assertIn("المتصلون الآن", view)
+        self.assertIn("code_online_available", view)
 
     def test_announcement_update_and_inactive_upload_contract(self) -> None:
         operations = self.read("views/operations.php")

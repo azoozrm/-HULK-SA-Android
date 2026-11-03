@@ -771,6 +771,58 @@ function cc_presence_online_now_totals(PDO $controlDb, array $config, ?DateTimeI
     ];
 }
 
+function cc_presence_code_online_subscription_counts(
+    PDO $controlDb,
+    array $config,
+    int $resellerId,
+    string $host,
+    array $codes,
+    ?DateTimeImmutable $now = null
+): array {
+    if ($resellerId < 1 || $codes === []) {
+        return [];
+    }
+    $normalized = function_exists('hulk_normalize_host') ? hulk_normalize_host($host) : null;
+    $hostValue = is_string($normalized) && $normalized !== '' ? $normalized : $host;
+    if ($hostValue === '') {
+        return [];
+    }
+    $now = cc_presence_now($now);
+    $ttlSeconds = (int) ($config['online_ttl_seconds'] ?? 0);
+    if ($ttlSeconds < 1) {
+        throw new RuntimeException('Presence online TTL is invalid.');
+    }
+    $cutoff = cc_presence_datetime($now->modify('-' . $ttlSeconds . ' seconds'));
+    $counts = [];
+    foreach ($codes as $code) {
+        $counts[(string) $code] = 0;
+    }
+    $statement = $controlDb->prepare(
+        'SELECT grouped.access_code_snapshot AS code, COUNT(*) AS online_subscriptions FROM ('
+        . 'SELECT s.access_code_snapshot, s.iptv_username '
+        . 'FROM cc_app_sessions s '
+        . 'WHERE s.ended_at IS NULL AND s.last_seen_at >= :online_cutoff '
+        . 'AND s.reseller_id = :target_reseller AND HEX(s.host_snapshot) = :target_host '
+        . 'GROUP BY s.access_code_snapshot, HEX(s.host_snapshot), HEX(s.iptv_username)'
+        . ') AS grouped GROUP BY grouped.access_code_snapshot'
+    );
+    $statement->execute([
+        'online_cutoff' => $cutoff,
+        'target_reseller' => $resellerId,
+        'target_host' => strtoupper(bin2hex($hostValue)),
+    ]);
+    foreach ($statement->fetchAll() as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $code = (string) ($row['code'] ?? '');
+        if (array_key_exists($code, $counts)) {
+            $counts[$code] = (int) ($row['online_subscriptions'] ?? 0);
+        }
+    }
+    return $counts;
+}
+
 function cc_presence_subscription_token(int $resellerId, string $host, string $username, ?array $config = null): string
 {
     $secret = (string) (($config ?? cc_presence_config())['token_secret'] ?? '');
