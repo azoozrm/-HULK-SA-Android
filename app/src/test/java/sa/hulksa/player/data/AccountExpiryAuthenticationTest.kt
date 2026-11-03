@@ -5,6 +5,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
@@ -26,14 +27,14 @@ class AccountExpiryAuthenticationTest {
         server.start()
         server.enqueue(authResponse(expiry = "1999"))
 
-        val error = assertThrows(XtreamException.SubscriptionInactive::class.java) {
+        val error = assertThrows(XtreamException.SubscriptionExpired::class.java) {
             runBlocking {
                 XtreamClient(nowEpochSeconds = { 2_000L })
                     .authenticate(portal(), credentials())
             }
         }
 
-        assertEquals(XtreamException.SubscriptionInactive, error)
+        assertEquals(XtreamException.SubscriptionExpired, error)
         assertEquals(1, server.requestCount)
     }
 
@@ -42,12 +43,29 @@ class AccountExpiryAuthenticationTest {
         server.start()
         server.enqueue(authResponse(expiry = "2000"))
 
-        assertThrows(XtreamException.SubscriptionInactive::class.java) {
+        assertThrows(XtreamException.SubscriptionExpired::class.java) {
             runBlocking {
                 XtreamClient(nowEpochSeconds = { 2_000L })
                     .authenticate(portal(), credentials())
             }
         }
+    }
+
+    @Test
+    fun `failed auth with explicit expired status is not guessed to be bad credentials`() {
+        server.start()
+        server.enqueue(
+            MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("""{"user_info":{"auth":0,"status":"Expired"}}"""),
+        )
+
+        val failure = assertThrows(XtreamException::class.java) {
+            runBlocking {
+                XtreamClient(nowEpochSeconds = { 2_000L }).authenticate(portal(), credentials())
+            }
+        }
+
+        assertFalse(failure is XtreamException.InvalidCredentials)
     }
 
     @Test
@@ -78,7 +96,7 @@ class AccountExpiryAuthenticationTest {
         val nowSeconds = System.currentTimeMillis() / 1_000L
         listOf(nowSeconds - 1L, nowSeconds).forEach { expiry ->
             val store = AccountSessionStore(TestAppContext())
-            assertThrows(XtreamException.SubscriptionInactive::class.java) {
+            assertThrows(XtreamException.SubscriptionExpired::class.java) {
                 store.recordAuthenticated(session(expiry), "account-expired")
             }
             assertNull("expiry=$expiry", store.metadata())
@@ -98,8 +116,8 @@ class AccountExpiryAuthenticationTest {
     }
 
     @Test
-    fun `deferred decision gate rejects an expired pending session`() {
-        assertThrows(XtreamException.SubscriptionInactive::class.java) {
+    fun `authentication commit gate rejects an expired session`() {
+        assertThrows(XtreamException.SubscriptionExpired::class.java) {
             requireUnexpiredAccountSession(expiresAtEpochSeconds = 2_000L, nowEpochSeconds = 2_000L)
         }
         requireUnexpiredAccountSession(expiresAtEpochSeconds = 2_001L, nowEpochSeconds = 2_000L)

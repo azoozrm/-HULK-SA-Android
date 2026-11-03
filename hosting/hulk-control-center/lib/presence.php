@@ -229,12 +229,7 @@ function cc_presence_validate_session_payload(array $payload, bool $withReason):
 
 function cc_presence_validate_reseller(PDO $db, array $input): array
 {
-    $statement = $db->prepare(
-        'SELECT reseller_id, access_code, access_code_hash, host, status '
-        . 'FROM resellers WHERE access_code_hash = :access_code_hash LIMIT 1'
-    );
-    $statement->execute(['access_code_hash' => hulk_access_code_hash($input['access_code'])]);
-    $reseller = $statement->fetch();
+    $reseller = hulk_host_code_lookup($db, $input['access_code']);
     if (!is_array($reseller)) {
         throw new CcPresenceException('INVALID_ACCESS_CODE', 404, 'The access code is invalid.');
     }
@@ -242,7 +237,7 @@ function cc_presence_validate_reseller(PDO $db, array $input): array
     $storedHash = strtolower((string) ($reseller['access_code_hash'] ?? ''));
     if (
         $storedCode === null
-        || !hash_equals($storedCode, $input['access_code'])
+        || !hulk_access_code_matches($storedCode, $input['access_code'])
         || !preg_match('/^[a-f0-9]{64}$/D', $storedHash)
         || !hash_equals(hulk_access_code_hash($storedCode), $storedHash)
     ) {

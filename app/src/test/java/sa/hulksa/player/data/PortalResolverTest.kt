@@ -9,6 +9,7 @@ import okhttp3.tls.HeldCertificate
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
@@ -134,6 +135,28 @@ class PortalResolverTest {
     }
 
     @Test
+    fun routing404WithoutSemanticCodeIsNotAnInvalidCustomerCode() {
+        server.enqueue(jsonResponse(404, "<html>route unavailable</html>"))
+
+        val failure = assertThrows(PortalException::class.java) {
+            runBlocking { resolver().resolve(GENERATED_CODE) }
+        }
+
+        assertFalse(failure is PortalException.InvalidAccessCode)
+    }
+
+    @Test
+    fun gateway403WithoutSemanticCodeIsNotADisabledCustomerCode() {
+        server.enqueue(jsonResponse(403, "<html>gateway refused request</html>"))
+
+        val failure = assertThrows(PortalException::class.java) {
+            runBlocking { resolver().resolve(GENERATED_CODE) }
+        }
+
+        assertFalse(failure is PortalException.ResellerInactive)
+    }
+
+    @Test
     fun invalidHostIsRejectedEvenWhenApiReturnsSuccess() {
         server.enqueue(jsonResponse(200, """{"host":"javascript:alert(1)"}"""))
 
@@ -186,6 +209,36 @@ class PortalResolverTest {
         assertEquals(0, server.requestCount)
     }
 
+    @Test
+    fun resolverCategoriesFollowSemanticCodesAndPreserveReceivedResponseProvenance() {
+        val cases = listOf(
+            Triple(503, """{"error":{"code":"INVALID_CODE"}}""", LoginFailureCategory.SERVICE_REJECTED),
+            Triple(404, "<html>route</html>", LoginFailureCategory.SERVICE_REJECTED),
+            Triple(403, "<html>gateway</html>", LoginFailureCategory.SERVICE_REJECTED),
+            Triple(408, "timeout", LoginFailureCategory.CONNECTION_UNCERTAIN),
+            Triple(404, """{"error":{"code":"INVALID_CODE"}}""", LoginFailureCategory.INVALID_CODE),
+            Triple(403, """{"error":{"code":"RESELLER_INACTIVE"}}""", LoginFailureCategory.DISABLED_CODE),
+            Triple(422, """{"error":{"code":"INVALID_HOST"}}""", LoginFailureCategory.SERVICE_REJECTED),
+            Triple(200, "not-json", LoginFailureCategory.MALFORMED),
+            Triple(200, "{}", LoginFailureCategory.MALFORMED),
+        )
+        for ((status, body, category) in cases) {
+            server.enqueue(jsonResponse(status, body))
+            val failure = assertThrows(PortalException::class.java) { runBlocking { resolver().resolve(GENERATED_CODE) } }
+            assertEquals(category, failure.loginFailure.category)
+            assertEquals(LoginFailureStage.RESOLVER, failure.loginFailure.stage)
+        }
+    }
+
+    @Test
+    fun resolverIoFailureRetainsTransportCauseInsteadOfGuessingOffline() {
+        server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_START))
+        val failure = assertThrows(PortalException.Transport::class.java) {
+            runBlocking { PortalResolver(server.url("/").toString(), client.newBuilder().retryOnConnectionFailure(false).build()).resolve(GENERATED_CODE) }
+        }
+        assertEquals(LoginFailure(LoginFailureCategory.TRANSPORT, LoginFailureStage.RESOLVER), failure.loginFailure)
+    }
+
     private fun resolver(): PortalResolver = PortalResolver(
         apiBaseUrl = server.url("/").toString(),
         client = client,
@@ -199,6 +252,8 @@ class PortalResolverTest {
     private fun jsonResponse(status: Int, body: String): MockResponse = MockResponse()
         .setResponseCode(status)
         .setHeader("Content-Type", "application/json")
+        // A received 408 is distinct from OkHttp retrying it and then hitting a transport error.
+        .apply { if (status == 408) setHeader("Retry-After", "1") }
         .setBody(body)
 
     private companion object {

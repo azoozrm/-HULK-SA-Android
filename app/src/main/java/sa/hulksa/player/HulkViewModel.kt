@@ -28,10 +28,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import sa.hulksa.player.data.AccountIdentityCandidateLabel
 import sa.hulksa.player.data.AuthenticatedSessionOwner
 import sa.hulksa.player.data.AuthenticatedSessionRegistry
-import sa.hulksa.player.data.AuthenticationStartResult
 import sa.hulksa.player.data.ContentMetadataRequestKey
 import sa.hulksa.player.data.DownloadActionClaim
 import sa.hulksa.player.data.DownloadActionIntent
@@ -48,6 +46,11 @@ import sa.hulksa.player.data.EpisodeNotificationStoreResult
 import sa.hulksa.player.data.FavoriteMutationGate
 import sa.hulksa.player.data.FavoriteMutationOutcome
 import sa.hulksa.player.data.FavoriteMutationStatus
+import sa.hulksa.player.data.LoginFailure
+import sa.hulksa.player.data.LoginFailureCategory
+import sa.hulksa.player.data.LoginFailureStage
+import sa.hulksa.player.data.loginFailureFor
+import sa.hulksa.player.data.loginValidationFailure
 import sa.hulksa.player.data.HulkRepository
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.data.HomeHeroTechnicalMetadata
@@ -72,8 +75,6 @@ import sa.hulksa.player.data.OperationsUiState
 import sa.hulksa.player.data.OperationsUpdateDecision
 import sa.hulksa.player.data.PairingClient
 import sa.hulksa.player.data.PairingDeviceInfo
-import sa.hulksa.player.data.PendingAccountIdentityDecision
-import sa.hulksa.player.data.accountIdentityCandidateLabels
 import sa.hulksa.player.data.activePersistentOperationsAnnouncement
 import sa.hulksa.player.data.PortalException
 import sa.hulksa.player.data.PresenceClient
@@ -195,6 +196,8 @@ data class HulkUiState(
     val isLoading: Boolean = false,
     val loadingTypes: Set<ContentType> = emptySet(),
     val errorMessage: String? = null,
+    val loginFailure: LoginFailure? = null,
+    val loginValidationAttempt: Long = 0,
     val account: AccountInfo? = null,
     val isAccountRefreshing: Boolean = false,
     val destination: MainDestination = MainDestination.HOME,
@@ -221,44 +224,40 @@ data class HulkUiState(
     val pairing: PairingUiState = PairingUiState(),
     val playback: PlaybackRequest? = null,
     val diagnostics: DiagnosticsState = DiagnosticsState(),
-    val accountDecision: AccountDecisionUiState? = null,
 ) {
     companion object {
     }
 }
+
+/** Actual failure-to-state projection shared by normal, restore and paired authentication. */
+internal fun HulkUiState.finishLoginFailure(error: Throwable): HulkUiState = copy(
+    isStarting = false,
+    isLoading = false,
+    isAccountRefreshing = false,
+    errorMessage = error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى",
+    loginFailure = loginFailureFor(error),
+)
 
 internal fun HulkUiState.finishExpiredOwnerFailure(message: String?): HulkUiState = copy(
     isStarting = false,
     isLoading = false,
     isAccountRefreshing = false,
     errorMessage = message,
+    loginFailure = LoginFailure(LoginFailureCategory.UNKNOWN, LoginFailureStage.LOCAL_PERSISTENCE),
 )
 
-/**
- * UI-safe ambiguity options. Keys are opaque positional tokens; accountIds and credentials never
- * enter UI state.
- */
-data class AccountDecisionOption(
-    val key: String,
-    val label: String,
+/** Every rejected submit must deliver focus again, even when the same field is still empty. */
+internal fun HulkUiState.rejectLoginValidation(failure: LoginFailure): HulkUiState = copy(
+    errorMessage = null,
+    loginFailure = failure,
+    loginValidationAttempt = loginValidationAttempt + 1,
 )
 
-data class AccountDecisionUiState(
-    val username: String,
-    val options: List<AccountDecisionOption>,
-)
-
-internal sealed interface AccountDecisionChoice {
-    data class ExistingAccount(val key: String) : AccountDecisionChoice
-    data object DifferentSubscription : AccountDecisionChoice
-    data object Cancel : AccountDecisionChoice
-}
-
-private data class PendingAccountDecision(
-    val generation: Long,
-    val outcome: PendingAccountIdentityDecision,
-    val remember: Boolean,
-    val labeledCandidates: List<AccountIdentityCandidateLabel>,
+internal fun HulkUiState.finishInvalidTvDeepLink(): HulkUiState = copy(
+    errorMessage = "تعذر فتح هذا الرابط",
+    loginFailure = if (screen == HulkScreen.LOGIN && loginFailure == null) {
+        LoginFailure(LoginFailureCategory.LINK_UNAVAILABLE, LoginFailureStage.VALIDATION)
+    } else loginFailure,
 )
 
 data class SeriesEpisodeTarget(
@@ -559,7 +558,6 @@ class HulkViewModel internal constructor(
     private var loginJob: Job? = null
     private var logoutJob: Job? = null
     private var sessionOwnershipEpoch = 0L
-    private var pendingAccountDecision: PendingAccountDecision? = null
     private val loadedCatalogs = mutableMapOf<ContentType, Catalog>()
     private val homeCatalogs = mutableMapOf<ContentType, Catalog>()
     private val catalogRequestOwner = CatalogRequestOwner(
@@ -681,16 +679,13 @@ class HulkViewModel internal constructor(
     fun login(accessCode: String, username: String, password: String, remember: Boolean = true) {
         pairingController.cancel()
         if (logoutJob?.isActive == true || authenticationAttemptGate.isActive()) return
-        val normalizedAccessCode = normalizeResellerAccessCode(accessCode)
-        if (normalizedAccessCode == null) {
-            mutableState.update { it.copy(errorMessage = "ادخل كود دخول صحيح") }
+        val validation = loginValidationFailure(accessCode, username, password)
+        if (validation != null) {
+            mutableState.update { it.rejectLoginValidation(validation) }
             return
         }
+        val normalizedAccessCode = requireNotNull(normalizeResellerAccessCode(accessCode))
         val cleanUsername = username.trim()
-        if (cleanUsername.isEmpty() || password.isEmpty()) {
-            mutableState.update { it.copy(errorMessage = "ادخل اسم المستخدم وكلمة المرور") }
-            return
-        }
         authenticate(
             Credentials(
                 accessCode = normalizedAccessCode,
@@ -704,7 +699,7 @@ class HulkViewModel internal constructor(
     fun startPairing(remember: Boolean) {
         val current = mutableState.value
         if (current.screen != HulkScreen.LOGIN) return
-        if (current.isStarting || current.isLoading || current.accountDecision != null) return
+        if (current.isStarting || current.isLoading) return
         if (!current.pairing.available) return
         pairingController.start(remember)
     }
@@ -723,7 +718,7 @@ class HulkViewModel internal constructor(
             tvDeepLinkEpisodeJob?.cancel()
             tvDeepLinkEpisodeJob = null
             if (!rawUri.isNullOrBlank()) {
-                mutableState.update { it.copy(errorMessage = "تعذر فتح هذا الرابط") }
+                mutableState.update { it.finishInvalidTvDeepLink() }
             }
             return
         }
@@ -3087,6 +3082,7 @@ class HulkViewModel internal constructor(
                     val error = outcome.error
                     val invalidSession = error is XtreamException.InvalidCredentials ||
                         error is XtreamException.SubscriptionInactive ||
+                        error is XtreamException.SubscriptionExpired ||
                         error is PortalException.InvalidAccessCode ||
                         error is PortalException.ResellerInactive
                     if (invalidSession) {
@@ -3253,13 +3249,12 @@ class HulkViewModel internal constructor(
         beginLogout(errorMessage = null)
     }
 
-    private fun beginLogout(errorMessage: String?) {
+    private fun beginLogout(errorMessage: String?, failure: LoginFailure? = null) {
         if (logoutJob?.isActive == true) return
 
         presenceLifecycleOwner.logout()
         authenticationAttemptGate.invalidate()
         pairingController.cancel()
-        pendingAccountDecision = null
         invalidateAccountRefresh()
         val pendingLoginJob = loginJob
         pendingLoginJob?.cancel()
@@ -3308,7 +3303,8 @@ class HulkViewModel internal constructor(
                         downloads = emptyList(),
                         notificationPopup = null,
                         errorMessage = errorMessage,
-                        accountDecision = null,
+                        loginFailure = failure,
+
                     )
                 }
                 val downloadSettings = withContext(Dispatchers.IO) { downloadRepository.settings() }
@@ -3324,6 +3320,7 @@ class HulkViewModel internal constructor(
                     operations = operationsState,
                     pairing = pairingState,
                     errorMessage = errorMessage,
+                    loginFailure = failure,
                 )
             } catch (error: CredentialEnvelopeRemovalException) {
                 // Fail closed: durable credential removal did not complete, so the session and
@@ -3336,14 +3333,13 @@ class HulkViewModel internal constructor(
     }
 
     fun clearError() {
-        mutableState.update { it.copy(errorMessage = null) }
+        mutableState.update { it.copy(errorMessage = null, loginFailure = null) }
     }
 
     private fun restoreSession() {
         val restoreGeneration = authenticationAttemptGate.tryStart() ?: return
         sessionRestorationComplete = false
         loginJob = viewModelScope.launch {
-            var decisionPending = false
             try {
                 val credentials = repository.savedCredentials()
                 if (!authenticationAttemptGate.isCurrent(restoreGeneration)) return@launch
@@ -3360,10 +3356,11 @@ class HulkViewModel internal constructor(
                         isLoading = true,
                         isAccountRefreshing = false,
                         errorMessage = null,
-                        accountDecision = null,
+                        loginFailure = null,
+
                     )
                 }
-                decisionPending = runAuthenticationAttempt(
+                runAuthenticationAttempt(
                     credentials = credentials,
                     remember = true,
                     attemptGeneration = restoreGeneration,
@@ -3376,7 +3373,7 @@ class HulkViewModel internal constructor(
                 showFailure(error)
                 resolvePendingTvDeepLink()
             } finally {
-                if (!decisionPending && authenticationAttemptGate.complete(restoreGeneration)) {
+                if (authenticationAttemptGate.complete(restoreGeneration)) {
                     loginJob = null
                 }
             }
@@ -3408,165 +3405,46 @@ class HulkViewModel internal constructor(
                 isLoading = true,
                 isAccountRefreshing = false,
                 errorMessage = null,
-                accountDecision = null,
+                        loginFailure = null,
+
             )
         }
         loginJob = viewModelScope.launch {
-            var decisionPending = false
             try {
-                decisionPending = runAuthenticationAttempt(
+                runAuthenticationAttempt(
                     credentials = credentials,
                     remember = remember,
                     attemptGeneration = attemptGeneration,
                 )
             } finally {
-                if (!decisionPending && authenticationAttemptGate.complete(attemptGeneration)) {
+                if (authenticationAttemptGate.complete(attemptGeneration)) {
                     loginJob = null
                 }
             }
         }
     }
 
-    /**
-     * Returns true only while an explicit ownership decision is pending. The attempt generation
-     * stays open in that case so no other authentication can start and a late result cannot
-     * complete the decision after ownership changed.
-     */
+    /** Provider authentication commits local continuation directly; every attempt always ends. */
     private suspend fun runAuthenticationAttempt(
         credentials: Credentials,
         remember: Boolean,
         attemptGeneration: Long,
-    ): Boolean {
+    ) {
         try {
-            when (val outcome = repository.beginAuthentication(credentials, remember)) {
-                is AuthenticationStartResult.Completed -> {
-                    if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return false
-                    completeAuthenticatedLogin(
-                        authenticated = outcome.session,
-                        expectedOwner = AuthenticatedSessionRegistry.currentOwner(),
-                        attemptGeneration = attemptGeneration,
-                    )
-                    return false
-                }
-                is AuthenticationStartResult.DecisionRequired -> {
-                    if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return false
-                    val labeledCandidates = accountIdentityCandidateLabels(
-                        outcome.pending.candidates,
-                    )
-                    pendingAccountDecision = PendingAccountDecision(
-                        generation = attemptGeneration,
-                        outcome = outcome.pending,
-                        remember = remember,
-                        labeledCandidates = labeledCandidates,
-                    )
-                    mutableState.update {
-                        it.copy(
-                            isStarting = false,
-                            isLoading = false,
-                            accountDecision = AccountDecisionUiState(
-                                username = outcome.pending.username,
-                                options = labeledCandidates.mapIndexed { index, candidate ->
-                                    AccountDecisionOption(
-                                        key = index.toString(),
-                                        label = candidate.label,
-                                    )
-                                },
-                            ),
-                        )
-                    }
-                    return true
-                }
-            }
+            val authenticated = repository.beginAuthentication(credentials, remember)
+            if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return
+            completeAuthenticatedLogin(
+                authenticated = authenticated,
+                expectedOwner = AuthenticatedSessionRegistry.currentOwner(),
+                attemptGeneration = attemptGeneration,
+            )
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
-            if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return false
+            if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return
             sessionRestorationComplete = true
             showFailure(error)
             resolvePendingTvDeepLink()
-            return false
-        }
-    }
-
-    /**
-     * Applies the user's explicit same/different/cancel decision. Cancel abandons the pending
-     * identity without any binding or trusted host; same/different commit through the repository
-     * only when the decision is still the current attempt.
-     */
-    internal fun resolveAccountDecision(choice: AccountDecisionChoice) {
-        val pending = pendingAccountDecision ?: return
-        pendingAccountDecision = null
-        if (!authenticationAttemptGate.isCurrent(pending.generation)) {
-            mutableState.update { it.copy(accountDecision = null, isLoading = false) }
-            return
-        }
-        when (choice) {
-            is AccountDecisionChoice.Cancel -> {
-                mutableState.update {
-                    it.copy(accountDecision = null, isLoading = false, isStarting = false)
-                }
-                loginJob = viewModelScope.launch {
-                    try {
-                        repository.abandonPendingAuthentication(pending.outcome)
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (error: CredentialEnvelopeRemovalException) {
-                        showFailure(error)
-                    } finally {
-                        if (authenticationAttemptGate.complete(pending.generation)) {
-                            loginJob = null
-                        }
-                    }
-                }
-            }
-
-            is AccountDecisionChoice.ExistingAccount,
-            is AccountDecisionChoice.DifferentSubscription,
-            -> {
-                val selectedAccountId = when (choice) {
-                    is AccountDecisionChoice.ExistingAccount ->
-                        pending.labeledCandidates
-                            .getOrNull(choice.key.toIntOrNull() ?: -1)
-                            ?.accountId
-                    else -> null
-                }
-                if (choice is AccountDecisionChoice.ExistingAccount && selectedAccountId == null) {
-                    mutableState.update { it.copy(accountDecision = null, isLoading = false) }
-                    if (authenticationAttemptGate.complete(pending.generation)) loginJob = null
-                    return
-                }
-                mutableState.update {
-                    it.copy(accountDecision = null, isLoading = true, errorMessage = null)
-                }
-                loginJob = viewModelScope.launch {
-                    try {
-                        val authenticated = repository.completeAuthenticationDecision(
-                            pending = pending.outcome,
-                            selectedAccountId = selectedAccountId,
-                            remember = pending.remember,
-                        )
-                        if (authenticationAttemptGate.isCurrent(pending.generation)) {
-                            completeAuthenticatedLogin(
-                                authenticated = authenticated,
-                                expectedOwner = AuthenticatedSessionRegistry.currentOwner(),
-                                attemptGeneration = pending.generation,
-                            )
-                        }
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (error: Throwable) {
-                        if (authenticationAttemptGate.isCurrent(pending.generation)) {
-                            sessionRestorationComplete = true
-                            showFailure(error)
-                            resolvePendingTvDeepLink()
-                        }
-                    } finally {
-                        if (authenticationAttemptGate.complete(pending.generation)) {
-                            loginJob = null
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -3613,7 +3491,8 @@ class HulkViewModel internal constructor(
                     downloads = downloads,
                     downloadSettings = downloadSettings,
                     errorMessage = null,
-                    accountDecision = null,
+                        loginFailure = null,
+
                 )
             }
         }
@@ -3672,7 +3551,8 @@ class HulkViewModel internal constructor(
                 downloadSettings = state.downloadSettings,
                 operations = state.operations,
                 pairing = state.pairing,
-                errorMessage = XtreamException.SubscriptionInactive.message,
+                errorMessage = XtreamException.SubscriptionExpired.message,
+                loginFailure = XtreamException.SubscriptionExpired.loginFailure,
             )
         }
         if (
@@ -4143,22 +4023,14 @@ class HulkViewModel internal constructor(
     private fun showFailure(error: Throwable) {
         val invalidSession = error is XtreamException.InvalidCredentials ||
             error is XtreamException.SubscriptionInactive ||
+            error is XtreamException.SubscriptionExpired ||
             error is PortalException.InvalidAccessCode ||
             error is PortalException.ResellerInactive
         if (invalidSession) {
-            beginLogout(error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى")
+            beginLogout(error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى", loginFailureFor(error))
             return
         }
-        mutableState.update {
-            it.copy(
-                screen = if (invalidSession) HulkScreen.LOGIN else it.screen,
-                isStarting = false,
-                isLoading = false,
-                isAccountRefreshing = false,
-                errorMessage = error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى",
-                accountDecision = null,
-            )
-        }
+        mutableState.update { it.finishLoginFailure(error) }
     }
 
     companion object {

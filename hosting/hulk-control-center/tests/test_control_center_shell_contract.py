@@ -10,7 +10,7 @@ class ControlCenterShellContractTests(unittest.TestCase):
     def read(self, name: str) -> str:
         return (ROOT / name).read_text(encoding="utf-8")
 
-    def test_primary_navigation_has_exactly_the_approved_four_tabs(self) -> None:
+    def test_primary_navigation_has_exactly_the_six_owner_destinations(self) -> None:
         routes = self.read("lib/routes.php")
         block = re.search(
             r"function cc_main_navigation\(\): array\s*\{(.*?)\n\}", routes, re.S
@@ -19,17 +19,17 @@ class ControlCenterShellContractTests(unittest.TestCase):
         keys = re.findall(r"'([a-z-]+)' => \[", block.group(1))
         self.assertEqual(
             keys,
-            ["live-users", "announcements", "hosts", "releases"],
-            "the main shell must expose exactly the four approved tabs",
+            ["dashboard", "hosts", "live-users", "announcements", "releases", "service"],
+            "the main shell must expose exactly the six owner destinations",
         )
-        for label in ("المتصلون الآن", "الإعلانات", "الهوست والأكواد", "تحديث التطبيق"):
+        for label in ("الرئيسية", "الهوستات والاكواد", "العملاء والاجهزة", "الرسائل", "تحديث التطبيق", "اعدادات التطبيق"):
             self.assertIn(label, block.group(1))
 
     def test_default_route_and_active_tab_families_are_stable(self) -> None:
         bootstrap = self.read("bootstrap.php")
         routes = self.read("lib/routes.php")
-        self.assertIn("function cc_url(string $module = 'live-users')", bootstrap)
-        self.assertIn("$key = 'live-users';", routes)
+        self.assertIn("function cc_url(string $module = 'dashboard')", bootstrap)
+        self.assertIn("$key = 'dashboard';", routes)
         active = re.search(
             r"function cc_active_main_navigation\(string \$moduleKey\): \?string\s*\{(.*?)\n\}",
             routes,
@@ -39,16 +39,25 @@ class ControlCenterShellContractTests(unittest.TestCase):
         for module in ("live-users", "sessions", "devices", "announcements", "hosts", "access-codes", "resellers", "releases"):
             self.assertIn(f"'{module}'", active.group(1))
 
-    def test_secondary_settings_menu_preserves_every_existing_module(self) -> None:
+    def test_context_navigation_preserves_every_existing_tool(self) -> None:
         routes = self.read("lib/routes.php")
         layout = self.read("views/layout.php")
-        self.assertIn("function cc_secondary_navigation_groups", routes)
-        self.assertIn("cc_secondary_navigation_groups()", layout)
-        self.assertIn("cc_url('service')", layout)
-        self.assertIn("cc_url('growth')", layout)
-        self.assertIn("cc_url('settings')", layout)
-        self.assertIn("حالة الخدمة والصيانة", layout)
-        self.assertIn("الدعم والتجديد", layout)
+        self.assertIn("function cc_context_navigation", routes)
+        self.assertIn("cc_context_navigation($activeKey)", layout)
+        self.assertIn("cc_subnav(", layout)
+        self.assertNotIn('data-settings-menu', layout)
+        for key in ("dashboard", "analytics", "diagnostics", "audit", "hosts", "access-codes", "host-health", "live-users", "sessions", "devices", "service", "features", "growth", "settings"):
+            self.assertIn(f"'{key}'", routes)
+        self.assertIn('data-primary-navigation', layout)
+        self.assertIn('<summary>', layout)
+
+    def test_host_context_has_one_combined_management_destination(self) -> None:
+        routes = self.read("lib/routes.php")
+        context = re.search(r"'hosts' => \[\s*'hosts' => 'الهوستات والاكواد', 'host-health' => 'حالة الهوستات',\s*\]", routes)
+        self.assertIsNotNone(context)
+        bootstrap = self.read("bootstrap.php")
+        self.assertIn("['access-codes','resellers']", bootstrap)
+        self.assertIn("$module = 'hosts'", bootstrap)
 
     def test_online_now_uses_exact_grouped_presence_identity(self) -> None:
         model = self.read("lib/presence-read-model.php")
@@ -84,7 +93,8 @@ class ControlCenterShellContractTests(unittest.TestCase):
         view = self.read("views/online-now.php")
         self.assertIn("CC_PRESENCE_ONLINE_DEVICE_LIMIT", model)
         self.assertIn("devices_truncated", model)
-        self.assertNotIn("['sessions']", model)
+        online_model = model.split("function cc_presence_online_now_page(", 1)[1].split("function cc_presence_device_page(", 1)[0]
+        self.assertNotIn("['sessions']", online_model)
         self.assertIn("ORDER BY s.last_seen_at DESC, s.id DESC LIMIT 1", model)
         self.assertIn("CC_PRESENCE_ONLINE_DEVICE_LIMIT + 1", model)
         self.assertIn("devices_truncated", view)
@@ -109,8 +119,10 @@ class ControlCenterShellContractTests(unittest.TestCase):
         self.assertNotIn("credential-disclosure", view)
         self.assertNotIn("ضمن الموزع والهوست", view)
         self.assertNotIn("لا يتم الدمج بالاسم وحده", view)
-        self.assertIn("online-now-total", view)
-        self.assertIn("online-now-breakdown", view)
+        self.assertIn("online-toolbar", view)
+        self.assertIn("online-totals", view)
+        self.assertIn("subscription-row-details", view)
+        self.assertIn("subscription-row", view)
         self.assertIn("check_subscriber", view)
         self.assertIn("save_subscriber_note", view)
         self.assertIn("subscriber-check-result", view)
@@ -138,11 +150,11 @@ class ControlCenterShellContractTests(unittest.TestCase):
         self.assertIn('<html lang="ar" dir="rtl">', layout)
         for token in ("--bg: #030402", "--surface-1: #111108", "--gold: #e6c352", "--text: #fff9eb"):
             self.assertIn(token, css)
-        self.assertIn(".settings-menu__panel", css)
+        self.assertIn(".primary-navigation > summary", css)
         self.assertIn(".primary-tabs__track", css)
         self.assertIn(".primary-tab", css)
         self.assertIn("overflow-x: auto", css)
-        self.assertIn(".online-now-total", css)
+        self.assertIn(".online-totals", css)
         self.assertIn(".subscription-credentials", css)
         self.assertIn("@media (max-width: 700px)", css)
         self.assertIn("@media (max-width: 440px)", css)
@@ -189,12 +201,13 @@ class ControlCenterShellContractTests(unittest.TestCase):
         self.assertNotIn("$_POST['host']", subscriber)
         self.assertNotIn("$_POST['password']", subscriber)
 
-    def test_access_codes_are_masked_in_reseller_administration(self) -> None:
+    def test_access_codes_require_explicit_owner_reveal(self) -> None:
         view = self.read("views/resellers.php")
         self.assertIn("code-reveal", view)
-        self.assertIn("code-mask", view)
+        self.assertRegex(view, r'<details class="code-reveal"><summary>اظهار الكود')
+        self.assertNotRegex(view, r'<details class="code-reveal"[^>]*\bopen\b')
         self.assertIn("credential-value", view)
-        self.assertIn("إظهار الكود", view)
+        self.assertIn("اظهار الكود", view)
         self.assertNotIn("owner access codes are displayed directly", view)
 
     def test_announcement_update_and_inactive_upload_contract(self) -> None:

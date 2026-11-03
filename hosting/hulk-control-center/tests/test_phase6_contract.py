@@ -50,8 +50,10 @@ class PhaseSixContractTests(unittest.TestCase):
         view = self.read(ROOT / "views" / "resellers.php")
         self.assertIn("cc_presence_usage_for_resellers", adapter)
         self.assertIn("presence_usage_available", adapter)
-        self.assertIn("آخر استخدام", view)
-        self.assertIn("متصل الآن", view)
+        self.assertIn("اخر استخدام", view)
+        self.assertIn("جلسة حديثة", view)
+        self.assertIn("code_usage", adapter)
+        self.assertIn("last_used_at", view)
 
     def test_mobile_representation_avoids_wide_table_dependency(self) -> None:
         sessions = self.read(ROOT / "views" / "sessions.php")

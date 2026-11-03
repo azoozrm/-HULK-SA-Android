@@ -12,6 +12,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     hulk_api_error('METHOD_NOT_ALLOWED', 'هذه العملية تقبل POST فقط.', 405);
 }
 
+try {
+    hulk_enforce_resolver_rate_limit();
+} catch (Throwable) {
+    hulk_api_error('SERVICE_UNAVAILABLE', 'خدمة HULK غير متاحة موقتا', 503);
+}
+
 $contentType = strtolower(trim(explode(';', (string) ($_SERVER['CONTENT_TYPE'] ?? ''))[0]));
 if ($contentType !== 'application/json') {
     hulk_api_error('INVALID_REQUEST', 'يجب إرسال الطلب بصيغة JSON.', 415);
@@ -42,11 +48,7 @@ if ($code === null) {
 }
 
 try {
-    $statement = hulk_db()->prepare(
-        'SELECT host, status FROM resellers WHERE access_code_hash = :access_code_hash LIMIT 1'
-    );
-    $statement->execute(['access_code_hash' => hulk_access_code_hash($code)]);
-    $reseller = $statement->fetch();
+    $reseller = hulk_host_code_lookup(hulk_db(), $code);
 } catch (Throwable) {
     hulk_api_error('SERVICE_UNAVAILABLE', 'خدمة HULK غير متاحة مؤقتا.', 503);
 }

@@ -760,6 +760,29 @@ authority.
   routing and narrow keeps the real website callback; auth, focus, keyboard/IME and
   remember-account/password policies are unchanged.
 
+Owner decision 2026-11-02: successful authentication restores the established local customer owner
+automatically across host/code changes. The subscription-identity confirmation and its host labels
+are retired entirely. Historical account-choice geometry is only a sizing reference for other
+entry dialogs; it does not authorize a prompt, notice or pending-decision gate in authentication
+
+Owner supersession2026-11-02, Login only: errors use typed resolver/provider/validation provenance,
+not Arabic message equality. All Login notices are concise complete single-line copy with no
+terminal punctuation, measured with maxLines=1/softWrap=false and no clipping/ellipsis/type shrink.
+One Login-only status slot reserves its actual font/icon/padding height across empty/error/replaced/
+cleared states; authentication and website failures cannot stack or move/resize the accepted actions.
+Other shared EntryNotice callers retain full multiline copy. Confirmed offline is distinguished from
+unknown/unvalidated connectivity by the existing callback owner; semantic API/expiry/auth errors
+retain their cause. The owner selected option1 after real Compose narrow-width proof: expiry copy
+is now «انتهت صلاحية اشتراكك», replacing the earlier requested longer renewal sentence. Other exact
+Login copy follows CC371R11 owner packet. Existing form/fields/fonts/actions/RTL/single scroll and
+polite live region remain. This supersedes earlier long Login connection/wrapping wording only;
+source/tests/build do not establish visual acceptance, which remains PENDING
+The Login form uses one remembered standard visibility-based BringIntoViewSpec: visible field/caret
+bounds stay still, and offscreen targets remain reachable through its one existing scroll owner
+This supersedes TV pivot alignment only inside that form; dialogs and other screens retain their
+policies. Reserve actual measured text/icon pixels plus independently rounded padding-edge pixels,
+then convert the reserved height to dp; do not sum unrounded padding and clip a line at fractional density
+
 ### 13.2 Who's Watching / management / entry options
 
 - Picker keeps the small original HS header mark above `من يشاهد الان ؟`, the real stable-ID TV
@@ -767,7 +790,7 @@ authority.
   82/96/106dp, gaps 14/20/24dp), truthful current/Kids/protected indications and MAX_PROFILES Add
   availability; phone keeps two complete columns only when the measured footprints fit, otherwise
   one, with one scroll owner. Original avatar family only; no seeded names/profiles.
-- Management/editor and entry options reuse the accepted AccountIdentityDecisionDialog bound: max
+- Management/editor and entry options reuse the shared bounded entry-dialog expression: max
   560dp expanded (TV or width at least 720dp) / 440dp compact, clamped to safe width, applied as
   max-width before fill. Option controls, type choices and Back actions keep natural compact
   widths; fields and real lists may fill the bounded parent. The older subordinate board's
@@ -854,6 +877,9 @@ three Favorites TV/phone model files (`نعم 1`). The accepted reference packag
 **design-reference acceptance**. The Android implementation
 (`favorites-ui-alignment-20261011`, LOCAL_ROUND R01) is under owner review — **PENDING**; no
 Favorites merge, signing, tag or release is authorized or implied.
+
+
+
 
 ### 14.1 Adopted composition, naming supersession and reuse
 

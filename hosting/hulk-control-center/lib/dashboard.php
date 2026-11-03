@@ -155,25 +155,26 @@ function cc_dashboard_reseller_snapshot(PDO $db): array
     $aggregate = $db->query(
         "SELECT COUNT(*) AS total_resellers, "
         . "SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_resellers "
-        . 'FROM resellers'
+        . 'FROM ' . hulk_host_relation() . ' host_records'
     )->fetch();
     if (!is_array($aggregate)) {
         throw new RuntimeException('Reseller aggregate is unavailable.');
     }
 
     $configuredHosts = 0;
+    foreach ($db->query("SELECT host FROM " . hulk_host_relation() . " host_records WHERE status = 'active'")->fetchAll() as $hostRecord) {
+        if (hulk_normalize_host((string) $hostRecord['host']) !== null) $configuredHosts++;
+    }
     $resolverReadyCodes = 0;
     $rows = $db->query(
-        "SELECT host, access_code, access_code_hash FROM resellers WHERE status = 'active'"
+        "SELECT reseller_id, host, access_code, access_code_hash FROM " . hulk_host_code_relation() . " host_codes WHERE status = 'active'"
     );
     while (($row = $rows->fetch()) !== false) {
         if (!is_array($row)) {
             continue;
         }
         $host = hulk_normalize_host((string) ($row['host'] ?? ''));
-        if ($host !== null) {
-            $configuredHosts++;
-        }
+
 
         $code = hulk_normalize_access_code((string) ($row['access_code'] ?? ''));
         $storedHash = strtolower((string) ($row['access_code_hash'] ?? ''));

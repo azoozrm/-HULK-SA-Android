@@ -12,7 +12,7 @@ try {
     }
 } catch (Throwable $exception) {
     http_response_code(503);
-    exit('تعذر تشغيل مركز التحكم بأمان. تحقق من إعداد HTTPS وملف الإعدادات.');
+    exit('تعذر تشغيل مركز التحكم بامان. تحقق من اعداد HTTPS وملف الاعدادات');
 }
 
 $error = null;
@@ -21,7 +21,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     $now = time();
     $sessionLockedUntil = (int) ($_SESSION['login_locked_until'] ?? 0);
     if ($sessionLockedUntil > $now) {
-        $error = 'تم إيقاف المحاولات مؤقتًا. حاول بعد قليل.';
+        $error = 'تم ايقاف المحاولات مؤقتًا. حاول بعد قليل';
     } else {
         $username = trim((string) ($_POST['username'] ?? ''));
         $password = (string) ($_POST['password'] ?? '');
@@ -75,13 +75,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 ]);
             }
             $db->commit();
-            $error = 'بيانات الدخول غير صحيحة أو الحساب موقوف مؤقتًا.';
+            $error = 'بيانات الدخول غير صحيحة او الحساب موقوف مؤقتًا';
         } catch (Throwable $exception) {
             if (isset($db) && $db instanceof PDO && $db->inTransaction()) {
                 $db->rollBack();
             }
             error_log('HULK Control Center login failure.');
-            $error = 'تعذر تسجيل الدخول حاليًا.';
+            $error = 'تعذر تسجيل الدخول حاليًا';
         }
     }
 }
@@ -96,33 +96,20 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     <meta name="theme-color" content="#030402">
     <title>تسجيل الدخول — HULK SA Control Center</title>
     <link rel="icon" href="<?= cc_e(cc_asset_url('hulk-sa-mark.svg')) ?>" type="image/svg+xml">
-    <link rel="stylesheet" href="<?= cc_e(cc_asset_url('app.css?v=6.2.0')) ?>">
+    <link rel="stylesheet" href="<?= cc_e(cc_asset_url('app.css?v=371.1')) ?>">
 </head>
 <body class="login-page">
 <main class="login-layout">
-    <section class="login-story" aria-label="هوية مركز التحكم">
-        <a class="brand brand--large" href="<?= cc_e(cc_url()) ?>">
-            <span class="brand__mark"><img src="<?= cc_e(cc_asset_url('hulk-sa-mark.svg')) ?>" alt=""></span>
-            <span class="brand__copy"><strong>HULK SA</strong><small>CONTROL CENTER</small></span>
-        </a>
-        <div class="login-story__copy">
-            <span class="eyebrow">إدارة موحّدة. قرار أسرع.</span>
-            <h1>كل ما يتعلق بـ HULK SA في مركز احترافي واحد.</h1>
-            <p>أساس إنتاجي آمن ومصمم للعربية، يجمع الرؤية التشغيلية بدون المساس بسلطات الأنظمة الحالية.</p>
-        </div>
-        <div class="login-story__glow" aria-hidden="true"><img src="<?= cc_e(cc_asset_url('hulk-sa-mark.svg')) ?>" alt=""></div>
-    </section>
-
     <section class="login-panel">
         <div class="login-card">
             <header>
                 <span class="login-card__mark"><img src="<?= cc_e(cc_asset_url('hulk-sa-mark.svg')) ?>" alt=""></span>
                 <span class="eyebrow">دخول المالك</span>
-                <h2>مرحبًا بعودتك</h2>
-                <p>استخدم حساب مسؤول HULK Operations نفسه.</p>
+                <h1>تسجيل الدخول</h1>
+                <p>ادخل اسم المستخدم وكلمة المرور</p>
             </header>
             <?php if ($error !== null): ?><div class="alert alert--error" role="alert"><?= cc_e($error) ?></div><?php endif; ?>
-            <form method="post" autocomplete="on" class="form-stack">
+            <form method="post" autocomplete="on" class="form-stack" data-submit-once>
                 <input type="hidden" name="csrf_token" value="<?= cc_e(cc_csrf_token()) ?>">
                 <label class="form-field" for="username">
                     <span>اسم المستخدم</span>
@@ -132,11 +119,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                     <span>كلمة المرور</span>
                     <input id="password" name="password" type="password" required autocomplete="current-password">
                 </label>
-                <button class="button button--primary button--full" type="submit">دخول إلى مركز التحكم<?= cc_icon('arrow-left') ?></button>
+                <button class="button button--primary button--full" type="submit">تسجيل الدخول<?= cc_icon('arrow-left') ?></button>
             </form>
-            <div class="security-note"><?= cc_icon('shield') ?><span>جلسة إدارية محمية ومحدودة بمسار مركز التحكم.</span></div>
+            <div class="security-note"><?= cc_icon('shield') ?><span>دخول خاص بمالك التطبيق</span></div>
         </div>
     </section>
 </main>
+<script src="<?= cc_e(cc_asset_url('app.js?v=371.1')) ?>" defer></script>
 </body>
 </html>

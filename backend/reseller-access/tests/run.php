@@ -27,49 +27,42 @@ $db->exec(
     . "status TEXT NOT NULL DEFAULT 'active', created_at TEXT, updated_at TEXT)"
 );
 
-$created = hulk_admin_create_reseller($db, [
-    'reseller_name' => 'Owner Test',
-    'password' => 'correct-password',
-    'host' => 'https://iptv.example:8080/',
-    'access_code' => '',
-]);
-reseller_test((int) $created['reseller_id'] === 1, 'create returns the inserted reseller ID');
-reseller_test(hulk_normalize_access_code((string) $created['access_code']) === $created['access_code'], 'generated access code matches the public resolver format');
-$row = $db->query('SELECT * FROM resellers WHERE reseller_id = 1')->fetch();
-reseller_test(is_array($row) && password_verify('correct-password', (string) $row['password_hash']), 'create stores a password hash');
-reseller_test(($row['host'] ?? '') === 'https://iptv.example:8080', 'create normalizes the host');
-reseller_test(($row['access_code_hash'] ?? '') === hulk_access_code_hash((string) $row['access_code']), 'create stores the canonical code hash');
-
-hulk_admin_set_status($db, 1, 'inactive');
-reseller_test($db->query('SELECT status FROM resellers WHERE reseller_id = 1')->fetchColumn() === 'inactive', 'status mutation uses the reseller authority');
-hulk_admin_update_host($db, 1, '');
-reseller_test($db->query('SELECT host FROM resellers WHERE reseller_id = 1')->fetchColumn() === '', 'host may be cleared');
-hulk_admin_update_host($db, 1, 'http://server.example:8080/');
-reseller_test($db->query('SELECT host FROM resellers WHERE reseller_id = 1')->fetchColumn() === 'http://server.example:8080', 'host update is normalized');
-
-$customCode = 'HULK-ABCD-EFGH-JKMN-PQRS';
-hulk_admin_set_code($db, 1, $customCode);
-$row = $db->query('SELECT access_code, access_code_hash FROM resellers WHERE reseller_id = 1')->fetch();
-reseller_test(($row['access_code'] ?? '') === $customCode, 'custom canonical access code is stored directly');
-reseller_test(($row['access_code_hash'] ?? '') === hulk_access_code_hash($customCode), 'custom access-code hash stays in sync');
-$rotated = hulk_admin_rotate_code($db, 1);
-reseller_test($rotated !== $customCode && hulk_normalize_access_code($rotated) === $rotated, 'rotation creates a new resolver-compatible code');
-
-hulk_admin_reset_password($db, 1, 'new-password-123', 'new-password-123');
-$hash = (string) $db->query('SELECT password_hash FROM resellers WHERE reseller_id = 1')->fetchColumn();
-reseller_test(password_verify('new-password-123', $hash), 'password reset writes a verifiable hash');
-
-foreach ([
-    static fn () => hulk_admin_create_reseller($db, ['reseller_name' => 'Short', 'password' => 'short']),
-    static fn () => hulk_admin_set_code($db, 1, 'not-a-public-code'),
-    static fn () => hulk_admin_update_host($db, 1, 'https://user:pass@example.com'),
-] as $invalidMutation) {
+// Synthetic historical row proves every obsolete callable fails before writing
+$seed = $db->prepare('INSERT INTO resellers (reseller_name,reseller_name_key,password_hash,host,access_code,access_code_hash,status) VALUES (:name,:key,:password,:host,:code,:hash,:status)');
+$seed->execute(['name'=>'Historical Test','key'=>'historical-test','password'=>'synthetic-frozen-hash','host'=>'https://legacy.example.test','code'=>'h5AbCdE29Z','hash'=>hash('sha256','h5AbCdE29Z'),'status'=>'active']);
+$frozen = $db->query('SELECT * FROM resellers ORDER BY reseller_id')->fetchAll();
+$retiredMutations = [
+    'create' => static fn () => hulk_admin_create_reseller($db, ['reseller_name'=>'Synthetic','password'=>'synthetic-password','host'=>'https://new.example.test']),
+    'status' => static fn () => hulk_admin_set_status($db, 1, 'inactive'),
+    'host' => static fn () => hulk_admin_update_host($db, 1, 'https://changed.example.test'),
+    'custom code' => static fn () => hulk_admin_set_code($db, 1, 'ChangedCustomCode'),
+    'rotation' => static fn () => hulk_admin_rotate_code($db, 1),
+    'code writer' => static fn () => hulk_admin_write_code($db, 1, 'ChangedCustomCode'),
+    'password' => static fn () => hulk_admin_reset_password($db, 1, 'synthetic-new-password', 'synthetic-new-password'),
+];
+foreach ($retiredMutations as $name => $mutation) {
     try {
-        $invalidMutation();
-        reseller_test(false, 'invalid mutation is rejected');
-    } catch (InvalidArgumentException) {
-        reseller_test(true, 'invalid mutation is rejected');
+        $mutation();
+        reseller_test(false, 'retired ' . $name . ' mutation must fail closed');
+    } catch (RuntimeException) {
+        reseller_test(true, 'retired ' . $name . ' mutation is explicitly rejected');
     }
+    reseller_test($db->query('SELECT * FROM resellers ORDER BY reseller_id')->fetchAll() === $frozen, 'retired ' . $name . ' mutation preserves every historical field and row');
+}
+reseller_test((int) $db->query('SELECT COUNT(*) FROM resellers')->fetchColumn() === 1, 'retirement creates no dummy reseller account');
+$generated = [];
+for ($index = 0; $index < 100; $index++) {
+    $code = hulk_generate_access_code();
+    reseller_test(preg_match('/^[A-Za-z0-9]{10}$/D', $code) === 1, 'generated code keeps the deployed ten-character alphanumeric format');
+    reseller_test(preg_match('/[A-Z]/', $code) === 1 && preg_match('/[a-z]/', $code) === 1 && preg_match('/[0-9]/', $code) === 1, 'generated code contains all deployed character classes');
+    reseller_test(hulk_normalize_access_code($code) === $code && !isset($generated[$code]), 'generated code is stable and distinct in the bounded sample');
+    $generated[$code] = true;
+}
+reseller_test(hulk_normalize_access_code('h5AbCdE29Z') === 'h5AbCdE29Z', 'normalization preserves the exact deployed mixed-case value');
+reseller_test(hulk_access_code_matches('h5AbCdE29Z', 'H5ABCDE29Z') === false, 'deployed short code matching remains case sensitive');
+reseller_test(hulk_access_code_matches('HULK-ABCD-EFGH-JKMN-PQRS', 'hulk abcd efgh jkmn pqrs'), 'legacy canonical codes retain their compatible formatted-input matching');
+foreach (['', str_repeat('x', 65), "control\x00value"] as $invalidCode) {
+    reseller_test(hulk_normalize_access_code($invalidCode) === null, 'empty oversized and control-character codes are rejected');
 }
 
 // Phase 9B: the retired legacy reseller-owner entry points redirect.
@@ -123,4 +116,4 @@ reseller_test(
     'the retired owner action endpoint still distinguishes the historical login action'
 );
 
-fwrite(STDOUT, "PASS: {$tests} reseller administration domain checks.\n");
+fwrite(STDOUT, "PASS: {$tests} legacy retirement and resolver-format checks.\n");

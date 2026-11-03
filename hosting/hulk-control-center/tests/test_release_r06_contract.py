@@ -48,12 +48,12 @@ class ReleaseR06ContractTests(unittest.TestCase):
         self.assertIn('data-copy-value="<?= cc_e($shortUrl) ?>"', block)
         self.assertIn("hulksa.com/app/", block)
         self.assertIn("Downloader", block)
-        self.assertIn("5672332", block)
+        self.assertIn("1956278", block)
         self.assertIn("الرابط والكود ثابتان مع كل تحديث", block)
         self.assertIn("النسخة المنشورة", block)
-        self.assertIn("إجباري", block)
+        self.assertIn("اجباري", block)
         self.assertIn("اختياري", block)
-        self.assertIn("لا يوجد إصدار منشور", block)
+        self.assertIn("لا يوجد اصدار منشور", block)
 
     def test_upload_and_review_flow_use_real_authoritative_actions(self) -> None:
         block = self.releases_block()
@@ -69,7 +69,7 @@ class ReleaseR06ContractTests(unittest.TestCase):
         self.assertIn('name="apk"', block)
         self.assertIn('enctype="multipart/form-data"', block)
         self.assertIn("مراجعة التحديث", block)
-        self.assertIn("نشر على الرابط المختصر", block)
+        self.assertIn("نشر التحديث", block)
         self.assertIn("حفظ دون نشر", block)
         self.assertIn("تعديل السياسة قبل النشر", block)
         self.assertIn("data-r6-min-confirm", block)
@@ -92,7 +92,7 @@ class ReleaseR06ContractTests(unittest.TestCase):
         self.assertIn("r6-release-details", block)
         self.assertIn("destructive-zone", block)
         self.assertIn("button--danger", block)
-        self.assertIn('data-confirm="حذف هذا الإصدار نهائيًا', block)
+        self.assertIn('data-confirm="حذف هذا الاصدار نهائيًا', block)
         self.assertIn("cc_e($release['version_name'])", block)
         self.assertIn("cc_e($release['release_notes'])", block)
         self.assertNotIn("apk_path", block)
@@ -117,9 +117,9 @@ class ReleaseR06ContractTests(unittest.TestCase):
         self.assertNotIn("fonts.googleapis.com", css)
         layout = self.read(ROOT / "views" / "layout.php")
         login = self.read(ROOT / "login.php")
-        self.assertIn("app.css?v=6.2.0", layout)
-        self.assertIn("app.js?v=6.1.0", layout)
-        self.assertIn("app.css?v=6.2.0", login)
+        self.assertIn("app.css?v=371.1", layout)
+        self.assertIn("app.js?v=371.1", layout)
+        self.assertIn("app.css?v=371.1", login)
 
     def test_adapter_binds_exact_staged_release_and_safe_view_facts(self) -> None:
         adapter = self.read(ROOT / "lib" / "operations-adapter.php")
@@ -165,7 +165,7 @@ class ReleaseR06ContractTests(unittest.TestCase):
 
     def test_route_description_matches_the_approved_supporting_line(self) -> None:
         routes = self.read(ROOT / "lib" / "routes.php")
-        self.assertIn("'description' => 'ارفع النسخة، راجعها، وانشرها على رابطك الثابت.'", routes)
+        self.assertIn("'description' => 'ارفع النسخة، راجعها، وانشرها على رابطك الثابت'", routes)
 
     def test_release_mutations_remain_post_only_and_csrf_protected(self) -> None:
         index = self.read(ROOT / "index.php")

@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 if (!empty($pageData['load_error'])) {
     cc_error_state(
-        'تعذر تحميل المتصلين الآن',
-        'لم تُعرض أي أرقام بديلة. تحقق من اتصال قاعدة بيانات الاتصال ثم أعد المحاولة.',
+        'تعذر تحميل المتصلين الان',
+        'لم تُعرض اي ارقام بديلة. تحقق من اتصال قاعدة بيانات الاتصال ثم اعد المحاولة',
         cc_url('live-users')
     );
     return;
@@ -27,62 +27,40 @@ $page = (int) ($pageData['page'] ?? 1);
 $pages = (int) ($pageData['pages'] ?? 1);
 $notesAvailable = (bool) ($pageData['notes_available'] ?? true);
 
-$platformLabels = ['PHONE' => 'هاتف', 'TABLET' => 'جهاز لوحي', 'TV' => 'تلفاز', 'OTHER' => 'أخرى'];
+$platformLabels = ['PHONE' => 'هاتف', 'TABLET' => 'جهاز لوحي', 'TV' => 'تلفاز', 'OTHER' => 'اخرى'];
 $platformIcons = ['PHONE' => 'phone', 'TABLET' => 'tablet', 'TV' => 'tv', 'OTHER' => 'device'];
-$paginationUrl = static fn (int $target): string => cc_url('live-users') . ($target > 1 ? '?page=' . $target : '');
+$paginationUrl = static fn (int $target): string => cc_url('live-users') . '?' . http_build_query(($pageData['filters'] ?? []) + ['page' => $target]);
 ?>
 <section class="module-stack online-now-page live-users-page">
-    <?php cc_subnav('أقسام النشاط', [
-        'live-users' => 'المتصلون الآن',
-        'sessions' => 'سجل الجلسات',
-        'devices' => 'الأجهزة',
-    ], 'live-users'); ?>
-
-    <section class="online-now-summary" aria-label="ملخص المتصلين الآن">
-        <article class="online-now-total">
-            <div class="online-now-total__head">
-                <span class="eyebrow">المتصلون الآن</span>
-                <?php cc_status_badge('مباشر', 'success'); ?>
-            </div>
-            <p class="online-now-total__value"><?= $totalConnections ?></p>
-            <p class="online-now-total__copy">اتصال نشط الآن</p>
-            <dl class="online-now-total__facts">
-                <div><dt>الاشتراكات</dt><dd><?= $totalSubscriptions ?></dd></div>
-                <div><dt>الأجهزة</dt><dd><?= $totalDevices ?></dd></div>
-                <div><dt>آخر قراءة</dt><dd><time dir="ltr"><?= cc_e(cc_presence_display_time($serverNow)) ?></time></dd></div>
-            </dl>
-            <p class="online-now-total__meta">مهلة الاتصال <bdi dir="ltr"><?= $ttlSeconds ?></bdi> ثانية</p>
-        </article>
-        <div class="online-now-breakdown">
-            <?php cc_metric_card('تلفاز', (string) $tvConnections, 'اتصال تلفاز', 'tv'); ?>
-            <?php cc_metric_card('هاتف ولوحي', (string) $phoneConnections, 'اتصال هاتف أو جهاز لوحي', 'phone'); ?>
-        </div>
-    </section>
-
+    <div class="online-toolbar"><strong>اخر قراءة</strong><time dir="ltr"><?= cc_e(cc_presence_display_time($serverNow)) ?></time><a class="button button--secondary" href="<?=cc_e($paginationUrl($page))?>">تحديث</a></div>
+    <dl class="online-totals"><div><dt>الاشتراكات</dt><dd><?=$totalSubscriptions?></dd></div><div><dt>الاجهزة</dt><dd><?=$totalDevices?></dd></div><div><dt>الجلسات الحديثة</dt><dd><?=$totalConnections?></dd></div></dl>
+    <p class="muted-copy">الارقام للنتائج المطابقة ضمن اخر <?=$ttlSeconds?> ثانية ، النشاط الحديث لا يثبت تشغيل فيديو</p>
+    <details class="inline-editor"><summary>تعريف الارقام</summary><p>الاشتراك يجمع هوية الحساب والهوست ، الاجهزة تحسب بالهوية المسجلة ، وقد يرسل الجهاز اكثر من جلسة</p><p>تلفاز <?=$tvConnections?> ، هاتف ولوحي <?=$phoneConnections?></p></details>
+    <form class="filter-bar" method="get"><label class="form-field"><span>بحث بالحساب او الهوست</span><input name="q" maxlength="100" value="<?=cc_e($pageData['filters']['q']??'')?>"></label><label class="form-field"><span>نوع الجهاز</span><select name="platform"><option value="">الكل</option><?php foreach($platformLabels as $value=>$label):?><option value="<?=cc_e($value)?>" <?=($pageData['filters']['platform']??'')===$value?'selected':''?>><?=cc_e($label)?></option><?php endforeach;?></select></label><button class="button button--secondary">بحث</button><a class="button button--quiet" href="<?=cc_e(cc_url('live-users'))?>">مسح الفلاتر</a></form>
     <?php if ($otherConnections > 0): ?>
-        <p class="muted-copy">يشمل الإجمالي <?= $otherConnections ?> اتصالًا من فئة أخرى غير التلفاز والهاتف أو الجهاز اللوحي.</p>
+        <p class="muted-copy">يشمل الاجمالي <?= $otherConnections ?> اتصالًا من فئة اخرى غير التلفاز والهاتف او الجهاز اللوحي</p>
     <?php endif; ?>
 
     <?php if ($multiDeviceSubscriptions > 0): ?>
         <?php cc_alert(
-            'استخدام متعدد الأجهزة',
-            'يوجد ' . $multiDeviceSubscriptions . ' اشتراكًا نشطًا على أكثر من جهاز في الوقت نفسه. راجع الأجهزة أدناه.',
+            'استخدام متعدد الاجهزة',
+            'يوجد ' . $multiDeviceSubscriptions . ' اشتراكًا ظاهرا على اكثر من جهاز في الوقت نفسه. راجع الاجهزة ادناه',
             'warning'
         ); ?>
     <?php endif; ?>
 
     <?php if (!$resellersAvailable && $groups !== []): ?>
-        <?php cc_alert('بيانات جزئية', 'الاشتراكات متاحة، لكن تعذر ربط أسماء الموزعين الحالية. أرقام الموزعين ما زالت معروضة كما هي.', 'warning'); ?>
+        <?php cc_alert('بيانات جزئية', 'الاشتراكات متاحة، لكن تعذر تحميل اسماء الهوستات الحالية ، سجل الاشتراكات ما زال متاحا', 'warning'); ?>
     <?php endif; ?>
 
     <section class="records-section" aria-labelledby="online-now-title">
         <header class="section-heading">
-            <div><span class="eyebrow">الأجهزة والاشتراكات</span><h2 id="online-now-title">المتصلون الآن</h2></div>
+            <div><span class="eyebrow">الاجهزة والاشتراكات</span><h2 id="online-now-title">الاشتراكات</h2></div>
             <span class="record-count"><?= $totalSubscriptions ?> اشتراك</span>
         </header>
 
         <?php if ($groups === []): ?>
-            <?php cc_empty_state('لا توجد اتصالات نشطة الآن', 'ستظهر الاشتراكات هنا عند وصول نشاط اتصال حديث داخل المهلة المعتمدة.'); ?>
+            <?php cc_empty_state('لا توجد جلسات حديثة الان', 'ستظهر الاشتراكات هنا عند وصول نشاط اتصال حديث داخل المهلة المعتمدة'); ?>
         <?php else: ?>
             <div class="subscription-list">
                 <?php foreach ($groups as $group):
@@ -107,31 +85,19 @@ $paginationUrl = static fn (int $target): string => cc_url('live-users') . ($tar
                     $noteDraft = (string) ($group['note_draft'] ?? '');
                     $noteUpdatedAt = (string) ($group['note_updated_at'] ?? '');
                 ?>
-                    <article class="record-card subscription-card<?= $multiDevice ? ' subscription-card--warning' : '' ?>">
-                        <header class="subscription-card__header">
-                            <div class="subscription-identity">
-                                <span class="record-identity__icon"><?= cc_icon($multiDevice ? 'alert' : ((int) ($group['tv_connections'] ?? 0) > 0 ? 'tv' : 'device')) ?></span>
-                                <div>
-                                    <h3><?= cc_e($resellerName) ?></h3>
-                                    <p><bdi dir="ltr">#<?= $resellerId ?></bdi></p>
-                                </div>
-                            </div>
-                            <div class="subscription-badges">
-                                <?php cc_status_badge($connectionCount . ' اتصال', $multiDevice ? 'warning' : 'success'); ?>
-                                <?php cc_status_badge($deviceCount . ' جهاز', 'neutral'); ?>
-                            </div>
-                        </header>
-
+                    <details class="subscription-card subscription-row-details" <?= $checkResult !== null || $noteDraft !== '' ? 'open' : '' ?>>
+                        <summary class="subscription-row"><strong><bdi dir="ltr"><?=cc_e($username)?></bdi></strong><span><?=$deviceCount?> جهاز</span><span><bdi dir="ltr"><?=cc_e($host)?></bdi></span><time dir="ltr"><?=cc_e(cc_presence_display_time($lastActivity))?></time><span>التفاصيل</span></summary>
+                        <div class="subscription-expanded">
                         <dl class="subscription-card__facts">
                             <div><dt>تلفاز</dt><dd><?= (int) ($group['tv_connections'] ?? 0) ?></dd></div>
                             <div><dt>هاتف ولوحي</dt><dd><?= (int) ($group['phone_connections'] ?? 0) ?></dd></div>
-                            <div><dt>آخر نشاط</dt><dd><time dir="ltr"><?= cc_e(cc_presence_display_time($lastActivity)) ?></time></dd></div>
+                            <div><dt>اخر نشاط</dt><dd><time dir="ltr"><?= cc_e(cc_presence_display_time($lastActivity)) ?></time></dd></div>
                         </dl>
 
                         <?php if ($multiDevice): ?>
                             <div class="subscription-warning">
                                 <?= cc_icon('alert') ?>
-                                <span>هذا الاشتراك متصل من <?= $deviceCount ?> أجهزة في الوقت نفسه. راجع الأجهزة قبل اتخاذ أي إجراء.</span>
+                                <span>هذا الاشتراك متصل من <?= $deviceCount ?> اجهزة في الوقت نفسه. راجع الاجهزة قبل اتخاذ اي اجراء</span>
                             </div>
                         <?php endif; ?>
 
@@ -171,9 +137,9 @@ $paginationUrl = static fn (int $target): string => cc_url('live-users') . ($tar
                         </dl>
 
                         <div class="subscription-devices">
-                            <div class="subscription-devices__heading"><span>الأجهزة (<?= count($devices) ?>)</span><span><?= $connectionCount ?> اتصال نشط</span></div>
+                            <div class="subscription-devices__heading"><span>الاجهزة (<?= count($devices) ?>)</span><span><?= $connectionCount ?> جلسة حديثة</span></div>
                             <?php if ($devicesTruncated): ?>
-                                <p class="subscription-devices__partial">يتم عرض أول <?= count($devices) ?> من <?= $deviceCount ?> أجهزة. العدد الإجمالي محفوظ في البطاقة.</p>
+                                <p class="subscription-devices__partial">يتم عرض اول <?= count($devices) ?> من <?= $deviceCount ?> اجهزة. العدد الاجمالي محفوظ في البطاقة</p>
                             <?php endif; ?>
                             <?php foreach ($devices as $device):
                                 $platform = (string) ($device['platform_class'] ?? 'OTHER');
@@ -195,16 +161,16 @@ $paginationUrl = static fn (int $target): string => cc_url('live-users') . ($tar
                         <section class="subscriber-note" aria-label="ملاحظة المشترك">
                             <div class="subscriber-note__head">
                                 <span class="eyebrow">ملاحظة المشترك</span>
-                                <?php if ($noteUpdatedAt !== ''): ?><small>آخر تحديث <?= cc_e(cc_presence_display_time($noteUpdatedAt)) ?></small><?php endif; ?>
+                                <?php if ($noteUpdatedAt !== ''): ?><small>اخر تحديث <?= cc_e(cc_presence_display_time($noteUpdatedAt)) ?></small><?php endif; ?>
                             </div>
                             <?php if ($note !== ''): ?>
                                 <p class="subscriber-note__text"><?= cc_e($note) ?></p>
                             <?php else: ?>
-                                <p class="muted-copy">لا توجد ملاحظة محفوظة.</p>
+                                <p class="muted-copy">لا توجد ملاحظة محفوظة</p>
                             <?php endif; ?>
-                            <?php if (!$notesAvailable): ?><p class="muted-copy">تعذر تحميل الملاحظات المحفوظة حاليًا.</p><?php endif; ?>
+                            <?php if (!$notesAvailable): ?><p class="muted-copy">تعذر تحميل الملاحظات المحفوظة حاليًا</p><?php endif; ?>
                             <details class="inline-editor">
-                                <summary><?= $note !== '' ? 'تعديل الملاحظة' : 'إضافة ملاحظة' ?></summary>
+                                <summary><?= $note !== '' ? 'تعديل الملاحظة' : 'اضافة ملاحظة' ?></summary>
                                 <form method="post" data-submit-once>
                                     <input type="hidden" name="csrf_token" value="<?= cc_e(cc_csrf_token()) ?>">
                                     <input type="hidden" name="action" value="save_subscriber_note">
@@ -217,7 +183,8 @@ $paginationUrl = static fn (int $target): string => cc_url('live-users') . ($tar
                                 </form>
                             </details>
                         </section>
-                    </article>
+                        </div>
+                    </details>
                 <?php endforeach; ?>
             </div>
 

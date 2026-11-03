@@ -2129,12 +2129,7 @@ function cc_pairing_approve(
     }
 
     $resellerDb ??= cc_pairing_reseller_db();
-    $lookup = $resellerDb->prepare(
-        'SELECT reseller_id, access_code, access_code_hash, host, status FROM resellers '
-        . 'WHERE access_code_hash = :access_code_hash LIMIT 1'
-    );
-    $lookup->execute(['access_code_hash' => hulk_access_code_hash($normalizedCode)]);
-    $reseller = $lookup->fetch();
+    $reseller = hulk_host_code_lookup($resellerDb, $normalizedCode);
     if (!is_array($reseller)) {
         throw new CcPairingException('INVALID_ACCESS_CODE', 404, 'The access code is invalid.');
     }
@@ -2142,7 +2137,7 @@ function cc_pairing_approve(
     $storedHash = strtolower((string) ($reseller['access_code_hash'] ?? ''));
     if (
         $storedCode === null
-        || !hash_equals($storedCode, $normalizedCode)
+        || !hulk_access_code_matches($storedCode, $normalizedCode)
         || preg_match('/^[a-f0-9]{64}$/D', $storedHash) !== 1
         || !hash_equals(hulk_access_code_hash($storedCode), $storedHash)
     ) {
@@ -2194,16 +2189,16 @@ function cc_pairing_approve(
             throw new CcPairingException('PAIRING_DISABLED', 404, 'Pairing is disabled.');
         }
 
-        $recheck = $resellerDb->prepare(
-            'SELECT access_code, access_code_hash, host, status FROM resellers WHERE reseller_id = :reseller_id LIMIT 1'
-        );
-        $recheck->execute(['reseller_id' => (int) $reseller['reseller_id']]);
-        $current = $recheck->fetch();
+        $current = hulk_host_code_lookup($resellerDb, $normalizedCode);
+        if (!is_array($current) || (int) ($current['code_id'] ?? 0) !== (int) ($reseller['code_id'] ?? 0)
+            || (int) ($current['reseller_id'] ?? 0) !== (int) $reseller['reseller_id']) {
+            throw new CcPairingException('INVALID_ACCESS_CODE', 404, 'The code association changed during validation.');
+        }
         $currentCode = is_array($current) ? hulk_normalize_access_code((string) ($current['access_code'] ?? '')) : null;
         $currentHash = is_array($current) ? strtolower((string) ($current['access_code_hash'] ?? '')) : '';
         if (
             $currentCode === null
-            || !hash_equals($normalizedCode, $currentCode)
+            || !hulk_access_code_matches($currentCode, $normalizedCode)
             || preg_match('/^[a-f0-9]{64}$/D', $currentHash) !== 1
             || !hash_equals(hulk_access_code_hash($currentCode), $currentHash)
         ) {

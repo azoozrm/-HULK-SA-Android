@@ -138,10 +138,11 @@ function cc_base_path(): string
     return $path === '' ? '' : $path;
 }
 
-function cc_url(string $module = 'live-users'): string
+function cc_url(string $module = 'dashboard'): string
 {
+    if (in_array($module, ['access-codes','resellers'], true)) $module = 'hosts';
     $base = cc_base_path();
-    return $module === 'live-users' ? $base . '/' : $base . '/' . rawurlencode($module) . '/';
+    return $module === 'dashboard' ? $base . '/' : $base . '/' . rawurlencode($module) . '/';
 }
 
 function cc_context_url(string $module, array $query): string

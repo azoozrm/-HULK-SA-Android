@@ -55,11 +55,24 @@ if ($resolved['valid'] && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         cc_flash('danger', 'تعذر تنفيذ العملية بأمان.');
     }
     $redirect = cc_url($moduleKey);
+    if (in_array($moduleKey, ['hosts','access-codes'], true)) {
+        $hostFocus = filter_var($_SESSION['cc_host_focus'] ?? $_GET['reseller'] ?? null, FILTER_VALIDATE_INT);
+        $codePage = filter_var($_SESSION['cc_code_page'] ?? $_GET['code_page'] ?? 1, FILTER_VALIDATE_INT);
+        if (is_int($hostFocus) && $hostFocus > 0) {
+            $redirect = cc_url('hosts') . '?' . http_build_query([
+                'reseller'=>$hostFocus, 'code_page'=>is_int($codePage) && $codePage > 0 ? $codePage : 1,
+            ]);
+        }
+        unset($_SESSION['cc_host_focus'],$_SESSION['cc_code_page']);
+    }
+
     if ($moduleKey === 'live-users') {
         $redirectPage = cc_presence_page_number($_POST['page'] ?? 1);
-        if ($redirectPage > 1) {
-            $redirect .= '?page=' . $redirectPage;
-        }
+        $context = ['page'=>$redirectPage];
+        $search = mb_substr(trim(is_string($_GET['q'] ?? null) ? $_GET['q'] : ''), 0, 100);
+        if ($search !== '') $context['q'] = $search;
+        if (is_string($_GET['platform'] ?? null) && in_array($_GET['platform'], ['TV','PHONE','TABLET','OTHER'],true)) $context['platform'] = $_GET['platform'];
+        $redirect .= '?' . http_build_query($context);
     }
     cc_redirect($redirect);
 }

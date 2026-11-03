@@ -132,20 +132,20 @@ class Phase9BLegacyRedirectCutoverTest(unittest.TestCase):
         ):
             self.assertIn(function + "(", adapter)
 
-    # 14: shared reseller authority unchanged.
-    def test_shared_reseller_authority_is_unchanged(self) -> None:
+    # The current section retires the old writable authority, preserving its fail-closed entry points
+    def test_legacy_reseller_mutations_are_retired_for_the_host_authority(self) -> None:
         domain = self.read(RES / ".hulk-reseller-app/admin-domain.php")
         adapter = self.read(CC / "lib/reseller-adapter.php")
         for function in (
-            "hulk_admin_create_reseller",
-            "hulk_admin_set_status",
-            "hulk_admin_update_host",
-            "hulk_admin_set_code",
-            "hulk_admin_rotate_code",
-            "hulk_admin_reset_password",
+            "hulk_admin_create_reseller", "hulk_admin_set_status", "hulk_admin_update_host",
+            "hulk_admin_set_code", "hulk_admin_rotate_code", "hulk_admin_reset_password", "hulk_admin_write_code",
         ):
             self.assertIn(f"function {function}", domain)
+            self.assertRegex(domain, rf"function {function}\([^{{]+\{{ throw new RuntimeException")
+            self.assertNotIn(function + "(", adapter)
+        for function in ("hulk_host_create", "hulk_host_update", "hulk_host_create_code", "hulk_host_set_code_status", "hulk_host_set_code", "hulk_host_rotate_code"):
             self.assertIn(function + "(", adapter)
+        self.assertIn("ops_audit(", adapter)
 
     # 15: reseller self-service unchanged.
     def test_reseller_self_service_is_unchanged(self) -> None:

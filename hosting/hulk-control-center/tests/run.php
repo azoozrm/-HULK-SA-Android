@@ -143,10 +143,10 @@ cc_test(is_string($layout) && str_contains($layout, '<html lang="ar" dir="rtl">'
 cc_test(is_string($css) && str_contains($css, ':focus-visible'), 'visible keyboard focus styles exist');
 cc_test(is_string($css) && str_contains($css, '@media (max-width: 860px)'), 'mobile responsive breakpoint exists');
 cc_test(is_string($css) && str_contains($css, '@media (max-width: 1180px)'), 'tablet responsive breakpoint exists');
-cc_test(count(cc_main_navigation()) === 4, 'four primary tabs are configured');
+cc_test(count(cc_main_navigation()) === 6, 'six owner destinations are configured');
 cc_test(
-    array_keys(cc_main_navigation()) === ['live-users', 'announcements', 'hosts', 'releases'],
-    'primary tabs are exactly the approved four routes'
+    array_keys(cc_main_navigation()) === ['dashboard', 'hosts', 'live-users', 'announcements', 'releases', 'service'],
+    'primary destinations are exactly the six owner routes'
 );
 cc_test(
     is_string($layout) && str_contains($layout, 'primary-tabs__track')
@@ -159,6 +159,19 @@ cc_test(
     is_string($javascript) && str_contains($javascript, 'data-primary-tabs')
         && !str_contains($javascript, 'data-nav-open'),
     'primary tabs keep the active tab in view without drawer runtime'
+);
+cc_test(cc_resolve_module(null)['key'] === 'dashboard', 'owner lands on the overview');
+foreach (array_keys(cc_modules()) as $moduleKey) {
+    cc_test(array_key_exists((string) cc_active_main_navigation($moduleKey), cc_main_navigation()), 'every existing module belongs to one owner destination');
+}
+cc_test(
+    array_keys(cc_context_navigation('service')) === ['service', 'features', 'growth', 'settings'],
+    'application settings keep maintenance, features, renewal and runtime details reachable'
+);
+cc_test(
+    is_string($layout) && str_contains($layout, 'data-primary-navigation')
+        && str_contains($layout, '<summary>') && str_contains($layout, 'cc_context_navigation($activeKey)'),
+    'native collapsible navigation and a single contextual strip remain keyboard reachable'
 );
 cc_test(is_string($login) && str_contains($login, 'FOR UPDATE') && str_contains($login, 'beginTransaction()') && str_contains($login, 'commit()'), 'owner lockout updates are serialized in a database transaction');
 cc_test(is_string($login) && str_contains($login, 'cc_login_record_accepts_password(') && !str_contains($login, 'password_hash('), 'unknown-user login does not generate a request-specific password hash');
@@ -286,9 +299,9 @@ cc_test(
 );
 cc_test(
     is_string($dashboardView) &&
-        str_contains($dashboardView, 'النشطون الآن') &&
+        str_contains($dashboardView, 'النشطون الان') &&
         str_contains($dashboardView, 'جلسات اليوم') &&
-        str_contains($dashboardView, 'أجهزة نشطة') &&
+        str_contains($dashboardView, 'اجهزة نشطة') &&
         str_contains($dashboardView, 'online_now') &&
         str_contains($dashboardView, 'sessions_today') &&
         str_contains($dashboardView, 'active_devices'),
@@ -328,6 +341,8 @@ require __DIR__ . '/subscriber.php';
 require __DIR__ . '/phase6.php';
 require __DIR__ . '/phase7.php';
 require __DIR__ . '/phase8.php';
+require __DIR__ . '/host-code-pages.php';
+require __DIR__ . '/host-code-navigation.php';
 require __DIR__ . '/pairing.php';
 
 fwrite(STDOUT, "PASS: {$tests} HULK Control Center checks.\n");

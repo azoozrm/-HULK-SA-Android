@@ -134,7 +134,7 @@ function cc_host_health_candidate_count(PDO $resellerDb): int
 {
     cc_reseller_require_domain();
     return (int) $resellerDb->query(
-        "SELECT COUNT(*) FROM resellers WHERE status = 'active' "
+        "SELECT COUNT(*) FROM " . hulk_host_relation() . " host_records WHERE status = 'active' "
         . "AND host IS NOT NULL AND TRIM(host) <> ''"
     )->fetchColumn();
 }
@@ -145,7 +145,7 @@ function cc_host_health_candidates(PDO $resellerDb, int $limit, int $offset = 0)
     $limit = max(1, min(500, $limit));
     $offset = max(0, $offset);
     $rows = $resellerDb->query(
-        "SELECT reseller_id, reseller_name, host FROM resellers WHERE status = 'active' "
+        "SELECT reseller_id, reseller_name, host FROM " . hulk_host_relation() . " host_records WHERE status = 'active' "
         . "AND host IS NOT NULL AND TRIM(host) <> '' ORDER BY reseller_id ASC LIMIT " . $limit
         . ' OFFSET ' . $offset
     )->fetchAll();

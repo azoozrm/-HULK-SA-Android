@@ -1,172 +1,40 @@
 <?php
-
 declare(strict_types=1);
-
-if (!empty($pageData['load_error'])) {
-    cc_error_state('تعذر تحميل بيانات الموزعين', 'لم يتم إجراء أي تعديل. تحقق من اتصال قاعدة الموزعين ثم أعد المحاولة.', cc_url($moduleKey));
-    return;
-}
-
-$rows = is_array($pageData['rows'] ?? null) ? $pageData['rows'] : [];
-$presenceUsage = is_array($pageData['presence_usage'] ?? null) ? $pageData['presence_usage'] : [];
-$presenceUsageAvailable = (bool) ($pageData['presence_usage_available'] ?? false);
-$csrf = cc_csrf_token();
-$modeClass = match ($moduleKey) {
-    'access-codes' => 'access-code-management-page',
-    'hosts' => 'host-management-page',
-    default => 'reseller-accounts-page',
-};
-$summary = match ($moduleKey) {
-    'access-codes' => [
-        'eyebrow' => 'الوصول إلى التطبيق',
-        'title' => 'أكواد الدخول الحالية',
-        'description' => 'اعرف مالك كل كود وحالته واستخدامه الأخير قبل تغييره أو تدويره.',
-        'icon' => 'key',
-    ],
-    'hosts' => [
-        'eyebrow' => 'وجهات الاتصال',
-        'title' => 'هوستات الموزعين',
-        'description' => 'راجع الهوست الحالي وعلاقته بالموزع ونشاطه، ثم انتقل إلى صحته أو عدّله عند الحاجة.',
-        'icon' => 'server',
-    ],
-    default => [
-        'eyebrow' => 'إدارة الموزعين',
-        'title' => 'حسابات الموزعين',
-        'description' => 'الحالة والوصول والهوست والنشاط مجمعة حول كل حساب بدل توزيعها في جدول عام.',
-        'icon' => 'briefcase',
-    ],
-};
-$hasFilters = trim((string) ($pageData['search'] ?? '')) !== ''
-    || trim((string) ($pageData['status'] ?? '')) !== ''
-    || trim((string) ($pageData['reseller'] ?? '')) !== '';
-?>
-<section class="module-stack reseller-management <?= cc_e($modeClass) ?>">
-    <?php cc_subnav('الهوست والأكواد', [
-        'hosts' => 'الهوستات',
-        'access-codes' => 'أكواد الدخول',
-        'resellers' => 'الموزعون',
-    ], $moduleKey); ?>
-    <?php cc_page_summary(
-        $summary['eyebrow'],
-        $summary['title'],
-        $summary['description'],
-        $summary['icon'],
-        ['label' => 'المصدر المعتمد', 'tone' => 'success'],
-        [
-            ['label' => 'إجمالي السجلات', 'value' => (string) ((int) ($pageData['total'] ?? 0))],
-            ['label' => 'المعروض الآن', 'value' => (string) count($rows)],
-            ['label' => 'سياق الاستخدام', 'value' => $presenceUsageAvailable ? 'متاح' : 'غير متاح'],
-        ]
-    ); ?>
-
-    <?php if ($moduleKey === 'resellers'): ?>
-        <details class="form-section">
-            <summary><span><?= cc_icon('briefcase') ?></span><span><strong>إنشاء موزع جديد</strong><small>أدخل الهوية الأساسية، ويمكن إضافة الهوست والكود الآن أو لاحقًا.</small></span></summary>
-            <form class="admin-form admin-form--grid" method="post">
-                <input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="create_reseller">
-                <label class="form-field"><span>اسم دخول الموزع</span><input name="reseller_name" maxlength="100" autocomplete="off" required></label>
-                <label class="form-field"><span>كلمة المرور</span><input name="password" type="password" minlength="10" maxlength="256" autocomplete="new-password" required></label>
-                <label class="form-field"><span>الهوست <small>اختياري</small></span><input name="host" type="url" maxlength="2048" dir="ltr" placeholder="https://server.example:8080"></label>
-                <label class="form-field"><span>كود مخصص <small>اختياري</small></span><input name="access_code" maxlength="64" dir="ltr" placeholder="HULK-XXXX-XXXX-XXXX-XXXX"></label>
-                <div class="form-submit form-field--wide"><p class="muted-copy">عند ترك الكود فارغًا ينشئ النظام كودًا متوافقًا تلقائيًا. لا تُنسخ كلمات المرور أو الأكواد إلى سجل الإدارة.</p><button class="button button--primary" type="submit">إنشاء الموزع</button></div>
-            </form>
-        </details>
-    <?php endif; ?>
-
-    <?php if (!$presenceUsageAvailable): ?>
-        <?php cc_alert('سياق الاستخدام غير متاح', 'بيانات الموزعين الحالية متاحة، لكن تعذر قراءة الجلسات. لم تُعرض أصفار بديلة.', 'warning'); ?>
-    <?php endif; ?>
-
-    <?php cc_filter_disclosure(
-        'البحث والتصفية',
-        $hasFilters ? 'هناك فلاتر مطبقة على القائمة الحالية.' : 'ابحث بالاسم أو الهوست أو الكود، أو حدد حالة الحساب.',
-        $hasFilters
-    ); ?>
-        <form class="data-toolbar data-toolbar--saved" method="get" data-saved-filters="<?= cc_e($moduleKey) ?>" data-saved-filter-fields="status,reseller">
-            <label class="search-control"><span class="sr-only">بحث</span><?= cc_icon('search') ?><input name="q" type="search" value="<?= cc_e($pageData['search'] ?? '') ?>" placeholder="بحث بالاسم أو الهوست أو الكود"></label>
-            <label class="filter-control"><span class="sr-only">الحالة</span><?= cc_icon('filter') ?><select name="status"><option value="">كل الحالات</option><option value="active" <?= ($pageData['status'] ?? '') === 'active' ? 'selected' : '' ?>>نشط</option><option value="inactive" <?= ($pageData['status'] ?? '') === 'inactive' ? 'selected' : '' ?>>متوقف</option></select></label>
-            <label class="form-field reseller-id-filter"><span>رقم الموزع</span><input name="reseller" type="number" min="1" value="<?= cc_e($pageData['reseller'] ?? '') ?>" placeholder="مثال: 7"></label>
-            <div class="filter-actions"><button class="button button--primary" type="submit">عرض النتائج</button><a class="button button--quiet" href="<?= cc_e(cc_url($moduleKey)) ?>">مسح الفلاتر</a></div>
-            <?php cc_saved_filter_controls($moduleKey, ['status', 'reseller']); ?>
-        </form>
-    <?php cc_disclosure_end(); ?>
-
-    <section class="management-summary records-section" aria-labelledby="management-records-title">
-        <header class="section-heading"><div><span class="eyebrow">النتائج</span><h2 id="management-records-title"><?= cc_e($summary['title']) ?></h2></div><span class="record-count"><?= (int) ($pageData['total'] ?? 0) ?> سجل</span></header>
-        <?php if ($rows === []): ?>
-            <?php cc_empty_state('لا توجد نتائج', $moduleKey === 'resellers' ? 'غيّر البحث أو أنشئ موزعًا جديدًا.' : 'غيّر البحث أو راجع حسابات الموزعين الحالية.'); ?>
-        <?php else: ?>
-            <div class="management-records">
-                <?php foreach ($rows as $row):
-                    $id = (int) $row['reseller_id'];
-                    $usage = $presenceUsage[$id] ?? null;
-                    $active = $row['status'] === 'active';
-                    $usageValue = !$presenceUsageAvailable || !is_array($usage)
-                        ? 'غير متاح'
-                        : ((int) $usage['online'] . ' متصل الآن');
-                ?>
-                    <article class="record-card management-record">
-                        <header class="record-card__header">
-                            <div class="record-identity">
-                                <span class="record-identity__icon"><?= cc_icon($summary['icon']) ?></span>
-                                <span><strong><?= cc_e($row['reseller_name']) ?></strong><small><bdi dir="ltr">#<?= $id ?></bdi></small></span>
-                            </div>
-                            <?php cc_status_badge($active ? 'نشط' : 'متوقف', $active ? 'success' : 'danger'); ?>
-                        </header>
-
-                        <?php if ($moduleKey === 'access-codes'): ?>
-                            <div class="credential-block">
-                                <span>الكود الحالي</span>
-                                <?php if ($row['access_code'] !== ''): ?>
-                                    <details class="code-reveal">
-                                        <summary><span class="code-mask" aria-hidden="true">••••••••</span><span>إظهار الكود</span></summary>
-                                        <code class="credential-value" dir="ltr"><?= cc_e($row['access_code']) ?></code>
-                                    </details>
-                                <?php else: ?>
-                                    <code class="credential-value" dir="ltr">غير محدد</code>
-                                <?php endif; ?>
-                            </div>
-                            <dl class="record-card__highlights record-card__highlights--three">
-                                <div><dt>الجاهزية</dt><dd><?= $active && $row['access_code'] !== '' ? 'الكود مرتبط بحساب نشط' : 'يحتاج إلى مراجعة' ?></dd></div>
-                                <div><dt>الاستخدام</dt><dd><?= cc_e($usageValue) ?></dd></div>
-                                <div><dt>آخر استخدام</dt><dd><?= is_array($usage) ? cc_e(cc_presence_display_time($usage['last_used_at'])) : 'غير متاح' ?></dd></div>
-                            </dl>
-                            <div class="record-actions">
-                                <details class="inline-editor"><summary>تعديل الكود</summary><form method="post"><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="set_code"><input type="hidden" name="reseller_id" value="<?= $id ?>"><label class="form-field"><span>الكود الجديد</span><input name="access_code" maxlength="64" dir="ltr" value="<?= cc_e($row['access_code']) ?>" required></label><button class="button button--secondary" type="submit">حفظ الكود</button></form></details>
-                                <form method="post" data-confirm="سيُوقف الكود الحالي فورًا. هل تريد إنشاء كود جديد؟"><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="rotate_code"><input type="hidden" name="reseller_id" value="<?= $id ?>"><button class="button button--danger" type="submit">تدوير الكود</button></form>
-                            </div>
-                        <?php elseif ($moduleKey === 'hosts'): ?>
-                            <div class="host-block">
-                                <span>الهوست الحالي</span>
-                                <bdi dir="ltr"><?= cc_e($row['host'] !== '' ? $row['host'] : 'غير محدد') ?></bdi>
-                            </div>
-                            <dl class="record-card__highlights record-card__highlights--three">
-                                <div><dt>الجاهزية</dt><dd><?= $active && $row['host'] !== '' ? 'مربوط بحساب نشط' : 'يحتاج إلى مراجعة' ?></dd></div>
-                                <div><dt>النشاط</dt><dd><?= cc_e($usageValue) ?></dd></div>
-                                <div><dt>الجلسات</dt><dd><?= is_array($usage) ? (int) $usage['sessions'] : 'غير متاح' ?></dd></div>
-                            </dl>
-                            <div class="context-links"><a href="<?= cc_e(cc_url('host-health')) ?>">عرض صحة الهوستات</a><a href="<?= cc_e(cc_context_url('sessions', ['reseller' => $id])) ?>">عرض الجلسات</a></div>
-                            <div class="record-actions">
-                                <details class="inline-editor"><summary><?= $row['host'] === '' ? 'إضافة هوست' : 'تعديل الهوست' ?></summary><form method="post"><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="update_host"><input type="hidden" name="reseller_id" value="<?= $id ?>"><label class="form-field"><span>الهوست</span><input name="host" type="url" maxlength="2048" dir="ltr" value="<?= cc_e($row['host']) ?>" placeholder="اتركه فارغًا للمسح"></label><button class="button button--secondary" type="submit">حفظ التغيير</button></form></details>
-                            </div>
-                        <?php else: ?>
-                            <dl class="record-card__highlights">
-                                <div><dt>الهوست</dt><dd class="break-value"><bdi dir="ltr"><?= cc_e($row['host'] !== '' ? $row['host'] : 'غير محدد') ?></bdi></dd></div>
-                                <div><dt>كود الدخول</dt><dd><?php if ($row['access_code'] !== ''): ?><details class="code-reveal"><summary><span class="code-mask" aria-hidden="true">••••••••</span><span>إظهار</span></summary><bdi dir="ltr"><?= cc_e($row['access_code']) ?></bdi></details><?php else: ?>غير محدد<?php endif; ?></dd></div>
-                                <div><dt>النشاط</dt><dd><?= cc_e($usageValue) ?></dd></div>
-                                <div><dt>آخر استخدام</dt><dd><?= is_array($usage) ? cc_e(cc_presence_display_time($usage['last_used_at'])) : 'غير متاح' ?></dd></div>
-                            </dl>
-                            <div class="record-actions">
-                                <form method="post" data-confirm="تغيير حالة هذا الموزع؟"><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="set_status"><input type="hidden" name="reseller_id" value="<?= $id ?>"><input type="hidden" name="status" value="<?= $active ? 'inactive' : 'active' ?>"><button class="button <?= $active ? 'button--danger' : 'button--primary' ?>" type="submit"><?= $active ? 'إيقاف الحساب' : 'تفعيل الحساب' ?></button></form>
-                                <details class="inline-editor"><summary>تغيير كلمة المرور</summary><form method="post"><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="reset_password"><input type="hidden" name="reseller_id" value="<?= $id ?>"><label class="form-field"><span>كلمة المرور الجديدة</span><input name="password" type="password" minlength="10" maxlength="256" autocomplete="new-password" required></label><label class="form-field"><span>تأكيد كلمة المرور</span><input name="confirm_password" type="password" minlength="10" maxlength="256" autocomplete="new-password" required></label><button class="button button--secondary" type="submit">حفظ كلمة المرور</button></form></details>
-                            </div>
-                        <?php endif; ?>
-                    </article>
-                <?php endforeach; ?>
-            </div>
-
-            <?php $page = (int) $pageData['page']; $pages = (int) $pageData['pages']; $query = ['q' => $pageData['search'], 'status' => $pageData['status'], 'reseller' => $pageData['reseller']]; ?>
-            <nav class="pagination" aria-label="ترقيم الصفحات"><p>الصفحة <?= $page ?> من <?= $pages ?></p><div><?php if ($page > 1): ?><a class="page-button" href="?<?= cc_e(http_build_query($query + ['page' => $page - 1])) ?>" aria-label="الصفحة السابقة"><?= cc_icon('chevron') ?></a><?php endif; ?><span class="page-button" aria-current="page"><?= $page ?></span><?php if ($page < $pages): ?><a class="page-button icon-button--flip" href="?<?= cc_e(http_build_query($query + ['page' => $page + 1])) ?>" aria-label="الصفحة التالية"><?= cc_icon('chevron') ?></a><?php endif; ?></div></nav>
-        <?php endif; ?>
-    </section>
+if (!empty($pageData['load_error'])) { cc_error_state('تعذر تحميل الهوستات','الخدمة غير متاحة حاليا ، اعد المحاولة من دون اجراء اي تعديل',cc_url('hosts'));return; }
+$rows=$pageData['rows']??[]; $csrf=cc_csrf_token();
+$hidden=static function(string $action,array $ids=[])use($csrf):void { ?><input type="hidden" name="csrf_token" value="<?=cc_e($csrf)?>"><input type="hidden" name="action" value="<?=cc_e($action)?>"><?php foreach($ids as $key=>$id):?><input type="hidden" name="<?=cc_e($key)?>" value="<?=(int)$id?>"><?php endforeach; };
+$fields=static function(array $row=[]):void { ?>
+<label class="form-field"><span>اسم الهوست</span><input name="name" maxlength="100" value="<?=cc_e($row['name']??'')?>" required></label>
+<label class="form-field"><span>رابط الهوست</span><input name="host" type="url" dir="ltr" maxlength="2048" value="<?=cc_e($row['host']??'')?>" required placeholder="https://server.example:8080"></label>
+<label class="form-field"><span>الحالة</span><select name="status"><option value="active" <?=($row['status']??'active')==='active'?'selected':''?>>نشط</option><option value="inactive" <?=($row['status']??'')==='inactive'?'selected':''?>>متوقف</option></select></label>
+<?php }; ?>
+<section class="module-stack host-code-page">
+<details class="form-section"><summary>البحث بكود</summary><form method="post" class="admin-form" data-submit-once><?php $hidden('find_code');?><label class="form-field"><span>كود الدخول الكامل</span><input name="access_code" maxlength="64" dir="ltr" required autocomplete="off"></label><button type="submit" class="button button--secondary">عرض الهوست المرتبط</button></form></details>
+<details class="form-section"><summary>اضافة هوست</summary><form class="admin-form admin-form--grid" method="post" data-submit-once><?php $hidden('create_host');$fields();?><button class="button button--primary" type="submit">اضافة هوست</button></form></details>
+<form method="get" class="filter-bar" data-saved-filters="<?=cc_e($moduleKey)?>" data-saved-filter-fields="status,reseller"><label class="form-field"><span>بحث بالاسم او الرابط</span><input name="q" maxlength="100" value="<?=cc_e($pageData['search'])?>"></label><label class="form-field"><span>الحالة</span><select name="status"><option value="">الكل</option><option value="active" <?=$pageData['status']==='active'?'selected':''?>>نشط</option><option value="inactive" <?=$pageData['status']==='inactive'?'selected':''?>>متوقف</option></select></label><button type="submit" class="button button--secondary">بحث</button><a class="button button--quiet" href="<?=cc_e(cc_url($moduleKey))?>">مسح الفلاتر</a><?php cc_saved_filter_controls($moduleKey,['status','reseller']);?></form>
+<p class="muted-copy"><?=(int)$pageData['total']?> هوست</p>
+<?php if($rows===[]): cc_empty_state('لا توجد هوستات','اضف هوستا ثم افتحه لانشاء كود او اكثر');endif;?>
+<div class="host-records">
+<?php foreach($rows as $row):$id=(int)$row['host_id'];$valid=hulk_normalize_host((string)$row['host'])!==null;?>
+<details class="host-record" <?=($pageData['reseller']??null)===$id?'open':''?>><summary class="host-row"><strong><?=cc_e($row['name'])?></strong><bdi dir="ltr"><?=cc_e($row['host']!==''?$row['host']:'رابط غير محدد')?></bdi><span><?php cc_status_badge($row['status']==='active'?'نشط':'متوقف',$row['status']==='active'?'success':'neutral');?></span><span><?=(int)$row['codes_total']?> كود</span><span>التفاصيل</span></summary>
+<div class="host-details">
+<p class="muted-copy"><?php $usage=$pageData['presence_usage'][$id]??null; ?><?=is_array($usage)?((int)$usage['online'].' جلسة حديثة ، '.(int)$usage['sessions'].' جلسة مسجلة ، اخر استخدام '.cc_e(cc_presence_display_time($usage['last_used_at']))):'احصاءات الاستخدام غير متاحة'?></p>
+<?php if(!$valid):?><p role="status" class="muted-copy">رابط الهوست يحتاج الى تصحيح قبل استخدام الاكواد</p><?php endif;?>
+<details class="inline-editor"><summary>تعديل الهوست</summary><form class="admin-form admin-form--grid" method="post" data-submit-once><?php $hidden('update_host',['host_id'=>$id]);$fields($row);?><button type="submit" class="button button--primary">حفظ التغييرات</button></form></details>
+<form class="admin-form admin-form--grid" method="post" data-submit-once><?php $hidden('create_code',['host_id'=>$id]);?><label class="form-field"><span>كود مخصص <small>اتركه فارغا لتوليد كود</small></span><input name="access_code" maxlength="64" dir="ltr" autocomplete="off"></label><button type="submit" class="button button--primary" <?=$valid?'':'disabled'?>>انشاء كود</button><p class="muted-copy">الكود يحدد الهوست فقط ، اضافة كود تحفظ جميع الاكواد السابقة</p></form>
+<?php foreach($row['codes'] as $code):$cid=(int)$code['code_id'];$active=$code['status']==='active';?>
+<div class="code-row"><?php $codeUsage=$row['code_usage'][$cid]??null;?><small><?=is_array($codeUsage)?((int)$codeUsage['online'].' جلسة حديثة ، اخر استخدام '.cc_e(cc_presence_display_time($codeUsage['last_used_at']))):'احصاءات الكود غير متاحة'?></small><details class="code-reveal"><summary>اظهار الكود #<?=$cid?></summary><code class="credential-value" dir="ltr"><?=cc_e($code['access_code'])?></code></details><?php cc_status_badge($active?($row['status']==='active'?'نشط':'نشط ، الهوست متوقف'):'متوقف',$active?'success':'neutral');?><form method="post" data-submit-once><?php $hidden('set_code_status',['code_id'=>$cid]);?><input type="hidden" name="status" value="<?=$active?'inactive':'active'?>"><button type="submit" class="button button--secondary"><?=$active?'ايقاف الكود':'تفعيل الكود'?></button></form>
+<details class="inline-editor"><summary>تعديل الكود</summary><form method="post" data-confirm="سيتم استبدال هذا الكود فقط ، هل تريد المتابعة؟"><?php $hidden('set_code',['code_id'=>$cid]);?><label class="form-field"><span>القيمة الجديدة</span><input name="access_code" maxlength="64" dir="ltr" required autocomplete="off"></label><button type="submit" class="button button--secondary">حفظ التغييرات</button></form><form method="post" data-confirm="سيتم استبدال هذا الكود فقط بكود مولد ، هل تريد المتابعة؟"><?php $hidden('rotate_code',['code_id'=>$cid]);?><button type="submit" class="button button--quiet">توليد بديل لهذا الكود</button></form></details>
+</div><?php endforeach;?>
+<?php if($row['code_pages']>1):?>
+<nav class="pagination code-pagination" aria-label="صفحات اكواد الهوست">
+<span>صفحة الاكواد <?=(int)$row['code_page']?> من <?=(int)$row['code_pages']?> ، <?=(int)$row['codes_total']?> كود</span>
+<?php foreach([-1,1] as $codeDelta):$codeTarget=$row['code_page']+$codeDelta;if($codeTarget<1||$codeTarget>$row['code_pages'])continue;?>
+<a class="button button--quiet" href="<?=cc_e(cc_url('hosts').'?' .http_build_query(['q'=>$pageData['search'],'status'=>$pageData['status'],'page'=>$pageData['page'],'reseller'=>$id,'code_page'=>$codeTarget]))?>"><?=$codeDelta<0?'الاكواد السابقة':'الاكواد التالية'?></a>
+<?php endforeach;?></nav>
+<?php endif;?>
+<p class="muted-copy">ايقاف الكود يمنع استخدامه للدخول مجددا ، ولا ينهي بثا قائما</p>
+<a href="<?=cc_e(cc_context_url('sessions',['reseller'=>$id]))?>">سجل الجلسات</a>
+</div></details><?php endforeach;?></div>
+<nav class="pagination" aria-label="صفحات الهوستات"><span>الصفحة <?=(int)$pageData['page']?> من <?=(int)$pageData['pages']?></span><?php foreach([-1,1] as $delta):$target=$pageData['page']+$delta;if($target<1||$target>$pageData['pages'])continue;?><a class="button button--quiet" href="?<?=cc_e(http_build_query(['q'=>$pageData['search'],'status'=>$pageData['status'],'reseller'=>$pageData['reseller'],'page'=>$target]))?>"><?=$delta<0?'السابقة':'التالية'?></a><?php endforeach;?></nav>
 </section>

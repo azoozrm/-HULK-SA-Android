@@ -248,7 +248,7 @@ function cc_presence_reseller_map(PDO $resellerDb, array $resellerIds): array
         $parameters[$key] = $id;
     }
     $statement = $resellerDb->prepare(
-        'SELECT reseller_id, reseller_name, status, host, access_code FROM resellers '
+        'SELECT reseller_id, reseller_name, status, host FROM ' . hulk_host_relation() . ' host_records '
         . 'WHERE reseller_id IN (' . implode(', ', $placeholders) . ') '
         . 'ORDER BY reseller_id ASC LIMIT ' . count($ids)
     );
@@ -298,6 +298,24 @@ function cc_presence_online_now_page(
     $cutoff = cc_presence_datetime($now->modify('-' . $ttlSeconds . ' seconds'));
     $page = cc_presence_page_number($query['page'] ?? 1);
     $perPage = CC_PRESENCE_SUBSCRIPTION_PAGE_SIZE;
+    $search = mb_substr(trim(is_string($query['q'] ?? null) ? $query['q'] : ''), 0, 100);
+    $platform = is_string($query['platform'] ?? null) && in_array($query['platform'], ['TV', 'PHONE', 'TABLET', 'OTHER'], true) ? $query['platform'] : '';
+    $filterSql = '';
+    $filterParameters = ['online_cutoff' => $cutoff];
+    if ($search !== '') {
+        $filterSql .= " AND (s.iptv_username LIKE :filter_user ESCAPE '=' OR s.host_snapshot LIKE :filter_host ESCAPE '=')";
+        $filterParameters['filter_user'] = cc_presence_like_pattern($search);
+        $filterParameters['filter_host'] = cc_presence_like_pattern($search);
+    }
+    // A device filter selects whole subscription groups; all their devices remain counted
+    if ($platform !== '') {
+        $filterSql .= ' AND EXISTS (SELECT 1 FROM cc_app_sessions f WHERE f.reseller_id = s.reseller_id '
+            . 'AND HEX(f.host_snapshot) = HEX(s.host_snapshot) AND HEX(f.iptv_username) = HEX(s.iptv_username) '
+            . 'AND f.ended_at IS NULL AND f.last_seen_at >= :filter_cutoff AND f.platform_class = :filter_platform)';
+        $filterParameters['filter_cutoff'] = $cutoff;
+        $filterParameters['filter_platform'] = $platform;
+    }
+
 
     $summary = $controlDb->prepare(
         'SELECT COUNT(*) AS connections, '
@@ -306,9 +324,9 @@ function cc_presence_online_now_page(
         . "SUM(CASE WHEN s.platform_class IN ('PHONE', 'TABLET') THEN 1 ELSE 0 END) AS phone_connections, "
         . "SUM(CASE WHEN s.platform_class = 'OTHER' THEN 1 ELSE 0 END) AS other_connections "
         . 'FROM cc_app_sessions s JOIN cc_devices d ON d.id = s.device_id '
-        . 'WHERE s.ended_at IS NULL AND s.last_seen_at >= :online_cutoff'
+        . 'WHERE s.ended_at IS NULL AND s.last_seen_at >= :online_cutoff' . $filterSql
     );
-    $summary->execute(['online_cutoff' => $cutoff]);
+    $summary->execute($filterParameters);
     $summaryRow = $summary->fetch();
     if (!is_array($summaryRow)) {
         throw new RuntimeException('Presence Online Now summary is unavailable.');
@@ -317,22 +335,22 @@ function cc_presence_online_now_page(
     $subscriptionCount = $controlDb->prepare(
         'SELECT COUNT(*) FROM ('
         . 'SELECT 1 FROM cc_app_sessions s JOIN cc_devices d ON d.id = s.device_id '
-        . 'WHERE s.ended_at IS NULL AND s.last_seen_at >= :online_cutoff '
+        . 'WHERE s.ended_at IS NULL AND s.last_seen_at >= :online_cutoff ' . $filterSql . ' '
         . 'GROUP BY s.reseller_id, HEX(s.host_snapshot), HEX(s.iptv_username)'
         . ') AS grouped_subscriptions'
     );
-    $subscriptionCount->execute(['online_cutoff' => $cutoff]);
+    $subscriptionCount->execute($filterParameters);
     $totalSubscriptions = (int) $subscriptionCount->fetchColumn();
 
     $multiDeviceCount = $controlDb->prepare(
         'SELECT COUNT(*) FROM ('
         . 'SELECT 1 FROM cc_app_sessions s JOIN cc_devices d ON d.id = s.device_id '
-        . 'WHERE s.ended_at IS NULL AND s.last_seen_at >= :online_cutoff '
+        . 'WHERE s.ended_at IS NULL AND s.last_seen_at >= :online_cutoff ' . $filterSql . ' '
         . 'GROUP BY s.reseller_id, HEX(s.host_snapshot), HEX(s.iptv_username) '
         . 'HAVING COUNT(DISTINCT d.installation_id) > 1'
         . ') AS multi_device_subscriptions'
     );
-    $multiDeviceCount->execute(['online_cutoff' => $cutoff]);
+    $multiDeviceCount->execute($filterParameters);
     $multiDeviceSubscriptions = (int) $multiDeviceCount->fetchColumn();
 
     $pages = max(1, (int) ceil($totalSubscriptions / $perPage));
@@ -350,12 +368,12 @@ function cc_presence_online_now_page(
         . 'MIN(s.started_at) AS first_started_at, '
         . 'MAX(s.last_seen_at) AS last_activity_at '
         . 'FROM cc_app_sessions s JOIN cc_devices d ON d.id = s.device_id '
-        . 'WHERE s.ended_at IS NULL AND s.last_seen_at >= :online_cutoff '
+        . 'WHERE s.ended_at IS NULL AND s.last_seen_at >= :online_cutoff ' . $filterSql . ' '
         . 'GROUP BY s.reseller_id, HEX(s.host_snapshot), HEX(s.iptv_username) '
         . 'ORDER BY last_activity_at DESC, s.reseller_id DESC, HEX(s.host_snapshot) ASC, HEX(s.iptv_username) ASC '
         . 'LIMIT ' . $perPage . ' OFFSET ' . $offset
     );
-    $groupStatement->execute(['online_cutoff' => $cutoff]);
+    $groupStatement->execute($filterParameters);
     $groupRows = $groupStatement->fetchAll();
 
     $groupedRows = [];
@@ -495,6 +513,7 @@ function cc_presence_online_now_page(
 
     return [
         'groups' => $groups,
+        'filters' => ['q' => $search, 'platform' => $platform],
         'total_subscriptions' => $totalSubscriptions,
         'total_connections' => (int) ($summaryRow['connections'] ?? 0),
         'total_devices' => (int) ($summaryRow['devices'] ?? 0),
@@ -570,71 +589,30 @@ function cc_presence_device_page(
     ];
 }
 
-function cc_presence_usage_for_resellers(
-    PDO $controlDb,
-    array $resellerRows,
-    string $module,
-    DateTimeImmutable $now,
-    int $ttlSeconds
-): array {
-    if (!in_array($module, ['resellers', 'access-codes', 'hosts'], true)) {
-        throw new InvalidArgumentException('Unknown reseller usage module.');
-    }
-    $rowsById = [];
-    foreach (array_slice($resellerRows, 0, CC_PRESENCE_PAGE_SIZE) as $row) {
-        $id = (int) ($row['reseller_id'] ?? 0);
-        if ($id > 0) {
-            $rowsById[$id] = $row;
+function cc_presence_usage_for_resellers(PDO $controlDb, array $resellerRows, string $module, DateTimeImmutable $now, int $ttlSeconds): array
+{
+    if (!in_array($module, ['hosts','access-codes','resellers'], true)) throw new InvalidArgumentException('Unknown usage module');
+    $usage=[];
+    foreach (array_slice($resellerRows,0,CC_PRESENCE_PAGE_SIZE) as $row) {
+        $id=(int)($row['reseller_id']??0); if($id<1)continue;
+        $key=$module==='access-codes'?(int)($row['code_id']??$id):$id;
+        $where='reseller_id = :id';
+        $params=['id'=>$id,'cutoff'=>cc_presence_datetime($now->modify('-'.$ttlSeconds.' seconds'))];
+        if($module==='access-codes') {
+            $code=(string)($row['access_code']??'');
+            $where.=' AND (HEX(access_code_snapshot) = :code_hex'; $params['code_hex']=strtoupper(bin2hex($code));
+            if(hulk_legacy_canonical_code($code)===$code) {
+                $where.=" OR UPPER(REPLACE(REPLACE(access_code_snapshot, '-', ''), ' ', '')) = :legacy_code";
+                $params['legacy_code']=str_replace('-','',$code);
+            }
+            $where.=')';
+        } elseif($module==='hosts') {
+            $where.=' AND HEX(host_snapshot) = :host_hex';
+            $params['host_hex']=strtoupper(bin2hex(hulk_normalize_host((string)($row['host']??''))??'__INVALID_HOST__'));
         }
-    }
-    if ($rowsById === []) {
-        return [];
-    }
-    $conditions = [];
-    $parameters = [
-        'usage_cutoff' => cc_presence_datetime(cc_presence_now($now)->modify('-' . $ttlSeconds . ' seconds')),
-    ];
-    foreach ($rowsById as $id => $row) {
-        $suffix = (string) $id;
-        $condition = 'reseller_id = :usage_reseller_' . $suffix;
-        $parameters['usage_reseller_' . $suffix] = $id;
-        if ($module === 'access-codes') {
-            $currentCode = hulk_normalize_access_code((string) ($row['access_code'] ?? ''));
-            $condition .= " AND UPPER(REPLACE(REPLACE(access_code_snapshot, '-', ''), ' ', '')) "
-                . '= :usage_value_' . $suffix;
-            $parameters['usage_value_' . $suffix] = $currentCode === null
-                ? '__INVALID_CURRENT_CODE__'
-                : str_replace('-', '', $currentCode);
-        } elseif ($module === 'hosts') {
-            $condition .= ' AND host_snapshot = :usage_value_' . $suffix;
-            $parameters['usage_value_' . $suffix] = hulk_normalize_host((string) ($row['host'] ?? ''))
-                ?? '__INVALID_CURRENT_HOST__';
-        }
-        $conditions[] = '(' . $condition . ')';
-    }
-    $statement = $controlDb->prepare(
-        'SELECT reseller_id, COUNT(*) AS session_count, '
-        . 'SUM(CASE WHEN ended_at IS NULL AND last_seen_at >= :usage_cutoff THEN 1 ELSE 0 END) AS online_count, '
-        . 'MAX(last_seen_at) AS last_used_at FROM cc_app_sessions WHERE '
-        . implode(' OR ', $conditions) . ' GROUP BY reseller_id ORDER BY reseller_id ASC'
-    );
-    $statement->execute($parameters);
-    $usage = [];
-    foreach ($rowsById as $id => $_row) {
-        $usage[$id] = ['sessions' => 0, 'online' => 0, 'last_used_at' => null];
-    }
-    while (($row = $statement->fetch()) !== false) {
-        if (!is_array($row)) {
-            continue;
-        }
-        $id = (int) $row['reseller_id'];
-        if (isset($usage[$id])) {
-            $usage[$id] = [
-                'sessions' => (int) $row['session_count'],
-                'online' => (int) $row['online_count'],
-                'last_used_at' => $row['last_used_at'] === null ? null : (string) $row['last_used_at'],
-            ];
-        }
+        $q=$controlDb->prepare('SELECT COUNT(*) AS sessions, SUM(CASE WHEN ended_at IS NULL AND last_seen_at >= :cutoff THEN 1 ELSE 0 END) AS online, MAX(last_seen_at) AS last_used_at FROM cc_app_sessions WHERE '.$where);
+        $q->execute($params); $result=$q->fetch();
+        $usage[$key]=['sessions'=>(int)($result['sessions']??0),'online'=>(int)($result['online']??0),'last_used_at'=>$result['last_used_at']??null];
     }
     return $usage;
 }
