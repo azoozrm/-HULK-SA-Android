@@ -20,6 +20,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.absolutePadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -2251,7 +2252,7 @@ private data class HomeMessageCardData(
  * duplicate renewal banner. Cards reuse the accepted renewal-banner anatomy and focus treatment.
  */
 @Composable
-private fun HomeMessagesZone(
+internal fun HomeMessagesZone(
     renewal: RenewalBannerContent?,
     announcement: OperationsAnnouncement?,
     optionalUpdate: OperationsUpdateConfig?,
@@ -2352,8 +2353,14 @@ private fun HomeMessagesZone(
         }
     }
     if (isTv) {
+        // Physical-left TV overscan inset. absolutePadding is direction-independent, so the RTL
+        // row keeps its existing right edge while the cards gain the adaptive left safe inset.
+        val tvLeftInset = LocalAdaptiveUi.current.tvPremiumPolicy.horizontalSafeInsetDp.dp
         Row(
-            modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+            modifier = Modifier
+                .fillMaxWidth()
+                .absolutePadding(left = tvLeftInset)
+                .height(IntrinsicSize.Min),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items.forEachIndexed { index, item ->
@@ -2725,7 +2732,7 @@ private fun downloadHomeStateGlyph(status: OfflineStatus): ImageVector = when (s
 }
 
 @Composable
-private fun HomeSectionPadding(isTv: Boolean, content: @Composable () -> Unit) {
+internal fun HomeSectionPadding(isTv: Boolean, content: @Composable () -> Unit) {
     Box(Modifier.fillMaxWidth().padding(horizontal = if (isTv) TV_PAGE_GUTTER else 0.dp)) { content() }
 }
 
