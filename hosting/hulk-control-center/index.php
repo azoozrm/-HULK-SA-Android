@@ -58,10 +58,22 @@ if ($resolved['valid'] && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     if (in_array($moduleKey, ['hosts','access-codes'], true)) {
         $hostFocus = filter_var($_SESSION['cc_host_focus'] ?? $_GET['reseller'] ?? null, FILTER_VALIDATE_INT);
         $codePage = filter_var($_SESSION['cc_code_page'] ?? $_GET['code_page'] ?? 1, FILTER_VALIDATE_INT);
+        $hostContext = [];
         if (is_int($hostFocus) && $hostFocus > 0) {
-            $redirect = cc_url('hosts') . '?' . http_build_query([
+            $hostContext = [
                 'reseller'=>$hostFocus, 'code_page'=>is_int($codePage) && $codePage > 0 ? $codePage : 1,
-            ]);
+            ];
+        }
+        $addForm = $_GET['add'] ?? null;
+        if (!isset($_SESSION['cc_host_focus']) && in_array($addForm, ['host', 'code'], true)) {
+            $hostPage = filter_var($_GET['page'] ?? null, FILTER_VALIDATE_INT);
+            if ($hostContext === [] && is_int($hostPage) && $hostPage > 1) {
+                $hostContext['page'] = $hostPage;
+            }
+            $hostContext['add'] = $addForm;
+        }
+        if ($hostContext !== []) {
+            $redirect = cc_url('hosts') . '?' . http_build_query($hostContext);
         }
         unset($_SESSION['cc_host_focus'],$_SESSION['cc_code_page']);
     }
@@ -86,6 +98,60 @@ if ($resolved['valid']) {
         } elseif ($moduleKey === 'live-users') {
             $pageData = cc_presence_online_now_data($_GET);
             $pageData = cc_subscriber_attach_session_state($pageData);
+            $targetToken = isset($_GET['subscription']) && is_string($_GET['subscription'])
+                ? strtolower(trim($_GET['subscription']))
+                : '';
+            $targetReseller = isset($_GET['reseller']) ? (int) $_GET['reseller'] : 0;
+            if ($targetToken !== '' && $targetReseller > 0) {
+                $targetGroup = cc_presence_online_now_target_group(
+                    cc_db('control'),
+                    cc_presence_config(),
+                    $targetReseller,
+                    $targetToken
+                );
+                if ($targetGroup === null) {
+                    $pageData['target_missing'] = true;
+                } else {
+                    $targetKey = cc_presence_subscription_key(
+                        (int) $targetGroup['reseller_id'],
+                        (string) $targetGroup['host_snapshot'],
+                        (string) $targetGroup['iptv_username']
+                    );
+                    $pageData['target_token'] = $targetToken;
+                    $pageData['target_key'] = $targetKey;
+                    $remaining = [];
+                    foreach (($pageData['groups'] ?? []) as $group) {
+                        if (!is_array($group)) {
+                            continue;
+                        }
+                        $key = cc_presence_subscription_key(
+                            (int) ($group['reseller_id'] ?? 0),
+                            (string) ($group['host_snapshot'] ?? ''),
+                            (string) ($group['iptv_username'] ?? '')
+                        );
+                        if ($key === $targetKey) {
+                            continue;
+                        }
+                        $remaining[] = $group;
+                    }
+                    if (count($remaining) === count($pageData['groups'] ?? [])) {
+                        $remaining = array_slice($remaining, 0, max(0, CC_PRESENCE_SUBSCRIPTION_PAGE_SIZE - 1));
+                    }
+                    array_unshift($remaining, $targetGroup);
+                    $pageData['groups'] = $remaining;
+                    try {
+                        $targetResellers = cc_presence_reseller_map(cc_db('reseller'), [$targetReseller]);
+                        if (is_array($targetResellers)) {
+                            $pageData['resellers'] = array_replace(
+                                is_array($pageData['resellers'] ?? null) ? $pageData['resellers'] : [],
+                                $targetResellers
+                            );
+                        }
+                    } catch (Throwable $exception) {
+                        // Keep the numeric identity visible if the reseller name is unavailable.
+                    }
+                }
+            }
         } elseif (in_array($moduleKey, ['sessions', 'devices'], true)) {
             $pageData = cc_presence_page_data($moduleKey, $_GET);
         } elseif (in_array($moduleKey, ['host-health', 'diagnostics', 'analytics'], true)) {

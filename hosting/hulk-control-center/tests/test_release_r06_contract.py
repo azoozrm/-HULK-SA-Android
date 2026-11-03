@@ -117,8 +117,8 @@ class ReleaseR06ContractTests(unittest.TestCase):
         self.assertNotIn("fonts.googleapis.com", css)
         layout = self.read(ROOT / "views" / "layout.php")
         login = self.read(ROOT / "login.php")
-        self.assertIn("app.css?v=371.1", layout)
-        self.assertIn("app.js?v=371.1", layout)
+        self.assertIn("app.css?v=371.2", layout)
+        self.assertIn("app.js?v=371.2", layout)
         self.assertIn("app.css?v=371.1", login)
 
     def test_adapter_binds_exact_staged_release_and_safe_view_facts(self) -> None:
@@ -165,7 +165,7 @@ class ReleaseR06ContractTests(unittest.TestCase):
 
     def test_route_description_matches_the_approved_supporting_line(self) -> None:
         routes = self.read(ROOT / "lib" / "routes.php")
-        self.assertIn("'description' => 'ارفع النسخة، راجعها، وانشرها على رابطك الثابت'", routes)
+        self.assertIn("'description' => 'راجع الإصدار وسياسة التحديث من مكان واحد'", routes)
 
     def test_release_mutations_remain_post_only_and_csrf_protected(self) -> None:
         index = self.read(ROOT / "index.php")

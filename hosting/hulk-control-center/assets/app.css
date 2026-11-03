@@ -1113,6 +1113,9 @@ input[type="file"] { overflow-wrap: anywhere; }
 .subscription-list { display: grid; grid-template-columns: minmax(0,1fr); gap: 0; }
 .subscription-row-details { padding: 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
 .subscription-expanded { padding: 14px; display: grid; gap: 12px; }
+.subscription-access { min-width: 0; padding: 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-1); }
+.subscription-access h3 { margin: 0 0 10px; font-size: .9rem; color: var(--gold); }
+.subscription-access .subscription-credentials dt { font-size: .76rem; }
 .host-records { display:grid; gap:0; }
 .host-record { border-bottom: 1px solid var(--line); padding: 10px 0; min-width:0; }
 .host-details { display:grid; gap:14px; padding:14px 0; }

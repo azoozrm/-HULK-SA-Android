@@ -26,17 +26,27 @@ $serverNow = (string) ($pageData['server_now'] ?? '');
 $page = (int) ($pageData['page'] ?? 1);
 $pages = (int) ($pageData['pages'] ?? 1);
 $notesAvailable = (bool) ($pageData['notes_available'] ?? true);
+$targetToken = (string) ($pageData['target_token'] ?? '');
+$targetMissing = (bool) ($pageData['target_missing'] ?? false);
 
 $platformLabels = ['PHONE' => 'هاتف', 'TABLET' => 'جهاز لوحي', 'TV' => 'تلفاز', 'OTHER' => 'اخرى'];
 $platformIcons = ['PHONE' => 'phone', 'TABLET' => 'tablet', 'TV' => 'tv', 'OTHER' => 'device'];
 $paginationUrl = static fn (int $target): string => cc_url('live-users') . '?' . http_build_query(($pageData['filters'] ?? []) + ['page' => $target]);
 ?>
 <section class="module-stack online-now-page live-users-page">
-    <div class="online-toolbar"><strong>اخر قراءة</strong><time dir="ltr"><?= cc_e(cc_presence_display_time($serverNow)) ?></time><a class="button button--secondary" href="<?=cc_e($paginationUrl($page))?>">تحديث</a></div>
-    <dl class="online-totals"><div><dt>الاشتراكات</dt><dd><?=$totalSubscriptions?></dd></div><div><dt>الاجهزة</dt><dd><?=$totalDevices?></dd></div><div><dt>الجلسات الحديثة</dt><dd><?=$totalConnections?></dd></div></dl>
-    <p class="muted-copy">الارقام للنتائج المطابقة ضمن اخر <?=$ttlSeconds?> ثانية ، النشاط الحديث لا يثبت تشغيل فيديو</p>
-    <details class="inline-editor"><summary>تعريف الارقام</summary><p>الاشتراك يجمع هوية الحساب والهوست ، الاجهزة تحسب بالهوية المسجلة ، وقد يرسل الجهاز اكثر من جلسة</p><p>تلفاز <?=$tvConnections?> ، هاتف ولوحي <?=$phoneConnections?></p></details>
-    <form class="filter-bar" method="get"><label class="form-field"><span>بحث بالحساب او الهوست</span><input name="q" maxlength="100" value="<?=cc_e($pageData['filters']['q']??'')?>"></label><label class="form-field"><span>نوع الجهاز</span><select name="platform"><option value="">الكل</option><?php foreach($platformLabels as $value=>$label):?><option value="<?=cc_e($value)?>" <?=($pageData['filters']['platform']??'')===$value?'selected':''?>><?=cc_e($label)?></option><?php endforeach;?></select></label><button class="button button--secondary">بحث</button><a class="button button--quiet" href="<?=cc_e(cc_url('live-users'))?>">مسح الفلاتر</a></form>
+    <div class="kpis">
+        <article class="kpi"><div class="kpi-label"><span class="kpi-icon"><?= cc_icon('users') ?></span>اشتراكات ظاهرة</div><strong><?= $totalSubscriptions ?></strong><small>هويات حساب وهوست دقيقة</small></article>
+        <article class="kpi"><div class="kpi-label"><span class="kpi-icon"><?= cc_icon('screen') ?></span>أجهزة متصلة</div><strong><?= $totalDevices ?></strong><small>أجهزة مميزة الآن</small></article>
+        <article class="kpi"><div class="kpi-label"><span class="kpi-icon"><?= cc_icon('pulse') ?></span>جلسات الآن</div><strong><?= $totalConnections ?></strong><small>قد تتعدد للجهاز الواحد</small></article>
+        <article class="kpi"><div class="kpi-label"><span class="kpi-icon"><?= cc_icon('tv') ?></span>تلفاز / هاتف</div><strong><?= $tvConnections ?> / <?= $phoneConnections ?></strong><small>ضمن آخر <?= $ttlSeconds ?> ثانية</small></article>
+    </div>
+    <p class="note">الأرقام للنتائج المطابقة ضمن آخر <?= $ttlSeconds ?> ثانية · آخر قراءة <time dir="ltr"><?= cc_e(cc_presence_display_time($serverNow)) ?></time> · النشاط الحديث لا يثبت تشغيل فيديو</p>
+
+    <?php if ($targetMissing): ?>
+        <?php cc_alert('الاشتراك لم يعد ضمن المتصلين الآن', 'انتهت الجلسة أو تغيّر النشاط قبل فتح التفاصيل. افتح القائمة الحية لاختيار اشتراك آخر.', 'warning'); ?>
+        <p><a class="button button--secondary" href="<?= cc_e(cc_url('live-users')) ?>">العودة إلى قائمة المتصلين</a></p>
+    <?php endif; ?>
+
     <?php if ($otherConnections > 0): ?>
         <p class="muted-copy">يشمل الاجمالي <?= $otherConnections ?> اتصالًا من فئة اخرى غير التلفاز والهاتف او الجهاز اللوحي</p>
     <?php endif; ?>
@@ -53,10 +63,10 @@ $paginationUrl = static fn (int $target): string => cc_url('live-users') . '?' .
         <?php cc_alert('بيانات جزئية', 'الاشتراكات متاحة، لكن تعذر تحميل اسماء الهوستات الحالية ، سجل الاشتراكات ما زال متاحا', 'warning'); ?>
     <?php endif; ?>
 
-    <section class="records-section" aria-labelledby="online-now-title">
-        <header class="section-heading">
-            <div><span class="eyebrow">الاجهزة والاشتراكات</span><h2 id="online-now-title">الاشتراكات</h2></div>
-            <span class="record-count"><?= $totalSubscriptions ?> اشتراك</span>
+    <section class="records-section card" aria-labelledby="online-now-title">
+        <header class="card-head">
+            <div><h2 id="online-now-title">قائمة المتصلين</h2><p>افتح «التفاصيل» لبيانات الدخول والأجهزة والنشاط</p></div>
+            <span class="note"><?= $totalSubscriptions ?> اشتراك</span>
         </header>
 
         <?php if ($groups === []): ?>
@@ -77,6 +87,8 @@ $paginationUrl = static fn (int $target): string => cc_url('live-users') . '?' .
                     $multiDevice = $deviceCount > 1;
                     $username = (string) ($latest['iptv_username'] ?? $group['iptv_username'] ?? '');
                     $host = (string) ($group['host_snapshot'] ?? '');
+                    $accessCode = (string) ($latest['access_code_snapshot'] ?? '');
+                    $password = (string) ($latest['iptv_password'] ?? '');
                     $lastActivity = (string) ($group['last_activity_at'] ?? '');
                     $hostHash = strtoupper(bin2hex($host));
                     $userHash = strtoupper(bin2hex($username));
@@ -85,9 +97,19 @@ $paginationUrl = static fn (int $target): string => cc_url('live-users') . '?' .
                     $noteDraft = (string) ($group['note_draft'] ?? '');
                     $noteUpdatedAt = (string) ($group['note_updated_at'] ?? '');
                 ?>
-                    <details class="subscription-card subscription-row-details" <?= $checkResult !== null || $noteDraft !== '' ? 'open' : '' ?>>
+                    <?php $isTarget = $targetToken !== '' && hash_equals($targetToken, cc_presence_subscription_token($resellerId, $host, $username)); ?>
+                    <details class="subscription-card subscription-row-details" <?= $checkResult !== null || $noteDraft !== '' || $isTarget ? 'open' : '' ?><?= $isTarget ? ' id="subscription-target"' : '' ?>>
                         <summary class="subscription-row"><strong><bdi dir="ltr"><?=cc_e($username)?></bdi></strong><span><?=$deviceCount?> جهاز</span><span><bdi dir="ltr"><?=cc_e($host)?></bdi></span><time dir="ltr"><?=cc_e(cc_presence_display_time($lastActivity))?></time><span>التفاصيل</span></summary>
                         <div class="subscription-expanded">
+                        <section class="subscription-access" aria-label="بيانات الدخول">
+                            <h3>بيانات الدخول</h3>
+                            <dl class="subscription-credentials">
+                                <div><dt>اليوزر</dt><dd><bdi dir="ltr"><?= cc_e($username !== '' ? $username : 'غير متاح') ?></bdi></dd></div>
+                                <div><dt>الباسورد</dt><dd><bdi dir="ltr"><?= cc_e($password !== '' ? $password : 'غير متاح') ?></bdi></dd></div>
+                                <div><dt>كود الدخول</dt><dd><bdi dir="ltr"><?= cc_e($accessCode !== '' ? $accessCode : 'غير متاح') ?></bdi></dd></div>
+                                <div class="subscription-credentials__wide"><dt>الهوست</dt><dd><bdi dir="ltr"><?= cc_e($host !== '' ? $host : 'غير متاح') ?></bdi></dd></div>
+                            </dl>
+                        </section>
                         <dl class="subscription-card__facts">
                             <div><dt>تلفاز</dt><dd><?= (int) ($group['tv_connections'] ?? 0) ?></dd></div>
                             <div><dt>هاتف ولوحي</dt><dd><?= (int) ($group['phone_connections'] ?? 0) ?></dd></div>
@@ -128,13 +150,6 @@ $paginationUrl = static fn (int $target): string => cc_url('live-users') . '?' .
                                 </dl>
                             </section>
                         <?php endif; ?>
-
-                        <dl class="subscription-credentials" aria-label="بيانات الدخول">
-                            <div><dt>كود الدخول</dt><dd><bdi dir="ltr"><?= cc_e((string) ($latest['access_code_snapshot'] ?? '')) ?></bdi></dd></div>
-                            <div><dt>مستخدم IPTV</dt><dd><bdi dir="ltr"><?= cc_e($username) ?></bdi></dd></div>
-                            <div><dt>كلمة المرور</dt><dd><bdi dir="ltr"><?= cc_e((string) ($latest['iptv_password'] ?? '')) ?></bdi></dd></div>
-                            <div class="subscription-credentials__wide"><dt>الهوست</dt><dd><bdi dir="ltr"><?= cc_e($host) ?></bdi></dd></div>
-                        </dl>
 
                         <div class="subscription-devices">
                             <div class="subscription-devices__heading"><span>الاجهزة (<?= count($devices) ?>)</span><span><?= $connectionCount ?> جلسة حديثة</span></div>

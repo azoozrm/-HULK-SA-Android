@@ -10,7 +10,7 @@ class ControlCenterShellContractTests(unittest.TestCase):
     def read(self, name: str) -> str:
         return (ROOT / name).read_text(encoding="utf-8")
 
-    def test_primary_navigation_has_exactly_the_six_owner_destinations(self) -> None:
+    def test_primary_navigation_has_exactly_the_seven_owner_destinations(self) -> None:
         routes = self.read("lib/routes.php")
         block = re.search(
             r"function cc_main_navigation\(\): array\s*\{(.*?)\n\}", routes, re.S
@@ -19,10 +19,10 @@ class ControlCenterShellContractTests(unittest.TestCase):
         keys = re.findall(r"'([a-z-]+)' => \[", block.group(1))
         self.assertEqual(
             keys,
-            ["dashboard", "hosts", "live-users", "announcements", "releases", "service"],
-            "the main shell must expose exactly the six owner destinations",
+            ["dashboard", "live-users", "hosts", "sessions", "announcements", "releases", "service"],
+            "the main shell must expose exactly the seven owner destinations",
         )
-        for label in ("الرئيسية", "الهوستات والاكواد", "العملاء والاجهزة", "الرسائل", "تحديث التطبيق", "اعدادات التطبيق"):
+        for label in ("نظرة عامة", "المتصلون الآن", "الهوستات والأكواد", "السجلات", "الرسائل", "تحديث التطبيق", "التحكم بالتطبيق"):
             self.assertIn(label, block.group(1))
 
     def test_default_route_and_active_tab_families_are_stable(self) -> None:
@@ -44,16 +44,16 @@ class ControlCenterShellContractTests(unittest.TestCase):
         layout = self.read("views/layout.php")
         self.assertIn("function cc_context_navigation", routes)
         self.assertIn("cc_context_navigation($activeKey)", layout)
-        self.assertIn("cc_subnav(", layout)
+        self.assertIn("context-nav", layout)
         self.assertNotIn('data-settings-menu', layout)
         for key in ("dashboard", "analytics", "diagnostics", "audit", "hosts", "access-codes", "host-health", "live-users", "sessions", "devices", "service", "features", "growth", "settings"):
             self.assertIn(f"'{key}'", routes)
-        self.assertIn('data-primary-navigation', layout)
-        self.assertIn('<summary>', layout)
+        self.assertIn('class="sidebar"', layout)
+        self.assertIn('bottom-nav', layout)
 
     def test_host_context_has_one_combined_management_destination(self) -> None:
         routes = self.read("lib/routes.php")
-        context = re.search(r"'hosts' => \[\s*'hosts' => 'الهوستات والاكواد', 'host-health' => 'حالة الهوستات',\s*\]", routes)
+        context = re.search(r"'hosts' => \[\s*'hosts' => 'الهوستات والأكواد', 'host-health' => 'حالة الهوستات',\s*\]", routes)
         self.assertIsNotNone(context)
         bootstrap = self.read("bootstrap.php")
         self.assertIn("['access-codes','resellers']", bootstrap)
@@ -119,8 +119,8 @@ class ControlCenterShellContractTests(unittest.TestCase):
         self.assertNotIn("credential-disclosure", view)
         self.assertNotIn("ضمن الموزع والهوست", view)
         self.assertNotIn("لا يتم الدمج بالاسم وحده", view)
-        self.assertIn("online-toolbar", view)
-        self.assertIn("online-totals", view)
+        self.assertIn("kpis", view)
+        self.assertIn("قائمة المتصلين", view)
         self.assertIn("subscription-row-details", view)
         self.assertIn("subscription-row", view)
         self.assertIn("check_subscriber", view)
@@ -144,24 +144,23 @@ class ControlCenterShellContractTests(unittest.TestCase):
         self.assertIn("application/vnd.android.package-archive", policies)
         self.assertIn("ops_apk_descriptor_errors", policies)
 
-    def test_shell_uses_rtl_dark_gold_and_narrow_layout_rules(self) -> None:
+    def test_shell_uses_the_light_reference_layout(self) -> None:
         layout = self.read("views/layout.php")
-        css = self.read("assets/app.css")
+        css = self.read("assets/reference.css")
         self.assertIn('<html lang="ar" dir="rtl">', layout)
-        for token in ("--bg: #030402", "--surface-1: #111108", "--gold: #e6c352", "--text: #fff9eb"):
+        for token in ("--paper:#f7f6f2", "--dark:#181a16", "--gold:#e6c352", "--ink:#20231e"):
             self.assertIn(token, css)
-        self.assertIn(".primary-navigation > summary", css)
-        self.assertIn(".primary-tabs__track", css)
-        self.assertIn(".primary-tab", css)
-        self.assertIn("overflow-x: auto", css)
-        self.assertIn(".online-totals", css)
-        self.assertIn(".subscription-credentials", css)
-        self.assertIn("@media (max-width: 700px)", css)
-        self.assertIn("@media (max-width: 440px)", css)
-        self.assertNotIn(".sidebar", layout)
-        self.assertNotIn("data-sidebar", layout)
-        self.assertNotIn("nav-backdrop", layout)
-        self.assertNotIn("data-nav-open", layout)
+        self.assertIn(".shell", css)
+        self.assertIn(".sidebar", css)
+        self.assertIn(".nav-btn", css)
+        self.assertIn(".bottom-nav", css)
+        self.assertIn(".kpis", css)
+        self.assertIn(".login-preview", css)
+        self.assertIn("@media(max-width:760px)", css)
+        self.assertIn('class="sidebar"', layout)
+        self.assertIn("bottom-nav", layout)
+        self.assertIn("context-nav", layout)
+        self.assertNotIn("primary-tabs__track", layout)
 
     def test_subscriber_check_and_notes_identity_contract(self) -> None:
         identity = self.read("lib/subscriber-identity.php")

@@ -41,6 +41,7 @@ class PhaseSixContractTests(unittest.TestCase):
         view = self.read(ROOT / "views" / "dashboard.php")
         for metric in ("online_now", "sessions_today", "active_devices"):
             self.assertIn(metric, source)
+        for metric in ("online_subscriptions", "online_devices", "online_now", "sessions_today"):
             self.assertIn(metric, view)
         self.assertIn("غير متاح لعدم وجود هوية حساب ثابتة", view)
         self.assertIn("Presence", view)

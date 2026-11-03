@@ -9,7 +9,7 @@ function cc_code_nav_test(bool $condition,string $message):void {
     if(!$condition){fwrite(STDERR,"FAIL: {$message}\n");exit(1);}
 }
 cc_code_nav_test(array_keys(cc_context_navigation('hosts'))===['hosts','host-health'],'owner sees one combined hosts/codes destination plus health');
-cc_code_nav_test(cc_context_navigation('hosts')['hosts']==='الهوستات والاكواد','combined destination has a clear owner label');
+cc_code_nav_test(cc_context_navigation('hosts')['hosts']==='الهوستات والأكواد','combined destination has a clear owner label');
 foreach(['hosts','access-codes','resellers'] as $key) {
     cc_code_nav_test(cc_resolve_module($key)['key']==='hosts','legacy owner URL resolves canonical combined management');
     cc_code_nav_test(cc_resolve_module($key)['valid'],'legacy owner URL remains valid');

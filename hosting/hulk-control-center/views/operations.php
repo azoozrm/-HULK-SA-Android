@@ -76,6 +76,13 @@ $csrf = cc_csrf_token();
     ?>
     <section class="release-management-page" aria-label="تحديث التطبيق">
         <div class="r6-top-grid">
+            <section class="r6-panel r6-upload-intro" aria-labelledby="r6-upload-intro-title">
+                <div class="r6-upload-symbol"><?= cc_icon('upload') ?></div>
+                <h2 id="r6-upload-intro-title">تحديث جديد</h2>
+                <p>ارفع ملف APK وراجعه قبل النشر.</p>
+                <a class="r6-btn r6-btn--primary" href="<?= cc_e(cc_url('releases') . '?upload=1#release-upload-panel') ?>" data-r6-open-upload><?= cc_icon('plus') ?>رفع تحديث جديد</a>
+            </section>
+
             <section class="r6-panel r6-link-panel" aria-labelledby="r6-link-title">
                 <div class="r6-section-heading">
                     <h2 id="r6-link-title" class="r6-label"><?= cc_icon('link', 'r6-gold-icon') ?>رابط التحميل الرسمي</h2>
@@ -110,12 +117,6 @@ $csrf = cc_csrf_token();
                 <?php endif; ?>
             </section>
 
-            <section class="r6-panel r6-upload-intro" aria-labelledby="r6-upload-intro-title">
-                <div class="r6-upload-symbol"><?= cc_icon('upload') ?></div>
-                <h2 id="r6-upload-intro-title">جاهز للتحديث القادم؟</h2>
-                <p><?= $activeRelease === null ? 'ارفع اول ملف APK ثم راجعه وانشره على الرابط الثابت' : 'ارفع ملف APK جديدًا. النسخة الحالية تبقى منشورة حتى تؤكد النشر' ?></p>
-                <a class="r6-btn r6-btn--primary" href="<?= cc_e(cc_url('releases') . '?upload=1#release-upload-panel') ?>" data-r6-open-upload><?= cc_icon('plus') ?>رفع تحديث جديد</a>
-            </section>
         </div>
 
         <section class="r6-panel r6-editor" id="release-upload-panel" aria-labelledby="r6-upload-title" <?= $uploadOpen ? '' : 'hidden' ?>>

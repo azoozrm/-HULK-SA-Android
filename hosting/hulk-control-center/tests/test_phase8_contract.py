@@ -69,7 +69,7 @@ class PhaseEightContractTests(unittest.TestCase):
         self.assertIn("'direction' => 'ltr'", domain)
         self.assertIn("تفاصيل تقنية", view)
         self.assertIn("audit-event__title", view)
-        self.assertIn("cc_phase8_audit_action_presentation", dashboard)
+        self.assertIn("cc_phase8_audit_action_presentation", view)
         self.assertNotRegex(view, re.compile(r"<code[^>]*>\s*<\?=\s*cc_e\(\$row\['action'\]\)", re.IGNORECASE))
 
     def test_navigation_and_settings_use_owner_oriented_arabic(self) -> None:
@@ -77,10 +77,10 @@ class PhaseEightContractTests(unittest.TestCase):
         layout = self.read(ROOT / "views" / "layout.php")
         settings = self.read(ROOT / "views" / "settings.php")
         css = self.read(ROOT / "assets" / "app.css")
-        for label in ("الرئيسية", "الهوستات والاكواد", "العملاء والاجهزة", "الرسائل", "تحديث التطبيق", "اعدادات التطبيق"):
+        for label in ("نظرة عامة", "المتصلون الآن", "الهوستات والأكواد", "السجلات", "الرسائل", "تحديث التطبيق", "التحكم بالتطبيق"):
             self.assertIn(label, routes)
         self.assertIn("cc_context_navigation($activeKey)", layout)
-        self.assertIn("data-primary-navigation", layout)
+        self.assertIn("context-nav", layout)
         for forbidden_heading in ("Presence", "Diagnostics", "Host Health", "Single-owner boundaries"):
             self.assertNotIn(f'>{forbidden_heading}<', settings)
         self.assertIn("اعدادات مركز التحكم", settings)
@@ -98,7 +98,7 @@ class PhaseEightContractTests(unittest.TestCase):
         self.assertIn("!$hostHealthCoverageComplete", dashboard)
         self.assertIn("اخر فحص لم يشمل كل الهوستات المستهدفة", dashboard)
         self.assertNotIn("array_slice($attentionItems, 0, 5)", dashboard)
-        self.assertIn("cc_phase8_audit_action_presentation", dashboard)
+        self.assertIn("cc_phase8_audit_action_presentation", audit)
         self.assertIn("technical_id", audit)
         self.assertIn("audit-event__technical", audit)
         self.assertIn("غير مصنف", audit)
@@ -112,11 +112,13 @@ class PhaseEightContractTests(unittest.TestCase):
         self.assertIn("localStorage", source)
         self.assertIn("MAX_SAVED_FILTERS = 10", source)
         self.assertIn("safeSavedValue", source)
-        for view in (sessions, devices, resellers, audit):
+        for view in (sessions, devices, audit):
             self.assertIn("data-saved-filters", view)
+        self.assertNotIn("data-saved-filters", resellers)
+        self.assertNotIn("filter-bar", resellers)
         allowed_declarations = "\n".join(
             declaration
-            for view in (sessions, devices, resellers, audit)
+            for view in (sessions, devices, audit)
             for declaration in re.findall(r'data-saved-filter-fields="([^"]*)"', view)
         )
         for forbidden in ("q", "host", "access_code", "iptv_username", "iptv_password", "session_id"):
@@ -137,22 +139,16 @@ class PhaseEightContractTests(unittest.TestCase):
         self.assertIn("@media (max-width: 700px)", css)
         self.assertIn("app.css?v=371.1", login)
 
-    def test_primary_tabs_stay_accessible_without_page_clipping(self) -> None:
-        css = self.read(ROOT / "assets" / "app.css")
+    def test_reference_shell_keeps_navigation_accessible_without_page_clipping(self) -> None:
+        css = self.read(ROOT / "assets" / "reference.css")
         layout = self.read(ROOT / "views" / "layout.php")
-        track = re.search(r"\.primary-tabs__track\s*\{([^}]*)\}", css)
-        self.assertIsNotNone(track)
-        declarations = {
-            name.strip(): value.strip()
-            for name, value in re.findall(r"([\w-]+)\s*:\s*([^;]+);", track.group(1))
-        }
-        self.assertEqual(declarations.get("overflow-x"), "auto")
-        self.assertIn("white-space: nowrap", css)
-        self.assertIn(".primary-tab.is-active", css)
-        self.assertIn("data-primary-tabs", layout)
-        self.assertNotIn("data-sidebar", layout)
-        self.assertNotIn("nav-backdrop", layout)
-        self.assertNotIn("data-nav-open", layout)
+        self.assertIn("grid-template-columns:216px minmax(0,1fr)", css)
+        self.assertIn(".bottom-nav", css)
+        self.assertIn("@media(max-width:760px)", css)
+        self.assertIn('class="sidebar"', layout)
+        self.assertIn("bottom-nav", layout)
+        self.assertIn("context-nav", layout)
+        self.assertNotIn("primary-tabs__track", layout)
 
     def test_login_layout_fits_a_390px_viewport(self) -> None:
         css = self.read(ROOT / "assets" / "app.css")
@@ -262,7 +258,10 @@ class PhaseEightContractTests(unittest.TestCase):
         self.assertIn("service-message-preview", operations)
         self.assertIn("feature-state-group", operations)
         self.assertIn("growth-channel", operations)
-        self.assertIn("host-row", resellers)
+        self.assertIn("host-record-heading", resellers)
+        self.assertIn("إضافة هوست", resellers)
+        self.assertIn("إضافة كود", resellers)
+        self.assertIn("host-code-table", resellers)
         self.assertIn("<details", resellers)
         self.assertIn("code-row", resellers)
         self.assertIn("code-reveal", resellers)
