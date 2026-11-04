@@ -88,6 +88,63 @@ class UserLibraryHistoryDispatchTest {
     }
 
     @Test
+    fun `explicit track preferences persist promptly and reject a stale account`() = runBlocking {
+        val fixture = Fixture()
+        val audioPreference = """{"identity":"ar-main","language":"ar","ordinal":1}"""
+        fixture.library.recordStartForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request("movie:1", id = 1).copy(originalLanguage = "ar"),
+            historyAttempt = fixture.library.currentHistoryAttempt(),
+        )
+
+        val updated = fixture.library.updateTrackPreferenceForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request("movie:1", id = 1),
+            audioPreference = audioPreference,
+            subtitlePreference = "off",
+            historyAttempt = fixture.library.currentHistoryAttempt(),
+        )
+        assertNotNull(updated)
+        assertEquals(audioPreference, updated!!.first { it.key == "movie:1" }.savedAudioPreference)
+        assertEquals("off", updated.first { it.key == "movie:1" }.savedSubtitlePreference)
+
+        val restarted = readHistoryDocument(fixture.userPreferences.restart(), HISTORY_KEY)
+        assertEquals(
+            audioPreference,
+            restarted.entries.first { it.key == "movie:1" }.savedAudioPreference,
+        )
+        assertEquals("off", restarted.entries.first { it.key == "movie:1" }.savedSubtitlePreference)
+        assertEquals("ar", restarted.entries.first { it.key == "movie:1" }.originalLanguage)
+
+        val laterStart = fixture.library.recordStartForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request("movie:1", id = 1),
+            historyAttempt = fixture.library.currentHistoryAttempt(),
+        )
+        assertEquals(
+            audioPreference,
+            laterStart!!.first { it.key == "movie:1" }.savedAudioPreference,
+        )
+        assertEquals("off", laterStart.first { it.key == "movie:1" }.savedSubtitlePreference)
+
+        val rejected = fixture.library.updateTrackPreferenceForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = "account-2",
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request("movie:1", id = 1),
+            audioPreference = audioPreference,
+            historyAttempt = fixture.library.currentHistoryAttempt(),
+        )
+        assertNull(rejected)
+    }
+
+    @Test
     fun `record start caller can progress while recovery IO is blocked and stale account cannot write`() = runBlocking {
         val fixture = Fixture()
         fixture.seedPartialHistory(position = 4_000L)

@@ -460,6 +460,24 @@ internal fun playerProgressProfileOwnerAllowed(
     activeProfileId: String,
 ): Boolean = expectedProfileId == activeProfileId
 
+/**
+ * Attach the saved audio/subtitle preference from this exact profile-scoped content entry. The
+ * helper is shared by details playback, Continue Watching, TV resume and download replay.
+ */
+internal fun PlaybackRequest.withSavedTrackPreferences(
+    history: List<HistoryEntry>,
+): PlaybackRequest {
+    val entry = history.firstOrNull {
+        it.key == historyKey &&
+            it.streamId == streamId &&
+            it.streamKind.equals(streamKind, ignoreCase = true)
+    } ?: return this
+    return copy(
+        savedAudioPreference = entry.savedAudioPreference,
+        savedSubtitlePreference = entry.savedSubtitlePreference,
+    )
+}
+
 class HulkViewModel internal constructor(
     application: Application,
     private val repository: HulkRepository,
@@ -1214,9 +1232,9 @@ class HulkViewModel internal constructor(
         val movie = state.selectedItem?.takeIf { it.type == ContentType.MOVIE } ?: return
         playerReturnScreen = HulkScreen.MOVIE_DETAILS
         startPlayback(
-            repository.playback(activeSession, movie).copy(
-                originalLanguage = state.selectedDetails?.originalLanguage,
-            ),
+            repository.playback(activeSession, movie)
+                .withSavedTrackPreferences(state.history)
+                .copy(originalLanguage = state.selectedDetails?.originalLanguage),
         )
     }
 
@@ -1226,9 +1244,9 @@ class HulkViewModel internal constructor(
         val series = state.selectedSeries ?: return
         playerReturnScreen = HulkScreen.SERIES
         startPlayback(
-            repository.playback(activeSession, series, episode).copy(
-                originalLanguage = state.selectedDetails?.originalLanguage,
-            ),
+            repository.playback(activeSession, series, episode)
+                .withSavedTrackPreferences(state.history)
+                .copy(originalLanguage = state.selectedDetails?.originalLanguage),
         )
     }
 
@@ -1242,9 +1260,9 @@ class HulkViewModel internal constructor(
         val next = ordered.getOrNull(currentIndex + 1) ?: return false
         playerReturnScreen = HulkScreen.SERIES
         startPlayback(
-            repository.playback(activeSession, series, next).copy(
-                originalLanguage = state.selectedDetails?.originalLanguage,
-            ),
+            repository.playback(activeSession, series, next)
+                .withSavedTrackPreferences(state.history)
+                .copy(originalLanguage = state.selectedDetails?.originalLanguage),
         )
         return true
     }
@@ -1317,7 +1335,7 @@ class HulkViewModel internal constructor(
                 streamKind = item.streamKind,
                 streamId = item.streamId,
                 extension = item.extension,
-            ),
+            ).withSavedTrackPreferences(mutableState.value.history),
         )
     }
 
@@ -1587,6 +1605,59 @@ class HulkViewModel internal constructor(
         ) {
             tvLastSyncedPositions[request.historyKey] = positionMs
             scheduleTvPlatformSync(immediate = positionMs.toDouble() / durationMs.coerceAtLeast(1L) >= .92)
+        }
+    }
+
+    fun saveAudioTrackPreference(request: PlaybackRequest, preference: String) {
+        saveTrackPreference(request = request, audioPreference = preference)
+    }
+
+    fun saveSubtitleTrackPreference(request: PlaybackRequest, preference: String) {
+        saveTrackPreference(request = request, subtitlePreference = preference)
+    }
+
+    private fun saveTrackPreference(
+        request: PlaybackRequest,
+        audioPreference: String? = null,
+        subtitlePreference: String? = null,
+    ) {
+        val owner = AuthenticatedSessionRegistry.currentOwner() ?: return
+        if (owner.session !== session) return
+        val expectedProfileId = profileStore.activeProfileId()
+        val historyAttempt = userLibrary.currentHistoryAttempt()
+        viewModelScope.launch {
+            val updated = userLibrary.updateTrackPreferenceForOwner(
+                expectedOwner = owner,
+                expectedAccountId = owner.accountId,
+                expectedProfileId = expectedProfileId,
+                request = request,
+                audioPreference = audioPreference,
+                subtitlePreference = subtitlePreference,
+                historyAttempt = historyAttempt,
+            ) ?: return@launch
+            if (
+                !AuthenticatedSessionRegistry.isCurrent(owner) ||
+                session !== owner.session ||
+                profileStore.activeProfileId() != expectedProfileId
+            ) return@launch
+            val saved = updated.firstOrNull {
+                it.key == request.historyKey && it.streamId == request.streamId
+            } ?: return@launch
+            mutableState.update { state ->
+                val existing = state.history.firstOrNull { it.key == saved.key }
+                // Keep newer progress fields from the in-memory entry and update only the durable
+                // preference. If the entry is not in memory yet, add the persisted one so a rapid
+                // exit/reopen still resolves the choice.
+                val merged = existing?.copy(
+                    savedAudioPreference = saved.savedAudioPreference,
+                    savedSubtitlePreference = saved.savedSubtitlePreference,
+                ) ?: saved
+                state.copy(
+                    history = (listOf(merged) + state.history.filterNot {
+                        it.key == merged.key
+                    }).sortedByDescending(HistoryEntry::updatedAtEpochMs),
+                )
+            }
         }
     }
 
@@ -3663,9 +3734,9 @@ class HulkViewModel internal constructor(
                 if (resolution.resumePlayback) {
                     playerReturnScreen = HulkScreen.MAIN
                     startPlayback(
-                        repository.playback(activeSession, resolution.item).copy(
-                            originalLanguage = resolution.originalLanguage,
-                        ),
+                        repository.playback(activeSession, resolution.item)
+                            .withSavedTrackPreferences(mutableState.value.history)
+                            .copy(originalLanguage = resolution.originalLanguage),
                     )
                 } else {
                     open(resolution.item)
@@ -3762,10 +3833,12 @@ class HulkViewModel internal constructor(
                 pendingTvDeepLink = null
                 playerReturnScreen = HulkScreen.MAIN
                 startPlayback(
-                    repository.playback(activeSession, resolution.series, episode).copy(
-                        originalLanguage = bundle.details.originalLanguage
-                            ?: resolution.originalLanguage,
-                    ),
+                    repository.playback(activeSession, resolution.series, episode)
+                        .withSavedTrackPreferences(mutableState.value.history)
+                        .copy(
+                            originalLanguage = bundle.details.originalLanguage
+                                ?: resolution.originalLanguage,
+                        ),
                 )
             } catch (cancelled: CancellationException) {
                 throw cancelled

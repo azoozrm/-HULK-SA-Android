@@ -648,6 +648,8 @@ fun HulkApp(
                                 onActionNotice = postActionNotice,
                                 onBack = viewModel::back,
                                 onProgress = viewModel::onPlaybackProgress,
+                                onAudioPreferenceChanged = viewModel::saveAudioTrackPreference,
+                                onSubtitlePreferenceChanged = viewModel::saveSubtitleTrackPreference,
                                 previousEpisode = episodeNeighbors.previous,
                                 nextEpisode = episodeNeighbors.next,
                                 onPlayPreviousEpisode = episodeNeighbors.previous?.let { episode ->

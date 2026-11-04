@@ -73,7 +73,9 @@ class HistoryIntegrityTest {
         val raw = JSONArray()
             .put(
                 historyJson(key = "movie:1", title = "Arabic original", id = 1, position = 5_000L)
-                    .put("originalLanguage", "ar"),
+                    .put("originalLanguage", "ar")
+                    .put("savedAudioPreference", """{"identity":"ar-main","language":"ar","ordinal":1}""")
+                    .put("savedSubtitlePreference", "off"),
             )
             .put(historyJson(key = "movie:2", title = "Legacy entry", id = 2, position = 6_000L))
             .toString()
@@ -82,12 +84,25 @@ class HistoryIntegrityTest {
         val read = readHistoryDocument(preferences, HISTORY_KEY)
         assertEquals(HistoryDocumentState.VALID, read.state)
         assertEquals("ar", read.entries.first { it.key == "movie:1" }.originalLanguage)
+        assertEquals(
+            """{"identity":"ar-main","language":"ar","ordinal":1}""",
+            read.entries.first { it.key == "movie:1" }.savedAudioPreference,
+        )
+        assertEquals("off", read.entries.first { it.key == "movie:1" }.savedSubtitlePreference)
         assertNull(read.entries.first { it.key == "movie:2" }.originalLanguage)
+        assertNull(read.entries.first { it.key == "movie:2" }.savedAudioPreference)
+        assertNull(read.entries.first { it.key == "movie:2" }.savedSubtitlePreference)
 
         assertTrue(writeHistoryDocument(preferences, HISTORY_KEY, read.entries, read))
         val restarted = readHistoryDocument(preferences.restart(), HISTORY_KEY)
         assertEquals("ar", restarted.entries.first { it.key == "movie:1" }.originalLanguage)
+        assertEquals(
+            """{"identity":"ar-main","language":"ar","ordinal":1}""",
+            restarted.entries.first { it.key == "movie:1" }.savedAudioPreference,
+        )
+        assertEquals("off", restarted.entries.first { it.key == "movie:1" }.savedSubtitlePreference)
         assertNull(restarted.entries.first { it.key == "movie:2" }.originalLanguage)
+        assertNull(restarted.entries.first { it.key == "movie:2" }.savedAudioPreference)
     }
 
     @Test

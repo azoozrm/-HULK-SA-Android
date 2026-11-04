@@ -82,6 +82,10 @@ data class PlaybackRequest(
      * A dub or the currently selected audio language never populates this value.
      */
     val originalLanguage: String? = null,
+    /** Opaque, versioned saved audio choice for this exact content/account/profile. */
+    val savedAudioPreference: String? = null,
+    /** Opaque, versioned saved subtitle choice or explicit OFF for this exact content. */
+    val savedSubtitlePreference: String? = null,
 )
 
 data class HistoryEntry(
@@ -102,6 +106,10 @@ data class HistoryEntry(
     val parentContentId: Int? = null,
     /** Explicit provider original language retained across history/Continue Watching entry paths. */
     val originalLanguage: String? = null,
+    /** Opaque, versioned saved audio choice for this exact content/account/profile. */
+    val savedAudioPreference: String? = null,
+    /** Opaque, versioned saved subtitle choice or explicit OFF for this exact content. */
+    val savedSubtitlePreference: String? = null,
 )
 
 enum class OfflineStatus {

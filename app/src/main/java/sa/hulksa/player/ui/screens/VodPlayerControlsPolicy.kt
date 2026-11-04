@@ -1,6 +1,7 @@
 package sa.hulksa.player.ui.screens
 
 import androidx.media3.common.C
+import org.json.JSONObject
 import sa.hulksa.player.model.ContentItem
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -16,14 +17,16 @@ internal enum class VodMorePanelView {
     MENU,
     SPEED,
     PICTURE_SIZE,
-    AUDIO_SUBTITLES,
+    AUDIO_TRACKS,
+    SUBTITLE_TRACKS,
 }
 
 internal enum class VodMoreRow {
     GO_TO_TIME,
     SPEED,
     PICTURE_SIZE,
-    AUDIO_SUBTITLES,
+    AUDIO_TRACKS,
+    SUBTITLE_TRACKS,
     RESTART,
     LOCK,
 }
@@ -45,7 +48,8 @@ internal fun vodMorePanelOriginRow(currentView: VodMorePanelView): VodMoreRow? =
         VodMorePanelView.MENU -> null
         VodMorePanelView.SPEED -> VodMoreRow.SPEED
         VodMorePanelView.PICTURE_SIZE -> VodMoreRow.PICTURE_SIZE
-        VodMorePanelView.AUDIO_SUBTITLES -> VodMoreRow.AUDIO_SUBTITLES
+        VodMorePanelView.AUDIO_TRACKS -> VodMoreRow.AUDIO_TRACKS
+        VodMorePanelView.SUBTITLE_TRACKS -> VodMoreRow.SUBTITLE_TRACKS
     }
 
 /** Numbered fallback for a real track without language/label metadata. Never invent a language. */
@@ -84,6 +88,50 @@ internal sealed interface VodSubtitleChoice {
     data class Track(val choice: VodTrackChoice) : VodSubtitleChoice
 }
 
+private const val VOD_SUBTITLE_OFF_PREFERENCE = "off"
+private const val VOD_SUBTITLE_TRACK_PREFIX = "track:"
+
+internal fun encodeVodTrackChoice(choice: VodTrackChoice): String = JSONObject()
+    .put("identity", choice.identityKey)
+    .apply { choice.languageCode?.let { put("language", it) } }
+    .put("ordinal", choice.languageOrdinal)
+    .toString()
+
+internal fun decodeVodTrackChoice(raw: String?): VodTrackChoice? {
+    val value = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    return runCatching {
+        val json = JSONObject(value)
+        val identity = json.optString("identity").trim()
+        if (identity.isBlank()) return@runCatching null
+        val language = if (json.has("language") && !json.isNull("language")) {
+            json.optString("language").trim().takeIf { it.isNotBlank() }
+        } else {
+            null
+        }
+        VodTrackChoice(
+            identityKey = identity,
+            languageCode = language,
+            languageOrdinal = json.optInt("ordinal", 0).coerceAtLeast(0),
+        )
+    }.getOrNull()
+}
+
+internal fun encodeVodSubtitleChoice(choice: VodSubtitleChoice): String = when (choice) {
+    VodSubtitleChoice.Off -> VOD_SUBTITLE_OFF_PREFERENCE
+    is VodSubtitleChoice.Track -> VOD_SUBTITLE_TRACK_PREFIX + encodeVodTrackChoice(choice.choice)
+}
+
+internal fun decodeVodSubtitleChoice(raw: String?): VodSubtitleChoice? {
+    val value = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    return when {
+        value == VOD_SUBTITLE_OFF_PREFERENCE -> VodSubtitleChoice.Off
+        value.startsWith(VOD_SUBTITLE_TRACK_PREFIX) -> decodeVodTrackChoice(
+            value.removePrefix(VOD_SUBTITLE_TRACK_PREFIX),
+        )?.let(VodSubtitleChoice::Track)
+        else -> null
+    }
+}
+
 internal fun VodTrackDescriptor.toChoice(): VodTrackChoice = VodTrackChoice(
     identityKey = identityKey,
     languageCode = languageCode,
@@ -116,16 +164,20 @@ internal fun vodResolveTrackChoiceIndex(
 }
 
 /**
- * Automatic subtitle behavior for the current item. Arabic-original content stays OFF; foreign and
- * unknown content selects real Arabic subtitles only. Missing Arabic subtitles means OFF.
+ * Automatic subtitle behavior follows the effective selected audio, not the title's branding or
+ * original-language guess. Arabic audio means OFF; every other/unknown audio selects real Arabic
+ * subtitles only. Missing Arabic subtitles means OFF.
  */
 internal fun vodAutoSubtitleTrack(
-    originalLanguage: VodOriginalLanguage,
+    selectedAudioLanguage: String?,
     tracks: List<VodTrackDescriptor>,
-): VodTrackDescriptor? = if (originalLanguage == VodOriginalLanguage.ARABIC) {
-    null
-} else {
-    tracks.firstOrNull { it.languageCode == VOD_ARABIC_LANGUAGE_CODE }
+): VodTrackDescriptor? {
+    val effectiveAudio = vodLanguageCode(selectedAudioLanguage)
+    return if (effectiveAudio == VOD_ARABIC_LANGUAGE_CODE) {
+        null
+    } else {
+        tracks.firstOrNull { it.languageCode == VOD_ARABIC_LANGUAGE_CODE }
+    }
 }
 
 internal const val VOD_ARABIC_LANGUAGE_CODE = "ar"
@@ -137,7 +189,7 @@ internal sealed interface VodTrackSelectionAction {
 }
 
 internal data class VodTrackSelectionPlan(
-    val preferredAudioLanguage: String,
+    val preferredAudioLanguage: String?,
     val preferredTextLanguage: String,
     val audio: VodTrackSelectionAction,
     val subtitles: VodTrackSelectionAction,
@@ -147,30 +199,37 @@ internal data class VodTrackSelectionPlan(
  * Deterministic selection plan for one VOD playback item. The player only applies this plan to the
  * current Media3 groups; no group/track index survives a title or episode change.
  *
- * Automatic audio is Arabic when present, otherwise the current playable fallback is kept.
- * Foreign/unknown subtitles select Arabic only; Arabic-original and missing Arabic subtitles are OFF.
- * Manual audio/subtitle/OFF intent wins. A recovery-selected audio track is left alone.
+ * Automatic audio never overrides the source player's declared/default/main track. Manual audio
+ * wins; a recovery-selected working track is left alone. Automatic subtitles follow the effective
+ * selected audio: Arabic audio -> OFF; other/unknown audio -> Arabic subtitles only.
  */
 internal fun vodTrackSelectionPlan(
     audioTracks: List<VodTrackDescriptor>,
     subtitleTracks: List<VodTrackDescriptor>,
-    originalLanguage: VodOriginalLanguage,
+    selectedAudioLanguage: String?,
     manualAudio: VodTrackChoice?,
     manualSubtitle: VodSubtitleChoice?,
     audioRecoveryOverrideActive: Boolean,
 ): VodTrackSelectionPlan {
-    val preferredAudio = manualAudio?.languageCode ?: VOD_ARABIC_LANGUAGE_CODE
-    val audioAction = when {
-        manualAudio != null && !audioRecoveryOverrideActive ->
-            vodResolveTrackChoiceIndex(manualAudio, audioTracks)
-                ?.let(VodTrackSelectionAction::Select)
-                ?: VodTrackSelectionAction.KeepCurrent
-        manualAudio == null && !audioRecoveryOverrideActive ->
-            audioTracks.indexOfFirst { it.languageCode == VOD_ARABIC_LANGUAGE_CODE }
-                .takeIf { it >= 0 }
-                ?.let(VodTrackSelectionAction::Select)
-                ?: VodTrackSelectionAction.KeepCurrent
-        else -> VodTrackSelectionAction.KeepCurrent
+    val manualAudioIndex = if (manualAudio != null && !audioRecoveryOverrideActive) {
+        vodResolveTrackChoiceIndex(manualAudio, audioTracks)
+    } else {
+        null
+    }
+    val audioAction = if (manualAudioIndex != null) {
+        VodTrackSelectionAction.Select(manualAudioIndex)
+    } else {
+        VodTrackSelectionAction.KeepCurrent
+    }
+    val preferredAudio = if (manualAudio != null && !audioRecoveryOverrideActive) {
+        manualAudio.languageCode
+    } else {
+        null
+    }
+    val effectiveAudioLanguage = if (manualAudioIndex != null) {
+        audioTracks.getOrNull(manualAudioIndex)?.languageCode ?: selectedAudioLanguage
+    } else {
+        selectedAudioLanguage
     }
 
     val subtitleAction = when (manualSubtitle) {
@@ -180,7 +239,7 @@ internal fun vodTrackSelectionPlan(
             tracks = subtitleTracks,
         )?.let(VodTrackSelectionAction::Select) ?: VodTrackSelectionAction.Off
         null -> {
-            val automatic = vodAutoSubtitleTrack(originalLanguage, subtitleTracks)
+            val automatic = vodAutoSubtitleTrack(effectiveAudioLanguage, subtitleTracks)
             if (automatic == null) {
                 VodTrackSelectionAction.Off
             } else {

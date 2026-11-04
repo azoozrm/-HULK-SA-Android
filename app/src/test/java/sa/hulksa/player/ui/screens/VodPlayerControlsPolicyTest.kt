@@ -150,7 +150,8 @@ class VodPlayerControlsPolicyTest {
     fun morePanelChildReturnsToMenuAndMenuCloses() {
         assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.SPEED))
         assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.PICTURE_SIZE))
-        assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.AUDIO_SUBTITLES))
+        assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.AUDIO_TRACKS))
+        assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.SUBTITLE_TRACKS))
         assertNull(vodMorePanelBack(VodMorePanelView.MENU))
     }
 
@@ -158,7 +159,8 @@ class VodPlayerControlsPolicyTest {
     fun morePanelOriginRowIsDeterministic() {
         assertEquals(VodMoreRow.SPEED, vodMorePanelOriginRow(VodMorePanelView.SPEED))
         assertEquals(VodMoreRow.PICTURE_SIZE, vodMorePanelOriginRow(VodMorePanelView.PICTURE_SIZE))
-        assertEquals(VodMoreRow.AUDIO_SUBTITLES, vodMorePanelOriginRow(VodMorePanelView.AUDIO_SUBTITLES))
+        assertEquals(VodMoreRow.AUDIO_TRACKS, vodMorePanelOriginRow(VodMorePanelView.AUDIO_TRACKS))
+        assertEquals(VodMoreRow.SUBTITLE_TRACKS, vodMorePanelOriginRow(VodMorePanelView.SUBTITLE_TRACKS))
         assertNull(vodMorePanelOriginRow(VodMorePanelView.MENU))
     }
 
@@ -233,19 +235,50 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
-    fun automaticSubtitlesPreferArabicOnlyForForeignOrUnknown() {
-        val arabic = descriptor("ar-track", "ar", 1)
-        val english = descriptor("en-track", "en", 1)
+    fun savedTrackPreferencesRoundTripAndDecodeLegacySafely() {
+        val audio = VodTrackChoice(
+            identityKey = "group|format|ar",
+            languageCode = "ar",
+            languageOrdinal = 2,
+        )
+        assertEquals(audio, decodeVodTrackChoice(encodeVodTrackChoice(audio)))
 
-        assertEquals(arabic, vodAutoSubtitleTrack(VodOriginalLanguage.FOREIGN, listOf(english, arabic)))
-        assertEquals(arabic, vodAutoSubtitleTrack(VodOriginalLanguage.UNKNOWN, listOf(english, arabic)))
-        assertNull(vodAutoSubtitleTrack(VodOriginalLanguage.ARABIC, listOf(arabic)))
-        assertNull(vodAutoSubtitleTrack(VodOriginalLanguage.FOREIGN, listOf(english)))
-        assertNull(vodAutoSubtitleTrack(VodOriginalLanguage.UNKNOWN, emptyList()))
+        val unknown = VodTrackChoice(
+            identityKey = "unknown|track",
+            languageCode = null,
+            languageOrdinal = 1,
+        )
+        assertEquals(unknown, decodeVodTrackChoice(encodeVodTrackChoice(unknown)))
+
+        val subtitleTrack = VodSubtitleChoice.Track(audio)
+        assertEquals(
+            subtitleTrack,
+            decodeVodSubtitleChoice(encodeVodSubtitleChoice(subtitleTrack)),
+        )
+        assertEquals(
+            VodSubtitleChoice.Off,
+            decodeVodSubtitleChoice(encodeVodSubtitleChoice(VodSubtitleChoice.Off)),
+        )
+        assertNull(decodeVodTrackChoice(null))
+        assertNull(decodeVodTrackChoice("not-json"))
+        assertNull(decodeVodSubtitleChoice("legacy-unknown"))
     }
 
     @Test
-    fun selectionPlanPrefersArabicAudioAndSubtitlesForForeignContent() {
+    fun automaticSubtitlesFollowEffectiveAudioLanguage() {
+        val arabic = descriptor("ar-track", "ar", 1)
+        val english = descriptor("en-track", "en", 1)
+
+        assertEquals(arabic, vodAutoSubtitleTrack("en", listOf(english, arabic)))
+        assertEquals(arabic, vodAutoSubtitleTrack("fr", listOf(english, arabic)))
+        assertEquals(arabic, vodAutoSubtitleTrack(null, listOf(english, arabic)))
+        assertNull(vodAutoSubtitleTrack("ar", listOf(arabic)))
+        assertNull(vodAutoSubtitleTrack("en", listOf(english)))
+        assertNull(vodAutoSubtitleTrack(null, emptyList()))
+    }
+
+    @Test
+    fun selectionPlanKeepsSourceAudioAndUsesArabicSubtitlesForEnglishAudio() {
         val plan = vodTrackSelectionPlan(
             audioTracks = listOf(
                 descriptor("en-audio", "en", 1),
@@ -255,15 +288,15 @@ class VodPlayerControlsPolicyTest {
                 descriptor("en-sub", "en", 1),
                 descriptor("ar-sub", "ar", 1),
             ),
-            originalLanguage = VodOriginalLanguage.FOREIGN,
+            selectedAudioLanguage = "en",
             manualAudio = null,
             manualSubtitle = null,
             audioRecoveryOverrideActive = false,
         )
 
-        assertEquals(VodTrackSelectionAction.Select(1), plan.audio)
+        assertEquals(VodTrackSelectionAction.KeepCurrent, plan.audio)
         assertEquals(VodTrackSelectionAction.Select(1), plan.subtitles)
-        assertEquals("ar", plan.preferredAudioLanguage)
+        assertNull(plan.preferredAudioLanguage)
         assertEquals("ar", plan.preferredTextLanguage)
     }
 
@@ -275,7 +308,7 @@ class VodPlayerControlsPolicyTest {
                 descriptor("en-sub", "en", 1),
                 descriptor("ar-sub", "ar", 1),
             ),
-            originalLanguage = VodOriginalLanguage.FOREIGN,
+            selectedAudioLanguage = "en",
             manualAudio = null,
             manualSubtitle = null,
             audioRecoveryOverrideActive = false,
@@ -286,26 +319,11 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
-    fun selectionPlanDisablesSubtitlesForArabicOriginal() {
+    fun selectionPlanDisablesSubtitlesWhenSelectedAudioIsArabic() {
         val plan = vodTrackSelectionPlan(
             audioTracks = listOf(descriptor("ar-audio", "ar", 1)),
             subtitleTracks = listOf(descriptor("ar-sub", "ar", 1)),
-            originalLanguage = VodOriginalLanguage.ARABIC,
-            manualAudio = null,
-            manualSubtitle = null,
-            audioRecoveryOverrideActive = false,
-        )
-
-        assertEquals(VodTrackSelectionAction.Select(0), plan.audio)
-        assertEquals(VodTrackSelectionAction.Off, plan.subtitles)
-    }
-
-    @Test
-    fun selectionPlanUnknownWithoutArabicTracksKeepsAudioAndDisablesSubtitles() {
-        val plan = vodTrackSelectionPlan(
-            audioTracks = listOf(descriptor("en-audio", "en", 1)),
-            subtitleTracks = listOf(descriptor("en-sub", "en", 1)),
-            originalLanguage = VodOriginalLanguage.UNKNOWN,
+            selectedAudioLanguage = "ar",
             manualAudio = null,
             manualSubtitle = null,
             audioRecoveryOverrideActive = false,
@@ -316,12 +334,40 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
+    fun selectionPlanUnknownAudioUsesArabicSubtitlesOnlyWhenPresent() {
+        val withArabic = vodTrackSelectionPlan(
+            audioTracks = listOf(descriptor("und-audio", null, 1)),
+            subtitleTracks = listOf(
+                descriptor("en-sub", "en", 1),
+                descriptor("ar-sub", "ar", 1),
+            ),
+            selectedAudioLanguage = null,
+            manualAudio = null,
+            manualSubtitle = null,
+            audioRecoveryOverrideActive = false,
+        )
+        assertEquals(VodTrackSelectionAction.KeepCurrent, withArabic.audio)
+        assertEquals(VodTrackSelectionAction.Select(1), withArabic.subtitles)
+
+        val withoutArabic = vodTrackSelectionPlan(
+            audioTracks = listOf(descriptor("und-audio", null, 1)),
+            subtitleTracks = listOf(descriptor("en-sub", "en", 1)),
+            selectedAudioLanguage = null,
+            manualAudio = null,
+            manualSubtitle = null,
+            audioRecoveryOverrideActive = false,
+        )
+        assertEquals(VodTrackSelectionAction.KeepCurrent, withoutArabic.audio)
+        assertEquals(VodTrackSelectionAction.Off, withoutArabic.subtitles)
+    }
+
+    @Test
     fun selectionPlanManualAudioAndSubtitleOffOverrideAutomaticChoices() {
         val english = descriptor("en-audio", "en", 1)
         val plan = vodTrackSelectionPlan(
             audioTracks = listOf(descriptor("ar-audio", "ar", 1), english),
             subtitleTracks = listOf(descriptor("ar-sub", "ar", 1)),
-            originalLanguage = VodOriginalLanguage.FOREIGN,
+            selectedAudioLanguage = "ar",
             manualAudio = english.toChoice(),
             manualSubtitle = VodSubtitleChoice.Off,
             audioRecoveryOverrideActive = false,
@@ -330,6 +376,44 @@ class VodPlayerControlsPolicyTest {
         assertEquals(VodTrackSelectionAction.Select(1), plan.audio)
         assertEquals(VodTrackSelectionAction.Off, plan.subtitles)
         assertEquals("en", plan.preferredAudioLanguage)
+    }
+
+    @Test
+    fun selectionPlanManualArabicAudioRecomputesAutomaticSubtitlesOff() {
+        val arabic = descriptor("ar-audio", "ar", 1)
+        val plan = vodTrackSelectionPlan(
+            audioTracks = listOf(descriptor("en-audio", "en", 1), arabic),
+            subtitleTracks = listOf(descriptor("ar-sub", "ar", 1)),
+            selectedAudioLanguage = "en",
+            manualAudio = arabic.toChoice(),
+            manualSubtitle = null,
+            audioRecoveryOverrideActive = false,
+        )
+
+        assertEquals(VodTrackSelectionAction.Select(1), plan.audio)
+        assertEquals(VodTrackSelectionAction.Off, plan.subtitles)
+    }
+
+    @Test
+    fun selectionPlanManualSubtitleTrackSurvivesAudioChange() {
+        val englishSubtitle = descriptor("en-sub", "en", 1)
+        val plan = vodTrackSelectionPlan(
+            audioTracks = listOf(
+                descriptor("en-audio", "en", 1),
+                descriptor("ar-audio", "ar", 1),
+            ),
+            subtitleTracks = listOf(
+                descriptor("ar-sub", "ar", 1),
+                englishSubtitle,
+            ),
+            selectedAudioLanguage = "en",
+            manualAudio = descriptor("ar-audio", "ar", 1).toChoice(),
+            manualSubtitle = VodSubtitleChoice.Track(englishSubtitle.toChoice()),
+            audioRecoveryOverrideActive = false,
+        )
+
+        assertEquals(VodTrackSelectionAction.Select(1), plan.audio)
+        assertEquals(VodTrackSelectionAction.Select(1), plan.subtitles)
     }
 
     @Test
@@ -342,7 +426,7 @@ class VodPlayerControlsPolicyTest {
         val refreshed = vodTrackSelectionPlan(
             audioTracks = refreshedTracks,
             subtitleTracks = emptyList(),
-            originalLanguage = VodOriginalLanguage.FOREIGN,
+            selectedAudioLanguage = "en",
             manualAudio = oldEnglish.toChoice(),
             manualSubtitle = null,
             audioRecoveryOverrideActive = false,
@@ -354,13 +438,13 @@ class VodPlayerControlsPolicyTest {
                 descriptor("next-en", "en", 1),
                 descriptor("next-ar", "ar", 1),
             ),
-            subtitleTracks = emptyList(),
-            originalLanguage = VodOriginalLanguage.FOREIGN,
+            subtitleTracks = listOf(descriptor("next-ar-sub", "ar", 1)),
+            selectedAudioLanguage = "ar",
             manualAudio = null,
             manualSubtitle = null,
             audioRecoveryOverrideActive = false,
         )
-        assertEquals(VodTrackSelectionAction.Select(1), nextItem.audio)
+        assertEquals(VodTrackSelectionAction.KeepCurrent, nextItem.audio)
         assertEquals(VodTrackSelectionAction.Off, nextItem.subtitles)
     }
 
@@ -369,7 +453,7 @@ class VodPlayerControlsPolicyTest {
         val plan = vodTrackSelectionPlan(
             audioTracks = listOf(descriptor("ar-audio", "ar", 1)),
             subtitleTracks = listOf(descriptor("ar-sub", "ar", 1)),
-            originalLanguage = VodOriginalLanguage.FOREIGN,
+            selectedAudioLanguage = "ar",
             manualAudio = descriptor("ar-audio", "ar", 1).toChoice(),
             manualSubtitle = VodSubtitleChoice.Off,
             audioRecoveryOverrideActive = true,
@@ -377,6 +461,7 @@ class VodPlayerControlsPolicyTest {
 
         assertEquals(VodTrackSelectionAction.KeepCurrent, plan.audio)
         assertEquals(VodTrackSelectionAction.Off, plan.subtitles)
+        assertNull(plan.preferredAudioLanguage)
     }
 
     @Test
@@ -384,7 +469,7 @@ class VodPlayerControlsPolicyTest {
         val plan = vodTrackSelectionPlan(
             audioTracks = listOf(descriptor("en-only", "en", 1)),
             subtitleTracks = listOf(descriptor("en-sub", "en", 1)),
-            originalLanguage = VodOriginalLanguage.FOREIGN,
+            selectedAudioLanguage = "en",
             manualAudio = descriptor("gone-audio", "ar", 1).toChoice(),
             manualSubtitle = VodSubtitleChoice.Track(
                 descriptor("gone-sub", "ar", 1).toChoice(),

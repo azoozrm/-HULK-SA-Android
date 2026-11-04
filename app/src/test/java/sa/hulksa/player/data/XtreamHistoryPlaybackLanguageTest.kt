@@ -34,14 +34,30 @@ class XtreamHistoryPlaybackLanguageTest {
         )
         val client = XtreamClient()
 
-        val known = client.playback(session, historyEntry(originalLanguage = "ar"))
+        val audioPreference = """{"identity":"ar-main","language":"ar","ordinal":1}"""
+        val known = client.playback(
+            session,
+            historyEntry(
+                originalLanguage = "ar",
+                savedAudioPreference = audioPreference,
+                savedSubtitlePreference = "off",
+            ),
+        )
         assertEquals("ar", known.originalLanguage)
+        assertEquals(audioPreference, known.savedAudioPreference)
+        assertEquals("off", known.savedSubtitlePreference)
 
         val legacy = client.playback(session, historyEntry(originalLanguage = null))
         assertNull(legacy.originalLanguage)
+        assertNull(legacy.savedAudioPreference)
+        assertNull(legacy.savedSubtitlePreference)
     }
 
-    private fun historyEntry(originalLanguage: String?): HistoryEntry = HistoryEntry(
+    private fun historyEntry(
+        originalLanguage: String?,
+        savedAudioPreference: String? = null,
+        savedSubtitlePreference: String? = null,
+    ): HistoryEntry = HistoryEntry(
         key = "MOVIE:7",
         title = "Synthetic movie",
         posterUrl = null,
@@ -53,5 +69,7 @@ class XtreamHistoryPlaybackLanguageTest {
         durationMs = 120_000L,
         updatedAtEpochMs = 1L,
         originalLanguage = originalLanguage,
+        savedAudioPreference = savedAudioPreference,
+        savedSubtitlePreference = savedSubtitlePreference,
     )
 }

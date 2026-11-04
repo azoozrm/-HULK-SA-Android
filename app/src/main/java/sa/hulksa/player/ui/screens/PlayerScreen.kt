@@ -597,6 +597,8 @@ fun PlayerScreen(
     onLastChannel: (() -> Unit)? = null,
     onBack: () -> Unit,
     onProgress: (request: PlaybackRequest, positionMs: Long, durationMs: Long) -> Unit,
+    onAudioPreferenceChanged: (PlaybackRequest, String) -> Unit = { _, _ -> },
+    onSubtitlePreferenceChanged: (PlaybackRequest, String) -> Unit = { _, _ -> },
     previousEpisodeTitle: String? = null,
     onPlayPreviousEpisode: (() -> Unit)? = null,
     nextEpisodeTitle: String? = null,
@@ -754,8 +756,12 @@ fun PlayerScreen(
     var subtitleTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
     var videoTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
     var subtitlesDisabled by remember(request) { mutableStateOf(false) }
-    var manualAudioChoice by remember(request) { mutableStateOf<VodTrackChoice?>(null) }
-    var manualSubtitleChoice by remember(request) { mutableStateOf<VodSubtitleChoice?>(null) }
+    var manualAudioChoice by remember(request) {
+        mutableStateOf(decodeVodTrackChoice(request.savedAudioPreference))
+    }
+    var manualSubtitleChoice by remember(request) {
+        mutableStateOf(decodeVodSubtitleChoice(request.savedSubtitlePreference))
+    }
     // Recovery may deliberately select another working audio track; the automatic/manual policy
     // must not immediately fight that recovery selection on the next track callback.
     var audioRecoveryOverrideActive by remember(request) { mutableStateOf(false) }
@@ -1273,7 +1279,7 @@ fun PlayerScreen(
         val plan = vodTrackSelectionPlan(
             audioTracks = audioTracks.map { it.toDescriptor() },
             subtitleTracks = subtitleTracks.map { it.toDescriptor() },
-            originalLanguage = originalLanguageClass,
+            selectedAudioLanguage = audioTracks.firstOrNull { it.selected }?.languageCode,
             manualAudio = manualAudioChoice,
             manualSubtitle = manualSubtitleChoice,
             audioRecoveryOverrideActive = audioRecoveryOverrideActive,
@@ -1281,9 +1287,16 @@ fun PlayerScreen(
         val builder = current.buildUpon()
         var changed = false
 
-        if (current.preferredAudioLanguages.firstOrNull() != plan.preferredAudioLanguage) {
-            builder.setPreferredAudioLanguage(plan.preferredAudioLanguage)
-            changed = true
+        when {
+            plan.preferredAudioLanguage == null && current.preferredAudioLanguages.isNotEmpty() -> {
+                builder.setPreferredAudioLanguages()
+                changed = true
+            }
+            plan.preferredAudioLanguage != null &&
+                current.preferredAudioLanguages.firstOrNull() != plan.preferredAudioLanguage -> {
+                builder.setPreferredAudioLanguage(plan.preferredAudioLanguage)
+                changed = true
+            }
         }
         if (current.preferredTextLanguages.firstOrNull() != plan.preferredTextLanguage) {
             builder.setPreferredTextLanguage(plan.preferredTextLanguage)
@@ -1305,6 +1318,9 @@ fun PlayerScreen(
                 }
                 is VodTrackSelectionAction.Select -> {
                     val option = tracks.getOrNull(action.index) ?: return
+                    val currentGroup = player.currentTracks.groups.getOrNull(option.groupIndex)
+                        ?: return
+                    if (!playerTrackOptionMatches(option, type, trackOwnerToken, currentGroup)) return
                     val disabled = current.disabledTrackTypes.contains(type)
                     if (!option.selected || disabled) {
                         builder.setTrackTypeDisabled(type, false)
@@ -1368,13 +1384,19 @@ fun PlayerScreen(
         vodMorePanel = VodMorePanelView.MENU
     }
 
-    fun openVodAudioSubtitles() {
+    fun openVodAudioTracks() {
         refreshVodTrackOptions()
-        vodMoreMenuFocusRow = VodMoreRow.AUDIO_SUBTITLES
-        vodMorePanel = VodMorePanelView.AUDIO_SUBTITLES
+        vodMoreMenuFocusRow = VodMoreRow.AUDIO_TRACKS
+        vodMorePanel = VodMorePanelView.AUDIO_TRACKS
     }
 
-    // Establish Arabic-first defaults before preparation, then re-evaluate whenever the real track
+    fun openVodSubtitleTracks() {
+        refreshVodTrackOptions()
+        vodMoreMenuFocusRow = VodMoreRow.SUBTITLE_TRACKS
+        vodMorePanel = VodMorePanelView.SUBTITLE_TRACKS
+    }
+
+    // Establish source-audio defaults before preparation, then re-evaluate whenever the real track
     // groups or either manual intent changes. Both effects are request-scoped so a new title or
     // episode never inherits another item's overrides or manual choices.
     LaunchedEffect(player, request) {
@@ -1390,9 +1412,9 @@ fun PlayerScreen(
         subtitleTracks = emptyList()
         videoTracks = emptyList()
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-            .setPreferredAudioLanguage(
-                manualAudioChoice?.languageCode ?: VOD_ARABIC_LANGUAGE_CODE,
-            )
+            // Never inherit a forced Arabic audio preference: the source player's declared/main
+            // audio track remains authoritative until the customer makes an explicit choice.
+            .setPreferredAudioLanguages()
             .setPreferredTextLanguage(VOD_ARABIC_LANGUAGE_CODE)
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
             .build()
@@ -2818,7 +2840,8 @@ fun PlayerScreen(
                                         vodMoreMenuFocusRow = VodMoreRow.PICTURE_SIZE
                                         vodMorePanel = VodMorePanelView.PICTURE_SIZE
                                     },
-                                    onOpenAudioSubtitles = ::openVodAudioSubtitles,
+                                    onOpenAudioTracks = ::openVodAudioTracks,
+                                    onOpenSubtitleTracks = ::openVodSubtitleTracks,
                                     onSelectSpeed = { speed ->
                                         applyVodPlaybackSpeed(speed)
                                         closeVodMorePanelForSelection()
@@ -2830,21 +2853,36 @@ fun PlayerScreen(
                                     onSelectAudioTrack = { option ->
                                         if (applyTrack(C.TRACK_TYPE_AUDIO, option)) {
                                             audioRecoveryOverrideActive = false
-                                            manualAudioChoice = option.toChoice()
+                                            val choice = option.toChoice()
+                                            manualAudioChoice = choice
+                                            onAudioPreferenceChanged(
+                                                request,
+                                                encodeVodTrackChoice(choice),
+                                            )
                                             closeVodMorePanelForSelection()
                                         }
                                     },
                                     onSelectSubtitleTrack = { option ->
                                         if (applyTrack(C.TRACK_TYPE_TEXT, option)) {
-                                            manualSubtitleChoice = VodSubtitleChoice.Track(
+                                            val choice = VodSubtitleChoice.Track(
                                                 option.toChoice(),
+                                            )
+                                            manualSubtitleChoice = choice
+                                            onSubtitlePreferenceChanged(
+                                                request,
+                                                encodeVodSubtitleChoice(choice),
                                             )
                                             closeVodMorePanelForSelection()
                                         }
                                     },
                                     onDisableSubtitles = {
                                         if (applyTrack(C.TRACK_TYPE_TEXT, null)) {
-                                            manualSubtitleChoice = VodSubtitleChoice.Off
+                                            val choice = VodSubtitleChoice.Off
+                                            manualSubtitleChoice = choice
+                                            onSubtitlePreferenceChanged(
+                                                request,
+                                                encodeVodSubtitleChoice(choice),
+                                            )
                                             closeVodMorePanelForSelection()
                                         }
                                     },
@@ -4420,7 +4458,7 @@ private fun LiveMorePanel(
                 caption = if (view == PlayerLiveMorePanelView.MENU) "اغلاق" else "رجوع",
                 onClick = if (view == PlayerLiveMorePanelView.MENU) onClose else onBackToMenu,
                 icon = if (view == PlayerLiveMorePanelView.MENU) {
-                    null
+                    Icons.Rounded.Close
                 } else {
                     Icons.AutoMirrored.Rounded.ArrowBack
                 },
@@ -4513,18 +4551,15 @@ private fun LiveMoreHeaderAction(
     downFocus: FocusRequester? = null,
     enabled: Boolean = true,
 ) {
-    val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    var focused by remember { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
-    val foreground = if (showFocused) Color(0xFF14120A) else colors.text
-    Row(
+    // Match the accepted PlayerTopBar compact outlined Back action: the title stays at the
+    // physical right, while this action owns the physical-left header slot.
+    FocusButton(
+        text = caption,
+        onClick = onClick,
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (showFocused) colors.gold else Color.Transparent)
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .then(
-                if (upFocus != null || downFocus != null) {
+                if (upFocus != null || downFocus != null || !enabled) {
                     Modifier.focusProperties {
                         canFocus = enabled
                         up = upFocus ?: FocusRequester.Cancel
@@ -4532,35 +4567,16 @@ private fun LiveMoreHeaderAction(
                         left = FocusRequester.Cancel
                         right = FocusRequester.Cancel
                     }
-                } else if (!enabled) {
-                    Modifier.focusProperties { canFocus = false }
                 } else {
                     Modifier
                 },
-            )
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .semantics(mergeDescendants = true) { contentDescription = caption }
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Text(
-            text = caption,
-            color = foreground,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
-        icon?.let {
-            Icon(
-                imageVector = it,
-                contentDescription = null,
-                tint = foreground,
-                modifier = Modifier.size(16.dp),
-            )
-        }
-    }
+            ),
+        primary = false,
+        outlined = true,
+        compact = true,
+        enabled = enabled,
+        trailingIcon = icon,
+    )
 }
 
 /**
@@ -4966,7 +4982,8 @@ private fun VodMorePanel(
     onOpenGoToTime: () -> Unit,
     onOpenSpeed: () -> Unit,
     onOpenPictureSize: () -> Unit,
-    onOpenAudioSubtitles: () -> Unit,
+    onOpenAudioTracks: () -> Unit,
+    onOpenSubtitleTracks: () -> Unit,
     onSelectSpeed: (Float) -> Unit,
     onSelectPictureSize: (Int) -> Unit,
     onSelectAudioTrack: (PlayerTrackOption) -> Unit,
@@ -4982,7 +4999,8 @@ private fun VodMorePanel(
     val goToTimeFocus = remember { FocusRequester() }
     val speedFocus = remember { FocusRequester() }
     val pictureFocus = remember { FocusRequester() }
-    val audioSubtitlesFocus = remember { FocusRequester() }
+    val audioFocus = remember { FocusRequester() }
+    val subtitlesFocus = remember { FocusRequester() }
     val restartFocus = remember { FocusRequester() }
     val lockFocus = remember { FocusRequester() }
     val headerFocus = remember { FocusRequester() }
@@ -5009,14 +5027,15 @@ private fun VodMorePanel(
             goToTimeFocus,
             speedFocus,
             pictureFocus,
-            audioSubtitlesFocus,
+            audioFocus,
+            subtitlesFocus,
             restartFocus,
             lockFocus,
         )
         VodMorePanelView.SPEED -> speedOptionFocus
         VodMorePanelView.PICTURE_SIZE -> pictureOptionFocus
-        VodMorePanelView.AUDIO_SUBTITLES ->
-            audioOptionFocus + subtitleOffFocus + subtitleOptionFocus
+        VodMorePanelView.AUDIO_TRACKS -> audioOptionFocus
+        VodMorePanelView.SUBTITLE_TRACKS -> listOf(subtitleOffFocus) + subtitleOptionFocus
     }
     val movieNodes = listOf(headerFocus) + movieRowFocus
     fun movieUp(nodeIndex: Int): FocusRequester =
@@ -5026,15 +5045,11 @@ private fun VodMorePanel(
     val selectedOptionIndex = when (view) {
         VodMorePanelView.SPEED -> VOD_PLAYER_SPEED_OPTIONS.indexOfFirst { kotlin.math.abs(it - speed) < 0.001f }
         VodMorePanelView.PICTURE_SIZE -> pictureSizeIndex
-        VodMorePanelView.AUDIO_SUBTITLES -> {
-            val audioIndex = audioTracks.indexOfFirst { it.selected }
-            when {
-                audioIndex >= 0 -> audioIndex
-                audioTracks.isNotEmpty() -> 0
-                subtitlesOff -> audioTracks.size
-                else -> audioTracks.size + 1 +
-                    subtitleTracks.indexOfFirst { it.selected }.coerceAtLeast(0)
-            }
+        VodMorePanelView.AUDIO_TRACKS -> audioTracks.indexOfFirst { it.selected }.coerceAtLeast(0)
+        VodMorePanelView.SUBTITLE_TRACKS -> if (subtitlesOff) {
+            0
+        } else {
+            1 + subtitleTracks.indexOfFirst { it.selected }.coerceAtLeast(0)
         }
         VodMorePanelView.MENU -> -1
     }
@@ -5045,13 +5060,15 @@ private fun VodMorePanel(
                 VodMoreRow.GO_TO_TIME -> goToTimeFocus
                 VodMoreRow.SPEED -> speedFocus
                 VodMoreRow.PICTURE_SIZE -> pictureFocus
-                VodMoreRow.AUDIO_SUBTITLES -> audioSubtitlesFocus
+                VodMoreRow.AUDIO_TRACKS -> audioFocus
+                VodMoreRow.SUBTITLE_TRACKS -> subtitlesFocus
                 VodMoreRow.RESTART -> restartFocus
                 VodMoreRow.LOCK -> lockFocus
             }
             VodMorePanelView.SPEED,
             VodMorePanelView.PICTURE_SIZE,
-            VodMorePanelView.AUDIO_SUBTITLES,
+            VodMorePanelView.AUDIO_TRACKS,
+            VodMorePanelView.SUBTITLE_TRACKS,
             -> movieRowFocus.getOrNull(selectedOptionIndex) ?: headerFocus
         }
         withFrameNanos { }
@@ -5084,7 +5101,8 @@ private fun VodMorePanel(
                     VodMorePanelView.MENU -> "المزيد"
                     VodMorePanelView.SPEED -> "سرعة التشغيل"
                     VodMorePanelView.PICTURE_SIZE -> "حجم الصورة"
-                    VodMorePanelView.AUDIO_SUBTITLES -> "الصوت والترجمة"
+                    VodMorePanelView.AUDIO_TRACKS -> "مسارات الصوت"
+                    VodMorePanelView.SUBTITLE_TRACKS -> "الترجمة"
                 },
                 color = colors.text,
                 fontSize = 16.sp,
@@ -5152,22 +5170,31 @@ private fun VodMorePanel(
                     )
                     VodPanelDivider()
                     VodMoreRow(
-                        text = "الصوت والترجمة",
-                        icon = Icons.Rounded.Subtitles,
-                        value = listOfNotNull(
-                            audioTracks.firstOrNull { it.selected }?.label,
-                            when {
-                                subtitleTracks.isEmpty() -> null
-                                subtitlesOff -> "ايقاف"
-                                else -> selectedSubtitle?.label
-                            },
-                        ).joinToString(" • ").takeIf { it.isNotBlank() },
+                        text = "مسارات الصوت",
+                        icon = Icons.Rounded.Audiotrack,
+                        value = audioTracks.firstOrNull { it.selected }?.label,
                         showChevron = true,
-                        onClick = onOpenAudioSubtitles,
-                        focusRequester = audioSubtitlesFocus,
+                        onClick = onOpenAudioTracks,
+                        focusRequester = audioFocus,
                         inputMuted = inputMuted,
                         upFocus = movieUp(4),
                         downFocus = movieDown(4),
+                    )
+                    VodPanelDivider()
+                    VodMoreRow(
+                        text = "الترجمة",
+                        icon = Icons.Rounded.Subtitles,
+                        value = when {
+                            subtitleTracks.isEmpty() -> null
+                            subtitlesOff -> "ايقاف"
+                            else -> selectedSubtitle?.label
+                        },
+                        showChevron = true,
+                        onClick = onOpenSubtitleTracks,
+                        focusRequester = subtitlesFocus,
+                        inputMuted = inputMuted,
+                        upFocus = movieUp(5),
+                        downFocus = movieDown(5),
                     )
                     VodPanelDivider()
                     VodDirectActionRow(
@@ -5176,8 +5203,8 @@ private fun VodMorePanel(
                         onClick = onRestart,
                         focusRequester = restartFocus,
                         inputMuted = inputMuted,
-                        upFocus = movieUp(5),
-                        downFocus = movieDown(5),
+                        upFocus = movieUp(6),
+                        downFocus = movieDown(6),
                     )
                     VodPanelDivider()
                     VodDirectActionRow(
@@ -5186,8 +5213,8 @@ private fun VodMorePanel(
                         onClick = onLock,
                         focusRequester = lockFocus,
                         inputMuted = inputMuted,
-                        upFocus = movieUp(6),
-                        downFocus = movieDown(6),
+                        upFocus = movieUp(7),
+                        downFocus = movieDown(7),
                     )
                 }
                 VodMorePanelView.SPEED -> {
@@ -5220,9 +5247,7 @@ private fun VodMorePanel(
                         )
                     }
                 }
-                VodMorePanelView.AUDIO_SUBTITLES -> {
-                    val audioCount = audioTracks.size
-                    VodPanelSectionLabel("مسارات الصوت")
+                VodMorePanelView.AUDIO_TRACKS -> {
                     if (audioTracks.isEmpty()) {
                         VodPanelEmptyState("لا توجد مسارات صوت في هذا المحتوى")
                     } else {
@@ -5240,8 +5265,8 @@ private fun VodMorePanel(
                             )
                         }
                     }
-                    VodPanelDivider()
-                    VodPanelSectionLabel("الترجمة")
+                }
+                VodMorePanelView.SUBTITLE_TRACKS -> {
                     VodMoreRow(
                         text = "ايقاف الترجمة",
                         icon = Icons.Rounded.Subtitles,
@@ -5250,8 +5275,8 @@ private fun VodMorePanel(
                         onClick = onDisableSubtitles,
                         focusRequester = subtitleOffFocus,
                         inputMuted = inputMuted,
-                        upFocus = movieUp(audioCount + 1),
-                        downFocus = movieDown(audioCount + 1),
+                        upFocus = movieUp(1),
+                        downFocus = movieDown(1),
                     )
                     if (subtitleTracks.isEmpty()) {
                         VodPanelDivider()
@@ -5266,8 +5291,8 @@ private fun VodMorePanel(
                                 onClick = { onSelectSubtitleTrack(option) },
                                 focusRequester = subtitleOptionFocus[index],
                                 inputMuted = inputMuted,
-                                upFocus = movieUp(audioCount + index + 2),
-                                downFocus = movieDown(audioCount + index + 2),
+                                upFocus = movieUp(index + 2),
+                                downFocus = movieDown(index + 2),
                             )
                         }
                     }
@@ -5275,17 +5300,6 @@ private fun VodMorePanel(
             }
         }
     }
-}
-
-@Composable
-private fun VodPanelSectionLabel(text: String) {
-    Text(
-        text = text,
-        color = LocalHulkColors.current.textMuted,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
-    )
 }
 
 @Composable
@@ -5497,12 +5511,16 @@ private fun VodTrackOptionRow(
 /** Fine separator between the compact menu rows. */
 @Composable
 private fun VodPanelDivider() {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(1.dp)
-            .background(LocalHulkColors.current.gold.copy(alpha = .18f)),
-    )
+    // Reserve the separator's breathing space outside every row's focus drawing bounds. The thin
+    // 1dp/18% line remains unchanged; only the surrounding layout space grows.
+    Box(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(LocalHulkColors.current.gold.copy(alpha = .18f)),
+        )
+    }
 }
 
 /**

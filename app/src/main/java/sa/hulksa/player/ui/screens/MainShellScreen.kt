@@ -2018,6 +2018,12 @@ private fun CinemaHomeScreen(
         }
     }
     val homeHeroFocusRequester = remember { FocusRequester() }
+    // Shared by both hero-absent retry surfaces so a refresh start cannot drop focus to the rail.
+    val homeRefreshFocusState = remember { HomeRefreshFocusState() }
+    val requestHomeRefresh = {
+        if (featured == null) homeRefreshFocusState.requested = true
+        onRefresh()
+    }
     // One Home restoration owner for the remembered row. It waits for the exact model when Home
     // is still staging, brings the remembered row into the vertical viewport, and uses the hero
     // only as the deterministic fallback when the entire row has disappeared. Card-level effects
@@ -2081,44 +2087,53 @@ private fun CinemaHomeScreen(
         verticalArrangement = Arrangement.spacedBy(if (isTv) 24.dp else 17.dp),
     ) {
         item(key = "hero") {
-            if (featured != null) {
-                LaunchedEffect(homeModelIsCurrent, remembered.rowKey) {
-                    if (!homeModelIsCurrent || remembered.rowKey != "hero") return@LaunchedEffect
-                    withFrameNanos { }
-                    if (
-                        homeFocusOwnershipLost(
-                            expected = remembered,
-                            current = navigationMemory.position(MainDestination.HOME),
-                            railFocusBaseline = homeReturnRailBaseline,
-                            currentRailFocusRevision = currentRailFocusRevision,
-                        )
-                    ) {
-                        return@LaunchedEffect
+            Box(Modifier.fillMaxWidth()) {
+                if (featured != null) {
+                    LaunchedEffect(homeModelIsCurrent, remembered.rowKey) {
+                        if (!homeModelIsCurrent || remembered.rowKey != "hero") return@LaunchedEffect
+                        withFrameNanos { }
+                        if (
+                            homeFocusOwnershipLost(
+                                expected = remembered,
+                                current = navigationMemory.position(MainDestination.HOME),
+                                railFocusBaseline = homeReturnRailBaseline,
+                                currentRailFocusRevision = currentRailFocusRevision,
+                            )
+                        ) {
+                            return@LaunchedEffect
+                        }
+                        runCatching { homeHeroFocusRequester.requestFocus() }
                     }
-                    runCatching { homeHeroFocusRequester.requestFocus() }
+                    CinemaHero(
+                        featured, isTv, favorites.contains(featured), { onOpen(featured) },
+                        { onToggleFavorite(featured) }, onRefresh, loading,
+                        unreadNotificationCount = state.unreadNotificationCount,
+                        onOpenNotifications = onOpenNotifications,
+                        topActions = homeTopActions,
+                        watchModifier = Modifier.focusRequester(homeHeroFocusRequester),
+                        onFocused = { navigationMemory.save(MainDestination.HOME, "${featured.type}:${featured.id}", 0, "hero", 0) },
+                    )
+                } else {
+                    HomePlaceholder(
+                        loading = loading,
+                        onRefresh = requestHomeRefresh,
+                        isTv = isTv,
+                        unreadNotificationCount = state.unreadNotificationCount,
+                        onOpenNotifications = onOpenNotifications,
+                        errorTitle = homeErrorCopy?.title,
+                        errorBody = homeErrorCopy?.body,
+                        networkFailure = !homeNetworkUsable,
+                        refreshModifier = Modifier.focusRequester(homeHeroFocusRequester),
+                        refreshFocusRequester = homeHeroFocusRequester,
+                        topActions = homeTopActions,
+                    )
+                    HomeRefreshFocusAnchor(
+                        state = homeRefreshFocusState,
+                        isTv = isTv,
+                        loading = loading,
+                        restoreRequester = homeHeroFocusRequester,
+                    )
                 }
-                CinemaHero(
-                    featured, isTv, favorites.contains(featured), { onOpen(featured) },
-                    { onToggleFavorite(featured) }, onRefresh, loading,
-                    unreadNotificationCount = state.unreadNotificationCount,
-                    onOpenNotifications = onOpenNotifications,
-                    topActions = homeTopActions,
-                    watchModifier = Modifier.focusRequester(homeHeroFocusRequester),
-                    onFocused = { navigationMemory.save(MainDestination.HOME, "${featured.type}:${featured.id}", 0, "hero", 0) },
-                )
-            } else {
-                HomePlaceholder(
-                    loading = loading,
-                    onRefresh = onRefresh,
-                    isTv = isTv,
-                    unreadNotificationCount = state.unreadNotificationCount,
-                    onOpenNotifications = onOpenNotifications,
-                    errorTitle = homeErrorCopy?.title,
-                    errorBody = homeErrorCopy?.body,
-                    networkFailure = !homeNetworkUsable,
-                    refreshModifier = Modifier.focusRequester(homeHeroFocusRequester),
-                    topActions = homeTopActions,
-                )
             }
         }
         if (hasHomeMessages) {
@@ -2149,7 +2164,7 @@ private fun CinemaHomeScreen(
                     MoviesErrorNotice(
                         title = homeErrorCopy.title,
                         body = homeErrorCopy.body,
-                        onRetry = onRefresh,
+                        onRetry = requestHomeRefresh,
                         isTv = isTv,
                         networkFailure = !homeNetworkUsable,
                         modifier = Modifier.padding(
@@ -3737,6 +3752,101 @@ private fun HomeHeroFavoriteAction(
     )
 }
 
+internal enum class HomeRefreshFocusAction { NONE, HOLD_PLACEHOLDER, RESTORE_HOME }
+
+/**
+ * Refresh keeps focus inside Home across the loading transition instead of letting focus fall to
+ * the TV rail. A user who intentionally moves focus elsewhere while loading is never pulled back.
+ */
+internal fun homeRefreshFocusAction(
+    isTv: Boolean,
+    loading: Boolean,
+    refreshRequested: Boolean,
+    refreshFocusHeld: Boolean,
+    placeholderFocused: Boolean,
+): HomeRefreshFocusAction = when {
+    !isTv -> HomeRefreshFocusAction.NONE
+    refreshRequested -> HomeRefreshFocusAction.HOLD_PLACEHOLDER
+    refreshFocusHeld && !loading && placeholderFocused -> HomeRefreshFocusAction.RESTORE_HOME
+    else -> HomeRefreshFocusAction.NONE
+}
+
+private class HomeRefreshFocusState {
+    var requested by mutableStateOf(false)
+    var held by mutableStateOf(false)
+    var focused by mutableStateOf(false)
+    val requester = FocusRequester()
+
+    fun reset() {
+        requested = false
+        held = false
+        focused = false
+    }
+}
+
+/**
+ * A real attached Home focus owner for the hero-absent refresh transition. It exists for the whole
+ * placeholder item, so both the placeholder and the separate error-notice Retry can hand focus here
+ * before their control disappears, and it is removed with the item once a hero returns.
+ */
+@Composable
+private fun HomeRefreshFocusAnchor(
+    state: HomeRefreshFocusState,
+    isTv: Boolean,
+    loading: Boolean,
+    restoreRequester: FocusRequester?,
+) {
+    LaunchedEffect(isTv, loading, state.requested, state.held, state.focused) {
+        when (
+            homeRefreshFocusAction(
+                isTv = isTv,
+                loading = loading,
+                refreshRequested = state.requested,
+                refreshFocusHeld = state.held,
+                placeholderFocused = state.focused,
+            )
+        ) {
+            HomeRefreshFocusAction.HOLD_PLACEHOLDER -> {
+                state.held = true
+                state.requested = false
+                withFrameNanos { }
+                runCatching { state.requester.requestFocus() }
+            }
+            HomeRefreshFocusAction.RESTORE_HOME -> {
+                withFrameNanos { }
+                val restored = runCatching {
+                    restoreRequester?.requestFocus() ?: false
+                }.getOrDefault(false)
+                if (restored || !state.focused) {
+                    state.held = false
+                    state.requested = false
+                }
+            }
+            HomeRefreshFocusAction.NONE -> {
+                if (!loading) {
+                    state.held = false
+                    state.requested = false
+                }
+            }
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose { state.reset() }
+    }
+    Box(
+        Modifier
+            .size(1.dp)
+            .then(
+                if (state.requested || state.held) {
+                    Modifier.focusRequester(state.requester).focusable()
+                } else {
+                    Modifier
+                },
+            )
+            .onFocusChanged { state.focused = it.isFocused },
+    )
+}
+
 @Composable
 private fun HomePlaceholder(
     loading: Boolean,
@@ -3748,6 +3858,7 @@ private fun HomePlaceholder(
     errorBody: String? = null,
     networkFailure: Boolean = true,
     refreshModifier: Modifier = Modifier,
+    refreshFocusRequester: FocusRequester? = null,
     topActions: @Composable () -> Unit,
 ) {
     val colors = LocalHulkColors.current
@@ -3755,7 +3866,10 @@ private fun HomePlaceholder(
     // Same compact boundary as the bottom navigation: TV and expanded/rail keep the original bell.
     val compactHeaderActions = !isTv && adaptiveUi.navigationType != HulkNavigationType.RAIL
     Box(
-        Modifier.fillMaxWidth().height(if (isTv) 360.dp else 270.dp).background(colors.surface),
+        Modifier
+            .fillMaxWidth()
+            .height(if (isTv) 360.dp else 270.dp)
+            .background(colors.surface),
         contentAlignment = Alignment.Center,
     ) {
         if (compactHeaderActions) {
@@ -3794,6 +3908,7 @@ private fun HomePlaceholder(
                 title = errorTitle,
                 body = errorBody,
                 networkFailure = networkFailure,
+                retryRequester = refreshFocusRequester,
                 modifier = Modifier.padding(horizontal = if (isTv) 16.dp else 14.dp),
             )
 

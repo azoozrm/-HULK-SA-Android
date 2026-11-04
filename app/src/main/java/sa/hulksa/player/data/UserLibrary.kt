@@ -368,6 +368,92 @@ class UserLibrary internal constructor(
                 episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
                 parentContentId = request.parentContentId ?: previous?.parentContentId,
                 originalLanguage = request.originalLanguage ?: previous?.originalLanguage,
+                // The stored preference is newer than the immutable playback request; progress and
+                // a fresh record-start must never roll an explicit choice back.
+                savedAudioPreference = previous?.savedAudioPreference
+                    ?: request.savedAudioPreference,
+                savedSubtitlePreference = previous?.savedSubtitlePreference
+                    ?: request.savedSubtitlePreference,
+            )
+            val normalized = normalizeHistory(
+                entries = listOf(entry) + read.entries.filterNot { it.key == entry.key },
+                profile = profile,
+            )
+            if (!canWrite()) return@synchronized null
+            if (!writeHistoryDocument(
+                    preferences = scopedPreferences,
+                    historyKey = profileKey(profile.id, KEY_HISTORY),
+                    entries = normalized,
+                    read = read,
+                    canWrite = ::canWrite,
+                    finalWriteLock = historyFinalWriteLock,
+                )
+            ) {
+                null
+            } else {
+                normalized
+            }
+        }
+    }
+
+    /**
+     * Persists an explicit audio/subtitle choice into this content's existing profile-scoped history
+     * entry as soon as the customer commits it. It never creates a competing persistence owner.
+     * A missing entry is created from the current request; an existing entry keeps its position,
+     * duration, original language and the other saved preference.
+     */
+    internal suspend fun updateTrackPreferenceForOwner(
+        expectedOwner: AuthenticatedSessionOwner,
+        expectedAccountId: String,
+        expectedProfileId: String,
+        request: PlaybackRequest,
+        audioPreference: String? = null,
+        subtitlePreference: String? = null,
+        historyAttempt: UserLibraryHistoryMutationGate.HistoryAttempt,
+    ): List<HistoryEntry>? = runUserLibraryHistoryPersistenceOffMain {
+        if (audioPreference == null && subtitlePreference == null) return@runUserLibraryHistoryPersistenceOffMain null
+        val operationContext = currentCoroutineContext()
+        fun canWrite(): Boolean =
+            operationContext.isActive &&
+                expectedOwner.accountId == expectedAccountId &&
+                AuthenticatedSessionRegistry.isCurrent(expectedOwner) &&
+                accountScope.activeAccountId() == expectedAccountId &&
+                profileStore.activeProfileId() == expectedProfileId &&
+                historyMutationGate.isCurrentHistory(historyAttempt)
+
+        if (!canWrite() || request.isLive) return@runUserLibraryHistoryPersistenceOffMain null
+        synchronized(historyPersistenceLock) {
+            if (!canWrite()) return@synchronized null
+            val profile = profileStore.activeProfile()
+            if (profile.id != expectedProfileId) return@synchronized null
+            val scopedPreferences = accountScope.preferences(PREFERENCES_NAME, expectedAccountId)
+            val read = readHistoryForProfile(scopedPreferences, profile, ::canWrite)
+            if (profile.kind == ProfileKind.KIDS && !kidsContentFilterStore.isAllowed(request)) {
+                return@synchronized read.entries
+            }
+            val previous = read.entries.firstOrNull { it.key == request.historyKey }
+            val entry = previous?.copy(
+                savedAudioPreference = audioPreference ?: previous.savedAudioPreference,
+                savedSubtitlePreference = subtitlePreference ?: previous.savedSubtitlePreference,
+            ) ?: HistoryEntry(
+                key = request.historyKey,
+                title = request.title,
+                posterUrl = persistableExternalUrlOrNull(request.posterUrl),
+                streamKind = request.streamKind,
+                streamId = request.streamId,
+                extension = request.extension,
+                isLive = request.isLive,
+                positionMs = request.resumePositionMs.coerceAtLeast(0L),
+                durationMs = 0L,
+                updatedAtEpochMs = System.currentTimeMillis(),
+                seriesTitle = request.seriesTitle,
+                season = request.season,
+                episodeNumber = request.episodeNumber,
+                episodeTitle = request.episodeTitle,
+                parentContentId = request.parentContentId,
+                originalLanguage = request.originalLanguage,
+                savedAudioPreference = audioPreference ?: request.savedAudioPreference,
+                savedSubtitlePreference = subtitlePreference ?: request.savedSubtitlePreference,
             )
             val normalized = normalizeHistory(
                 entries = listOf(entry) + read.entries.filterNot { it.key == entry.key },
@@ -451,6 +537,12 @@ class UserLibrary internal constructor(
                 episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
                 parentContentId = request.parentContentId ?: previous?.parentContentId,
                 originalLanguage = request.originalLanguage ?: previous?.originalLanguage,
+                // The stored preference is newer than the immutable playback request; progress and
+                // a fresh record-start must never roll an explicit choice back.
+                savedAudioPreference = previous?.savedAudioPreference
+                    ?: request.savedAudioPreference,
+                savedSubtitlePreference = previous?.savedSubtitlePreference
+                    ?: request.savedSubtitlePreference,
             )
             val normalized = normalizeHistory(
                 entries = listOf(entry) + currentHistory.filterNot { it.key == entry.key },

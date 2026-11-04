@@ -254,6 +254,8 @@ open class XtreamClient(
             episodeNumber = entry.episodeNumber,
             episodeTitle = entry.episodeTitle,
             originalLanguage = entry.originalLanguage,
+            savedAudioPreference = entry.savedAudioPreference,
+            savedSubtitlePreference = entry.savedSubtitlePreference,
         )
     }
 
