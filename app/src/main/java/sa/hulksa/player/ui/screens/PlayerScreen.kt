@@ -1270,83 +1270,55 @@ fun PlayerScreen(
     fun applyVodTrackSelection() {
         if (request.isLive) return
         val current = player.trackSelectionParameters
+        val plan = vodTrackSelectionPlan(
+            audioTracks = audioTracks.map { it.toDescriptor() },
+            subtitleTracks = subtitleTracks.map { it.toDescriptor() },
+            originalLanguage = originalLanguageClass,
+            manualAudio = manualAudioChoice,
+            manualSubtitle = manualSubtitleChoice,
+            audioRecoveryOverrideActive = audioRecoveryOverrideActive,
+        )
         val builder = current.buildUpon()
         var changed = false
 
-        val preferredAudio = manualAudioChoice?.languageCode ?: VOD_ARABIC_LANGUAGE_CODE
-        if (current.preferredAudioLanguages.firstOrNull() != preferredAudio) {
-            builder.setPreferredAudioLanguage(preferredAudio)
+        if (current.preferredAudioLanguages.firstOrNull() != plan.preferredAudioLanguage) {
+            builder.setPreferredAudioLanguage(plan.preferredAudioLanguage)
             changed = true
         }
-        if (current.preferredTextLanguages.firstOrNull() != VOD_ARABIC_LANGUAGE_CODE) {
-            builder.setPreferredTextLanguage(VOD_ARABIC_LANGUAGE_CODE)
+        if (current.preferredTextLanguages.firstOrNull() != plan.preferredTextLanguage) {
+            builder.setPreferredTextLanguage(plan.preferredTextLanguage)
             changed = true
         }
 
-        fun selectIfNeeded(option: PlayerTrackOption, type: Int) {
-            val disabled = current.disabledTrackTypes.contains(type)
-            if (!option.selected || disabled) {
-                builder.setTrackTypeDisabled(type, false)
-                builder.setOverrideForType(
-                    TrackSelectionOverride(option.trackGroup, option.trackIndex),
-                )
-                changed = true
-            }
-        }
-
-        val manualAudio = manualAudioChoice
-        if (manualAudio != null && !audioRecoveryOverrideActive) {
-            val index = vodResolveTrackChoiceIndex(
-                choice = manualAudio,
-                tracks = audioTracks.map { it.toDescriptor() },
-            )
-            index?.let(audioTracks::getOrNull)?.let { selectIfNeeded(it, C.TRACK_TYPE_AUDIO) }
-        } else if (manualAudio == null && !audioRecoveryOverrideActive) {
-            // Explicit Arabic selection avoids depending on language-code normalization in the
-            // selector; no Arabic track means the existing playable fallback is untouched.
-            audioTracks.firstOrNull { it.languageCode == VOD_ARABIC_LANGUAGE_CODE }
-                ?.let { selectIfNeeded(it, C.TRACK_TYPE_AUDIO) }
-        }
-
-        when (val manualSubtitle = manualSubtitleChoice) {
-            null -> {
-                val autoTrack = vodAutoSubtitleTrack(
-                    originalLanguage = originalLanguageClass,
-                    tracks = subtitleTracks.map { it.toDescriptor() },
-                )
-                val autoIndex = autoTrack?.let { chosen ->
-                    subtitleTracks.indexOfFirst {
-                        it.languageCode == chosen.languageCode &&
-                            it.languageOrdinal == chosen.languageOrdinal
+        fun applyAction(
+            action: VodTrackSelectionAction,
+            tracks: List<PlayerTrackOption>,
+            type: Int,
+        ) {
+            when (action) {
+                VodTrackSelectionAction.KeepCurrent -> Unit
+                VodTrackSelectionAction.Off -> {
+                    if (!current.disabledTrackTypes.contains(type)) {
+                        builder.setTrackTypeDisabled(type, true)
+                        changed = true
                     }
-                } ?: -1
-                if (autoIndex >= 0) {
-                    selectIfNeeded(subtitleTracks[autoIndex], C.TRACK_TYPE_TEXT)
-                } else if (!current.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) {
-                    builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                    changed = true
                 }
-            }
-            VodSubtitleChoice.Off -> {
-                if (!current.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) {
-                    builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                    changed = true
-                }
-            }
-            is VodSubtitleChoice.Track -> {
-                val index = vodResolveTrackChoiceIndex(
-                    choice = manualSubtitle.choice,
-                    tracks = subtitleTracks.map { it.toDescriptor() },
-                )
-                val option = index?.let(subtitleTracks::getOrNull)
-                if (option != null) {
-                    selectIfNeeded(option, C.TRACK_TYPE_TEXT)
-                } else if (!current.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) {
-                    builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                    changed = true
+                is VodTrackSelectionAction.Select -> {
+                    val option = tracks.getOrNull(action.index) ?: return
+                    val disabled = current.disabledTrackTypes.contains(type)
+                    if (!option.selected || disabled) {
+                        builder.setTrackTypeDisabled(type, false)
+                        builder.setOverrideForType(
+                            TrackSelectionOverride(option.trackGroup, option.trackIndex),
+                        )
+                        changed = true
+                    }
                 }
             }
         }
+
+        applyAction(plan.audio, audioTracks, C.TRACK_TYPE_AUDIO)
+        applyAction(plan.subtitles, subtitleTracks, C.TRACK_TYPE_TEXT)
 
         if (changed) {
             player.trackSelectionParameters = builder.build()

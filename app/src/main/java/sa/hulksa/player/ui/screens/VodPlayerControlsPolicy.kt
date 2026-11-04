@@ -130,6 +130,77 @@ internal fun vodAutoSubtitleTrack(
 
 internal const val VOD_ARABIC_LANGUAGE_CODE = "ar"
 
+internal sealed interface VodTrackSelectionAction {
+    data object KeepCurrent : VodTrackSelectionAction
+    data object Off : VodTrackSelectionAction
+    data class Select(val index: Int) : VodTrackSelectionAction
+}
+
+internal data class VodTrackSelectionPlan(
+    val preferredAudioLanguage: String,
+    val preferredTextLanguage: String,
+    val audio: VodTrackSelectionAction,
+    val subtitles: VodTrackSelectionAction,
+)
+
+/**
+ * Deterministic selection plan for one VOD playback item. The player only applies this plan to the
+ * current Media3 groups; no group/track index survives a title or episode change.
+ *
+ * Automatic audio is Arabic when present, otherwise the current playable fallback is kept.
+ * Foreign/unknown subtitles select Arabic only; Arabic-original and missing Arabic subtitles are OFF.
+ * Manual audio/subtitle/OFF intent wins. A recovery-selected audio track is left alone.
+ */
+internal fun vodTrackSelectionPlan(
+    audioTracks: List<VodTrackDescriptor>,
+    subtitleTracks: List<VodTrackDescriptor>,
+    originalLanguage: VodOriginalLanguage,
+    manualAudio: VodTrackChoice?,
+    manualSubtitle: VodSubtitleChoice?,
+    audioRecoveryOverrideActive: Boolean,
+): VodTrackSelectionPlan {
+    val preferredAudio = manualAudio?.languageCode ?: VOD_ARABIC_LANGUAGE_CODE
+    val audioAction = when {
+        manualAudio != null && !audioRecoveryOverrideActive ->
+            vodResolveTrackChoiceIndex(manualAudio, audioTracks)
+                ?.let(VodTrackSelectionAction::Select)
+                ?: VodTrackSelectionAction.KeepCurrent
+        manualAudio == null && !audioRecoveryOverrideActive ->
+            audioTracks.indexOfFirst { it.languageCode == VOD_ARABIC_LANGUAGE_CODE }
+                .takeIf { it >= 0 }
+                ?.let(VodTrackSelectionAction::Select)
+                ?: VodTrackSelectionAction.KeepCurrent
+        else -> VodTrackSelectionAction.KeepCurrent
+    }
+
+    val subtitleAction = when (manualSubtitle) {
+        VodSubtitleChoice.Off -> VodTrackSelectionAction.Off
+        is VodSubtitleChoice.Track -> vodResolveTrackChoiceIndex(
+            choice = manualSubtitle.choice,
+            tracks = subtitleTracks,
+        )?.let(VodTrackSelectionAction::Select) ?: VodTrackSelectionAction.Off
+        null -> {
+            val automatic = vodAutoSubtitleTrack(originalLanguage, subtitleTracks)
+            if (automatic == null) {
+                VodTrackSelectionAction.Off
+            } else {
+                subtitleTracks.indexOfFirst {
+                    it.languageCode == automatic.languageCode &&
+                        it.languageOrdinal == automatic.languageOrdinal
+                }.takeIf { it >= 0 }?.let(VodTrackSelectionAction::Select)
+                    ?: VodTrackSelectionAction.Off
+            }
+        }
+    }
+
+    return VodTrackSelectionPlan(
+        preferredAudioLanguage = preferredAudio,
+        preferredTextLanguage = VOD_ARABIC_LANGUAGE_CODE,
+        audio = audioAction,
+        subtitles = subtitleAction,
+    )
+}
+
 private val VOD_UNDETERMINED_LANGUAGE_VALUES = setOf(
     "und",
     "zxx",

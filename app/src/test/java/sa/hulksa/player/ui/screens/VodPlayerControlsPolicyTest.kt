@@ -245,6 +245,158 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
+    fun selectionPlanPrefersArabicAudioAndSubtitlesForForeignContent() {
+        val plan = vodTrackSelectionPlan(
+            audioTracks = listOf(
+                descriptor("en-audio", "en", 1),
+                descriptor("ar-audio", "ar", 1),
+            ),
+            subtitleTracks = listOf(
+                descriptor("en-sub", "en", 1),
+                descriptor("ar-sub", "ar", 1),
+            ),
+            originalLanguage = VodOriginalLanguage.FOREIGN,
+            manualAudio = null,
+            manualSubtitle = null,
+            audioRecoveryOverrideActive = false,
+        )
+
+        assertEquals(VodTrackSelectionAction.Select(1), plan.audio)
+        assertEquals(VodTrackSelectionAction.Select(1), plan.subtitles)
+        assertEquals("ar", plan.preferredAudioLanguage)
+        assertEquals("ar", plan.preferredTextLanguage)
+    }
+
+    @Test
+    fun selectionPlanKeepsPlayableAudioWithoutArabicAndUsesArabicSubtitles() {
+        val plan = vodTrackSelectionPlan(
+            audioTracks = listOf(descriptor("en-audio", "en", 1)),
+            subtitleTracks = listOf(
+                descriptor("en-sub", "en", 1),
+                descriptor("ar-sub", "ar", 1),
+            ),
+            originalLanguage = VodOriginalLanguage.FOREIGN,
+            manualAudio = null,
+            manualSubtitle = null,
+            audioRecoveryOverrideActive = false,
+        )
+
+        assertEquals(VodTrackSelectionAction.KeepCurrent, plan.audio)
+        assertEquals(VodTrackSelectionAction.Select(1), plan.subtitles)
+    }
+
+    @Test
+    fun selectionPlanDisablesSubtitlesForArabicOriginal() {
+        val plan = vodTrackSelectionPlan(
+            audioTracks = listOf(descriptor("ar-audio", "ar", 1)),
+            subtitleTracks = listOf(descriptor("ar-sub", "ar", 1)),
+            originalLanguage = VodOriginalLanguage.ARABIC,
+            manualAudio = null,
+            manualSubtitle = null,
+            audioRecoveryOverrideActive = false,
+        )
+
+        assertEquals(VodTrackSelectionAction.Select(0), plan.audio)
+        assertEquals(VodTrackSelectionAction.Off, plan.subtitles)
+    }
+
+    @Test
+    fun selectionPlanUnknownWithoutArabicTracksKeepsAudioAndDisablesSubtitles() {
+        val plan = vodTrackSelectionPlan(
+            audioTracks = listOf(descriptor("en-audio", "en", 1)),
+            subtitleTracks = listOf(descriptor("en-sub", "en", 1)),
+            originalLanguage = VodOriginalLanguage.UNKNOWN,
+            manualAudio = null,
+            manualSubtitle = null,
+            audioRecoveryOverrideActive = false,
+        )
+
+        assertEquals(VodTrackSelectionAction.KeepCurrent, plan.audio)
+        assertEquals(VodTrackSelectionAction.Off, plan.subtitles)
+    }
+
+    @Test
+    fun selectionPlanManualAudioAndSubtitleOffOverrideAutomaticChoices() {
+        val english = descriptor("en-audio", "en", 1)
+        val plan = vodTrackSelectionPlan(
+            audioTracks = listOf(descriptor("ar-audio", "ar", 1), english),
+            subtitleTracks = listOf(descriptor("ar-sub", "ar", 1)),
+            originalLanguage = VodOriginalLanguage.FOREIGN,
+            manualAudio = english.toChoice(),
+            manualSubtitle = VodSubtitleChoice.Off,
+            audioRecoveryOverrideActive = false,
+        )
+
+        assertEquals(VodTrackSelectionAction.Select(1), plan.audio)
+        assertEquals(VodTrackSelectionAction.Off, plan.subtitles)
+        assertEquals("en", plan.preferredAudioLanguage)
+    }
+
+    @Test
+    fun selectionPlanResolvesManualChoiceAfterRefreshAndResetsForNewItem() {
+        val oldEnglish = descriptor("en-main", "en", 2)
+        val refreshedTracks = listOf(
+            descriptor("en-commentary", "en", 1),
+            oldEnglish,
+        )
+        val refreshed = vodTrackSelectionPlan(
+            audioTracks = refreshedTracks,
+            subtitleTracks = emptyList(),
+            originalLanguage = VodOriginalLanguage.FOREIGN,
+            manualAudio = oldEnglish.toChoice(),
+            manualSubtitle = null,
+            audioRecoveryOverrideActive = false,
+        )
+        assertEquals(VodTrackSelectionAction.Select(1), refreshed.audio)
+
+        val nextItem = vodTrackSelectionPlan(
+            audioTracks = listOf(
+                descriptor("next-en", "en", 1),
+                descriptor("next-ar", "ar", 1),
+            ),
+            subtitleTracks = emptyList(),
+            originalLanguage = VodOriginalLanguage.FOREIGN,
+            manualAudio = null,
+            manualSubtitle = null,
+            audioRecoveryOverrideActive = false,
+        )
+        assertEquals(VodTrackSelectionAction.Select(1), nextItem.audio)
+        assertEquals(VodTrackSelectionAction.Off, nextItem.subtitles)
+    }
+
+    @Test
+    fun selectionPlanRecoveryKeepsWorkingAudioButManualSubtitleStillWins() {
+        val plan = vodTrackSelectionPlan(
+            audioTracks = listOf(descriptor("ar-audio", "ar", 1)),
+            subtitleTracks = listOf(descriptor("ar-sub", "ar", 1)),
+            originalLanguage = VodOriginalLanguage.FOREIGN,
+            manualAudio = descriptor("ar-audio", "ar", 1).toChoice(),
+            manualSubtitle = VodSubtitleChoice.Off,
+            audioRecoveryOverrideActive = true,
+        )
+
+        assertEquals(VodTrackSelectionAction.KeepCurrent, plan.audio)
+        assertEquals(VodTrackSelectionAction.Off, plan.subtitles)
+    }
+
+    @Test
+    fun selectionPlanDisappearedManualTracksFallBackSafely() {
+        val plan = vodTrackSelectionPlan(
+            audioTracks = listOf(descriptor("en-only", "en", 1)),
+            subtitleTracks = listOf(descriptor("en-sub", "en", 1)),
+            originalLanguage = VodOriginalLanguage.FOREIGN,
+            manualAudio = descriptor("gone-audio", "ar", 1).toChoice(),
+            manualSubtitle = VodSubtitleChoice.Track(
+                descriptor("gone-sub", "ar", 1).toChoice(),
+            ),
+            audioRecoveryOverrideActive = false,
+        )
+
+        assertEquals(VodTrackSelectionAction.KeepCurrent, plan.audio)
+        assertEquals(VodTrackSelectionAction.Off, plan.subtitles)
+    }
+
+    @Test
     fun manualChoiceResolvesByIdentityAfterReorderAndFallsBackByLanguageOrdinal() {
         val choice = VodTrackChoice(
             identityKey = "en-main",
