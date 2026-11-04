@@ -54,6 +54,7 @@ function cc_presence_session_filters(string $module, array $query): array
         $direction = 'desc';
     }
     return [
+        'days' => in_array((string) ($query['days'] ?? ''), ['1','7','30'], true) ? (int) $query['days'] : 0,
         'q' => cc_presence_query_text($query['q'] ?? null, 100),
         'status' => $status,
         'app_version' => cc_presence_query_text($query['app_version'] ?? null, 32),
@@ -90,9 +91,13 @@ function cc_presence_device_filters(array $query): array
     ];
 }
 
-function cc_presence_session_conditions(array $filters, string $cutoff, array &$parameters): array
+function cc_presence_session_conditions(array $filters, string $cutoff, array &$parameters, ?DateTimeImmutable $now = null): array
 {
     $conditions = [];
+    if (($filters['days'] ?? 0) > 0) {
+        $conditions[] = 's.started_at >= :duration_since';
+        $parameters['duration_since'] = cc_presence_datetime(cc_presence_now($now)->modify('-' . (int) $filters['days'] . ' days'));
+    }
     if ($filters['status'] === 'online') {
         $conditions[] = 's.ended_at IS NULL AND s.last_seen_at >= :status_cutoff';
         $parameters['status_cutoff'] = $cutoff;
@@ -153,7 +158,7 @@ function cc_presence_session_page(
     $filters = cc_presence_session_filters($module, $query);
     $cutoff = cc_presence_datetime($now->modify('-' . $ttlSeconds . ' seconds'));
     $parameters = [];
-    $conditions = cc_presence_session_conditions($filters, $cutoff, $parameters);
+    $conditions = cc_presence_session_conditions($filters, $cutoff, $parameters, $now);
     $where = $conditions === [] ? '' : ' WHERE ' . implode(' AND ', $conditions);
 
     $count = $controlDb->prepare(
@@ -230,6 +235,7 @@ function cc_presence_session_page(
 
 function cc_presence_reseller_map(PDO $resellerDb, array $resellerIds): array
 {
+    cc_reseller_require_domain();
     $ids = array_values(array_unique(array_filter(
         array_map('intval', $resellerIds),
         static fn (int $id): bool => $id > 0
@@ -782,7 +788,8 @@ function cc_presence_code_online_subscription_counts(
     if ($resellerId < 1 || $codes === []) {
         return [];
     }
-    $normalized = function_exists('hulk_normalize_host') ? hulk_normalize_host($host) : null;
+    cc_reseller_require_domain();
+    $normalized = hulk_normalize_host($host);
     $hostValue = is_string($normalized) && $normalized !== '' ? $normalized : $host;
     if ($hostValue === '') {
         return [];
@@ -798,27 +805,32 @@ function cc_presence_code_online_subscription_counts(
         $counts[(string) $code] = 0;
     }
     $statement = $controlDb->prepare(
-        'SELECT grouped.access_code_snapshot AS code, COUNT(*) AS online_subscriptions FROM ('
-        . 'SELECT s.access_code_snapshot, s.iptv_username '
+        'SELECT HEX(s.access_code_snapshot) AS code_hex, HEX(s.iptv_username) AS user_hex '
         . 'FROM cc_app_sessions s '
         . 'WHERE s.ended_at IS NULL AND s.last_seen_at >= :online_cutoff '
         . 'AND s.reseller_id = :target_reseller AND HEX(s.host_snapshot) = :target_host '
-        . 'GROUP BY s.access_code_snapshot, HEX(s.host_snapshot), HEX(s.iptv_username)'
-        . ') AS grouped GROUP BY grouped.access_code_snapshot'
+        . 'GROUP BY HEX(s.access_code_snapshot), HEX(s.iptv_username)'
     );
     $statement->execute([
         'online_cutoff' => $cutoff,
         'target_reseller' => $resellerId,
         'target_host' => strtoupper(bin2hex($hostValue)),
     ]);
-    foreach ($statement->fetchAll() as $row) {
-        if (!is_array($row)) {
-            continue;
+    $identities = [];
+    while (($row = $statement->fetch()) !== false) {
+        $snapshot = hex2bin((string) $row['code_hex']);
+        if ($snapshot === false) {
+            throw new RuntimeException('Presence code snapshot is invalid.');
         }
-        $code = (string) ($row['code'] ?? '');
-        if (array_key_exists($code, $counts)) {
-            $counts[$code] = (int) ($row['online_subscriptions'] ?? 0);
+        foreach ($codes as $storedCode) {
+            // Use the resolver's existing legacy-alias grammar; short codes remain exact.
+            if (hulk_access_code_matches((string) $storedCode, $snapshot)) {
+                $identities[(string) $storedCode][(string) $row['user_hex']] = true;
+            }
         }
+    }
+    foreach ($identities as $code => $users) {
+        $counts[$code] = count($users);
     }
     return $counts;
 }

@@ -144,7 +144,7 @@ class PhaseEightContractTests(unittest.TestCase):
         layout = self.read(ROOT / "views" / "layout.php")
         self.assertIn("grid-template-columns:216px minmax(0,1fr)", css)
         self.assertIn(".bottom-nav", css)
-        self.assertIn("@media(max-width:760px)", css)
+        self.assertIn('media="(max-width: 760px)"', layout)
         self.assertIn('class="sidebar"', layout)
         self.assertIn("bottom-nav", layout)
         self.assertIn("context-nav", layout)

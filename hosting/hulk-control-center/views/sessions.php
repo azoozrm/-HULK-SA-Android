@@ -35,6 +35,13 @@ $hasActiveFilters = trim((string) ($filters['q'] ?? '')) !== ''
     || trim((string) ($filters['platform'] ?? '')) !== '';
 ?>
 <section class="module-stack presence-module <?= $isLive ? 'live-users-page' : 'session-history-page' ?>">
+    <form class="cc-duration-filter" method="get" aria-label="مدة السجلات">
+        <?php foreach ($filters as $key => $value): if (in_array($key, ['days','page'], true) || $value === null || $value === '') continue; ?>
+            <input type="hidden" name="<?= cc_e($key) ?>" value="<?= cc_e((string) $value) ?>">
+        <?php endforeach; ?>
+        <label class="form-field"><span>المدة</span><select name="days"><option value="0">كل السجلات</option><?php foreach ([1=>'آخر 24 ساعة',7=>'آخر 7 أيام',30=>'آخر 30 يومًا'] as $days=>$label): ?><option value="<?= $days ?>" <?= ($filters['days'] ?? 0) === $days ? 'selected' : '' ?>><?= cc_e($label) ?></option><?php endforeach; ?></select></label>
+        <button class="button button--secondary" type="submit">عرض</button>
+    </form>
     <?php cc_page_summary(
         $isLive ? 'نشاط مباشر' : 'سجل الاتصالات',
         $isLive ? 'من يستخدم التطبيق الان؟' : 'تاريخ الجلسات في مكان واحد',
@@ -60,7 +67,7 @@ $hasActiveFilters = trim((string) ($filters['q'] ?? '')) !== ''
         $hasActiveFilters
     ); ?>
         <form class="presence-filters" method="get" aria-label="بحث وتصفية الجلسات" data-saved-filters="<?= cc_e($moduleKey) ?>" data-saved-filter-fields="status,reseller,platform,sort,direction">
-            <label class="form-field presence-filter--wide"><span>بحث</span><input name="q" type="search" maxlength="100" value="<?= cc_e($filters['q'] ?? '') ?>" placeholder="الجلسة، الكود، مستخدم IPTV، الهوست او الجهاز"></label>
+            <input type="hidden" name="days" value="<?= (int) ($filters['days'] ?? 0) ?>"><label class="form-field presence-filter--wide"><span>بحث</span><input name="q" type="search" maxlength="100" value="<?= cc_e($filters['q'] ?? '') ?>" placeholder="الجلسة، الكود، مستخدم IPTV، الهوست او الجهاز"></label>
             <label class="form-field"><span>الحالة</span><select name="status"><option value="all" <?= ($filters['status'] ?? '') === 'all' ? 'selected' : '' ?>>الكل</option><option value="online" <?= ($filters['status'] ?? '') === 'online' ? 'selected' : '' ?>>متصلة</option><option value="offline" <?= ($filters['status'] ?? '') === 'offline' ? 'selected' : '' ?>>غير متصلة</option></select></label>
             <label class="form-field"><span>اصدار التطبيق</span><input name="app_version" maxlength="32" dir="ltr" value="<?= cc_e($filters['app_version'] ?? '') ?>" placeholder="0.9.3.23"></label>
             <label class="form-field"><span>مرجع الهوست</span><input name="reseller" type="number" min="1" value="<?= cc_e($filters['reseller'] ?? '') ?>" placeholder="مثال: 7"></label>

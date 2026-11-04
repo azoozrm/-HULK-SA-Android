@@ -337,6 +337,26 @@
         sync();
     };
 
+    const mobileMessages = window.matchMedia('(max-width: 760px)');
+    const syncMessages = () => document.querySelectorAll('[data-mobile-message]').forEach((card) => {
+        card.open = mobileMessages.matches;
+    });
+    mobileMessages.addEventListener('change', syncMessages);
+    syncMessages();
+
+    const moreMenu = document.querySelector('[data-mobile-more]');
+    if (moreMenu) {
+        document.addEventListener('click', (event) => {
+            if (!moreMenu.contains(event.target)) moreMenu.open = false;
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && moreMenu.open) {
+                moreMenu.open = false;
+                moreMenu.querySelector('summary').focus();
+            }
+        });
+    }
+
     initializePrimaryTabs();
     initializePrimaryNavigation();
     initializeConfirmations();

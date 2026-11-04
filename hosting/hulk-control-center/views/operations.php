@@ -75,6 +75,12 @@ $csrf = cc_csrf_token();
     };
     ?>
     <section class="release-management-page" aria-label="تحديث التطبيق">
+        <section class="cc-release-summary" aria-label="الإصدار المنشور">
+            <dl><div><dt><?= cc_icon('package') ?>الإصدار المنشور</dt><dd dir="ltr"><?= $activeRelease === null ? 'غير متاح' : cc_e($activeRelease['version_name']) . ' · build ' . (int) $activeRelease['version_code'] ?></dd></div>
+            <div><dt><?= cc_icon('link') ?>رابط التحميل الرسمي</dt><dd><a dir="ltr" href="<?= cc_e($shortUrl) ?>"><?= cc_e($shortLabel) ?></a></dd></div>
+            <div><dt><?= cc_icon('key') ?>كود Downloader</dt><dd dir="ltr"><?= cc_e($downloaderCode) ?></dd></div></dl>
+            <a class="r6-btn r6-btn--primary" href="<?= cc_e(cc_url('releases') . '?upload=1#release-upload-panel') ?>" data-r6-open-upload><?= cc_icon('upload') ?>رفع ملف APK</a>
+        </section>
         <div class="r6-top-grid">
             <section class="r6-panel r6-upload-intro" aria-labelledby="r6-upload-intro-title">
                 <div class="r6-upload-symbol"><?= cc_icon('upload') ?></div>
@@ -121,7 +127,7 @@ $csrf = cc_csrf_token();
 
         <section class="r6-panel r6-editor" id="release-upload-panel" aria-labelledby="r6-upload-title" <?= $uploadOpen ? '' : 'hidden' ?>>
             <div class="r6-editor-heading">
-                <div><div class="r6-eyebrow">١ / ٢ · الملف والبيانات</div><h2 id="r6-upload-title">رفع تحديث جديد</h2></div>
+                <div><div class="r6-eyebrow">1 / 2 · الملف والبيانات</div><h2 id="r6-upload-title">رفع تحديث جديد</h2></div>
                 <a class="r6-btn r6-btn--quiet r6-icon-btn" href="<?= cc_e(cc_url('releases') . '#release-library') ?>" data-r6-close-upload aria-label="اغلاق نموذج الرفع"><?= cc_icon('close') ?></a>
             </div>
             <form class="r6-form" method="post" enctype="multipart/form-data" data-r6-upload-form data-submit-once>
@@ -143,7 +149,7 @@ $csrf = cc_csrf_token();
         <?php if ($reviewRelease !== null): ?>
             <section class="r6-panel r6-editor r6-review" id="release-review-panel" aria-labelledby="r6-review-title">
                 <div class="r6-editor-heading">
-                    <div><div class="r6-eyebrow">٢ / ٢ · المراجعة والنشر</div><h2 id="r6-review-title">راجع التحديث قبل النشر</h2></div>
+                    <div><div class="r6-eyebrow">2 / 2 · المراجعة والنشر</div><h2 id="r6-review-title">راجع التحديث قبل النشر</h2></div>
                     <span class="r6-badge r6-badge--neutral">غير منشور</span>
                 </div>
                 <p class="r6-review-lead">عند التاكيد، يصبح هذا هو اصدار التطبيق المنشور والملف المتاح على رابطك المختصر</p>
@@ -184,7 +190,7 @@ $csrf = cc_csrf_token();
         <?php endif; ?>
 
         <section class="r6-library" id="release-library" aria-labelledby="r6-library-title">
-            <div class="r6-library-heading"><h2 id="r6-library-title">الاصدارات</h2><span class="r6-counter"><?= count($releases) ?> اصدار</span></div>
+            <div class="r6-library-heading"><h2 id="r6-library-title">سجل الإصدارات</h2><span class="r6-counter"><?= count($releases) ?> اصدار</span></div>
             <?php if ($releases === []): ?>
                 <?php cc_empty_state('لا توجد اصدارات', 'ارفع اول APK لتكوين سجل الاصدارات'); ?>
             <?php else: ?>
@@ -238,6 +244,8 @@ $csrf = cc_csrf_token();
     $serviceTone = $serviceStatus === 'OPERATIONAL' ? 'success' : ($serviceStatus === 'DEGRADED' ? 'warning' : 'danger');
     ?>
     <section class="module-stack service-control-page">
+
+
         <?php cc_page_summary(
             'الحالة المنشورة للمستخدمين',
             $serviceLabels[$serviceStatus] ?? 'حالة غير معروفة',
@@ -266,6 +274,11 @@ $csrf = cc_csrf_token();
                 </form>
             </section>
         </section>
+        <nav class="cc-control-tools" aria-label="إعدادات التطبيق">
+            <?php foreach (['features'=>['toggle','المميزات','إدارة مزايا التطبيق وإعداداتها'],'growth'=>['calendar','التجديد والدعم','مواعيد التجديد وقنوات المساعدة'],'settings'=>['settings','حدود التشغيل','عرض حدود الاستخدام والأداء']] as $key=>$item): ?>
+                <a href="<?= cc_e(cc_url($key)) ?>"><?= cc_icon($item[0]) ?><span><strong><?= cc_e($item[1]) ?></strong><small><?= cc_e($item[2]) ?></small></span><?= cc_icon('arrow-left') ?></a>
+            <?php endforeach; ?>
+        </nav>
     </section>
 
 <?php elseif ($moduleKey === 'announcements'): ?>
@@ -289,7 +302,7 @@ $csrf = cc_csrf_token();
         ); ?>
 
         <details class="form-section" id="create-message">
-            <summary><span><?= cc_icon('bell') ?></span><span><strong>انشاء رسالة</strong><small>اكتب الرسالة اولًا، ثم حدد الجمهور والنافذة والاستمرار</small></span></summary>
+            <summary><span><?= cc_icon('bell') ?></span><span><strong>إضافة رسالة</strong><small>اكتب الرسالة اولًا، ثم حدد الجمهور والنافذة والاستمرار</small></span></summary>
             <form class="admin-form admin-form--grid" method="post">
                 <input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="create_announcement">
                 <label class="form-field"><span>العنوان</span><input name="title" maxlength="160" required></label>
@@ -313,8 +326,8 @@ $csrf = cc_csrf_token();
             <?php else: ?>
                 <div class="announcement-records">
                     <?php foreach ($announcements as $row): ?>
-                        <details class="record-card announcement-record compact-details">
-                            <summary class="record-card__header"><div class="record-identity"><span class="record-identity__icon"><?= cc_icon('bell') ?></span><span><strong><?= cc_e($row['title']) ?></strong><small><?= cc_e($severityLabels[(string) $row['severity']] ?? 'غير محدد') ?> · <?= cc_e($audienceLabels[(string) $row['target']] ?? 'غير محدد') ?></small></span></div><?php cc_status_badge(!empty($row['enabled']) ? 'مفعّل' : 'متوقف', !empty($row['enabled']) ? 'success' : 'neutral'); ?><span class="details-caption">التفاصيل<?= cc_icon('chevron-down') ?></span></summary><div class="compact-details__body">
+                        <details class="record-card announcement-record compact-details cc-message-card" data-mobile-message>
+                            <summary class="record-card__header"><div class="record-identity"><span class="record-identity__icon"><?= cc_icon('bell') ?></span><span><strong><?= cc_e($row['title']) ?></strong><small><?= cc_e($severityLabels[(string) $row['severity']] ?? 'غير محدد') ?> · <?= cc_e($audienceLabels[(string) $row['target']] ?? 'غير محدد') ?></small></span></div><?php cc_status_badge(!empty($row['enabled']) ? 'مفعّل' : 'متوقف', !empty($row['enabled']) ? 'success' : 'neutral'); ?><span class="details-caption">التفاصيل<?= cc_icon('chevron-down') ?></span></summary><div class="compact-details__body"><p class="cc-message-text"><?= nl2br(cc_e((string) $row['message'])) ?></p>
                             <dl class="record-card__highlights record-card__highlights--three"><div><dt>الجمهور</dt><dd><?= cc_e($audienceLabels[(string) $row['target']] ?? 'غير محدد') ?></dd></div><div><dt>البداية</dt><dd><?= cc_e((string) $row['starts_at']) ?></dd></div><div><dt>النهاية</dt><dd><?= cc_e((string) ($row['ends_at'] ?: 'بدون انتهاء')) ?></dd></div></dl>
                             <details class="technical-disclosure"><summary>الاستهداف التقني</summary><div class="technical-disclosure__body"><?php cc_fact_list([['label' => 'معرّف الرسالة', 'value' => (string) $row['message_key'], 'ltr' => true]], 'fact-list--technical'); ?></div></details>                            <details class="inline-editor">
                                 <summary>تعديل الرسالة</summary>

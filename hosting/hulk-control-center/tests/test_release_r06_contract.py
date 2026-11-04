@@ -117,8 +117,9 @@ class ReleaseR06ContractTests(unittest.TestCase):
         self.assertNotIn("fonts.googleapis.com", css)
         layout = self.read(ROOT / "views" / "layout.php")
         login = self.read(ROOT / "login.php")
-        self.assertIn("app.css?v=371.2", layout)
-        self.assertIn("app.js?v=371.2", layout)
+        self.assertIn("cc_shell_asset('app.css')", layout)
+        self.assertIn("hash_file('sha256'", layout)
+        self.assertIn("cc_shell_asset('app.js')", layout)
         self.assertIn("app.css?v=371.1", login)
 
     def test_adapter_binds_exact_staged_release_and_safe_view_facts(self) -> None:

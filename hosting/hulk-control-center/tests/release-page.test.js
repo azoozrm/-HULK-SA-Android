@@ -70,7 +70,7 @@ vm.runInNewContext(source, {
     Array,
     document,
     navigator: {clipboard},
-    window: {},
+    window: {matchMedia: () => ({matches: false, addEventListener() {}})},
     Promise,
 });
 

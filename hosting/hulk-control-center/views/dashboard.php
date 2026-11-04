@@ -142,11 +142,11 @@ foreach ($chartPoints as $index => $point) {
 $chartArea = $chartPoints === [] ? '' : $chartPath . 'L' . $chartRight . ' ' . $chartBottom . ' L' . $chartLeft . ' ' . $chartBottom . ' Z';
 $firstAttention = $attentionItems[0] ?? null;
 ?>
-<section class="banner">
+<section class="banner cc-service-status">
     <div class="banner-status">
         <span class="banner-icon"><?= cc_icon((string) $overall['icon']) ?></span>
         <div>
-            <h2>حالة الخدمة · <?= cc_e((string) $overall['title']) ?></h2>
+            <h2>حالة الخدمة<span class="cc-desktop-status"> · <?= cc_e((string) $overall['title']) ?></span></h2><span class="cc-service-state status-badge status-badge--<?= cc_e($servicePresentation[1]) ?>"><?= cc_e($operationsAvailable ? $servicePresentation[0] : 'غير متاحة') ?></span>
             <p>الإصدار الحالي <bdi dir="ltr"><?= cc_e($currentVersion !== '' ? $currentVersion : '—') ?></bdi> · <?= cc_e($updateCopy) ?></p>
         </div>
     </div>
@@ -171,9 +171,9 @@ $firstAttention = $attentionItems[0] ?? null;
 
 <div class="grid">
     <section class="card">
-        <header class="card-head"><div><h2>حركة الجلسات</h2><p>عدد الجلسات المسجلة</p></div><div class="period" role="group" aria-label="فترة الرسم">
-                <a href="<?= cc_e(cc_url('dashboard')) ?>?chart=7" aria-pressed="<?= $chartRange === 7 ? 'true' : 'false' ?>"<?= $chartRange === 7 ? ' class="is-active"' : '' ?>>٧ أيام</a>
-                <a href="<?= cc_e(cc_url('dashboard')) ?>?chart=30" aria-pressed="<?= $chartRange === 30 ? 'true' : 'false' ?>"<?= $chartRange === 30 ? ' class="is-active"' : '' ?>>٣٠ يومًا</a>
+        <header class="card-head"><div><h2>نشاط الجلسات</h2><p>عدد الجلسات المسجلة</p></div><div class="period" role="group" aria-label="فترة الرسم">
+                <a href="<?= cc_e(cc_url('dashboard')) ?>?chart=7" aria-pressed="<?= $chartRange === 7 ? 'true' : 'false' ?>"<?= $chartRange === 7 ? ' class="is-active"' : '' ?>>7 أيام</a>
+                <a href="<?= cc_e(cc_url('dashboard')) ?>?chart=30" aria-pressed="<?= $chartRange === 30 ? 'true' : 'false' ?>"<?= $chartRange === 30 ? ' class="is-active"' : '' ?>>30 يومًا</a>
             </div></header>
         <?php if (!$analyticsAvailable): ?>
             <div class="card-head"><p>تعذر قراءة بيانات التحليل</p></div>
@@ -207,11 +207,26 @@ $firstAttention = $attentionItems[0] ?? null;
     </section>
 </div>
 
-<section class="card">
+<section class="card cc-recent-connections">
     <header class="card-head"><div><h2>آخر الاتصالات</h2><p>مرتبة حسب آخر إشارة من التطبيق</p></div><a class="btn quiet" href="<?= cc_e(cc_url('live-users')) ?>">عرض الكل</a></header>
     <?php if (!$presenceAvailable): ?>
         <div class="card-head"><p>النشاط المباشر غير متاح، ولم تُعرض أرقام بديلة</p></div>
     <?php else: ?>
+        <div class="cc-recent-list">
+            <?php if ($livePreview === []): ?><p class="empty">لا توجد اتصالات حديثة الآن</p><?php endif; ?>
+            <?php foreach (array_slice($livePreview, 0, 4) as $recent):
+                $recentHostId = (int) ($recent['reseller_id'] ?? 0);
+                $recentIdentity = cc_presence_subscription_token($recentHostId, (string) ($recent['host_snapshot'] ?? ''), (string) ($recent['iptv_username'] ?? ''));
+                $recentUrl = cc_url('live-users') . '?' . http_build_query(['reseller'=>$recentHostId,'subscription'=>$recentIdentity]) . '#subscription-target';
+                $recentDevice = trim((string) ($recent['device_manufacturer'] ?? '') . ' ' . (string) ($recent['device_model'] ?? ''));
+            ?>
+                <a class="cc-recent-row" href="<?= cc_e($recentUrl) ?>">
+                    <span class="cc-recent-icon"><?= cc_icon('screen') ?></span>
+                    <span class="cc-recent-copy"><strong dir="ltr"><?= cc_e((string) ($recent['iptv_username'] ?? '')) ?></strong><small><?= cc_e($recentDevice !== '' ? $recentDevice : 'جهاز غير محدد') ?></small><bdi dir="ltr"><?= cc_e((string) ($recent['host_snapshot'] ?? '')) ?></bdi></span>
+                    <span class="cc-recent-time"><span class="dot"></span><time dir="ltr"><?= cc_e(cc_presence_display_time((string) ($recent['last_seen_at'] ?? ''))) ?></time></span>
+                </a>
+            <?php endforeach; ?>
+        </div>
         <div class="table-wrap">
             <table>
                 <thead><tr><th scope="col">الاشتراك</th><th scope="col">الهوست</th><th scope="col">الأجهزة</th><th scope="col">آخر نشاط</th><th scope="col"></th></tr></thead>

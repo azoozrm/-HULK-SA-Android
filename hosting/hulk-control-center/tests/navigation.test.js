@@ -69,7 +69,7 @@ function runApp({scrollWidth, clientWidth}) {
     vm.runInNewContext(source, {
         Array,
         document,
-        window: {confirm: () => confirmResult},
+        window: {confirm: () => confirmResult, matchMedia: () => ({matches: false, addEventListener() {}})},
     });
     return {
         confirmForm,

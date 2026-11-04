@@ -2,6 +2,12 @@
 
 declare(strict_types=1);
 
+// Each markup response binds its assets to their bytes, including warm browser caches.
+function cc_shell_asset(string $name): string
+{
+    return cc_asset_url($name . '?v=' . substr(hash_file('sha256', __DIR__ . '/../assets/' . $name), 0, 16));
+}
+
 function cc_page_start(array $resolved, array $admin): void
 {
     $activeKey = (string) $resolved['key'];
@@ -32,16 +38,18 @@ function cc_page_start(array $resolved, array $admin): void
     <html lang="ar" dir="rtl">
     <head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
         <meta name="robots" content="noindex,nofollow">
-        <meta name="color-scheme" content="light">
-        <meta name="theme-color" content="#f7f6f2">
+        <meta name="color-scheme" content="light dark">
+        <meta name="theme-color" content="#f7f6f2" media="(min-width: 761px)">
+        <meta name="theme-color" content="#0B1423" media="(max-width: 760px)">
         <title><?= cc_e((string) $module['title']) ?> — HULK SA</title>
         <link rel="icon" href="<?= cc_e(cc_asset_url('hulk-sa-mark.svg')) ?>" type="image/svg+xml">
-        <link rel="stylesheet" href="<?= cc_e(cc_asset_url('app.css?v=371.2')) ?>">
-        <link rel="stylesheet" href="<?= cc_e(cc_asset_url('reference.css?v=371.3')) ?>">
+        <link rel="stylesheet" href="<?= cc_e(cc_shell_asset('app.css')) ?>">
+        <link rel="stylesheet" href="<?= cc_e(cc_shell_asset('reference.css')) ?>">
+        <link rel="stylesheet" media="(max-width: 760px)" href="<?= cc_e(cc_shell_asset('mobile.css')) ?>">
     </head>
-    <body>
+    <body class="cc-control" data-screen="<?= cc_e($activeMain) ?>">
     <a class="skip-link" href="#main-content">انتقل الى المحتوى</a>
     <div class="shell">
         <aside class="sidebar">
@@ -69,9 +77,9 @@ function cc_page_start(array $resolved, array $admin): void
                     </form>
                 </div>
             </header>
-            <main id="main-content" tabindex="-1">
-                <header class="page-title">
-                    <div><h1 tabindex="-1"><?= cc_e((string) $module['title']) ?></h1><p class="subtitle"><?= cc_e((string) $module['description']) ?></p></div>
+            <main id="main-content" class="cc-main" tabindex="-1">
+                <header class="page-title cc-screen-heading">
+                    <div><span class="cc-mobile-wordmark" dir="ltr">HULK SA</span><h1 tabindex="-1"><?= cc_e((string) $module['title']) ?></h1><p class="subtitle"><?= cc_e((string) $module['description']) ?></p></div>
                 </header>
                 <?php if ($resolved['valid'] && count($contextNavigation) > 1): ?>
                     <nav class="context-nav" aria-label="أدوات <?= cc_e($label) ?>">
@@ -89,7 +97,7 @@ function cc_page_end(): void
             </main>
         </div>
     </div>
-    <nav class="bottom-nav" aria-label="أقسام الجوال">
+    <nav class="bottom-nav cc-mobile-bar" aria-label="أقسام الجوال">
         <?php
         $nav = cc_main_navigation();
         $activeBottom = $GLOBALS['cc_active_main_navigation'] ?? 'dashboard';
@@ -102,7 +110,7 @@ function cc_page_end(): void
                 <?= cc_icon((string) ($nav[$key]['icon'] ?? 'dashboard')) ?><span><?= cc_e($text) ?></span>
             </a>
         <?php endforeach; ?>
-        <details class="more-nav">
+        <details class="more-nav" data-mobile-more>
             <summary <?= $moreActive ? 'aria-current="page"' : '' ?>><?= cc_icon('menu') ?><span>المزيد</span></summary>
             <nav aria-label="المزيد من الأقسام">
                 <?php foreach ($moreKeys as $key): ?>
@@ -113,7 +121,7 @@ function cc_page_end(): void
             </nav>
         </details>
     </nav>
-    <script src="<?= cc_e(cc_asset_url('app.js?v=371.2')) ?>" defer></script>
+    <script src="<?= cc_e(cc_shell_asset('app.js')) ?>" defer></script>
     </body>
     </html>
     <?php

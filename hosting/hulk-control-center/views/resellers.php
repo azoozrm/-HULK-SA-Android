@@ -42,6 +42,12 @@ $hostFields = static function (array $row = []): void { ?>
 <?php }; ?>
 
 <section class="module-stack host-code-page">
+    <form class="cc-subscription-search cc-code-search" method="post" role="search" aria-label="البحث عن كود">
+        <?php $hidden('find_code'); ?>
+        <label class="cc-search-field"><?= cc_icon('search') ?><input type="text" name="access_code" dir="ltr" maxlength="64" autocomplete="off" required placeholder="كود الدخول كاملًا" aria-label="كود الدخول كاملًا"></label>
+        <button class="button button--secondary" type="submit">بحث عن كود</button>
+    </form>
+
     <div class="host-actions" aria-label="إجراءات الهوستات والأكواد">
         <a class="button button--primary" href="<?= cc_e($hostsUrl($context + ['add' => 'host'], '#host-editor')) ?>"><?= cc_icon('plus') ?>إضافة هوست</a>
         <a class="button button--secondary" href="<?= cc_e($hostsUrl($context + ['add' => 'code'], '#host-editor')) ?>"><?= cc_icon('key') ?>إضافة كود</a>
@@ -98,10 +104,10 @@ $hostFields = static function (array $row = []): void { ?>
         $valid = hulk_normalize_host((string) $row['host']) !== null;
         $usage = $pageData['presence_usage'][$id] ?? null;
     ?>
-        <article class="card host-record">
+        <article class="card host-record cc-host-card">
             <header class="card-head host-record-heading">
                 <div>
-                    <h3><?= cc_e($row['name']) ?></h3>
+                    <h3><?= cc_icon('server') ?><?= cc_e($row['name']) ?></h3>
                     <p><bdi dir="ltr"><?= cc_e($row['host'] !== '' ? $row['host'] : 'رابط غير محدد') ?></bdi></p>
                 </div>
                 <div class="host-actions">
@@ -129,31 +135,32 @@ $hostFields = static function (array $row = []): void { ?>
                                 $codeUsage = $row['code_usage'][$cid] ?? null;
                             ?>
                                 <tr class="code-row">
-                                    <td data-label="كود الدخول"><code class="credential-value" dir="ltr"><?= cc_e($code['access_code'] !== '' ? $code['access_code'] : 'غير متاح') ?></code></td>
+                                    <td class="cc-code-value" data-label="كود الدخول"><code class="credential-value" dir="ltr"><?= cc_e($code['access_code'] !== '' ? $code['access_code'] : 'غير متاح') ?></code></td>
                                     <td data-label="الحالة"><?php cc_status_badge($active ? ($row['status'] === 'active' ? 'نشط' : 'نشط، الهوست متوقف') : 'متوقف', $active ? 'success' : 'neutral'); ?></td>
                                     <td data-label="آخر استخدام">
                                         <?= is_array($codeUsage) ? cc_e(cc_presence_display_time($codeUsage['last_used_at'])) : 'غير متاح' ?>
                                         <?php if (is_array($codeUsage)): ?><small class="muted-copy"><?= (int) $codeUsage['online'] ?> جلسة حديثة</small><?php endif; ?>
                                     </td>
-                                    <td data-label="المتصلون الآن">
+                                    <td class="cc-code-live" data-label="المتصلون الآن">
                                         <?php
                                         $codeOnline = is_array($row['code_online'] ?? null) ? $row['code_online'] : [];
                                         $onlineSubscriptions = array_key_exists((string) $code['access_code'], $codeOnline) ? (int) $codeOnline[(string) $code['access_code']] : 0;
                                         ?>
                                         <?= $codeOnlineAvailable ? $onlineSubscriptions : 'غير متاح' ?>
                                     </td>
-                                    <td><details class="inline-editor host-code-actions">
+                                    <td class="cc-code-actions"><details class="inline-editor cc-code-edit"><summary><?= cc_icon('edit') ?>تعديل الكود</summary>
+                                        <form method="post" data-confirm="سيتم استبدال هذا الكود فقط ، هل تريد المتابعة؟">
+                                            <?php $hidden('set_code', ['code_id' => $cid]); ?>
+                                            <label class="form-field"><span>القيمة الجديدة</span><input name="access_code" maxlength="64" dir="ltr" required autocomplete="off"></label>
+                                            <button type="submit" class="button button--secondary">حفظ الكود</button>
+                                        </form></details><details class="inline-editor host-code-actions">
                                         <summary>إدارة الكود</summary>
                                         <form method="post" data-submit-once>
                                             <?php $hidden('set_code_status', ['code_id' => $cid]); ?>
                                             <input type="hidden" name="status" value="<?= $active ? 'inactive' : 'active' ?>">
                                             <button type="submit" class="button button--secondary"><?= $active ? 'إيقاف الكود' : 'تفعيل الكود' ?></button>
                                         </form>
-                                        <form method="post" data-confirm="سيتم استبدال هذا الكود فقط ، هل تريد المتابعة؟">
-                                            <?php $hidden('set_code', ['code_id' => $cid]); ?>
-                                            <label class="form-field"><span>القيمة الجديدة</span><input name="access_code" maxlength="64" dir="ltr" required autocomplete="off"></label>
-                                            <button type="submit" class="button button--secondary">حفظ الكود</button>
-                                        </form>
+
                                         <form method="post" data-confirm="سيتم استبدال هذا الكود فقط بكود مولد ، هل تريد المتابعة؟">
                                             <?php $hidden('rotate_code', ['code_id' => $cid]); ?>
                                             <button type="submit" class="button button--quiet">توليد بديل لهذا الكود</button>

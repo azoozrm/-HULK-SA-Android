@@ -34,13 +34,19 @@ $platformIcons = ['PHONE' => 'phone', 'TABLET' => 'tablet', 'TV' => 'tv', 'OTHER
 $paginationUrl = static fn (int $target): string => cc_url('live-users') . '?' . http_build_query(($pageData['filters'] ?? []) + ['page' => $target]);
 ?>
 <section class="module-stack online-now-page live-users-page">
-    <div class="kpis">
-        <article class="kpi"><div class="kpi-label"><span class="kpi-icon"><?= cc_icon('users') ?></span>اشتراكات ظاهرة</div><strong><?= $totalSubscriptions ?></strong><small>هويات حساب وهوست دقيقة</small></article>
-        <article class="kpi"><div class="kpi-label"><span class="kpi-icon"><?= cc_icon('screen') ?></span>أجهزة متصلة</div><strong><?= $totalDevices ?></strong><small>أجهزة مميزة الآن</small></article>
-        <article class="kpi"><div class="kpi-label"><span class="kpi-icon"><?= cc_icon('pulse') ?></span>جلسات الآن</div><strong><?= $totalConnections ?></strong><small>قد تتعدد للجهاز الواحد</small></article>
+    <div class="kpis cc-live-metrics">
+        <article class="kpi"><div class="kpi-label"><span class="kpi-icon"><?= cc_icon('users') ?></span>الاشتراكات</div><strong><?= $totalSubscriptions ?></strong><small>هويات حساب وهوست دقيقة</small></article>
+        <article class="kpi"><div class="kpi-label"><span class="kpi-icon"><?= cc_icon('screen') ?></span>الأجهزة</div><strong><?= $totalDevices ?></strong><small>أجهزة مميزة الآن</small></article>
+        <article class="kpi"><div class="kpi-label"><span class="kpi-icon"><?= cc_icon('pulse') ?></span>الجلسات</div><strong><?= $totalConnections ?></strong><small>قد تتعدد للجهاز الواحد</small></article>
         <article class="kpi"><div class="kpi-label"><span class="kpi-icon"><?= cc_icon('tv') ?></span>تلفاز / هاتف</div><strong><?= $tvConnections ?> / <?= $phoneConnections ?></strong><small>ضمن آخر <?= $ttlSeconds ?> ثانية</small></article>
     </div>
     <p class="note">الأرقام للنتائج المطابقة ضمن آخر <?= $ttlSeconds ?> ثانية · آخر قراءة <time dir="ltr"><?= cc_e(cc_presence_display_time($serverNow)) ?></time> · النشاط الحديث لا يثبت تشغيل فيديو</p>
+
+    <form class="cc-subscription-search" method="get" role="search" aria-label="بحث المتصلين">
+        <label class="cc-search-field"><?= cc_icon('search') ?><input type="search" name="q" maxlength="100" value="<?= cc_e((string) ($pageData['filters']['q'] ?? '')) ?>" placeholder="بحث عن اشتراك أو هوست" aria-label="بحث عن اشتراك أو هوست"></label>
+        <button class="button button--secondary" type="submit">بحث</button>
+        <?php if (($pageData['filters']['q'] ?? '') !== ''): ?><a class="button button--quiet" href="<?= cc_e(cc_url('live-users')) ?>">مسح البحث</a><?php endif; ?>
+    </form>
 
     <?php if ($targetMissing): ?>
         <?php cc_alert('الاشتراك لم يعد ضمن المتصلين الآن', 'انتهت الجلسة أو تغيّر النشاط قبل فتح التفاصيل. افتح القائمة الحية لاختيار اشتراك آخر.', 'warning'); ?>
@@ -107,7 +113,15 @@ $paginationUrl = static fn (int $target): string => cc_url('live-users') . '?' .
                     $isTarget = $targetToken !== '' && $subscriptionToken !== '' && hash_equals($targetToken, $subscriptionToken);
                     ?>
                     <details class="subscription-card subscription-row-details" <?= $checkResult !== null || $noteDraft !== '' || $isTarget ? 'open' : '' ?><?= $isTarget ? ' id="subscription-target"' : '' ?>>
-                        <summary class="subscription-row"><strong><bdi dir="ltr"><?=cc_e($username)?></bdi></strong><span><?=$deviceCount?> جهاز</span><span><bdi dir="ltr"><?=cc_e($host)?></bdi></span><time dir="ltr"><?=cc_e(cc_presence_display_time($lastActivity))?></time><span>التفاصيل</span></summary>
+                        <summary class="subscription-row cc-subscriber-heading">
+                            <span class="cc-subscriber-desktop"><strong><bdi dir="ltr"><?= cc_e($username) ?></bdi></strong><span><?= $deviceCount ?> جهاز</span><span><bdi dir="ltr"><?= cc_e($host) ?></bdi></span><time dir="ltr"><?= cc_e(cc_presence_display_time($lastActivity)) ?></time><span>التفاصيل</span></span>
+                            <span class="cc-subscriber-mobile">
+                            <span class="cc-subscriber-avatar"><?= cc_icon('user') ?></span>
+                            <span class="cc-subscriber-identity"><strong><bdi dir="ltr"><?= cc_e($username) ?></bdi></strong><small><span class="dot"></span> <?= cc_e(cc_presence_display_time($lastActivity)) ?></small><bdi class="cc-subscriber-host" dir="ltr"><?= cc_e($host) ?></bdi></span>
+                            <span class="cc-subscriber-devices"><?= cc_icon('screen') ?> <?= $deviceCount ?> جهاز</span>
+                            <span class="cc-subscriber-toggle">التفاصيل <?= cc_icon('chevron-down') ?></span>
+                            </span>
+                        </summary>
                         <div class="subscription-expanded">
                         <section class="subscription-access" aria-label="بيانات الدخول">
                             <h3>بيانات الدخول</h3>
@@ -140,7 +154,7 @@ $paginationUrl = static fn (int $target): string => cc_url('live-users') . '?' .
                                 <input type="hidden" name="user_hash" value="<?= cc_e($userHash) ?>">
                                 <?php if ($subscriptionToken !== ''): ?><input type="hidden" name="subscription" value="<?= cc_e($subscriptionToken) ?>"><?php endif; ?>
                                 <input type="hidden" name="page" value="<?= $page ?>">
-                                <button class="button button--secondary" type="submit"><?= cc_icon('pulse') ?>فحص المشترك</button>
+                                <button class="button button--primary" type="submit"><?= cc_icon('shield') ?>فحص المشترك</button>
                             </form>
                         </div>
 
