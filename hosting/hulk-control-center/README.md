@@ -1,3 +1,19 @@
+## R19 mobile presentation
+
+Mobile windows up to 760px use the approved navy RTL shell and dedicated `assets/mobile.css`; desktop keeps `reference.css`. Shell assets use their SHA-256 byte prefix in the URL so a cached R18 stylesheet cannot style the new response. The four mobile destinations are نظرة عامة، المتصلون، الهوستات، المزيد; the More panel opens above the bar. All writes continue through existing authenticated actions.
+
+Presence initializes the shared host domain before mapping. Per-code live counts use the resolver's alias matching with exact subscription byte identities; devices and alias spellings cannot double-count a subscription. Session history supports 1/7/30-day filters plus all retained history. Focused SQLite regressions: `php tests/mobile-data.php` and `php tests/session-duration.php`.
+
+## Current owner section — direct hosts and multiple codes
+
+The seven primary destinations are نظرة عامة، المتصلون الآن، الهوستات والأكواد، السجلات، الرسائل، تحديث التطبيق، التحكم بالتطبيق. Secondary capabilities are contextual tabs. All existing management routes remain authenticated; the old resellers route is a compatibility alias to host management without reseller-account creation
+
+Host/code writes now use the shared `host-domain.php` authority in backend/reseller-access. This supersedes historical one-code-per-reseller descriptions below. See `backend/reseller-access/DIRECT-HOSTS-MIGRATION.md` for isolated qualification, coordinated deployment and safe rollback limits. New hosts need only name, URL and state. New code creation inserts a separate record and preserves existing codes. Each host code list has pages of25 rows with a truthful full total; usage is computed for every displayed row, including later pages. Full-code search and code mutations focus the page containing that stable code identity. The `access-codes` and `resellers` owner URLs resolve the single combined hosts/codes view and retain authentication, CSRF and numeric host focus; no duplicate code-management tab is exposed. Each code has independent state/edit/rotation. Code disable prevents future resolution; it does not terminate an IPTV stream. No IPTV credentials are embedded in codes
+
+Online users retain exact subscription identity, device/session count definitions, server TTL and bounded group pagination. Search and platform filters select whole groups; support actions retain the active filter context. Activity is recent Presence, not proof of playback. Host/code usage remains optional and distinguishes code identities/case. Exact-code lookup uses CSRF-protected POST so codes are not placed in navigation URLs
+
+LOCAL_ROUND does not deploy or migrate production, publish Git, or authorize Android trials. Private preview instructions and exact candidate provenance are in the task evidence tree. Screenshots/recordings remain OFF; owner acceptance PENDING
+
 # HULK SA Control Center
 
 Production foundation for the owner-facing administration application at:

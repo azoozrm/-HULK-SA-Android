@@ -20,8 +20,8 @@ internal fun stableAccountId(portalBaseUrl: String, username: String): String {
 
 /**
  * Persistent local alias for a subscriber username. Kept for rollback compatibility with
- * earlier releases: the trusted-host ownership model below supersedes it for resolution, but the
- * alias is still maintained so an older build reading the same data follows the same owner.
+ * earlier releases and as durable same-customer continuation evidence when a host or code changes.
+ * The existing accountId always remains the local data owner; no access code is a data namespace.
  */
 internal fun accountIdentityAliasKey(username: String): String =
     "account_alias_${accountIdentityUsernameKey(username)}"
@@ -38,40 +38,9 @@ internal fun accountIdentityUsernameKey(username: String): String {
 internal fun accountTrustedHostKey(portalBaseUrl: String): String =
     portalBaseUrl.trim().trimEnd('/')
 
-/**
- * User-readable, privacy-safe host label: host and optional port only. Scheme, path, query,
- * fragment and any user-info are deliberately removed.
- */
-internal fun trustedHostDisplayLabel(portalBaseUrl: String): String? {
-    val trimmed = portalBaseUrl.trim()
-    if (trimmed.isEmpty()) return null
-    val afterScheme = trimmed.substringAfter("://", trimmed)
-    val authority = afterScheme
-        .substringBefore('/')
-        .substringBefore('?')
-        .substringBefore('#')
-    val hostPort = authority.substringAfterLast('@')
-    return hostPort.takeIf { it.isNotBlank() }
-}
-
-/** Host label including the scheme; used only to disambiguate otherwise identical candidates. */
-internal fun trustedHostFullDisplayLabel(portalBaseUrl: String): String? {
-    val hostPort = trustedHostDisplayLabel(portalBaseUrl) ?: return null
-    val trimmed = portalBaseUrl.trim()
-    val schemeEnd = trimmed.indexOf("://")
-    val scheme = if (schemeEnd > 0) trimmed.substring(0, schemeEnd).lowercase() else null
-    return if (scheme != null) "$scheme://$hostPort" else hostPort
-}
-
-internal data class TrustedAccountIdentity(
-    val accountId: String,
-    val trustedHosts: Set<String>,
-)
-
 internal sealed interface AccountIdentityResolution {
     data class Known(val accountId: String) : AccountIdentityResolution
     data class New(val accountId: String) : AccountIdentityResolution
-    data class Ambiguous(val candidates: List<TrustedAccountIdentity>) : AccountIdentityResolution
 }
 
 internal data class AccountIdentitySnapshot(
@@ -81,15 +50,18 @@ internal data class AccountIdentitySnapshot(
     val activeAccountId: String?,
     val activeUsername: String?,
     val activePortalBaseUrl: String?,
+    val aliasAccountId: String? = null,
+    val lastAccountId: String? = null,
+    val lastUsername: String? = null,
 )
 
 /**
- * O2 + O4 subscriber identity precedence:
- * 1. an exact trusted username+host association resolves directly to its account;
- * 2. an active session whose persisted username+host match is trustworthy saved evidence;
- * 3. a username with no local account at all starts a new isolated scope;
- * 4. any unknown host with existing same-username candidates stays ambiguous until the user
- *    explicitly chooses one existing account or a different subscription.
+ * Owner decision 2026-11-02 supersedes the old O2/O4 customer-confirmation rule.
+ * Exact established host associations preserve distinct historical scopes. On a new host,
+ * continue this username's current owner, per-username alias, matching last owner, or sole
+ * historical owner, in that order. No decision, host notice, scope merge or data copy is needed.
+ * Evidence-free multiple/conflicting scopes remain intact; a deterministic separate owner is
+ * used instead of choosing an arbitrary candidate or exposing another customer's local data.
  */
 internal fun resolveAccountIdentity(
     username: String,
@@ -98,128 +70,33 @@ internal fun resolveAccountIdentity(
 ): AccountIdentityResolution {
     val normalizedUsername = username.trim()
     val hostKey = accountTrustedHostKey(portalBaseUrl)
-    val candidates = (snapshot.trustedAccountIds + snapshot.legacyCandidateAccountIds)
-        .map { accountId ->
-            TrustedAccountIdentity(
-                accountId = accountId,
-                trustedHosts = snapshot.trustedHostsByAccountId[accountId].orEmpty(),
-            )
-        }
-        .sortedBy(TrustedAccountIdentity::accountId)
-    val hostOwners = candidates.filter { hostKey in it.trustedHosts }
-    if (hostOwners.size == 1) return AccountIdentityResolution.Known(hostOwners.single().accountId)
-    if (hostOwners.size > 1) return AccountIdentityResolution.Ambiguous(candidates)
-    val activeAccountId = snapshot.activeAccountId?.trim()?.takeIf(String::isNotBlank)
-    if (
-        activeAccountId != null &&
-        snapshot.activeUsername?.trim() == normalizedUsername &&
-        snapshot.activePortalBaseUrl != null &&
-        accountTrustedHostKey(snapshot.activePortalBaseUrl) == hostKey
-    ) {
-        return AccountIdentityResolution.Known(activeAccountId)
+    fun String?.ownerId(): String? = this?.trim()?.takeIf(String::isNotBlank)
+    val current = snapshot.activeAccountId.ownerId()
+        .takeIf { snapshot.activeUsername?.trim() == normalizedUsername }
+    val alias = snapshot.aliasAccountId.ownerId()
+    val last = snapshot.lastAccountId.ownerId()
+        .takeIf { snapshot.lastUsername?.trim() == normalizedUsername }
+    val candidates = (snapshot.trustedAccountIds + snapshot.legacyCandidateAccountIds +
+        listOfNotNull(current, alias, last)).mapNotNull { it.ownerId() }.toSet()
+    val hostOwners = candidates.filter { hostKey in snapshot.trustedHostsByAccountId[it].orEmpty() }
+    val continuation = listOfNotNull(current, alias, last).firstOrNull()
+    if (hostOwners.size == 1) return AccountIdentityResolution.Known(hostOwners.single())
+    if (hostOwners.size > 1) {
+        if (continuation in hostOwners) return AccountIdentityResolution.Known(requireNotNull(continuation))
+        return AccountIdentityResolution.New(isolatedUnresolvedAccountId(normalizedUsername, hostKey, candidates))
     }
-    if (candidates.isEmpty()) {
-        return AccountIdentityResolution.New(stableAccountId(portalBaseUrl, normalizedUsername))
-    }
-    return AccountIdentityResolution.Ambiguous(candidates)
+    if (continuation != null) return AccountIdentityResolution.Known(continuation)
+    val legacyHostOwner = stableAccountId(hostKey, normalizedUsername)
+    if (legacyHostOwner in candidates) return AccountIdentityResolution.Known(legacyHostOwner)
+    if (candidates.size == 1) return AccountIdentityResolution.Known(candidates.single())
+    return AccountIdentityResolution.New(
+        if (candidates.isEmpty()) legacyHostOwner
+        else isolatedUnresolvedAccountId(normalizedUsername, hostKey, candidates),
+    )
 }
 
-internal data class AccountIdentityCandidateLabel(
-    val accountId: String,
-    val label: String,
-)
-
-internal const val ACCOUNT_DECISION_LEGACY_ACCOUNT_LABEL = "حساب محفوظ سابقاً"
-
-/**
- * Deterministic non-secret labels for ambiguity choices. Host-only labels are preferred; scheme
- * is included only when host:port alone would collide. No accountId or credential is exposed.
- */
-internal fun accountIdentityCandidateLabels(
-    candidates: List<TrustedAccountIdentity>,
-): List<AccountIdentityCandidateLabel> {
-    val hostLabels = candidates.associate { candidate ->
-        candidate.accountId to candidate.trustedHosts
-            .mapNotNull(::trustedHostDisplayLabel)
-            .distinct()
-            .sorted()
-    }
-    val preferred = candidates.associate { candidate ->
-        candidate.accountId to (
-            hostLabels[candidate.accountId]?.firstOrNull()
-                ?: ACCOUNT_DECISION_LEGACY_ACCOUNT_LABEL
-            )
-    }
-    val preferredCounts = preferred.values.groupingBy { it }.eachCount()
-    return candidates.map { candidate ->
-        val labels = hostLabels[candidate.accountId].orEmpty()
-        val label = when {
-            labels.isEmpty() -> ACCOUNT_DECISION_LEGACY_ACCOUNT_LABEL
-            preferredCounts[labels.first()] == 1 -> labels.first()
-            else -> candidate.trustedHosts
-                .mapNotNull(::trustedHostFullDisplayLabel)
-                .distinct()
-                .sorted()
-                .joinToString("، ")
-        }
-        AccountIdentityCandidateLabel(accountId = candidate.accountId, label = label)
-    }.sortedWith(compareBy({ it.label }, { it.accountId }))
-}
-
-/**
- * Raised when ownership cannot be resolved without an explicit user decision. The pending
- * authenticated session must not be committed or bound before that decision completes.
- */
-internal class AccountIdentityDecisionRequiredException(
-    val candidates: List<TrustedAccountIdentity>,
-) : IllegalStateException("Account identity decision required")
-
-/** A stale or late decision can never rebind ownership after trusted state changed. */
-internal class StaleAccountIdentityDecisionException :
-    IllegalStateException("Account identity decision no longer applies")
-
-/**
- * Locally generated opaque accountId for an explicit DIFFERENT decision. The "local-" namespace
- * can never equal a stable host+username id or a legacy alias id, and no provider identity is
- * invented. Durable ownership is established through the username+trusted-host association.
- */
-internal fun generateIsolatedAccountId(): String =
-    "local-" + UUID.randomUUID().toString().replace("-", "")
-
-/**
- * Validates an explicit decision against freshly resolved ownership and returns the accountId to
- * commit, or throws when the decision no longer applies: a currently known host cannot be rebound
- * to another account, a selected candidate must still be a current same-username account, and an
- * explicit DIFFERENT decision must not collide with any current candidate accountId.
- */
-internal fun resolveDecisionAccountId(
-    resolution: AccountIdentityResolution,
-    selectedAccountId: String?,
-    isolatedAccountIdProvider: () -> String,
-): String = when (resolution) {
-    is AccountIdentityResolution.Known -> {
-        if (resolution.accountId != selectedAccountId) throw StaleAccountIdentityDecisionException()
-        resolution.accountId
-    }
-    is AccountIdentityResolution.Ambiguous -> {
-        if (selectedAccountId != null) {
-            resolution.candidates
-                .firstOrNull { it.accountId == selectedAccountId }
-                ?.accountId
-                ?: throw StaleAccountIdentityDecisionException()
-        } else {
-            isolatedAccountIdProvider().also { generated ->
-                if (resolution.candidates.any { it.accountId == generated }) {
-                    throw StaleAccountIdentityDecisionException()
-                }
-            }
-        }
-    }
-    is AccountIdentityResolution.New -> {
-        if (selectedAccountId != null) throw StaleAccountIdentityDecisionException()
-        isolatedAccountIdProvider()
-    }
-}
+private fun isolatedUnresolvedAccountId(username: String, host: String, candidates: Set<String>): String =
+    "local-restore-" + stableAccountId(host, username + "\u0000" + candidates.sorted().joinToString("\u0000"))
 
 internal fun accountScopedPreferencesName(baseName: String, accountId: String): String =
     "$baseName.account.${accountId.trim()}"
@@ -231,7 +108,7 @@ internal fun isAccountSessionExpired(
     nowEpochSeconds >= expiresAtEpochSeconds
 
 /**
- * Single expiry gate for fresh authentication, refresh/restore and deferred identity decisions.
+ * Single expiry gate for fresh authentication and authenticated refresh/restore.
  * Missing, zero and non-positive expiry values keep the provider's unlimited semantics.
  */
 internal fun requireUnexpiredAccountSession(
@@ -239,7 +116,7 @@ internal fun requireUnexpiredAccountSession(
     nowEpochSeconds: Long,
 ) {
     if (isAccountSessionExpired(expiresAtEpochSeconds, nowEpochSeconds)) {
-        throw XtreamException.SubscriptionInactive
+        throw XtreamException.SubscriptionExpired
     }
 }
 
@@ -315,7 +192,7 @@ class AccountScopeStore internal constructor(
         legacyOwnerAccountId = legacyOwnerAccountId(),
     )
 
-    internal fun restore(snapshot: RollbackSnapshot) {
+    internal fun restore(snapshot: RollbackSnapshot): Boolean =
         state.edit().apply {
             if (snapshot.activeAccountId == null) {
                 remove(KEY_ACTIVE_ACCOUNT_ID)
@@ -328,7 +205,6 @@ class AccountScopeStore internal constructor(
                 putString(KEY_LEGACY_OWNER_ACCOUNT_ID, snapshot.legacyOwnerAccountId)
             }
         }.commit()
-    }
 
     internal fun registerActiveAccountListener(
         listener: SharedPreferences.OnSharedPreferenceChangeListener,
@@ -460,13 +336,11 @@ class AccountSessionStore internal constructor(
         return when (val resolution = resolveAuthenticationIdentity(username, session.portal.baseUrl)) {
             is AccountIdentityResolution.Known -> recordAuthenticated(session, resolution.accountId)
             is AccountIdentityResolution.New -> recordAuthenticated(session, resolution.accountId)
-            is AccountIdentityResolution.Ambiguous ->
-                throw AccountIdentityDecisionRequiredException(resolution.candidates)
         }
     }
 
     /**
-     * Commits an explicitly resolved ownership decision. The account scope binding, session
+     * Commits resolved local ownership. The account scope binding, session
      * metadata and trusted-host association are persisted in one checked commit so a failed
      * commit cannot leave a partial ownership state behind.
      */
@@ -483,8 +357,7 @@ class AccountSessionStore internal constructor(
         val username = session.credentials.username.trim()
         val normalizedAccountId = accountId.trim().takeIf(String::isNotBlank)
             ?: throw IllegalArgumentException("Authenticated accountId must not be blank")
-        val previousPreferences = preferences.all.toMap()
-        val previousScope = accountScope.rollbackSnapshot()
+        val previous = rollbackSnapshot()
         try {
             check(accountScope.bind(normalizedAccountId)) {
                 "Unable to bind authenticated account scope"
@@ -529,16 +402,15 @@ class AccountSessionStore internal constructor(
             check(editor.commit()) { "Unable to persist authenticated account session metadata" }
             return metadata
         } catch (error: Throwable) {
-            restoreSessionPreferencesSnapshot(previousPreferences)
-            accountScope.restore(previousScope)
+            runCatching { restore(previous) }.exceptionOrNull()?.let(error::addSuppressed)
             throw error
         }
     }
 
     /**
-     * Resolves the O2 + O4 ownership decision for an authenticated username+host. Trusted state is
-     * authoritative; the legacy alias/current/last accountIds remain candidates only so an
-     * upgrade install can still offer a one-time same/different decision instead of orphaning data.
+     * Resolves authenticated ownership using exact historical associations and same-username
+     * continuation evidence. Legacy aliases/current/last owners restore their original scopes
+     * automatically; neither an access code nor a changed host creates a replacement namespace.
      */
     @Synchronized
     internal fun resolveAuthenticationIdentity(
@@ -585,31 +457,11 @@ class AccountSessionStore internal constructor(
                 activeAccountId = activeMetadata?.accountId,
                 activeUsername = activeMetadata?.username,
                 activePortalBaseUrl = activeMetadata?.portalBaseUrl,
+                aliasAccountId = preferences.getString(accountIdentityAliasKey(normalizedUsername), null),
+                lastAccountId = preferences.getString(KEY_LAST_ACCOUNT_ID, null),
+                lastUsername = preferences.getString(KEY_LAST_USERNAME, null),
             ),
         )
-    }
-
-    /**
-     * Owns the complete explicit-decision ownership transaction: fresh resolution, decision
-     * validation against that fresh state, and the checked metadata/trust commit all execute
-     * inside this single synchronized boundary. A stale decision can therefore never bind a host
-     * after trusted ownership changed, and a DIFFERENT decision can never reuse a candidate id.
-     */
-    @Synchronized
-    internal fun commitAccountIdentityDecision(
-        username: String,
-        portalBaseUrl: String,
-        selectedAccountId: String?,
-        session: AuthenticatedSession,
-        isolatedAccountIdProvider: () -> String = ::generateIsolatedAccountId,
-    ): AccountSessionMetadata {
-        val resolution = resolveAuthenticationIdentity(username, portalBaseUrl)
-        val accountId = resolveDecisionAccountId(
-            resolution = resolution,
-            selectedAccountId = selectedAccountId,
-            isolatedAccountIdProvider = isolatedAccountIdProvider,
-        )
-        return recordAuthenticated(session, accountId)
     }
 
     /**
@@ -624,6 +476,8 @@ class AccountSessionStore internal constructor(
         currentAccountId: String,
     ): String? {
         val normalizedAccountId = currentAccountId.trim().takeIf(String::isNotBlank) ?: return null
+        val current = metadata() ?: return null
+        if (current.accountId != normalizedAccountId || current.username.trim() != username.trim()) return null
         val hostKey = accountTrustedHostKey(portalBaseUrl)
         if (hostKey.isEmpty()) return null
         val usernameKey = accountIdentityUsernameKey(username.trim())
@@ -706,7 +560,24 @@ class AccountSessionStore internal constructor(
     fun lastAccessCode(): String? = preferences.getString(KEY_LAST_ACCESS_CODE, null)
         ?.takeIf { it.isNotBlank() }
 
-    private fun restoreSessionPreferencesSnapshot(snapshot: Map<String, *>) {
+    internal data class RollbackSnapshot(
+        val sessionPreferences: Map<String, *>,
+        val accountScope: AccountScopeStore.RollbackSnapshot,
+    )
+
+    @Synchronized
+    internal fun rollbackSnapshot(): RollbackSnapshot =
+        RollbackSnapshot(preferences.all.toMap(), accountScope.rollbackSnapshot())
+
+    /** Attempts both durable restorations even if one commit reports failure. */
+    @Synchronized
+    internal fun restore(snapshot: RollbackSnapshot) {
+        val restoredSession = restoreSessionPreferencesSnapshot(snapshot.sessionPreferences)
+        val restoredScope = accountScope.restore(snapshot.accountScope)
+        check(restoredSession && restoredScope) { "Unable to restore previous account ownership" }
+    }
+
+    private fun restoreSessionPreferencesSnapshot(snapshot: Map<String, *>): Boolean {
         val editor = preferences.edit().clear()
         snapshot.forEach { (key, value) ->
             when (value) {
@@ -718,7 +589,7 @@ class AccountSessionStore internal constructor(
                 is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
             }
         }
-        editor.apply()
+        return editor.commit()
     }
 
     /**

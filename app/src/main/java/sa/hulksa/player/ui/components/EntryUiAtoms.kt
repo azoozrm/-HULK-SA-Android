@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import sa.hulksa.player.ui.screens.moviesErrorIcon
@@ -55,7 +56,7 @@ import sa.hulksa.player.ui.theme.LocalHulkColors
 
 /**
  * Scoped bounded-panel maximum width for the entry section, reusing the already accepted
- * AccountIdentityDecisionDialog expression: 560dp on TV/expanded windows, 440dp otherwise.
+ * shared bounded entry-dialog expression: 560dp on TV/expanded windows, 440dp otherwise.
  * Apply the cap BEFORE fillMaxWidth so an inherited full-width minimum cannot defeat it.
  */
 internal fun entryPanelMaxWidthDp(expanded: Boolean): Int = if (expanded) 560 else 440
@@ -121,11 +122,28 @@ internal fun stripTerminalDecoration(raw: String): String {
 internal fun entryErrorDisplayText(raw: String): String =
     stripTerminalDecoration(raw).ifBlank { ENTRY_ERROR_FALLBACK_TEXT }
 
+internal data class EntryNoticeMetrics(
+    val horizontalPadding: Dp,
+    val verticalPadding: Dp,
+    val iconSize: Dp,
+    val fontSize: TextUnit,
+    val lineHeight: TextUnit,
+)
+
+internal fun entryNoticeMetrics(compact: Boolean) = EntryNoticeMetrics(
+    horizontalPadding = if (compact) 10.dp else 12.dp,
+    verticalPadding = if (compact) 8.dp else 10.dp,
+    iconSize = if (compact) 16.dp else 18.dp,
+    fontSize = if (compact) 12.sp else 13.sp,
+    lineHeight = if (compact) 16.sp else 18.sp,
+)
+
 /**
  * Scoped entry-section notice family (Login / Who's Watching / entry options / management / PIN /
  * account choice / Growth QR). One bounded dark surface with the accepted gold line, the gold
  * status glyph physically LEFT of right-aligned ivory wording and a muted explanation when the
- * caller supplies a title. Complete copy wraps; no fixed failure slot elides the message.
+ * caller supplies a title. Default complete copy wraps. Login alone opts into the measured,
+ * reserved one-line variant; other entry callers retain their full multiline behavior.
  */
 @Composable
 internal fun EntryNotice(
@@ -135,11 +153,13 @@ internal fun EntryNotice(
     networkFailure: Boolean = false,
     compact: Boolean = false,
     liveRegionPolite: Boolean = true,
+    singleLine: Boolean = false,
     action: (@Composable () -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     val shape = RoundedCornerShape(if (compact) 10.dp else 12.dp)
     val displayMessage = entryErrorDisplayText(message)
+    val metrics = entryNoticeMetrics(compact)
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -147,8 +167,8 @@ internal fun EntryNotice(
             .background(Color(0xFF11120D))
             .border(1.dp, colors.gold.copy(alpha = .35f), shape)
             .padding(
-                horizontal = if (compact) 10.dp else 12.dp,
-                vertical = if (compact) 8.dp else 10.dp,
+                horizontal = metrics.horizontalPadding,
+                vertical = metrics.verticalPadding,
             )
             .then(
                 if (liveRegionPolite) {
@@ -174,9 +194,12 @@ internal fun EntryNotice(
                 }
                 Text(
                     text = displayMessage,
+                    modifier = if (singleLine) Modifier.fillMaxWidth() else Modifier,
                     color = if (title.isNullOrBlank()) colors.text else colors.textMuted,
-                    fontSize = if (compact) 12.sp else 13.sp,
-                    lineHeight = if (compact) 16.sp else 18.sp,
+                    fontSize = metrics.fontSize,
+                    lineHeight = metrics.lineHeight,
+                    maxLines = if (singleLine) 1 else Int.MAX_VALUE,
+                    softWrap = !singleLine,
                     fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Start,
                 )
@@ -186,7 +209,7 @@ internal fun EntryNotice(
                 imageVector = moviesErrorIcon(networkFailure),
                 contentDescription = null,
                 tint = colors.gold,
-                modifier = Modifier.size(if (compact) 16.dp else 18.dp),
+                modifier = Modifier.size(metrics.iconSize),
             )
         }
         if (action != null) {

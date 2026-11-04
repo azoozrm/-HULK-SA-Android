@@ -41,6 +41,7 @@ class PhaseSixContractTests(unittest.TestCase):
         view = self.read(ROOT / "views" / "dashboard.php")
         for metric in ("online_now", "sessions_today", "active_devices"):
             self.assertIn(metric, source)
+        for metric in ("online_subscriptions", "online_devices", "online_now", "sessions_today"):
             self.assertIn(metric, view)
         self.assertIn("غير متاح لعدم وجود هوية حساب ثابتة", view)
         self.assertIn("Presence", view)
@@ -50,8 +51,10 @@ class PhaseSixContractTests(unittest.TestCase):
         view = self.read(ROOT / "views" / "resellers.php")
         self.assertIn("cc_presence_usage_for_resellers", adapter)
         self.assertIn("presence_usage_available", adapter)
-        self.assertIn("آخر استخدام", view)
-        self.assertIn("متصل الآن", view)
+        self.assertIn("اخر استخدام", view)
+        self.assertIn("جلسة حديثة", view)
+        self.assertIn("code_usage", adapter)
+        self.assertIn("last_used_at", view)
 
     def test_mobile_representation_avoids_wide_table_dependency(self) -> None:
         sessions = self.read(ROOT / "views" / "sessions.php")

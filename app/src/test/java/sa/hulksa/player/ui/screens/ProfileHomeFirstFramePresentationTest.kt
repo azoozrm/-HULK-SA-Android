@@ -105,6 +105,58 @@ class ProfileHomeFirstFramePresentationTest {
     }
 
     @Test
+    fun `catalog revision keeps Continue Watching until the exact model settles`() = runBlocking {
+        val history = listOf(history(7, "Continue Watching"))
+        val firstCatalog = Catalog(emptyList(), listOf(movie(1, "First Hero")))
+        val store = CatalogScreenEntryModelStore()
+
+        val firstExact = store.home(homeInput(movieCatalog = firstCatalog, history = history))
+        assertEquals(listOf("movie:7"), firstExact.model.continueWatching.map(HistoryEntry::key))
+
+        val refreshedCatalog = Catalog(emptyList(), listOf(movie(8, "Refreshed Hero")))
+        val refreshedInput = homeInput(movieCatalog = refreshedCatalog, history = history)
+        assertNull(store.cachedHome(refreshedInput))
+        val fallback = checkNotNull(store.lastGoodHome())
+
+        assertTrue(fallback.isFirstFrameFallback)
+        assertSame(refreshedInput, fallback.input)
+        assertEquals(listOf(8), fallback.model.movies.map(ContentItem::id))
+        assertEquals(
+            listOf("movie:7"),
+            fallback.model.continueWatching.map(HistoryEntry::key),
+        )
+
+        val refreshedExact = store.home(refreshedInput)
+        assertSame(refreshedExact, store.lastGoodHome())
+        assertEquals(
+            listOf("movie:7"),
+            refreshedExact.model.continueWatching.map(HistoryEntry::key),
+        )
+    }
+
+    @Test
+    fun `history removal or reorder is never masked by the retained fallback`() = runBlocking {
+        val firstHistory = listOf(history(1, "First"), history(2, "Second"))
+        val catalog = Catalog(emptyList(), listOf(movie(1, "Hero")))
+        val store = CatalogScreenEntryModelStore()
+        store.home(homeInput(movieCatalog = catalog, history = firstHistory))
+
+        val removedInput = homeInput(
+            movieCatalog = Catalog(emptyList(), listOf(movie(2, "Next Hero"))),
+            history = listOf(history(1, "First")),
+        )
+        assertNull(store.cachedHome(removedInput))
+        assertTrue(checkNotNull(store.lastGoodHome()).model.continueWatching.isEmpty())
+
+        val reorderedInput = homeInput(
+            movieCatalog = Catalog(emptyList(), listOf(movie(3, "Last Hero"))),
+            history = firstHistory.reversed(),
+        )
+        assertNull(store.cachedHome(reorderedInput))
+        assertTrue(checkNotNull(store.lastGoodHome()).model.continueWatching.isEmpty())
+    }
+
+    @Test
     fun `stale exact completion cannot replace newer current input presentation`() = runBlocking {
         val inputA = homeInput()
         val movieCatalog = Catalog(emptyList(), listOf(movie(5, "Input B Movie")))

@@ -53,7 +53,7 @@ $pageData = [
             'public_apk_url' => 'https://hulksa.com/hulk-operations/releases/hulk-sa-v1.0.0-68-1d957b42.apk',
             'sha256' => $sha,
             'size_bytes' => 5336391,
-            'release_notes' => 'الإصدار الرسمي',
+            'release_notes' => 'الاصدار الرسمي',
             'created_at' => '2026-10-19 03:53:22',
             'artifact_ready' => true,
         ],
@@ -110,8 +110,8 @@ require $testRoot . '/views/operations.php';
 $emptyHtml = (string) ob_get_clean();
 
 $checks = [
-    'active release is unmistakable' => str_contains($html, 'المنشور الآن') && str_contains($html, 'is-live'),
-    'official URL and Downloader are present' => str_contains($html, 'https://hulksa.com/app/') && str_contains($html, '5672332'),
+    'active release is unmistakable' => str_contains($html, 'المنشور الان') && str_contains($html, 'is-live'),
+    'official URL and Downloader are present' => str_contains($html, 'https://hulksa.com/app/') && str_contains($html, '1956278'),
     'staged review is bound to the uploaded record' => str_contains($html, 'release-review-panel') && str_contains($html, 'hulk-sa-v1.0.1-69-abcdef12.apk'),
     'publish action is explicit and CSRF protected' => str_contains($html, 'name="action" value="activate_release"') && str_contains($html, 'name="csrf_token"'),
     'save without publish is available' => str_contains($html, 'حفظ دون نشر'),
@@ -120,8 +120,8 @@ $checks = [
     'copy failure fallback is present' => str_contains($html, 'data-copy-fallback') && str_contains($html, 'readonly hidden'),
     'no mock preview text is rendered' => !str_contains($html, 'نموذج للمراجعة') && !str_contains($html, 'محاكاة'),
     'no raw filesystem path is rendered' => !str_contains($html, 'apk_path') && !str_contains($html, 'apk_sha256'),
-    'empty state is honest and invents no release' => str_contains($emptyHtml, 'لا يوجد إصدار منشور')
-        && str_contains($emptyHtml, 'لا توجد إصدارات')
+    'empty state is honest and invents no release' => str_contains($emptyHtml, 'لا يوجد اصدار منشور')
+        && str_contains($emptyHtml, 'لا توجد اصدارات')
         && !str_contains($emptyHtml, '1.0.0'),
 ];
 

@@ -40,10 +40,11 @@ open class PortalResolver internal constructor(
                 if (!response.isSuccessful) {
                     throw mapApiFailure(response.code, body)
                 }
-
-                val host = runCatching { JSONObject(body).optString("host") }
-                    .getOrNull()
-                    .normalizeIptvHost()
+                val payload = runCatching { JSONObject(body) }.getOrNull()
+                    ?: throw PortalException.InvalidResponse
+                if (payload.optJSONObject("error") != null) throw mapApiFailure(response.code, body)
+                if (!payload.has("host") || payload.isNull("host")) throw PortalException.InvalidResponse
+                val host = payload.optString("host").normalizeIptvHost()
                     ?: throw PortalException.InvalidHost
                 PortalConfig(host, PortalConfig.Source.ACCESS_CODE)
             }
@@ -51,8 +52,8 @@ open class PortalResolver internal constructor(
             throw error
         } catch (error: CancellationException) {
             throw error
-        } catch (_: IOException) {
-            throw PortalException.ServiceUnavailable
+        } catch (error: IOException) {
+            throw PortalException.Transport(error)
         } catch (_: Exception) {
             throw PortalException.InvalidResponse
         }
@@ -81,11 +82,12 @@ open class PortalResolver internal constructor(
             JSONObject(body).optJSONObject("error")?.optString("code").orEmpty()
         }.getOrDefault("")
         return when {
-            apiCode == "INVALID_CODE" || statusCode == 404 -> PortalException.InvalidAccessCode
-            apiCode == "RESELLER_INACTIVE" || statusCode == 403 -> PortalException.ResellerInactive
-            apiCode == "INVALID_HOST" || statusCode == 422 -> PortalException.InvalidHost
-            statusCode == 408 || statusCode == 425 || statusCode == 429 || statusCode in 500..599 ->
-                PortalException.ServiceUnavailable
+            statusCode in 500..599 -> PortalException.ServiceRejected(statusCode)
+            statusCode == 408 || statusCode == 425 -> PortalException.ConnectionUncertain(statusCode)
+            apiCode == "INVALID_CODE" -> PortalException.InvalidAccessCode
+            apiCode == "RESELLER_INACTIVE" -> PortalException.ResellerInactive
+            apiCode == "INVALID_HOST" -> PortalException.InvalidHost
+            statusCode in 400..499 -> PortalException.ServiceRejected(statusCode)
             else -> PortalException.InvalidResponse
         }
     }
@@ -124,11 +126,27 @@ internal fun String?.normalizeIptvHost(): String? {
     return parsed.toString().trimEnd('/')
 }
 
-sealed class PortalException(message: String) : Exception(message) {
+sealed class PortalException(message: String, cause: Throwable? = null) : Exception(message, cause), LoginFailureSource {
+    override val loginFailure: LoginFailure
+        get() = LoginFailure(
+            when (this) {
+                InvalidAccessCode -> LoginFailureCategory.INVALID_CODE
+                ResellerInactive -> LoginFailureCategory.DISABLED_CODE
+                ConfigurationMissing, InvalidHost, is ServiceRejected -> LoginFailureCategory.SERVICE_REJECTED
+                is Transport -> LoginFailureCategory.TRANSPORT
+                ServiceUnavailable, is ConnectionUncertain -> LoginFailureCategory.CONNECTION_UNCERTAIN
+                InvalidResponse -> LoginFailureCategory.MALFORMED
+            },
+            LoginFailureStage.RESOLVER,
+        )
+
     data object ConfigurationMissing : PortalException("تعذر الاتصال بخدمة HULK ، تواصل مع الدعم")
     data object InvalidAccessCode : PortalException("كود الدخول غير صحيح")
     data object ResellerInactive : PortalException("حساب الموزع متوقف. تواصل مع الدعم")
     data object InvalidHost : PortalException("هوست الموزع غير صالح. تواصل مع الموزع")
     data object ServiceUnavailable : PortalException("تعذر الاتصال بخدمة HULK ، حاول مرة اخرى")
     data object InvalidResponse : PortalException("استجابة خدمة HULK غير صالحة. حاول مرة اخرى")
+    class Transport(error: IOException) : PortalException(ServiceUnavailable.message.orEmpty(), error)
+    data class ServiceRejected(val statusCode: Int) : PortalException(ServiceUnavailable.message.orEmpty())
+    data class ConnectionUncertain(val statusCode: Int) : PortalException(ServiceUnavailable.message.orEmpty())
 }

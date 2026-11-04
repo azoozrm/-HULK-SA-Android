@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+require_once __DIR__ . '/legacy-host-fixture.php';
 
 /**
  * Native behavioral regressions against an isolated disposable MySQL/MariaDB test
@@ -34,6 +35,9 @@ $nativeDb->exec('CREATE TABLE IF NOT EXISTS resellers ('
     . 'host VARCHAR(2048) NOT NULL, '
     . 'status VARCHAR(32) NOT NULL'
     . ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
+$nativeDb->exec('DROP VIEW IF EXISTS host_access_codes');
+$nativeDb->exec('DROP VIEW IF EXISTS hosts');
+cc_test_legacy_host_views($nativeDb);
 $nativeDb->exec('CREATE TABLE IF NOT EXISTS cc_api_rate_limits ('
     . 'scope VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, '
     . 'client_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, '
@@ -419,6 +423,19 @@ try {
     $nativeRotated = $exception->apiCode === 'INVALID_ACCESS_CODE';
 }
 cc_test($nativeRotated, 'native: access-code rotation at commit is rejected');
+
+// A code moved to another host identity during provider IO must not approve
+$identityCreated=cc_pairing_create($nativeDb,$nativeInput($nativeSecret()),$nativeSettings,$nativeBaseClock());
+$nativeSeedReseller($nativeDb);
+$identityProbe=static function(string $h,string $u,string $p,array $c) use ($nativeDb):array {
+    $nativeDb->exec('UPDATE resellers SET reseller_id=8');
+    return ['result'=>'OK','http_status'=>200,'reason'=>'ACTIVE'];
+};
+$identityRejected=false;
+try { cc_pairing_approve($nativeDb,$identityCreated['body']['requestId'],$nativeCode,'user','pass',$nativeSettings,$identityProbe,$nativeBaseClock,$nativeDb); }
+catch(CcPairingException $error) { $identityRejected=$error->apiCode==='INVALID_ACCESS_CODE'; }
+$identityRow=cc_pairing_load_by_request_id($nativeDb,$identityCreated['body']['requestId']);
+cc_test($identityRejected && $identityRow['state']==='PENDING' && $identityRow['envelope_blob']===null,'native: reassigned code identity during provider validation cannot approve or alter history');
 
 // blocked admission lock: bounded by innodb_lock_wait_timeout, then rollback
 $nativeSeedReseller($nativeDb);
@@ -1198,7 +1215,14 @@ cc_test($portReady, 'native-r06: silent listener port is ready');
 $silentConfig = sys_get_temp_dir() . '/hulk-pairing-silent-' . bin2hex(random_bytes(6)) . '.php';
 file_put_contents(
     $silentConfig,
-    str_replace('port=33077', 'port=33999', (string) file_get_contents($nativeConfig))
+    (static function () use ($nativeConfig): string {
+        $config = require $nativeConfig;
+        foreach ($config['databases'] as &$database) {
+            preg_match('/dbname=([^;]+)/', (string)$database['dsn'], $match);
+            $database['dsn'] = 'mysql:host=127.0.0.1;port=33999;dbname=' . ($match[1] ?? 'cc371_pairing_test');
+        } unset($database);
+        return '<?php return ' . var_export($config, true) . ';';
+    })()
 );
 chmod($silentConfig, 0600);
 $supervisorStarted = microtime(true);

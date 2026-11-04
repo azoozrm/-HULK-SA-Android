@@ -1,9 +1,15 @@
 package sa.hulksa.player.ui
 
 import java.io.File
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import sa.hulksa.player.HulkScreen
+import sa.hulksa.player.HulkUiState
+import sa.hulksa.player.finishLoginFailure
+import sa.hulksa.player.model.ContentDetails
 import sa.hulksa.player.DetailsRequestGate
 import sa.hulksa.player.model.ContentType
 
@@ -145,8 +151,15 @@ class DetailsEntryPresentationTest {
         val failureEnd = source.indexOf("companion object", startIndex = failureStart)
         val failureBody = source.substring(failureStart, failureEnd)
 
-        assertTrue(failureBody.contains("screen = if (invalidSession) HulkScreen.LOGIN else it.screen"))
-        assertTrue(failureBody.contains("isLoading = false"))
+        assertTrue(failureBody.contains("it.finishLoginFailure(error)"))
+        assertTrue(failureBody.contains("if (invalidSession)"))
+        assertTrue(failureBody.contains("beginLogout("))
+        val details = ContentDetails("retained plot", null, null, null, null, null, null)
+        val previous = HulkUiState(screen = HulkScreen.MOVIE_DETAILS, isLoading = true, selectedDetails = details)
+        val updated = previous.finishLoginFailure(IllegalStateException("synthetic hydration failure"))
+        assertEquals(HulkScreen.MOVIE_DETAILS, updated.screen)
+        assertSame(details, updated.selectedDetails)
+        assertFalse(updated.isLoading)
         assertFalse(
             detailsEntryShouldBlock(
                 remoteLoading = false,

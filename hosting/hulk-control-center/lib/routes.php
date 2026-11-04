@@ -6,121 +6,121 @@ function cc_modules(): array
 {
     return [
         'dashboard' => [
-            'label' => 'النظرة العامة',
-            'title' => 'مركز العمليات',
-            'description' => 'الحالة الحالية للتطبيق وما يحتاج إلى انتباهك.',
+            'label' => 'نظرة عامة',
+            'title' => 'نظرة عامة',
+            'description' => 'حالة التطبيق والاتصالات وأهم الإجراءات',
             'icon' => 'dashboard',
             'group' => 'overview',
         ],
         'live-users' => [
             'label' => 'المتصلون الآن',
             'title' => 'المتصلون الآن',
-            'description' => 'الاشتراكات والأجهزة التي أرسلت نشاطًا حديثًا إلى الخادم.',
+            'description' => 'ابحث عن حساب وافتح تفاصيل أجهزته',
             'icon' => 'users',
             'group' => 'audience',
         ],
         'sessions' => [
-            'label' => 'الجلسات',
-            'title' => 'سجل الجلسات',
-            'description' => 'تاريخ الاتصالات وحالة كل جلسة وبياناتها المرتبطة.',
+            'label' => 'السجلات',
+            'title' => 'السجلات',
+            'description' => 'متابعة ما حدث في التطبيق واللوحة',
             'icon' => 'clock',
             'group' => 'audience',
         ],
         'devices' => [
-            'label' => 'الأجهزة',
-            'title' => 'أجهزة التطبيق',
-            'description' => 'الأجهزة المسجلة وإصدارات النظام والتطبيق المستخدمة.',
+            'label' => 'الاجهزة',
+            'title' => 'اجهزة التطبيق',
+            'description' => 'الاجهزة المسجلة واصدارات النظام والتطبيق المستخدمة',
             'icon' => 'device',
             'group' => 'audience',
         ],
         'resellers' => [
-            'label' => 'الموزعون',
-            'title' => 'الموزعون',
-            'description' => 'إدارة الموزعين وحالتهم التشغيلية.',
+            'label' => 'ادارة الهوستات',
+            'title' => 'ادارة الهوستات',
+            'description' => 'ادارة الهوستات والاكواد المرتبطة بها',
             'icon' => 'briefcase',
             'group' => 'reseller',
         ],
         'access-codes' => [
-            'label' => 'أكواد الدخول',
-            'title' => 'أكواد الدخول',
-            'description' => 'الأكواد الحالية المرتبطة بالموزعين وإدارتها.',
+            'label' => 'اكواد الدخول',
+            'title' => 'اكواد الدخول',
+            'description' => 'اكواد الدخول وحالة كل كود',
             'icon' => 'key',
             'group' => 'reseller',
         ],
         'hosts' => [
-            'label' => 'الهوست والأكواد',
-            'title' => 'الهوست والأكواد',
-            'description' => 'الهوستات وأكواد الدخول الحالية وعلاقتها بالموزعين.',
+            'label' => 'الهوستات والأكواد',
+            'title' => 'الهوستات والأكواد',
+            'description' => 'إدارة الهوستات وربط أكواد الدخول بها',
             'icon' => 'server',
             'group' => 'reseller',
         ],
         'releases' => [
             'label' => 'تحديث التطبيق',
             'title' => 'تحديث التطبيق',
-            'description' => 'ارفع النسخة، راجعها، وانشرها على رابطك الثابت.',
+            'description' => 'راجع الإصدار وسياسة التحديث من مكان واحد',
             'icon' => 'package',
             'group' => 'operations',
         ],
         'service' => [
-            'label' => 'حالة الخدمة',
-            'title' => 'حالة الخدمة',
-            'description' => 'الحالة التشغيلية ورسائل الصيانة والتدهور.',
+            'label' => 'التحكم بالتطبيق',
+            'title' => 'التحكم بالتطبيق',
+            'description' => 'أدوات الإدارة اليومية في مكان واحد',
             'icon' => 'pulse',
             'group' => 'operations',
         ],
         'announcements' => [
-            'label' => 'الإعلانات',
-            'title' => 'الإعلانات',
-            'description' => 'الإعلانات الموجّهة لمستخدمي التطبيق.',
+            'label' => 'الرسائل',
+            'title' => 'الرسائل',
+            'description' => 'جهّز الرسائل التي تظهر للمستخدمين وراجعها قبل النشر',
             'icon' => 'bell',
             'group' => 'operations',
         ],
         'features' => [
             'label' => 'المميزات',
             'title' => 'مميزات التطبيق',
-            'description' => 'تفعيل المميزات المعتمدة أو إيقافها مركزيًا.',
+            'description' => 'تفعيل المميزات المعتمدة او ايقافها مركزيًا',
             'icon' => 'toggle',
             'group' => 'operations',
         ],
         'growth' => [
             'label' => 'التجديد والدعم',
             'title' => 'التجديد والدعم',
-            'description' => 'إدارة تجربة التجديد ومسارات الدعم داخل التطبيق.',
+            'description' => 'ادارة تجربة التجديد ومسارات الدعم داخل التطبيق',
             'icon' => 'trend',
             'group' => 'operations',
         ],
         'host-health' => [
             'label' => 'صحة الهوستات',
             'title' => 'صحة الهوستات',
-            'description' => 'نتائج الفحص الدوري وتوفر الهوستات.',
+            'description' => 'نتائج الفحص الدوري وتوفر الهوستات',
             'icon' => 'heart',
             'group' => 'insights',
         ],
         'diagnostics' => [
-            'label' => 'أعطال التطبيق',
-            'title' => 'أعطال التطبيق',
-            'description' => 'الأعطال المصنفة حسب النوع والإصدار والجهاز.',
+            'label' => 'اعطال التطبيق',
+            'title' => 'اعطال التطبيق',
+            'description' => 'الاعطال المصنفة حسب النوع والاصدار والجهاز',
             'icon' => 'diagnostic',
             'group' => 'insights',
         ],
         'analytics' => [
             'label' => 'التحليلات',
             'title' => 'التحليلات',
-            'description' => 'اتجاهات الاستخدام واعتماد الإصدارات.',
+            'description' => 'اتجاهات الاستخدام واعتماد الاصدارات',
             'icon' => 'chart',
             'group' => 'insights',
         ],
         'audit' => [
-            'label' => 'النشاط الإداري',
-            'title' => 'النشاط الإداري',
-            'description' => 'ما تغيّر داخل المركز، ومن نفّذه، ومتى حدث.',
+            'label' => 'النشاط الاداري',
+            'title' => 'النشاط الاداري',
+            'description' => 'ما تغيّر داخل المركز، ومن نفّذه، ومتى حدث',
             'icon' => 'audit',
             'group' => 'system',
         ],
         'settings' => [
-            'label' => 'إعدادات المركز',
-            'title' => 'إعدادات مركز التحكم',
-            'description' => 'ملخص آمن لحدود التشغيل والجهات المسؤولة عن التعديل.',
+            'label' => 'حدود التشغيل',
+            'title' => 'حدود التشغيل',
+            'description' => 'ملخص امن لحدود التشغيل والجهات المسؤولة عن التعديل',
             'icon' => 'settings',
             'group' => 'system',
         ],
@@ -132,67 +132,63 @@ function cc_navigation_groups(): array
     return [
         'overview' => 'الرئيسية',
         'audience' => 'النشاط المباشر',
-        'reseller' => 'الموزعون والوصول',
-        'operations' => 'إدارة التطبيق',
+        'reseller' => 'الهوستات والاكواد',
+        'operations' => 'ادارة التطبيق',
         'insights' => 'المتابعة والتحليل',
-        'system' => 'إدارة المركز',
+        'system' => 'ادارة المركز',
     ];
 }
 
 function cc_main_navigation(): array
 {
     return [
-        'live-users' => [
-            'label' => 'المتصلون الآن',
-            'icon' => 'users',
-        ],
-        'announcements' => [
-            'label' => 'الإعلانات',
-            'icon' => 'bell',
-        ],
-        'hosts' => [
-            'label' => 'الهوست والأكواد',
-            'icon' => 'server',
-        ],
-        'releases' => [
-            'label' => 'تحديث التطبيق',
-            'icon' => 'package',
-        ],
+        'dashboard' => ['label' => 'نظرة عامة', 'icon' => 'dashboard'],
+        'live-users' => ['label' => 'المتصلون الآن', 'icon' => 'users'],
+        'hosts' => ['label' => 'الهوستات والأكواد', 'icon' => 'server'],
+        'sessions' => ['label' => 'السجلات', 'icon' => 'clock'],
+        'announcements' => ['label' => 'الرسائل', 'icon' => 'bell'],
+        'releases' => ['label' => 'تحديث التطبيق', 'icon' => 'package'],
+        'service' => ['label' => 'التحكم بالتطبيق', 'icon' => 'settings'],
     ];
 }
 
 function cc_active_main_navigation(string $moduleKey): ?string
 {
     return match ($moduleKey) {
-        'live-users', 'sessions', 'devices' => 'live-users',
+        'dashboard' => 'dashboard',
+        'live-users' => 'live-users',
+        'hosts', 'access-codes', 'resellers', 'host-health' => 'hosts',
+        'sessions', 'devices', 'audit', 'diagnostics', 'analytics' => 'sessions',
         'announcements' => 'announcements',
-        'hosts', 'access-codes', 'resellers' => 'hosts',
-        'releases', 'features' => 'releases',
+        'releases' => 'releases',
+        'service', 'features', 'growth', 'settings' => 'service',
         default => null,
     };
 }
 
-function cc_secondary_navigation_groups(): array
+/** Every module has one home; related tools stay within its current section */
+function cc_context_navigation(string $moduleKey): array
 {
-    $mainKeys = array_keys(cc_main_navigation());
-    $serviceKeys = ['service', 'growth', 'settings'];
-    $groups = [];
-    foreach (cc_navigation_groups() as $groupKey => $groupLabel) {
-        $items = [];
-        foreach (cc_modules() as $moduleKey => $module) {
-            if ($module['group'] !== $groupKey) {
-                continue;
-            }
-            if (in_array($moduleKey, $mainKeys, true) || in_array($moduleKey, $serviceKeys, true)) {
-                continue;
-            }
-            $items[$moduleKey] = $module['label'];
-        }
-        if ($items !== []) {
-            $groups[$groupKey] = ['label' => $groupLabel, 'items' => $items];
-        }
-    }
-    return $groups;
+    return match (cc_active_main_navigation($moduleKey)) {
+        'dashboard' => ['dashboard' => 'نظرة عامة'],
+        'live-users' => [
+            'live-users' => 'المتصلون الآن', 'sessions' => 'السجلات', 'devices' => 'الأجهزة',
+        ],
+        'hosts' => [
+            'hosts' => 'الهوستات والأكواد', 'host-health' => 'حالة الهوستات',
+        ],
+        'sessions' => [
+            'sessions' => 'السجلات', 'devices' => 'الأجهزة', 'audit' => 'سجل التغييرات',
+            'diagnostics' => 'أعطال التطبيق', 'analytics' => 'الاستخدام',
+        ],
+        'announcements' => ['announcements' => 'الرسائل'],
+        'releases' => ['releases' => 'تحديث التطبيق'],
+        'service' => [
+            'service' => 'التحكم بالتطبيق', 'features' => 'المميزات',
+            'growth' => 'التجديد والدعم', 'settings' => 'حدود التشغيل',
+        ],
+        default => [],
+    };
 }
 
 function cc_resolve_module(?string $requested): array
@@ -200,8 +196,11 @@ function cc_resolve_module(?string $requested): array
     $modules = cc_modules();
     $key = trim((string) $requested);
     if ($key === '') {
-        $key = 'live-users';
+        $key = 'dashboard';
     }
+
+    $requestedKey = $key;
+    if (in_array($key, ['access-codes','resellers'], true)) $key = 'hosts';
 
     if (!array_key_exists($key, $modules)) {
         return [
@@ -216,6 +215,6 @@ function cc_resolve_module(?string $requested): array
         'key' => $key,
         'module' => $modules[$key],
         'valid' => true,
-        'requested' => $key,
+        'requested' => $requestedKey,
     ];
 }

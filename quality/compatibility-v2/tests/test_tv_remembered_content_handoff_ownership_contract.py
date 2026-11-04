@@ -27,7 +27,7 @@ class TvRememberedContentHandoffOwnershipContractTest(unittest.TestCase):
 
     def decision(self) -> str:
         return self.section(
-            "val rememberedPosterContentOwnsTvHandoff",
+            "val rememberedContentOwnsTvHandoff",
             "val homeModel =",
         )
 
@@ -40,12 +40,12 @@ class TvRememberedContentHandoffOwnershipContractTest(unittest.TestCase):
     def test_remembered_poster_restore_and_all_handoff_have_one_exclusive_owner(self) -> None:
         decision = self.decision()
         self.assertIn(
-            "val rememberedPosterContentOwnsTvHandoff: (MainDestination) -> Boolean = { destination ->",
+            "val rememberedContentOwnsTvHandoff: (MainDestination) -> Boolean = { destination ->",
             decision,
         )
         self.assertIn("val contentRestoreOwnsTvHandoff =", decision)
         self.assertIn(
-            "destination != state.destination && rememberedPosterContentOwnsTvHandoff(destination)",
+            "destination != state.destination && rememberedContentOwnsTvHandoff(destination)",
             decision,
         )
         self.assertIn("pendingTvContentFocusHandoff = if (contentRestoreOwnsTvHandoff) {", decision)
@@ -54,11 +54,13 @@ class TvRememberedContentHandoffOwnershipContractTest(unittest.TestCase):
         request_branch = decision.index("TvContentFocusHandoffRequest(", null_branch)
         self.assertLess(null_branch, request_branch)
         self.assertEqual(1, decision.count("pendingTvContentFocusHandoff ="))
-        self.assertEqual(2, decision.count("rememberedPosterContentOwnsTvHandoff"))
+        self.assertEqual(2, decision.count("rememberedContentOwnsTvHandoff"))
         self.assertEqual(2, decision.count("contentRestoreOwnsTvHandoff"))
 
-    def test_remembered_poster_eligibility_reuses_existing_navigation_memory(self) -> None:
+    def test_remembered_poster_and_home_eligibility_reuse_navigation_memory(self) -> None:
         decision = self.decision()
+        self.assertIn("MainDestination.HOME ->", decision)
+        self.assertIn("navigationMemory.position(MainDestination.HOME).rowKey.isNotBlank()", decision)
         self.assertIn("MainDestination.MOVIES -> ContentType.MOVIE", decision)
         self.assertIn("MainDestination.SERIES -> ContentType.SERIES", decision)
         self.assertIn("val rememberedKey = navigationMemory.position(destination).itemKey", decision)

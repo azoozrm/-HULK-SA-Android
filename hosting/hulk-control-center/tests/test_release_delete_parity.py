@@ -55,7 +55,7 @@ class ReleaseDeleteParityTests(unittest.TestCase):
         self.assertIn('name="release_id"', view)
         self.assertIn("destructive-zone", view)
         self.assertIn("button--danger", view)
-        self.assertIn('data-confirm="حذف هذا الإصدار نهائيًا', view)
+        self.assertIn('data-confirm="حذف هذا الاصدار نهائيًا', view)
         self.assertNotIn("apk_path", view)
         self.assertNotIn("apk_sha256", view)
 

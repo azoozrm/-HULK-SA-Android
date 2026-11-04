@@ -83,46 +83,12 @@ function hulk_require_reseller(): array
 
 function hulk_update_host_action(): never
 {
-    $reseller = hulk_require_reseller();
-    $rawHost = is_string($_POST['host'] ?? null) ? $_POST['host'] : '';
-    $host = hulk_normalize_host($rawHost);
-    if ($host === null) {
-        hulk_redirect('/reseller/?error=host');
-    }
-
-    $statement = hulk_db()->prepare(
-        'UPDATE resellers SET host = :host WHERE reseller_id = :id AND status = :status'
-    );
-    $statement->execute([
-        'host' => $host,
-        'id' => (int) $reseller['reseller_id'],
-        'status' => HULK_ACTIVE_STATUS,
-    ]);
-    hulk_redirect('/reseller/?result=host');
+    hulk_require_reseller();
+    hulk_redirect('/reseller/?error=retired');
 }
 
 function hulk_rotate_code_action(): never
 {
-    $reseller = hulk_require_reseller();
-    for ($attempt = 0; $attempt < 5; $attempt++) {
-        $accessCode = hulk_generate_access_code();
-        try {
-            $statement = hulk_db()->prepare(
-                'UPDATE resellers SET access_code = :access_code, access_code_hash = :access_code_hash '
-                . 'WHERE reseller_id = :id AND status = :status'
-            );
-            $statement->execute([
-                'access_code' => $accessCode,
-                'access_code_hash' => hulk_access_code_hash($accessCode),
-                'id' => (int) $reseller['reseller_id'],
-                'status' => HULK_ACTIVE_STATUS,
-            ]);
-            hulk_redirect('/reseller/?result=code');
-        } catch (PDOException $error) {
-            if ((string) $error->getCode() !== '23000' || $attempt === 4) {
-                throw $error;
-            }
-        }
-    }
-    hulk_redirect('/reseller/?error=request');
+    hulk_require_reseller();
+    hulk_redirect('/reseller/?error=retired');
 }

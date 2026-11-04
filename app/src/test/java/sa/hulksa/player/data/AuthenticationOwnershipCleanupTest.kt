@@ -18,126 +18,20 @@ import sa.hulksa.player.model.Credentials
 import sa.hulksa.player.model.PortalConfig
 import sa.hulksa.player.security.CredentialVault
 
-class PendingAuthenticationDecisionTest {
+class AuthenticationOwnershipCleanupTest {
     private lateinit var fixture: Fixture
 
     @Before
     fun setUp() {
-        PendingAuthenticationDecisionRegistry.invalidate()
+        AuthenticationAttemptRegistry.invalidate()
         AuthenticatedSessionRegistry.clear()
         fixture = Fixture()
     }
 
     @After
     fun tearDown() {
-        PendingAuthenticationDecisionRegistry.invalidate()
+        AuthenticationAttemptRegistry.invalidate()
         AuthenticatedSessionRegistry.clear()
-    }
-
-    @Test
-    fun `expired stale decision cannot erase a newer valid session`() {
-        val pendingA = fixture.pendingA(expiry = System.currentTimeMillis() / 1_000L - 1L)
-        val b = fixture.installCurrentB(accountId = "account-b")
-
-        assertThrows(StaleAccountIdentityDecisionException::class.java) {
-            runBlocking {
-                fixture.repository.completeAuthenticationDecision(
-                    pending = pendingA,
-                    selectedAccountId = null,
-                    remember = false,
-                )
-            }
-        }
-
-        fixture.assertCurrentB(b)
-    }
-
-    @Test
-    fun `non-expired stale decision cannot overwrite a newer same-account session`() {
-        val pendingA = fixture.pendingA(expiry = System.currentTimeMillis() / 1_000L + 3_600L)
-        val b = fixture.installCurrentB(accountId = "account-a")
-
-        assertThrows(StaleAccountIdentityDecisionException::class.java) {
-            runBlocking {
-                fixture.repository.completeAuthenticationDecision(
-                    pending = pendingA,
-                    selectedAccountId = null,
-                    remember = false,
-                )
-            }
-        }
-
-        fixture.assertCurrentB(b)
-    }
-
-    @Test
-    fun `logout then new login cannot be undone by late decision`() {
-        val pendingA = fixture.pendingA(expiry = System.currentTimeMillis() / 1_000L + 3_600L)
-        runBlocking { fixture.repository.logout() }
-        val b = fixture.installCurrentB(accountId = "account-b")
-
-        assertThrows(StaleAccountIdentityDecisionException::class.java) {
-            runBlocking {
-                fixture.repository.completeAuthenticationDecision(
-                    pending = pendingA,
-                    selectedAccountId = null,
-                    remember = false,
-                )
-            }
-        }
-
-        fixture.assertCurrentB(b)
-    }
-
-    @Test
-    fun `stale cancel cannot clear a newer valid session`() {
-        val pendingA = fixture.pendingA(expiry = System.currentTimeMillis() / 1_000L + 3_600L)
-        val b = fixture.installCurrentB(accountId = "account-b")
-
-        assertFalse(runBlocking { fixture.repository.abandonPendingAuthentication(pendingA) })
-
-        fixture.assertCurrentB(b)
-    }
-
-    @Test
-    fun `failed deferred commit leaves no partial session for a new owner`() {
-        val pendingA = fixture.pendingA(expiry = System.currentTimeMillis() / 1_000L + 3_600L)
-        fixture.sessionPreferences.commitResult = false
-
-        assertThrows(IllegalStateException::class.java) {
-            runBlocking {
-                fixture.repository.completeAuthenticationDecision(
-                    pending = pendingA,
-                    selectedAccountId = null,
-                    remember = false,
-                )
-            }
-        }
-
-        assertNull(fixture.store.metadata())
-        assertNull(fixture.store.activeAccountId())
-        assertNull(AuthenticatedSessionRegistry.currentOwner())
-        assertNull(fixture.sessionPreferences.durableValue("account_id"))
-        assertNull(fixture.scopePreferences.durableValue("active_account_id"))
-    }
-
-    @Test
-    fun `failed deferred commit preserves an existing prior owner`() {
-        val b = fixture.installCurrentB(accountId = "account-b")
-        val pendingA = fixture.pendingA(expiry = System.currentTimeMillis() / 1_000L + 3_600L)
-        fixture.sessionPreferences.commitResult = false
-
-        assertThrows(IllegalStateException::class.java) {
-            runBlocking {
-                fixture.repository.completeAuthenticationDecision(
-                    pending = pendingA,
-                    selectedAccountId = null,
-                    remember = false,
-                )
-            }
-        }
-
-        fixture.assertCurrentB(b)
     }
 
     @Test
@@ -200,46 +94,6 @@ class PendingAuthenticationDecisionTest {
         assertNull(fixture.envelopePreferences.durableValue(CredentialVault.KEY_IV))
     }
 
-    @Test
-    fun `current pending decision that expires fails without publishing a session`() {
-        val pendingA = fixture.pendingA(expiry = System.currentTimeMillis() / 1_000L - 1L)
-
-        assertThrows(XtreamException.SubscriptionInactive::class.java) {
-            runBlocking {
-                fixture.repository.completeAuthenticationDecision(
-                    pending = pendingA,
-                    selectedAccountId = null,
-                    remember = false,
-                )
-            }
-        }
-
-        assertNull(fixture.store.metadata())
-        assertNull(fixture.store.activeAccountId())
-        assertNull(AuthenticatedSessionRegistry.currentOwner())
-        assertFalse(runBlocking { fixture.repository.abandonPendingAuthentication(pendingA) })
-    }
-
-    @Test
-    fun `current valid decision still commits successfully`() {
-        val pendingA = fixture.pendingA(expiry = System.currentTimeMillis() / 1_000L + 3_600L)
-
-        val authenticated = runBlocking {
-            fixture.repository.completeAuthenticationDecision(
-                pending = pendingA,
-                selectedAccountId = null,
-                remember = false,
-            )
-        }
-
-        assertEquals(pendingA.session, authenticated)
-        val metadata = checkNotNull(fixture.store.metadata())
-        assertTrue(metadata.accountId.isNotBlank())
-        assertEquals(metadata.sessionId, AuthenticatedSessionRegistry.currentOwner()?.sessionId)
-        assertEquals(metadata.accountId, fixture.store.activeAccountId())
-        assertNull(fixture.vault.load())
-    }
-
     private class Fixture {
         val envelopePreferences = FakeSharedPreferences()
         val sessionPreferences = FakeSharedPreferences()
@@ -255,22 +109,6 @@ class PendingAuthenticationDecisionTest {
             accountSessionStore = store,
             suspendDownloadOwner = {},
         )
-
-        fun pendingA(expiry: Long): PendingAccountIdentityDecision {
-            val session = session(
-                username = "alpha",
-                accessCode = "CODE-ALPHA",
-                expiry = expiry,
-            )
-            return PendingAccountIdentityDecision(
-                session = session,
-                username = session.credentials.username,
-                portalBaseUrl = accountTrustedHostKey(session.portal.baseUrl),
-                candidates = emptyList(),
-                attempt = PendingAuthenticationDecisionRegistry.begin(),
-                priorSessionId = store.metadata()?.sessionId,
-            )
-        }
 
         fun installCurrentA(): AccountSessionMetadata {
             val session = session(

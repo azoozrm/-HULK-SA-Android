@@ -255,6 +255,23 @@ class SessionPublicationGateTest {
     }
 
     @Test
+    fun `login cleanup failure has a typed visible notice without replacing saved owner`() {
+        val existing = HulkUiState(
+            screen = HulkScreen.LOGIN,
+            isStarting = true,
+            isLoading = true,
+            account = AccountInfo("synthetic-owner", "Active", 9_000L, 0, 1, false),
+            favorites = setOf("retained-favorite"),
+        )
+        val updated = existing.finishExpiredOwnerFailure("synthetic private persistence detail")
+        assertEquals(LoginFailure(LoginFailureCategory.UNKNOWN, LoginFailureStage.LOCAL_PERSISTENCE), updated.loginFailure)
+        assertEquals(existing.account, updated.account)
+        assertEquals(existing.favorites, updated.favorites)
+        assertFalse(updated.isStarting)
+        assertFalse(updated.isLoading)
+    }
+
+    @Test
     fun `refresh success is rejected when a newer owner replaced the session`() {
         val session = session(expiry = 9_000L)
         val expected = owner(session, sessionId = "session-a")

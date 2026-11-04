@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 if (!empty($pageData['load_error'])) {
-    cc_error_state('تعذر تحميل التحليلات', 'لم تُستبدل البيانات غير المتاحة بأصفار.', cc_url('analytics'));
+    cc_error_state('تعذر تحميل التحليلات', 'لم تُستبدل البيانات غير المتاحة باصفار', cc_url('analytics'));
     return;
 }
 
@@ -21,25 +21,25 @@ $latestSessionDay = $sessions === [] ? 'غير متاح' : (string) ($sessions[a
     <?php cc_page_summary(
         'قراءة الاستخدام',
         'التحليلات',
-        'تابع حركة الجلسات وانتشار الإصدارات ضمن الفترة المتاحة من دون استنتاج مؤشرات غير مدعومة.',
+        'تابع حركة الجلسات وانتشار الاصدارات ضمن الفترة المتاحة من دون استنتاج مؤشرات غير مدعومة',
         'chart',
         ['label' => ($versionPartial || $currentPartial) ? 'بعض القراءات جزئية' : 'البيانات مكتملة ضمن الحدود', 'tone' => ($versionPartial || $currentPartial) ? 'warning' : 'success'],
         [
             ['label' => 'الفترة', 'value' => (string) ((int) ($pageData['window_days'] ?? 30)) . ' يومًا'],
             ['label' => 'الجلسات في الاتجاه', 'value' => (string) $sessionTotal],
-            ['label' => 'آخر يوم ظاهر', 'value' => $latestSessionDay, 'ltr' => true],
+            ['label' => 'اخر يوم ظاهر', 'value' => $latestSessionDay, 'ltr' => true],
         ]
     ); ?>
 
     <?php if ($versionPartial || $currentPartial): ?>
-        <?php cc_alert('قراءة اعتماد الإصدارات جزئية', 'وصلت البيانات إلى حد العرض؛ لا تُحوّل الصفوف غير الظاهرة إلى أصفار.', 'warning'); ?>
+        <?php cc_alert('قراءة اعتماد الاصدارات جزئية', 'وصلت البيانات الى حد العرض؛ لا تُحوّل الصفوف غير الظاهرة الى اصفار', 'warning'); ?>
     <?php endif; ?>
 
     <section class="analytics-primary-grid">
         <article class="panel analytics-chart analytics-chart--sessions">
-            <header class="panel__header"><div><span class="eyebrow">حركة الاستخدام</span><h2>الجلسات خلال الفترة</h2><p class="muted-copy">عدد الجلسات التي بدأت في كل يوم.</p></div></header>
+            <header class="panel__header"><div><span class="eyebrow">حركة الاستخدام</span><h2>الجلسات خلال الفترة</h2><p class="muted-copy">عدد الجلسات التي بدات في كل يوم</p></div></header>
             <?php if ($sessions === []): ?>
-                <?php cc_empty_state('لا توجد جلسات في الفترة', 'لم تُسجل جلسات يمكن عرضها في الاتجاه الحالي.'); ?>
+                <?php cc_empty_state('لا توجد جلسات في الفترة', 'لم تُسجل جلسات يمكن عرضها في الاتجاه الحالي'); ?>
             <?php else: ?>
                 <div class="bar-chart bar-chart--timeline" role="img" aria-label="اتجاه الجلسات حسب اليوم">
                     <?php foreach ($sessions as $row): ?>
@@ -50,14 +50,14 @@ $latestSessionDay = $sessions === [] ? 'غير متاح' : (string) ($sessions[a
         </article>
 
         <article class="panel analytics-chart analytics-chart--versions">
-            <header class="panel__header"><div><span class="eyebrow">الأجهزة النشطة خلال 24 ساعة<?= $currentPartial ? ' · قراءة جزئية' : '' ?></span><h2>الإصدارات المستخدمة الآن</h2><p class="muted-copy">أحدث إصدار ظهر على كل جهاز نشط.</p></div></header>
+            <header class="panel__header"><div><span class="eyebrow">الاجهزة النشطة خلال 24 ساعة<?= $currentPartial ? ' · قراءة جزئية' : '' ?></span><h2>الاصدارات المستخدمة الان</h2><p class="muted-copy">احدث اصدار ظهر على كل جهاز نشط</p></div></header>
             <?php if ($current === []): ?>
-                <?php cc_empty_state('لا توجد أجهزة حديثة', 'لا توجد أجهزة ذات نشاط حديث في نافذة العرض الحالية.'); ?>
+                <?php cc_empty_state('لا توجد اجهزة حديثة', 'لا توجد اجهزة ذات نشاط حديث في نافذة العرض الحالية'); ?>
             <?php else: ?>
                 <div class="version-distribution">
                     <?php foreach ($current as $row): ?>
                         <div class="version-distribution__row">
-                            <div><strong><?= cc_e((string) $row['app_version_name']) ?></strong><small>رمز الإصدار <bdi dir="ltr"><?= (int) $row['app_version_code'] ?></bdi></small></div>
+                            <div><strong><?= cc_e((string) $row['app_version_name']) ?></strong><small>رمز الاصدار <bdi dir="ltr"><?= (int) $row['app_version_code'] ?></bdi></small></div>
                             <progress max="<?= $maximumCurrent ?>" value="<?= (int) $row['device_count'] ?>"><?= (int) $row['device_count'] ?></progress>
                             <span><?= (int) $row['device_count'] ?> جهاز</span>
                         </div>
@@ -68,15 +68,15 @@ $latestSessionDay = $sessions === [] ? 'غير متاح' : (string) ($sessions[a
     </section>
 
     <section class="panel adoption-trend">
-        <header class="panel__header"><div><span class="eyebrow">الانتقال بين الإصدارات<?= $versionPartial ? ' · قراءة جزئية' : '' ?></span><h2>اعتماد الإصدارات عبر الأيام</h2><p class="muted-copy">عرض مضغوط يسهل مقارنة اليوم والإصدار وعدد الأجهزة.</p></div></header>
+        <header class="panel__header"><div><span class="eyebrow">الانتقال بين الاصدارات<?= $versionPartial ? ' · قراءة جزئية' : '' ?></span><h2>اعتماد الاصدارات عبر الايام</h2><p class="muted-copy">عرض مضغوط يسهل مقارنة اليوم والاصدار وعدد الاجهزة</p></div></header>
         <?php if ($versions === []): ?>
-            <?php cc_empty_state('لا توجد بيانات اعتماد', 'لا توجد جلسات ضمن فترة التحليل.'); ?>
+            <?php cc_empty_state('لا توجد بيانات اعتماد', 'لا توجد جلسات ضمن فترة التحليل'); ?>
         <?php else: ?>
-            <div class="compact-records" role="list" aria-label="اتجاه اعتماد الإصدارات">
+            <div class="compact-records" role="list" aria-label="اتجاه اعتماد الاصدارات">
                 <?php foreach ($versions as $row): ?>
                     <article class="compact-record" role="listitem">
                         <div class="compact-record__identity"><strong><?= cc_e((string) $row['app_version_name']) ?></strong><small><bdi dir="ltr"><?= cc_e((string) $row['day']) ?></bdi> · رمز <bdi dir="ltr"><?= (int) $row['app_version_code'] ?></bdi></small></div>
-                        <div class="compact-record__metric"><span>الأجهزة</span><strong><?= (int) $row['device_count'] ?></strong></div>
+                        <div class="compact-record__metric"><span>الاجهزة</span><strong><?= (int) $row['device_count'] ?></strong></div>
                     </article>
                 <?php endforeach; ?>
             </div>
@@ -86,7 +86,7 @@ $latestSessionDay = $sessions === [] ? 'غير متاح' : (string) ($sessions[a
     <details class="technical-disclosure methodology-disclosure">
         <summary>منهجية احتساب المؤشرات</summary>
         <div class="technical-disclosure__body">
-            <p>يعتمد اتجاه الجلسات على وقت بدء الجلسة. ويأخذ اتجاه اعتماد الإصدارات آخر جلسة لكل جهاز في اليوم. أما التوزيع الحالي فيستخدم أحدث نشاط للجهاز خلال 24 ساعة، ولا يعتمد على عدد تنزيلات ملف التطبيق.</p>
+            <p>يعتمد اتجاه الجلسات على وقت بدء الجلسة. وياخذ اتجاه اعتماد الاصدارات اخر جلسة لكل جهاز في اليوم. اما التوزيع الحالي فيستخدم احدث نشاط للجهاز خلال 24 ساعة، ولا يعتمد على عدد تنزيلات ملف التطبيق</p>
         </div>
     </details>
 </section>

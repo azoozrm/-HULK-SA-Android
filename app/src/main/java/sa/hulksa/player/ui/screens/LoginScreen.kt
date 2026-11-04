@@ -11,6 +11,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -108,41 +110,16 @@ import androidx.compose.ui.unit.sp
 import sa.hulksa.player.R
 import sa.hulksa.player.PairingUiState
 import sa.hulksa.player.data.GrowthDestination
-import sa.hulksa.player.data.PortalException
+import sa.hulksa.player.data.LoginFailure
 import sa.hulksa.player.data.OperationsGrowthLinkConfig
 import sa.hulksa.player.ui.components.EntryActionButton
 import sa.hulksa.player.ui.components.PairingQuickLoginIcon
 import sa.hulksa.player.ui.components.EntryNotice
+import sa.hulksa.player.ui.components.entryNoticeMetrics
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 private const val HULK_WEBSITE = "https://hulksa.com/"
-
-internal const val LOGIN_OFFLINE_MESSAGE =
-    "لا يوجد اتصال بالانترنت ، تحقق من اتصالك وحاول مرة اخرى"
-
-internal data class LoginErrorPresentation(
-    val displayText: String?,
-    val confirmedOffline: Boolean,
-)
-
-/**
- * Routes the raw Login failure to its display copy: a confirmed-offline transport failure uses the
- * offline wording; a service failure with internet available keeps the app-authored service retry
- * copy; validation/credential failures stay unchanged. Raw classification is untouched.
- */
-internal fun loginErrorPresentation(
-    errorMessage: String?,
-    serviceUnavailableMessage: String,
-    confirmedOffline: Boolean,
-): LoginErrorPresentation = when {
-    errorMessage.isNullOrBlank() ->
-        LoginErrorPresentation(displayText = null, confirmedOffline = false)
-    errorMessage == serviceUnavailableMessage && confirmedOffline ->
-        LoginErrorPresentation(displayText = LOGIN_OFFLINE_MESSAGE, confirmedOffline = true)
-    else ->
-        LoginErrorPresentation(displayText = errorMessage, confirmedOffline = false)
-}
 
 internal class LoginCardFocusRequesterHolder(
     initialRequester: FocusRequester,
@@ -168,13 +145,6 @@ internal class LoginKeyboardFocusTransitionController {
         textInputFocused = false
         hideKeyboard()
     }
-}
-
-private enum class LoginErrorTarget {
-    ACCESS_CODE,
-    USERNAME,
-    PASSWORD,
-    NONE,
 }
 
 private data class LoginLayoutPolicy(
@@ -279,10 +249,12 @@ fun LoginScreen(
     isTv: Boolean,
     pairingOffered: Boolean,
     pairing: PairingUiState,
-    pairingReturnFocusSuspended: Boolean,
+
     isStarting: Boolean,
     isLoading: Boolean,
-    errorMessage: String?,
+    failure: LoginFailure?,
+    connectivity: LoginConnectivityEvidence,
+    loginValidationAttempt: Long = 0,
     onLogin: (String, String, String, Boolean) -> Unit,
     onStartPairing: (Boolean) -> Unit,
     onRetryPairing: () -> Unit,
@@ -320,7 +292,7 @@ fun LoginScreen(
     val passwordState = remember { mutableStateOf("") }
     var showPassword by rememberSaveable { mutableStateOf(false) }
     var rememberAccount by rememberSaveable { mutableStateOf(true) }
-    var websiteOpenError by remember { mutableStateOf<String?>(null) }
+    var websiteOpenFailed by remember { mutableStateOf(false) }
 
     DisposableEffect(isTv, activity) {
         if (isTv && activity != null) {
@@ -364,6 +336,7 @@ fun LoginScreen(
             } else {
                 dismissKeyboard()
             }
+            websiteOpenFailed = false
             onLogin(
                 accessCodeState.value,
                 usernameState.value.trim(),
@@ -374,15 +347,14 @@ fun LoginScreen(
     }
     val openWebsite = {
         runCatching { uriHandler.openUri(HULK_WEBSITE) }
-            .onSuccess { websiteOpenError = null }
-            .onFailure {
-                websiteOpenError = "تعذر فتح الموقع. تحقق من وجود متصفح او اتصال ثم حاول مرة اخرى"
-            }
+            .onSuccess { websiteOpenFailed = false }
+            .onFailure { websiteOpenFailed = true }
         Unit
     }
 
     LaunchedEffect(isTv, isLoading, isStarting) {
         if (isLoading || isStarting) {
+            websiteOpenFailed = false
             hideKeyboard()
             if (!isTv) {
                 focusManager.clearFocus(force = true)
@@ -440,12 +412,8 @@ fun LoginScreen(
                 return@BoxWithConstraints
             }
 
-            val usableNetwork by rememberUsableNetworkState()
-            val errorPresentation = loginErrorPresentation(
-                errorMessage = errorMessage,
-                serviceUnavailableMessage = PortalException.ServiceUnavailable.message.orEmpty(),
-                confirmedOffline = !usableNetwork,
-            )
+            val errorPresentation = loginErrorPresentation(failure, connectivity)
+            val notice = loginNoticePresentation(errorPresentation, websiteOpenFailed)
 
             val panel: @Composable (Modifier) -> Unit = { modifier ->
                 LoginPanel(
@@ -462,11 +430,10 @@ fun LoginScreen(
                     subscriptionUsesQr = subscriptionUsesQr,
                     pairingOffered = pairingOffered,
                     pairingVisible = pairing.visible,
-                    pairingReturnFocusSuspended = pairingReturnFocusSuspended,
-                    errorMessage = errorMessage,
-                    displayedErrorMessage = errorPresentation.displayText,
-                    networkFailure = errorPresentation.confirmedOffline,
-                    websiteErrorMessage = websiteOpenError,
+
+                    failure = failure,
+                    loginValidationAttempt = loginValidationAttempt,
+                    notice = notice,
                     onSubmit = submit,
                     onOpenSubscription = {
                         if (subscriptionUsesQr) {
@@ -509,6 +476,10 @@ fun LoginScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 val pageScrollState = rememberScrollState()
+                // Keep the form still when a field/caret is already visible. TV pivot alignment
+                // otherwise gives their different bounds competing scroll targets at larger fonts.
+                val visibilitySpec = remember { object : BringIntoViewSpec {} }
+                CompositionLocalProvider(LocalBringIntoViewSpec provides visibilitySpec) {
                 Column(
                     modifier = Modifier
                         .verticalScroll(pageScrollState)
@@ -520,6 +491,7 @@ fun LoginScreen(
                             .widthIn(max = resolvedCardMaxWidth)
                             .fillMaxWidth(),
                     )
+                }
                 }
             }
 
@@ -579,11 +551,10 @@ private fun LoginPanel(
     subscriptionUsesQr: Boolean,
     pairingOffered: Boolean,
     pairingVisible: Boolean,
-    pairingReturnFocusSuspended: Boolean,
-    errorMessage: String?,
-    displayedErrorMessage: String?,
-    networkFailure: Boolean,
-    websiteErrorMessage: String?,
+
+    failure: LoginFailure?,
+    loginValidationAttempt: Long,
+    notice: LoginErrorPresentation,
     onSubmit: () -> Unit,
     onOpenSubscription: () -> Unit,
     onStartPairing: (Boolean) -> Unit,
@@ -604,16 +575,15 @@ private fun LoginPanel(
     val showPasswordRequester = remember { FocusRequester() }
     val pairingRequester = remember { FocusRequester() }
     val panelShape = RoundedCornerShape(policy.cardRadius)
-    val displayedError = displayedErrorMessage
     val actionFloorDp = movieActionHeightDp(isTv = isTv, compactHeight = !isTv && policy.compact)
     val actionCaptionGap = rememberActionCaptionSpace()
     var pairingWasVisible by remember { mutableStateOf(false) }
     var pairingTriggerPlaced by remember { mutableStateOf(false) }
     var pendingPairingReturnFocus by remember { mutableStateOf(false) }
 
-    LaunchedEffect(isLoading, errorMessage) {
-        if (!isLoading && !errorMessage.isNullOrBlank()) {
-            when (resolveLoginErrorTarget(errorMessage, usernameState.value, passwordState.value)) {
+    LaunchedEffect(isLoading, failure, loginValidationAttempt) {
+        if (!isLoading && failure != null) {
+            when (notice.target) {
                 LoginErrorTarget.ACCESS_CODE -> runCatching { accessRequester.requestFocus() }
                 LoginErrorTarget.USERNAME -> runCatching { usernameRequester.requestFocus() }
                 LoginErrorTarget.PASSWORD -> runCatching { passwordRequester.requestFocus() }
@@ -635,22 +605,20 @@ private fun LoginPanel(
         if (!pairingOffered) pendingPairingReturnFocus = false
     }
     // Placement-driven return focus: the pending request resolves only after the real target has
-    // been placed and no newer owner (loading, error target, account decision) owns focus.
+    // been placed and no newer owner (loading or an error target) owns focus.
     LaunchedEffect(
         pendingPairingReturnFocus,
         pairingOffered,
         pairingTriggerPlaced,
         isLoading,
-        errorMessage,
-        pairingReturnFocusSuspended,
+        failure,
     ) {
         if (
             pendingPairingReturnFocus &&
             pairingOffered &&
             pairingTriggerPlaced &&
             !isLoading &&
-            errorMessage.isNullOrBlank() &&
-            !pairingReturnFocusSuspended
+            failure == null
         ) {
             pendingPairingReturnFocus = false
             runCatching { pairingRequester.requestFocus() }
@@ -816,33 +784,7 @@ private fun LoginPanel(
             policy = policy,
         )
 
-        if (displayedError != null) {
-            Spacer(Modifier.height(if (isTv) 6.dp else 10.dp))
-            EntryNotice(
-                message = displayedError,
-                networkFailure = networkFailure,
-                compact = policy.compact,
-            )
-        }
-
-        if (websiteErrorMessage != null) {
-            Spacer(Modifier.height(if (isTv) 6.dp else 10.dp))
-            EntryNotice(
-                message = websiteErrorMessage,
-                compact = policy.compact,
-                liveRegionPolite = false,
-            )
-        }
-
-        Spacer(
-            Modifier.height(
-                if (isTv) {
-                    if (displayedError != null || websiteErrorMessage != null) 6.dp else 10.dp
-                } else {
-                    if (policy.compact) 0.dp else 8.dp
-                },
-            ),
-        )
+        LoginNoticeSlot(notice = notice, isTv = isTv, compact = policy.compact)
         EntryActionButton(
             text = "تسجيل الدخول",
             onClick = onSubmit,
@@ -1337,21 +1279,6 @@ private fun LoginOption(
 }
 
 
-private fun resolveLoginErrorTarget(
-    errorMessage: String,
-    username: String,
-    password: String,
-): LoginErrorTarget {
-    val normalized = errorMessage.withoutArabicHamzas()
-    return when {
-        "كود الدخول" in normalized || "كود دخول" in normalized -> LoginErrorTarget.ACCESS_CODE
-        "اسم المستخدم وكلمة المرور" in normalized && username.isBlank() -> LoginErrorTarget.USERNAME
-        "اسم المستخدم وكلمة المرور" in normalized && password.isEmpty() -> LoginErrorTarget.PASSWORD
-        "بيانات الاشتراك غير صحيحة" in normalized -> LoginErrorTarget.USERNAME
-        else -> LoginErrorTarget.NONE
-    }
-}
-
 private tailrec fun Context.findActivity(): Activity? =
     when (this) {
         is Activity -> this
@@ -1359,9 +1286,41 @@ private tailrec fun Context.findActivity(): Activity? =
         else -> null
     }
 
-private fun String.withoutArabicHamzas(): String =
-    replace('أ', 'ا')
-        .replace('إ', 'ا')
-        .replace('آ', 'ا')
-        .replace('ؤ', 'و')
-        .replace('ئ', 'ي')
+/** Fixed Login-only status geometry; empty space has no error/live-region semantics. */
+@Composable
+private fun LoginNoticeSlot(notice: LoginErrorPresentation, isTv: Boolean, compact: Boolean) {
+    val metrics = entryNoticeMetrics(compact)
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    val style = LocalTextStyle.current.copy(
+        fontSize = metrics.fontSize,
+        lineHeight = metrics.lineHeight,
+        fontWeight = FontWeight.Medium,
+    )
+    // Use the actual Arabic font metrics at this density/font scale, not a guessed photo height.
+    val textHeight = measurer.measure(
+        text = LOGIN_EXPIRY_MESSAGE,
+        style = style,
+        maxLines = 1,
+        softWrap = false,
+    ).size.height
+    // Padding rounds each edge independently; reserve those exact pixels to avoid losing a
+    // text pixel at fractional densities when twice the unrounded padding rounds differently.
+    val noticeHeightPx = with(density) {
+        maxOf(textHeight, metrics.iconSize.roundToPx()) + metrics.verticalPadding.roundToPx() * 2
+    }
+    val noticeHeight = with(density) { noticeHeightPx.toDp() }
+    Spacer(Modifier.height(if (isTv) 6.dp else 10.dp))
+    Box(Modifier.fillMaxWidth().height(noticeHeight)) {
+        notice.displayText?.let { text ->
+            EntryNotice(
+                message = text,
+                networkFailure = notice.confirmedOffline,
+                compact = compact,
+                singleLine = true,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+    Spacer(Modifier.height(if (isTv) 6.dp else if (compact) 0.dp else 8.dp))
+}

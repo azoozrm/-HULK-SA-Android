@@ -224,6 +224,257 @@ class EpisodeNotificationPipelineInstrumentedTest {
     }
 
     @Test
+    fun automaticStartupScanPresentsNewEpisodeWithoutManualRefresh() = runBlocking {
+        val accountStore = AccountSessionStore(context)
+        val metadata = accountStore.recordAuthenticated(session())
+        val profileStore = ProfileStore(context)
+        val profile = requireNotNull(profileStore.load(metadata.accountId))
+            .let { profileStore.activeProfile() }
+        val notificationStore = LocalEpisodeNotificationStore(context)
+        assertEquals(
+            EpisodeNotificationStoreResult.SUCCESS,
+            notificationStore.enableSubscription(
+                profileId = profile.id,
+                series = series(),
+                episodes = listOf(episodeA()),
+                nowEpochMs = 0L,
+                expectedAccountId = metadata.accountId,
+            ),
+        )
+
+        val client = CountingXtreamClient(episodes = listOf(episodeA(), episodeB()))
+        val model = modelFor(accountStore, client)
+        viewModel = model
+
+        // No refreshProfileLibrary/onAppResumed/refresh call: this is the APP_START path owned by
+        // the authenticated session publication itself.
+        val detected = withTimeout(15_000) {
+            model.state.first { state ->
+                state.localNotifications.any { item ->
+                    item is LocalNotificationItem.Episode &&
+                        item.notification.episodeNumber == 2
+                }
+            }
+        }
+        assertEquals(1, detected.unreadNotificationCount)
+        assertEquals(1, client.calls.get())
+
+        composeRule.setContent {
+            val state by model.state.collectAsState()
+            NotificationProfileReadinessEffect(ready = true) { model.setNotificationUiReady(it) }
+            state.notificationPopup?.let { popup ->
+                NewEpisodeAlertOverlay(
+                    popup = popup,
+                    isTv = true,
+                    onPresented = model::confirmNotificationPopupPresented,
+                    onPrimary = {},
+                    onLater = model::dismissNotificationPopup,
+                )
+            }
+        }
+        composeRule.waitUntil(10_000) { model.state.value.notificationPopup != null }
+        composeRule.onNodeWithText("حلقة جديدة نزلت", substring = true).assertExists()
+        Unit
+    }
+
+    @Test
+    fun automaticResumeScanAfterThrottlePresentsWithoutManualRefresh() = runBlocking {
+        val accountStore = AccountSessionStore(context)
+        val metadata = accountStore.recordAuthenticated(session())
+        val profileStore = ProfileStore(context)
+        val profile = requireNotNull(profileStore.load(metadata.accountId))
+            .let { profileStore.activeProfile() }
+        val notificationStore = LocalEpisodeNotificationStore(context)
+        assertEquals(
+            EpisodeNotificationStoreResult.SUCCESS,
+            notificationStore.enableSubscription(
+                profileId = profile.id,
+                series = series(),
+                episodes = listOf(episodeA()),
+                nowEpochMs = 0L,
+                expectedAccountId = metadata.accountId,
+            ),
+        )
+
+        val client = CountingXtreamClient(episodes = listOf(episodeA()))
+        val model = modelFor(accountStore, client)
+        viewModel = model
+        withTimeout(10_000) { model.state.first { it.account != null } }
+        withTimeout(10_000) { client.firstCallStarted.await() }
+        withTimeout(10_000) {
+            while (
+                notificationStore.snapshot(profile.id).subscriptions.single()
+                    .lastCheckedAtEpochMs <= 0L
+            ) {
+                kotlinx.coroutines.delay(50)
+            }
+        }
+
+        // Provider gains the next episode while the app process stays alive. Rewind only the
+        // persisted eligibility timestamp so the real APP_RESUME threshold is exercised without
+        // waiting wall-clock minutes; the trigger itself remains the activity-resume path.
+        client.episodes = listOf(episodeA(), episodeB())
+        assertEquals(
+            EpisodeNotificationStoreResult.SUCCESS,
+            notificationStore.replaceBaseline(
+                profileId = profile.id,
+                seriesId = series().id,
+                episodes = listOf(episodeA()),
+                checkedAtEpochMs = System.currentTimeMillis() - ELEVEN_MINUTES_MS,
+                expectedAccountId = metadata.accountId,
+            ),
+        )
+        val callsBeforeResume = client.calls.get()
+        model.onAppResumed()
+
+        val detected = withTimeout(10_000) {
+            model.state.first { state ->
+                state.localNotifications.any { item ->
+                    item is LocalNotificationItem.Episode &&
+                        item.notification.episodeNumber == 2
+                }
+            }
+        }
+        assertEquals(1, detected.unreadNotificationCount)
+        assertEquals(callsBeforeResume + 1, client.calls.get())
+    }
+
+    @Test
+    fun foregroundDueCheckPresentsOnceWithoutManualRefresh() = runBlocking {
+        val accountStore = AccountSessionStore(context)
+        val metadata = accountStore.recordAuthenticated(session())
+        val profileStore = ProfileStore(context)
+        val profile = requireNotNull(profileStore.load(metadata.accountId))
+            .let { profileStore.activeProfile() }
+        val notificationStore = LocalEpisodeNotificationStore(context)
+        assertEquals(
+            EpisodeNotificationStoreResult.SUCCESS,
+            notificationStore.enableSubscription(
+                profileId = profile.id,
+                series = series(),
+                episodes = listOf(episodeA()),
+                nowEpochMs = 0L,
+                expectedAccountId = metadata.accountId,
+            ),
+        )
+
+        val client = CountingXtreamClient(episodes = listOf(episodeA()))
+        val model = modelFor(accountStore, client)
+        viewModel = model
+        withTimeout(10_000) { model.state.first { it.account != null } }
+        withTimeout(10_000) { client.firstCallStarted.await() }
+        withTimeout(10_000) {
+            while (
+                notificationStore.snapshot(profile.id).subscriptions.single()
+                    .lastCheckedAtEpochMs <= 0L
+            ) {
+                kotlinx.coroutines.delay(50)
+            }
+        }
+
+        client.episodes = listOf(episodeA(), episodeB())
+        assertEquals(
+            EpisodeNotificationStoreResult.SUCCESS,
+            notificationStore.replaceBaseline(
+                profileId = profile.id,
+                seriesId = series().id,
+                episodes = listOf(episodeA()),
+                checkedAtEpochMs = System.currentTimeMillis() - SIX_MINUTES_MS,
+                expectedAccountId = metadata.accountId,
+            ),
+        )
+        val callsBeforeHome = client.calls.get()
+        model.onAppForegroundChanged(true)
+
+        val detected = withTimeout(10_000) {
+            model.state.first { state ->
+                state.localNotifications.any { item ->
+                    item is LocalNotificationItem.Episode &&
+                        item.notification.episodeNumber == 2
+                }
+            }
+        }
+        assertEquals(1, detected.unreadNotificationCount)
+        assertEquals(callsBeforeHome + 1, client.calls.get())
+
+        // A second foreground wake inside the same eligibility window must neither fetch nor
+        // duplicate the persisted event.
+        model.onAppForegroundChanged(true)
+        kotlinx.coroutines.delay(750)
+        assertEquals(callsBeforeHome + 1, client.calls.get())
+        assertEquals(
+            1,
+            notificationStore.snapshot(profile.id).notifications.count {
+                it.episodeNumber == 2
+            },
+        )
+    }
+
+    @Test
+    fun manualRefreshStillDetectsWithinTheAutomaticWindow() = runBlocking {
+        val accountStore = AccountSessionStore(context)
+        val metadata = accountStore.recordAuthenticated(session())
+        val profileStore = ProfileStore(context)
+        val profile = requireNotNull(profileStore.load(metadata.accountId))
+            .let { profileStore.activeProfile() }
+        val notificationStore = LocalEpisodeNotificationStore(context)
+        assertEquals(
+            EpisodeNotificationStoreResult.SUCCESS,
+            notificationStore.enableSubscription(
+                profileId = profile.id,
+                series = series(),
+                episodes = listOf(episodeA()),
+                nowEpochMs = 0L,
+                expectedAccountId = metadata.accountId,
+            ),
+        )
+
+        val client = CountingXtreamClient(episodes = listOf(episodeA()))
+        val model = modelFor(accountStore, client)
+        viewModel = model
+        withTimeout(10_000) { model.state.first { it.account != null } }
+        withTimeout(10_000) { client.firstCallStarted.await() }
+        withTimeout(10_000) {
+            while (
+                notificationStore.snapshot(profile.id).subscriptions.single()
+                    .lastCheckedAtEpochMs <= 0L
+            ) {
+                kotlinx.coroutines.delay(50)
+            }
+        }
+
+        // Two minutes is inside the five-minute automatic window but outside the existing
+        // one-minute manual window; only the explicit refresh may fetch here.
+        client.episodes = listOf(episodeA(), episodeB())
+        assertEquals(
+            EpisodeNotificationStoreResult.SUCCESS,
+            notificationStore.replaceBaseline(
+                profileId = profile.id,
+                seriesId = series().id,
+                episodes = listOf(episodeA()),
+                checkedAtEpochMs = System.currentTimeMillis() - TWO_MINUTES_MS,
+                expectedAccountId = metadata.accountId,
+            ),
+        )
+        model.onAppForegroundChanged(true)
+        kotlinx.coroutines.delay(500)
+        assertEquals(1, client.calls.get())
+
+        val callsBeforeManual = client.calls.get()
+        model.refresh()
+        val detected = withTimeout(10_000) {
+            model.state.first { state ->
+                state.localNotifications.any { item ->
+                    item is LocalNotificationItem.Episode &&
+                        item.notification.episodeNumber == 2
+                }
+            }
+        }
+        assertEquals(1, detected.unreadNotificationCount)
+        assertEquals(callsBeforeManual + 1, client.calls.get())
+    }
+
+    @Test
     fun profileChangeDuringInFlightScanDoesNotPublishEventUnderNewProfile() = runBlocking {
         val accountStore = AccountSessionStore(context)
         val metadata = accountStore.recordAuthenticated(session())
@@ -547,7 +798,7 @@ class EpisodeNotificationPipelineInstrumentedTest {
     """.trimIndent()
 
     private inner class CountingXtreamClient(
-        private val episodes: List<Episode> = listOf(episodeA()),
+        var episodes: List<Episode> = listOf(episodeA()),
     ) : XtreamClient() {
         val firstCallStarted = CompletableDeferred<Unit>()
         val calls = AtomicInteger(0)
@@ -694,6 +945,7 @@ class EpisodeNotificationPipelineInstrumentedTest {
             "hulk_profiles_v1",
             "hulk_user_library",
             "hulk_local_episode_notifications_v1",
+            "hulk_kids_content_filter_v1.provider.$accountId",
         ).forEach { name ->
             context.getSharedPreferences(
                 accountScopedPreferencesName(name, accountId),
@@ -710,5 +962,6 @@ class EpisodeNotificationPipelineInstrumentedTest {
         const val SERIES_ID = 44
         const val TWO_MINUTES_MS = 2L * 60L * 1_000L
         const val SIX_MINUTES_MS = 6L * 60L * 1_000L
+        const val ELEVEN_MINUTES_MS = 11L * 60L * 1_000L
     }
 }

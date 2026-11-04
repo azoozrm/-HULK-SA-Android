@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+require_once __DIR__ . '/legacy-host-fixture.php';
 
 $phaseSevenRoot = dirname(__DIR__);
 require_once $phaseSevenRoot . '/lib/phase7-read-model.php';
@@ -114,6 +115,7 @@ $reseller->exec(
     'CREATE TABLE resellers ('
     . 'reseller_id INTEGER PRIMARY KEY, reseller_name TEXT NOT NULL, host TEXT NULL, status TEXT NOT NULL)'
 );
+cc_test_legacy_host_views($reseller);
 $reseller->exec(
     "INSERT INTO resellers VALUES "
     . "(7, 'Synthetic Active', 'https://first.example.test', 'active'), "
@@ -243,6 +245,7 @@ $boundedReseller->exec(
     'CREATE TABLE resellers ('
     . 'reseller_id INTEGER PRIMARY KEY, reseller_name TEXT NOT NULL, host TEXT NULL, status TEXT NOT NULL)'
 );
+cc_test_legacy_host_views($boundedReseller);
 for ($target = 1; $target <= 25; $target++) {
     $boundedReseller->prepare('INSERT INTO resellers VALUES (:id, :name, :host, \'active\')')->execute([
         'id' => $target,

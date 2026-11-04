@@ -15,6 +15,10 @@ function cc_icon(string $name, string $class = ''): string
 {
     $content = match ($name) {
         'dashboard' => '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
+        'user' => '<circle cx="12" cy="8" r="3"/><path d="M5 20v-2a7 4 0 0 1 14 0v2"/>',
+        'host' => '<rect x="4" y="4" width="16" height="7" rx="2"/><rect x="4" y="13" width="16" height="7" rx="2"/><path d="M8 8h.1M8 17h.1"/>',
+        'screen' => '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/>',
+        'list' => '<path d="M9 6h11M9 12h11M9 18h11M4 6h.1M4 12h.1M4 18h.1"/>',
         'users' => '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
         'clock' => '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
         'device' => '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/>',
@@ -110,28 +114,25 @@ function cc_page_summary(
     array $facts = []
 ): void {
     ?>
-    <section class="page-summary">
+    <section class="page-summary" aria-label="ملخص الحالة">
         <div class="page-summary__main">
-            <span class="page-summary__icon"><?= cc_icon($icon) ?></span>
-            <div>
-                <span class="eyebrow"><?= cc_e($eyebrow) ?></span>
-                <h2><?= cc_e($title) ?></h2>
-                <p><?= cc_e($description) ?></p>
-            </div>
+            <strong><?= cc_e($title) ?></strong>
+            <?php if ($status !== null): ?>
+                <?php cc_status_badge((string) ($status['label'] ?? ''), (string) ($status['tone'] ?? 'neutral')); ?>
+            <?php endif; ?>
         </div>
-        <?php if ($status !== null): ?>
-            <div class="page-summary__status"><?php cc_status_badge((string) ($status['label'] ?? ''), (string) ($status['tone'] ?? 'neutral')); ?></div>
-        <?php endif; ?>
         <?php if ($facts !== []): ?>
             <dl class="page-summary__facts">
                 <?php foreach ($facts as $fact): ?>
-                    <div>
-                        <dt><?= cc_e((string) ($fact['label'] ?? '')) ?></dt>
+                    <div><dt><?= cc_e((string) ($fact['label'] ?? '')) ?></dt>
                         <dd<?= !empty($fact['ltr']) ? ' dir="ltr"' : '' ?>><?= cc_e((string) ($fact['value'] ?? '—')) ?></dd>
                         <?php if (($fact['hint'] ?? '') !== ''): ?><small><?= cc_e((string) $fact['hint']) ?></small><?php endif; ?>
                     </div>
                 <?php endforeach; ?>
             </dl>
+        <?php endif; ?>
+        <?php if ($description !== ''): ?>
+            <details class="summary-help"><summary>عن هذه البيانات</summary><p><?= cc_e($description) ?></p></details>
         <?php endif; ?>
     </section>
     <?php
@@ -237,7 +238,7 @@ function cc_error_state(string $title, string $description, string $retryUrl): v
         <div>
             <h2><?= cc_e($title) ?></h2>
             <p><?= cc_e($description) ?></p>
-            <a class="button button--secondary" href="<?= cc_e($retryUrl) ?>">إعادة المحاولة</a>
+            <a class="button button--secondary" href="<?= cc_e($retryUrl) ?>">اعادة المحاولة</a>
         </div>
     </section>
     <?php
@@ -266,12 +267,12 @@ function cc_saved_filter_controls(string $module, array $allowedFields): void
     }
     ?>
     <div class="saved-filters" data-saved-filter-controls>
-        <label class="form-field saved-filters__name"><span>اسم العرض المحفوظ</span><input type="text" maxlength="40" data-saved-filter-name autocomplete="off" placeholder="مثال: أجهزة التلفاز"></label>
-        <button class="button button--secondary" type="button" data-saved-filter-save>حفظ الفلاتر الآمنة</button>
+        <label class="form-field saved-filters__name"><span>اسم العرض المحفوظ</span><input type="text" maxlength="40" data-saved-filter-name autocomplete="off" placeholder="مثال: اجهزة التلفاز"></label>
+        <button class="button button--secondary" type="button" data-saved-filter-save>حفظ الفلاتر الامنة</button>
         <label class="form-field saved-filters__select"><span>العروض المحفوظة</span><select data-saved-filter-select><option value="">اختر عرضًا محفوظًا</option></select></label>
         <button class="button button--quiet" type="button" data-saved-filter-apply>تطبيق العرض</button>
         <button class="button button--quiet" type="button" data-saved-filter-delete>حذف العرض</button>
-        <p class="saved-filters__status" data-saved-filter-status role="status" aria-live="polite">لا تُحفظ حقول البحث الحر أو بيانات الدخول أو الهوست.</p>
+        <p class="saved-filters__status" data-saved-filter-status role="status" aria-live="polite">لا تُحفظ حقول البحث الحر او بيانات الدخول او الهوست</p>
     </div>
     <?php
 }
@@ -279,7 +280,7 @@ function cc_saved_filter_controls(string $module, array $allowedFields): void
 function cc_toolbar(string $searchLabel, array $filters = []): void
 {
     ?>
-    <div class="data-toolbar" aria-label="أدوات البحث والتصفية">
+    <div class="data-toolbar" aria-label="ادوات البحث والتصفية">
         <label class="search-control">
             <span class="sr-only"><?= cc_e($searchLabel) ?></span>
             <?= cc_icon('search') ?>
@@ -309,7 +310,7 @@ function cc_table_shell(array $columns): void
                 </tr></thead>
                 <tbody>
                 <tr class="table-empty-row">
-                    <td colspan="<?= count($columns) ?>">لا توجد بيانات متصلة بهذه الوحدة.</td>
+                    <td colspan="<?= count($columns) ?>">لا توجد بيانات متصلة بهذه الوحدة</td>
                 </tr>
                 </tbody>
             </table>

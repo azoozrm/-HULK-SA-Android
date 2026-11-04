@@ -21,7 +21,7 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
     GROUPS_START = "private fun LoginOptionGroups("
     GROUPS_END = "private fun LoginOption("
     CONTROLLER_START = "internal class LoginKeyboardFocusTransitionController"
-    CONTROLLER_END = "private enum class LoginErrorTarget"
+    CONTROLLER_END = "private data class LoginLayoutPolicy"
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -328,7 +328,7 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         option = self.section(
             self.source,
             "private fun LoginOption(",
-            "private fun resolveLoginErrorTarget(",
+            "private tailrec fun Context.findActivity",
         )
 
         # R05 moved the option call sites into the shared group owner; both the
@@ -359,7 +359,12 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertIn("onRememberChange = { rememberAccount = !rememberAccount }", screen)
         self.assertIn("tvInitialFocusRequester.requestFocus()", screen)
         self.assertIn("initialFocusRequester = if (isTv) tvInitialFocusRequester else null", screen)
-        self.assertIn("resolveLoginErrorTarget(errorMessage, usernameState.value, passwordState.value)", panel)
+        # R11 retains each field's focus owner while replacing translated-string routing
+        # with the typed presentation target exercised by JVM and real Compose regressions.
+        self.assertIn("failure: LoginFailure?", panel)
+        self.assertIn("when (notice.target)", panel)
+        self.assertNotIn("resolveLoginErrorTarget", self.source)
+        self.assertNotIn("withoutArabicHamzas", self.source)
         self.assertIn("accessRequester.requestFocus()", panel)
         self.assertIn("usernameRequester.requestFocus()", panel)
         self.assertIn("passwordRequester.requestFocus()", panel)

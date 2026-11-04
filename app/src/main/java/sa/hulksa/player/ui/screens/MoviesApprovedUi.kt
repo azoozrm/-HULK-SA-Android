@@ -56,6 +56,7 @@ import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -753,19 +754,42 @@ internal fun moviesDetailsErrorCopy(
  */
 @Composable
 internal fun rememberUsableNetworkState(): State<Boolean> {
+    val evidence = rememberNetworkConnectivityState()
+    return remember(evidence) { derivedStateOf { evidence.value == LoginConnectivityEvidence.ONLINE } }
+}
+
+private fun networkConnectivityEvidence(context: Context, networkAppeared: Boolean = false): LoginConnectivityEvidence =
+    runCatching {
+        val manager = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return@runCatching LoginConnectivityEvidence.UNKNOWN
+        val network = manager.activeNetwork
+        // onAvailable may precede the corresponding default-network/capabilities snapshot.
+        if (network == null && networkAppeared) return@runCatching LoginConnectivityEvidence.UNKNOWN
+        val capabilities = network?.let(manager::getNetworkCapabilities)
+        validatedConnectivityEvidence(
+            hasDefaultNetwork = network != null,
+            capabilitiesKnown = capabilities != null,
+            internet = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true,
+            validated = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true,
+        )
+    }.getOrDefault(LoginConnectivityEvidence.UNKNOWN)
+
+/** Same callback owner as the Boolean API; Login additionally distinguishes unknown from offline. */
+@Composable
+internal fun rememberNetworkConnectivityState(): State<LoginConnectivityEvidence> {
     val context = LocalContext.current
-    val state = remember { mutableStateOf(hasUsableNetwork(context)) }
+    val state = remember { mutableStateOf(networkConnectivityEvidence(context)) }
     DisposableEffect(context) {
         val manager = context.applicationContext
             .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
         val handler = Handler(Looper.getMainLooper())
         val callback = object : ConnectivityManager.NetworkCallback() {
-            private fun publish() {
-                val available = hasUsableNetwork(context)
-                handler.post { state.value = available }
+            private fun publish(networkAppeared: Boolean = false) {
+                val evidence = networkConnectivityEvidence(context, networkAppeared)
+                handler.post { state.value = evidence }
             }
 
-            override fun onAvailable(network: Network) = publish()
+            override fun onAvailable(network: Network) = publish(networkAppeared = true)
             override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = publish()
             override fun onLost(network: Network) = publish()
         }
@@ -782,7 +806,7 @@ internal fun rememberUsableNetworkState(): State<Boolean> {
                     )
                 }
             }
-            state.value = hasUsableNetwork(context)
+            state.value = networkConnectivityEvidence(context)
         }
         onDispose {
             handler.removeCallbacksAndMessages(null)

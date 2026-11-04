@@ -18,10 +18,29 @@
         }
     };
 
+    const initializePrimaryNavigation = () => {
+        const navigation = document.querySelector('[data-primary-navigation]');
+        if (!navigation || typeof window.matchMedia !== 'function') {
+            return;
+        }
+        const compact = window.matchMedia('(max-width: 860px)');
+        const sync = () => { navigation.open = !compact.matches; };
+        sync();
+        if (typeof compact.addEventListener === 'function') {
+            compact.addEventListener('change', sync);
+        }
+        navigation.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && compact.matches && navigation.open) {
+                navigation.open = false;
+                navigation.querySelector('summary').focus();
+            }
+        });
+    };
+
     const initializeConfirmations = () => {
         document.querySelectorAll('form[data-confirm]').forEach((form) => {
             form.addEventListener('submit', (event) => {
-                const message = form.getAttribute('data-confirm') || 'هل تريد تنفيذ هذا الإجراء؟';
+                const message = form.getAttribute('data-confirm') || 'هل تريد تنفيذ هذا الاجراء؟';
                 if (!window.confirm(message)) {
                     event.preventDefault();
                 }
@@ -35,9 +54,13 @@
                 if (event.defaultPrevented) {
                     return;
                 }
+                if (typeof form.setAttribute === 'function') {
+                    form.setAttribute('aria-busy', 'true');
+                }
                 form.querySelectorAll('button[type="submit"]').forEach((button) => {
                     button.disabled = true;
                     button.setAttribute('aria-disabled', 'true');
+                    button.textContent = 'جار الحفظ';
                 });
             });
         });
@@ -102,7 +125,7 @@
                         ? parsed.filter((item) => item && typeof item.name === 'string' && item.values && typeof item.values === 'object').slice(0, MAX_SAVED_FILTERS)
                         : [];
                 } catch (_error) {
-                    setStatus('تعذر قراءة العروض المحفوظة في هذا المتصفح.');
+                    setStatus('تعذر قراءة العروض المحفوظة في هذا المتصفح');
                     return [];
                 }
             };
@@ -111,7 +134,7 @@
                     window.localStorage.setItem(storageKey, JSON.stringify(items.slice(0, MAX_SAVED_FILTERS)));
                     return true;
                 } catch (_error) {
-                    setStatus('التخزين المحلي غير متاح في هذا المتصفح.');
+                    setStatus('التخزين المحلي غير متاح في هذا المتصفح');
                     return false;
                 }
             };
@@ -144,7 +167,7 @@
             saveButton.addEventListener('click', () => {
                 const name = nameInput.value.trim();
                 if (!/^[\p{L}\p{N} _.-]{1,40}$/u.test(name)) {
-                    setStatus('اكتب اسمًا قصيرًا من الحروف أو الأرقام لحفظ العرض.');
+                    setStatus('اكتب اسمًا قصيرًا من الحروف او الارقام لحفظ العرض');
                     nameInput.focus();
                     return;
                 }
@@ -152,14 +175,14 @@
                 items.unshift({name, values: collect()});
                 if (persist(items)) {
                     render(items, '0');
-                    setStatus('تم حفظ الفلاتر الآمنة فقط في هذا المتصفح.');
+                    setStatus('تم حفظ الفلاتر الامنة فقط في هذا المتصفح');
                 }
             });
             applyButton.addEventListener('click', () => {
                 const index = Number.parseInt(select.value, 10);
                 const item = load()[index];
                 if (!item) {
-                    setStatus('اختر عرضًا محفوظًا أولًا.');
+                    setStatus('اختر عرضًا محفوظًا اولًا');
                     return;
                 }
                 allowed.forEach((fieldName) => {
@@ -174,13 +197,13 @@
                 const index = Number.parseInt(select.value, 10);
                 const items = load();
                 if (!items[index]) {
-                    setStatus('اختر عرضًا محفوظًا لحذفه.');
+                    setStatus('اختر عرضًا محفوظًا لحذفه');
                     return;
                 }
                 items.splice(index, 1);
                 if (persist(items)) {
                     render(items);
-                    setStatus('تم حذف العرض المحفوظ.');
+                    setStatus('تم حذف العرض المحفوظ');
                 }
             });
             render(load());
@@ -231,7 +254,7 @@
                 const file = fileInput.files && fileInput.files[0];
                 fileHint.textContent = file
                     ? `${file.name} · ${(file.size / 1000000).toFixed(1)} MB`
-                    : 'اختر ملفًا بامتداد .apk — لا يُنشر بمجرد اختياره.';
+                    : 'اختر ملفًا بامتداد .apk — لا يُنشر بمجرد اختياره';
             });
         }
 
@@ -243,8 +266,8 @@
                 }
                 if (policyHelp) {
                     policyHelp.textContent = required.checked
-                        ? 'يجب على المستخدم تحديث التطبيق للمتابعة.'
-                        : 'يمكن للمستخدم تأجيل هذا التحديث، ما لم يكن أقل من الحد الأدنى المدعوم.';
+                        ? 'يجب على المستخدم تحديث التطبيق للمتابعة'
+                        : 'يمكن للمستخدم تاجيل هذا التحديث، ما لم يكن اقل من الحد الادنى المدعوم';
                 }
             };
             required.addEventListener('change', syncPolicy);
@@ -280,7 +303,7 @@
                     throw new Error('clipboard unavailable');
                 }
                 await navigator.clipboard.writeText(value);
-                setStatus('تم نسخ الرابط.', 'success');
+                setStatus('تم نسخ الرابط', 'success');
             } catch (_error) {
                 if (fallback) {
                     fallback.hidden = false;
@@ -290,7 +313,7 @@
                         fallback.select();
                     }
                 }
-                setStatus('تعذر النسخ التلقائي. الرابط محدد وجاهز للنسخ اليدوي.', 'fallback');
+                setStatus('تعذر النسخ التلقائي. الرابط محدد وجاهز للنسخ اليدوي', 'fallback');
             }
         };
 
@@ -314,7 +337,28 @@
         sync();
     };
 
+    const mobileMessages = window.matchMedia('(max-width: 760px)');
+    const syncMessages = () => document.querySelectorAll('[data-mobile-message]').forEach((card) => {
+        card.open = mobileMessages.matches;
+    });
+    mobileMessages.addEventListener('change', syncMessages);
+    syncMessages();
+
+    const moreMenu = document.querySelector('[data-mobile-more]');
+    if (moreMenu) {
+        document.addEventListener('click', (event) => {
+            if (!moreMenu.contains(event.target)) moreMenu.open = false;
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && moreMenu.open) {
+                moreMenu.open = false;
+                moreMenu.querySelector('summary').focus();
+            }
+        });
+    }
+
     initializePrimaryTabs();
+    initializePrimaryNavigation();
     initializeConfirmations();
     initializeSubmitOnce();
     initializeResponsiveTables();

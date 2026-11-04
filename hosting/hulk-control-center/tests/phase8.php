@@ -32,13 +32,13 @@ cc_test($fallback['notice'] !== '', 'Phase 8 audit reports a normalized over-wid
 
 $knownAction = cc_phase8_audit_action_presentation('GROWTH_CONFIG_PUBLISHED');
 cc_test(
-    $knownAction['title'] === 'تم تحديث إعدادات التجديد والدعم'
+    $knownAction['title'] === 'تم تحديث اعدادات التجديد والدعم'
         && $knownAction['technical_id'] === 'GROWTH_CONFIG_PUBLISHED',
     'Phase 8 owner UI gives known audit actions a clear Arabic meaning'
 );
 $unknownAction = cc_phase8_audit_action_presentation('LEGACY_CUSTOM_ACTION');
 cc_test(
-    $unknownAction['title'] === 'عملية إدارية'
+    $unknownAction['title'] === 'عملية ادارية'
         && $unknownAction['technical_id'] === 'LEGACY_CUSTOM_ACTION',
     'Phase 8 owner UI keeps an honest Arabic fallback and secondary unknown identifier'
 );
@@ -52,7 +52,7 @@ $safeDetails = cc_phase8_safe_audit_details(json_encode([
 ], JSON_THROW_ON_ERROR));
 $encodedSafeDetails = json_encode($safeDetails, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
 cc_test(
-    ($safeDetails['rows'][0]['label'] ?? '') === 'رقم الموزع'
+    ($safeDetails['rows'][0]['label'] ?? '') === 'مرجع الهوست'
         && ($safeDetails['rows'][0]['direction'] ?? '') === 'ltr',
     'Phase 8 audit projects allow-listed details into Arabic label/value rows with bidi metadata'
 );
@@ -139,7 +139,11 @@ foreach ($page['audit'] as $row) {
     cc_test($row['username'] === 'owner', 'Phase 8 audit administrator filter is applied by SQL');
     cc_test(str_starts_with($row['action'], 'CONTROL_CENTER_'), 'Phase 8 audit action prefix filter is applied by SQL');
     $projected = json_encode($row['details_safe'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-    cc_test(str_contains($projected, 'رقم الموزع') && str_contains($projected, '>') === false, 'Phase 8 audit reseller detail filter returns structured safe rows');
+    cc_test(str_contains($projected, 'مرجع الهوست') && str_contains($projected, '>') === false, 'Phase 8 audit reseller detail filter returns structured safe rows');
     cc_test(!str_contains($projected, 'password'), 'Phase 8 audit emits only safe detail output');
     cc_test(!array_key_exists('details', $row), 'Phase 8 audit removes raw details before the view boundary');
 }
+
+$insert->execute(['id'=>1000,'admin'=>1,'action'=>'CONTROL_CENTER_CREATE_CODE','details'=>'{"host_id":42,"code_id":9}','created'=>'2026-09-10 10:00:00']);
+$hostAudit=cc_phase8_audit_page($db,['reseller_id'=>'42'],$now);
+cc_test(count($hostAudit['audit'])===1 && $hostAudit['audit'][0]['action_presentation']['known'],'new host/code audit preserves safe contextual filtering and owner labels');

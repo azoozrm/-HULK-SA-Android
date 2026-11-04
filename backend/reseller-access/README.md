@@ -1,3 +1,7 @@
+## Current authority: direct hosts
+
+`hosts` and `host_access_codes` replace the mutable host/current-code slots in `resellers`. Existing rows remain a read-only historical snapshot. All legacy mutations fail explicitly. Resolver URL/method/request and response/error contracts remain compatible, including deployed short case-sensitive codes and legacy canonical aliases. See [migration and rollback](DIRECT-HOSTS-MIGRATION.md). Historical sections below describe the retired reseller portal and do not authorize new writes
+
 # HULK SA Reseller Access
 
 بوابة PHP/MySQL صغيرة تعمل على استضافة `hulksa.com` الحالية، وتوفر:

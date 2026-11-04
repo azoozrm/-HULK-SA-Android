@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+require_once __DIR__ . '/legacy-host-fixture.php';
 
 $onlineNowRoot = dirname(__DIR__);
 require_once $onlineNowRoot . '/lib/presence-read-model.php';
@@ -49,6 +50,7 @@ $onlineNowReseller->exec(
     . 'reseller_id INTEGER PRIMARY KEY, reseller_name TEXT NOT NULL, access_code TEXT NOT NULL, '
     . 'access_code_hash TEXT NOT NULL, host TEXT NOT NULL, status TEXT NOT NULL)'
 );
+cc_test_legacy_host_views($onlineNowReseller);
 $onlineNowReseller->exec(
     "INSERT INTO resellers VALUES "
     . "(7, 'Synthetic One', 'HULK-AAAA-BBBB-CCCC-DDDD', 'hash-seven', 'https://a.invalid', 'active'), "
@@ -213,6 +215,40 @@ $onlineNowPage = cc_presence_online_now_page(
 );
 cc_test($onlineNowLookups === 1, 'Online Now resolves all visible resellers with one bounded lookup');
 cc_test($onlineNowPage['total_subscriptions'] === 13, 'Online Now counts distinct exact subscription groups');
+$onlineNowTotals = cc_presence_online_now_totals($onlineNowControl, $onlineNowConfig, $onlineNowTime);
+cc_test($onlineNowTotals['subscriptions'] === 13, 'Online Now totals count every grouped subscription');
+cc_test($onlineNowTotals['devices'] === 26, 'Online Now totals count every distinct online device');
+cc_test($onlineNowTotals['connections'] === 26, 'Online Now totals count every online session');
+$dashboardSnapshot = cc_presence_dashboard_snapshot($onlineNowControl, $onlineNowLoader, $onlineNowConfig, $onlineNowTime);
+cc_test(
+    (int) $dashboardSnapshot['online_subscriptions'] === (int) $onlineNowPage['total_subscriptions'],
+    'overview online card matches the unfiltered live list at the same measurement time'
+);
+$subscriptionTokenA = cc_presence_subscription_token(7, 'https://a.invalid', 'shared-user', $onlineNowConfig);
+$subscriptionTokenB = cc_presence_subscription_token(8, 'https://b.invalid', 'shared-user', $onlineNowConfig);
+cc_test(
+    strlen($subscriptionTokenA) === 64 && $subscriptionTokenA !== $subscriptionTokenB,
+    'subscription details tokens are opaque and include the full host/account identity'
+);
+$sharedTargetToken = cc_presence_subscription_token(7, 'https://a.invalid', 'shared-user', $onlineNowConfig);
+$sharedTargetBefore = cc_presence_online_now_target_group($onlineNowControl, $onlineNowConfig, 7, $sharedTargetToken, $onlineNowTime);
+cc_test(
+    is_array($sharedTargetBefore)
+        && (string) $sharedTargetBefore['iptv_username'] === 'shared-user'
+        && (string) $sharedTargetBefore['host_snapshot'] === 'https://a.invalid'
+        && (int) $sharedTargetBefore['device_count'] === 3,
+    'subscription details resolve by exact identity before any rank change'
+);
+$onlineNowControl->exec("UPDATE cc_app_sessions SET last_seen_at='2026-09-19 11:57:30.000000' WHERE reseller_id=7 AND iptv_username='shared-user'");
+$onlineNowControl->exec("UPDATE cc_app_sessions SET last_seen_at='2026-09-19 11:59:59.000000' WHERE reseller_id=7 AND iptv_username='other-user'");
+$sharedTargetAfter = cc_presence_online_now_target_group($onlineNowControl, $onlineNowConfig, 7, $sharedTargetToken, $onlineNowTime);
+cc_test(
+    is_array($sharedTargetAfter)
+        && (string) $sharedTargetAfter['iptv_username'] === 'shared-user'
+        && (string) $sharedTargetAfter['host_snapshot'] === 'https://a.invalid'
+        && (int) $sharedTargetAfter['device_count'] === 3,
+    'subscription details still open after a heartbeat changes its rank between reads'
+);
 cc_test($onlineNowPage['total_connections'] === 26, 'Online Now counts every online session');
 cc_test($onlineNowPage['total_devices'] === 26, 'Online Now counts distinct online installation identities');
 cc_test($onlineNowPage['tv_connections'] === 2, 'Online Now reports TV connections from authoritative platform snapshots');
@@ -458,3 +494,10 @@ foreach ($tieGroups as $group) {
 }
 cc_test($tieCredentialsMatch, 'tie-breaker credentials remain attached to their own exact subscription');
 cc_test($tieDetailsBounded, 'tie-breaker fixture preserves normal bounded device details');
+
+// Search applies before pagination; platform selects complete logical groups
+$filtered = cc_presence_online_now_page($onlineNowControl,$onlineNowLoader,['q'=>'shared-user','platform'=>'TV'],$onlineNowConfig,$onlineNowTime);
+cc_test($filtered['total_subscriptions'] === 1, 'search and platform filter select exact whole subscription groups');
+cc_test($filtered['total_connections'] === 3 && $filtered['total_devices'] === 3, 'platform filter preserves all matching subscription devices and count definitions');
+$none = cc_presence_online_now_page($onlineNowControl,$onlineNowLoader,['q'=>'%_missing'], $onlineNowConfig,$onlineNowTime);
+cc_test($none['total_subscriptions'] === 0 && $none['groups'] === [], 'search wildcards are literal and empty results truthful');

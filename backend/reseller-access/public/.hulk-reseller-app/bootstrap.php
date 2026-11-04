@@ -13,7 +13,8 @@ function hulk_config(): array
         return $config;
     }
 
-    $path = __DIR__ . '/config.php';
+    $external = trim((string)getenv('HULK_RESELLER_CONFIG'));
+    $path = $external !== '' ? $external : __DIR__ . '/config.php';
     if (!is_file($path)) {
         throw new RuntimeException('HULK reseller configuration is missing.');
     }
@@ -147,28 +148,40 @@ function hulk_normalize_reseller_name(string $value): string
 
 function hulk_generate_access_code(): string
 {
-    $payload = '';
-    $maximum = strlen(HULK_ACCESS_CODE_ALPHABET) - 1;
-    for ($index = 0; $index < HULK_ACCESS_CODE_PAYLOAD_LENGTH; $index++) {
-        $payload .= HULK_ACCESS_CODE_ALPHABET[random_int(0, $maximum)];
-    }
-    return 'HULK-' . implode('-', str_split($payload, 4));
+    // Preserve the deployed short format and case-sensitive values
+    $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    do {
+        $code = '';
+        for ($index = 0; $index < 10; $index++) {
+            $code .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+        }
+    } while (!preg_match('/[A-Z]/', $code) || !preg_match('/[a-z]/', $code) || !preg_match('/[0-9]/', $code));
+    return $code;
 }
 
 function hulk_normalize_access_code(string $value): ?string
+{
+    $code = trim($value);
+    return $code === '' || mb_strlen($code, 'UTF-8') > 64 || preg_match('/[\x00-\x1F\x7F]/u', $code) !== 0 ? null : $code;
+}
+
+function hulk_legacy_canonical_code(string $value): ?string
 {
     $compact = strtoupper((string) preg_replace('/[\s-]+/', '', trim($value)));
     if (!str_starts_with($compact, 'HULK')) {
         return null;
     }
     $payload = substr($compact, 4);
-    if (strlen($payload) !== HULK_ACCESS_CODE_PAYLOAD_LENGTH) {
-        return null;
-    }
     if (!preg_match('/^[' . HULK_ACCESS_CODE_ALPHABET . ']{16}$/D', $payload)) {
         return null;
     }
     return 'HULK-' . implode('-', str_split($payload, 4));
+}
+
+function hulk_access_code_matches(string $stored, string $input): bool
+{
+    return hash_equals($stored, $input)
+        || (hulk_legacy_canonical_code($stored) === $stored && hulk_legacy_canonical_code($input) === $stored);
 }
 
 function hulk_access_code_hash(string $code): string
@@ -262,3 +275,25 @@ function hulk_current_admin(): ?array
 }
 
 require_once __DIR__ . '/admin-domain.php';
+
+require_once __DIR__ . '/host-domain.php';
+
+/** Deployed resolver throttle: only a hashed network identity is persisted */
+function hulk_enforce_resolver_rate_limit(): void
+{
+    $clientHash = hash('sha256', trim((string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown')));
+    $db = hulk_db();
+    $statement = $db->prepare('INSERT INTO resolver_rate_limits (client_hash, window_started_at, attempts) '
+        . 'VALUES (:client_hash, UTC_TIMESTAMP(), 1) ON DUPLICATE KEY UPDATE '
+        . 'attempts = IF(window_started_at <= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 MINUTE), 1, LEAST(attempts + 1, 31)), '
+        . 'window_started_at = IF(window_started_at <= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 MINUTE), UTC_TIMESTAMP(), window_started_at)');
+    $statement->execute(['client_hash' => $clientHash]);
+    $lookup = $db->prepare('SELECT attempts FROM resolver_rate_limits WHERE client_hash = :client_hash LIMIT 1');
+    $lookup->execute(['client_hash' => $clientHash]);
+    if ((int) $lookup->fetchColumn() > 30) {
+        hulk_api_error('RATE_LIMITED', 'محاولات كثيرة، حاول مرة اخرى بعد خمس دقائق', 429);
+    }
+    if (random_int(1, 100) === 1) {
+        $db->exec('DELETE FROM resolver_rate_limits WHERE window_started_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY) LIMIT 200');
+    }
+}

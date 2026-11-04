@@ -70,7 +70,7 @@ vm.runInNewContext(source, {
     Array,
     document,
     navigator: {clipboard},
-    window: {},
+    window: {matchMedia: () => ({matches: false, addEventListener() {}})},
     Promise,
 });
 
@@ -100,7 +100,7 @@ async function main() {
     copyButton.handlers.click();
     await flush();
     assert(fallback.hidden === true, 'clipboard success keeps the fallback hidden');
-    assert(status.textContent === 'تم نسخ الرابط.', 'clipboard success reports the copied URL');
+    assert(status.textContent === 'تم نسخ الرابط', 'clipboard success reports the copied URL');
     assert(status.attributes['data-copy-state'] === 'success', 'clipboard success is labeled as success');
 
     process.stdout.write('PASS: Release R06 clipboard success and selectable-fallback contract.\n');

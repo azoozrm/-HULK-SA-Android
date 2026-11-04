@@ -85,7 +85,13 @@ class TvMainActivity : ComponentActivity() {
         if (!subscriptionResumeEnforcer.onResume()) {
             viewModel.onAppResumed()
         }
+        viewModel.onAppForegroundChanged(true)
         window.decorView.post { enterImmersiveModeSafely() }
+    }
+
+    override fun onPause() {
+        viewModel.onAppForegroundChanged(false)
+        super.onPause()
     }
 
     private fun observeVoiceSearchContext() {

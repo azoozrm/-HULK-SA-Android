@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+require_once __DIR__ . '/legacy-host-fixture.php';
 
 $presenceRoot = dirname(__DIR__);
 $presenceMigration = file_get_contents($presenceRoot . '/migrations/2026-09-17-presence-v1.sql');
@@ -156,6 +157,7 @@ $reseller->exec(
     . 'reseller_id INTEGER PRIMARY KEY, access_code TEXT NOT NULL, access_code_hash TEXT NOT NULL UNIQUE, '
     . 'host TEXT NOT NULL, status TEXT NOT NULL)'
 );
+cc_test_legacy_host_views($reseller);
 $insertReseller = $reseller->prepare(
     'INSERT INTO resellers (reseller_id, access_code, access_code_hash, host, status) '
     . 'VALUES (7, :code, :hash, :host, :status)'

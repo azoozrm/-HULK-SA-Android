@@ -49,11 +49,15 @@ class ResellerBackendContractTest(unittest.TestCase):
         self.assertIn("admins_username_key_unique", schema)
         self.assertIn("resolver_rate_limits_window_idx", schema)
 
-    def test_access_codes_use_high_entropy_canonical_format(self) -> None:
+    def test_generated_codes_preserve_deployed_format_and_legacy_canonical_lookup(self) -> None:
         bootstrap = BOOTSTRAP.read_text(encoding="utf-8")
         self.assertIn("ABCDEFGHJKMNPQRSTUVWXYZ23456789", bootstrap)
         self.assertIn("HULK_ACCESS_CODE_PAYLOAD_LENGTH = 16", bootstrap)
         self.assertIn("random_int", bootstrap)
+        self.assertIn("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", bootstrap)
+        self.assertIn("$index < 10", bootstrap)
+        self.assertIn("function hulk_legacy_canonical_code", bootstrap)
+        self.assertIn("hash_equals($stored, $input)", bootstrap)
         self.assertRegex(bootstrap, re.escape("'HULK-' . implode('-', str_split($payload, 4))"))
 
     def test_api_has_clear_required_error_contract(self) -> None:
@@ -67,7 +71,10 @@ class ResellerBackendContractTest(unittest.TestCase):
         ):
             self.assertIn(marker, api)
         self.assertIn("hulk_json(['host' => $host])", api)
-        self.assertIn("access_code_hash", api)
+        self.assertIn("hulk_host_code_lookup(hulk_db(), $code)", api)
+        authority = (PUBLIC / ".hulk-reseller-app/host-domain.php").read_text(encoding="utf-8")
+        self.assertIn("access_code_hash = :hash", authority)
+        self.assertIn("hulk_access_code_hash($canonicalCode)", authority)
 
     def test_https_detection_does_not_trust_client_forwarded_header(self) -> None:
         bootstrap = BOOTSTRAP.read_text(encoding="utf-8")
@@ -90,27 +97,21 @@ class ResellerBackendContractTest(unittest.TestCase):
         self.assertIn("hulk_verify_csrf", action)
         self.assertIn("password_verify", action)
 
-    def test_owner_mutations_share_one_domain(self) -> None:
-        domain = (PUBLIC / ".hulk-reseller-app/admin-domain.php").read_text(encoding="utf-8")
+    def test_host_mutations_have_one_authority_and_legacy_writers_are_retired(self) -> None:
+        retired = (PUBLIC / ".hulk-reseller-app/admin-domain.php").read_text(encoding="utf-8")
+        host_domain = (PUBLIC / ".hulk-reseller-app/host-domain.php").read_text(encoding="utf-8")
         owner_action = (PUBLIC / "hulk-reseller-admin/action.php").read_text(encoding="utf-8")
-        adapter = (
-            REPO / "hosting/hulk-control-center/lib/reseller-adapter.php"
-        ).read_text(encoding="utf-8")
+        adapter = (REPO / "hosting/hulk-control-center/lib/reseller-adapter.php").read_text(encoding="utf-8")
         bootstrap = BOOTSTRAP.read_text(encoding="utf-8")
-        for function in (
-            "hulk_admin_create_reseller",
-            "hulk_admin_set_status",
-            "hulk_admin_update_host",
-            "hulk_admin_set_code",
-            "hulk_admin_rotate_code",
-            "hulk_admin_reset_password",
-        ):
-            self.assertIn(f"function {function}", domain)
-            # Control Center is now the sole owner-facing consumer.
-            self.assertIn(f"{function}(", adapter)
-            # The retired legacy owner endpoint no longer calls the authority.
-            self.assertNotIn(f"{function}(", owner_action)
-        self.assertIn("require_once __DIR__ . '/admin-domain.php'", bootstrap)
+        for function in ("hulk_admin_create_reseller", "hulk_admin_set_status", "hulk_admin_update_host", "hulk_admin_set_code", "hulk_admin_rotate_code", "hulk_admin_reset_password", "hulk_admin_write_code"):
+            self.assertIn(f"function {function}", retired)
+            self.assertRegex(retired, rf"function {function}\([^{{]+\{{ throw new RuntimeException")
+            self.assertNotIn(function + "(", adapter)
+            self.assertNotIn(function + "(", owner_action)
+        for function in ("hulk_host_create", "hulk_host_update", "hulk_host_create_code", "hulk_host_set_code_status", "hulk_host_set_code", "hulk_host_rotate_code"):
+            self.assertIn(f"function {function}", host_domain)
+            self.assertIn(function + "(", adapter)
+        self.assertIn("require_once __DIR__ . '/host-domain.php'", bootstrap)
         self.assertNotIn("hulk_start_session('admin')", owner_action)
 
     def test_no_runtime_config_or_reseller_data_is_tracked(self) -> None:
@@ -152,7 +153,7 @@ class ResellerBackendContractTest(unittest.TestCase):
         self.assertIn("/control-center/login.php", redirect)
         self.assertIn("'login'", owner_action)
 
-        # The shared reseller authority is unchanged.
+        # Historical callable names remain available and fail closed after the authority cutover.
         for function in (
             "hulk_admin_create_reseller",
             "hulk_admin_set_status",

@@ -48,7 +48,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
-import sa.hulksa.player.AccountDecisionChoice
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.MainDestination
@@ -61,7 +60,6 @@ import sa.hulksa.player.ui.adaptive.HulkNavigationType
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.rememberAdaptiveUiState
 import sa.hulksa.player.ui.adaptive.trackAdaptiveInput
-import sa.hulksa.player.ui.screens.AccountIdentityDecisionDialog
 import sa.hulksa.player.ui.screens.DownloadFeedback
 import sa.hulksa.player.ui.screens.DownloadFeedbackGlyph
 import sa.hulksa.player.ui.screens.HomeActionNotice
@@ -69,6 +67,7 @@ import sa.hulksa.player.ui.screens.LIVE_TV_PRO_CONTEXT_ALL
 import sa.hulksa.player.ui.screens.LIVE_TV_PRO_CONTEXT_FAVORITES
 import sa.hulksa.player.ui.screens.LocalNotificationCenterScreen
 import sa.hulksa.player.ui.screens.LoginScreen
+import sa.hulksa.player.ui.screens.rememberNetworkConnectivityState
 import sa.hulksa.player.ui.screens.MainShellScreen
 import sa.hulksa.player.ui.screens.MovieDetailsProPolishedScreen
 import sa.hulksa.player.ui.screens.NavigationMemoryStore
@@ -318,6 +317,7 @@ fun HulkApp(
             ) {
                 when (state.screen) {
                     HulkScreen.LOGIN -> {
+                        val connectivity by rememberNetworkConnectivityState()
                         LoginScreen(
                             isTv = isTv,
                             pairingOffered = pairingEntryOffered(
@@ -325,35 +325,18 @@ fun HulkApp(
                                 pairingAvailable = state.pairing.available,
                             ),
                             pairing = state.pairing,
-                            pairingReturnFocusSuspended = state.accountDecision != null,
                             isStarting = state.isStarting,
                             isLoading = state.isLoading,
-                            errorMessage = state.errorMessage,
+                            failure = state.loginFailure,
+                            loginValidationAttempt = state.loginValidationAttempt,
+                            connectivity = connectivity,
                             onLogin = viewModel::login,
                             onStartPairing = viewModel::startPairing,
                             onRetryPairing = viewModel::retryPairing,
                             onRegeneratePairing = viewModel::regeneratePairing,
                             onCancelPairing = viewModel::cancelPairing,
                         )
-                        state.accountDecision?.let { decision ->
-                            AccountIdentityDecisionDialog(
-                                username = decision.username,
-                                options = decision.options,
-                                onSelectExisting = { key ->
-                                    viewModel.resolveAccountDecision(
-                                        AccountDecisionChoice.ExistingAccount(key),
-                                    )
-                                },
-                                onDifferentSubscription = {
-                                    viewModel.resolveAccountDecision(
-                                        AccountDecisionChoice.DifferentSubscription,
-                                    )
-                                },
-                                onCancel = {
-                                    viewModel.resolveAccountDecision(AccountDecisionChoice.Cancel)
-                                },
-                            )
-                        }
+
                     }
 
                     HulkScreen.MAIN -> {

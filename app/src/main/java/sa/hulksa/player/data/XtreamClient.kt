@@ -46,15 +46,24 @@ open class XtreamClient(
         val root = requestObject(portal, credentials)
         val user = root.optJSONObject("user_info") ?: throw XtreamException.InvalidResponse
         val status = user.optString("status").trim()
-        if (user.optInt("auth", 0) != 1) throw XtreamException.InvalidCredentials
-        if (status.isNotEmpty() && !status.equals("Active", ignoreCase = true)) {
-            throw XtreamException.SubscriptionInactive
-        }
-
+        val auth = user.optInt("auth", -1)
+        if (auth != 0 && auth != 1) throw XtreamException.InvalidResponse
         val expires = user.optNullableString("exp_date")
             ?.toLongOrNull()
             ?.takeIf { it > 0L }
+        // Provider status/date are explicit entitlement evidence even in a failed-auth reply.
+        // auth=0 alone never proves expiry, and no failed-auth response can create a session.
+        if (status.equals("Expired", ignoreCase = true)) throw XtreamException.SubscriptionExpired
         requireUnexpiredAccountSession(expires, nowEpochSeconds())
+        if (status.lowercase() in setOf("disabled", "banned", "inactive", "suspended")) {
+            throw XtreamException.SubscriptionInactive
+        }
+        if (auth != 1) throw XtreamException.InvalidCredentials
+        if (status.isNotEmpty() && !status.equals("Active", ignoreCase = true)) {
+            // Preserve the existing non-Active entitlement denial, including unfamiliar statuses.
+            throw XtreamException.SubscriptionInactive
+        }
+        // Preserve the established auth=1/omitted-status provider compatibility below.
         val account = AccountInfo(
             username = user.optString("username", credentials.username),
             status = status.ifEmpty { "Active" },
@@ -329,6 +338,7 @@ open class XtreamClient(
             .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} Android")
             .build()
         val limit = XtreamJsonLimits.forAction(action)
+        val authenticationRequest = action == null && extra.isEmpty()
 
         try {
             client.executeCancellable(request) { response ->
@@ -342,10 +352,29 @@ open class XtreamClient(
                     throw XtreamException.InvalidResponse
                 }
                 if (!response.isSuccessful) {
-                    body.challengeCategory()?.let { throw XtreamException.ServiceBlocked(response.code, it) }
-                    throw XtreamException.Http(response.code)
+                    if (!authenticationRequest || !body.trimStart().startsWith("{")) {
+                        body.challengeCategory()?.let { throw XtreamException.ServiceBlocked(response.code, it) }
+                    }
+                    // Some providers return structured failed-auth evidence with 401/403.
+                    // Permit only auth=0 to reach the authentication parser; never accept auth=1
+                    // from a rejected response or apply this exception to catalog requests.
+                    val failedAuth = authenticationRequest && response.code in setOf(401, 403) &&
+                        runCatching {
+                            XtreamJsonParser.parseObject(body).optJSONObject("user_info")
+                                ?.optInt("auth", -1) == 0
+                        }.getOrDefault(false)
+                    if (!failedAuth) throw XtreamException.Http(response.code)
                 }
-                body.challengeCategory()?.let { throw XtreamException.ServiceBlocked(response.code, it) }
+                if (!authenticationRequest || !body.trimStart().startsWith("{")) {
+                    body.challengeCategory()?.let { category ->
+                        val prefix = body.trimStart().take(512).lowercase()
+                        if (authenticationRequest && response.isSuccessful &&
+                            category in setOf("html", "html-doctype") &&
+                            "cloudflare" !in prefix && "sorry, you have been blocked" !in prefix
+                        ) throw XtreamException.InvalidResponse
+                        throw XtreamException.ServiceBlocked(response.code, category)
+                    }
+                }
                 body
             }
         } catch (error: CancellationException) {
@@ -547,9 +576,26 @@ internal fun normalizeArtworkUrl(raw: String?, portalBaseUrl: String): String? {
     }
 }
 
-sealed class XtreamException(message: String, cause: Throwable? = null) : Exception(message, cause) {
+sealed class XtreamException(message: String, cause: Throwable? = null) : Exception(message, cause), LoginFailureSource {
+    override val loginFailure: LoginFailure
+        get() = LoginFailure(
+            when (this) {
+                InvalidCredentials -> LoginFailureCategory.INVALID_CREDENTIALS
+                SubscriptionExpired -> LoginFailureCategory.EXPIRED_SUBSCRIPTION
+                SubscriptionInactive -> LoginFailureCategory.INACTIVE_SUBSCRIPTION
+                InvalidResponse, PayloadLimitExceeded -> LoginFailureCategory.MALFORMED
+                is Network -> LoginFailureCategory.TRANSPORT
+                is ServiceBlocked -> LoginFailureCategory.SERVICE_REJECTED
+                is Http -> if (statusCode == 408 || statusCode == 425) {
+                    LoginFailureCategory.CONNECTION_UNCERTAIN
+                } else LoginFailureCategory.SERVICE_REJECTED
+            },
+            LoginFailureStage.PROVIDER,
+        )
+
     data object InvalidCredentials : XtreamException("بيانات الاشتراك غير صحيحة او غير فعالة.")
     data object SubscriptionInactive : XtreamException("الاشتراك منتهي او غير فعال. تواصل مع الدعم للتجديد.")
+    data object SubscriptionExpired : XtreamException("انتهت صلاحية الاشتراك")
     data object InvalidResponse : XtreamException("وصل رد غير صالح من الخدمة.")
     data object PayloadLimitExceeded : XtreamException("رد الخدمة تجاوز حدود الأمان المدعومة.")
     data class ServiceBlocked(val statusCode: Int, val category: String?) :

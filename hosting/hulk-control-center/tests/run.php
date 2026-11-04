@@ -143,22 +143,37 @@ cc_test(is_string($layout) && str_contains($layout, '<html lang="ar" dir="rtl">'
 cc_test(is_string($css) && str_contains($css, ':focus-visible'), 'visible keyboard focus styles exist');
 cc_test(is_string($css) && str_contains($css, '@media (max-width: 860px)'), 'mobile responsive breakpoint exists');
 cc_test(is_string($css) && str_contains($css, '@media (max-width: 1180px)'), 'tablet responsive breakpoint exists');
-cc_test(count(cc_main_navigation()) === 4, 'four primary tabs are configured');
+cc_test(count(cc_main_navigation()) === 7, 'seven owner destinations are configured');
 cc_test(
-    array_keys(cc_main_navigation()) === ['live-users', 'announcements', 'hosts', 'releases'],
-    'primary tabs are exactly the approved four routes'
+    array_keys(cc_main_navigation()) === ['dashboard', 'live-users', 'hosts', 'sessions', 'announcements', 'releases', 'service'],
+    'primary destinations are exactly the seven owner routes'
 );
 cc_test(
-    is_string($layout) && str_contains($layout, 'primary-tabs__track')
-        && str_contains($layout, 'data-primary-tabs')
-        && !str_contains($layout, 'data-sidebar')
-        && !str_contains($layout, 'nav-backdrop'),
-    'shell uses visible primary tabs instead of a sidebar or drawer'
+    is_string($layout) && str_contains($layout, 'class="sidebar"')
+        && str_contains($layout, 'side-nav')
+        && str_contains($layout, 'bottom-nav')
+        && str_contains($layout, 'context-nav')
+        && !str_contains($layout, 'primary-tabs__track'),
+    'shell uses the reference sidebar, context tools and mobile bottom navigation'
 );
 cc_test(
-    is_string($javascript) && str_contains($javascript, 'data-primary-tabs')
-        && !str_contains($javascript, 'data-nav-open'),
-    'primary tabs keep the active tab in view without drawer runtime'
+    is_string($javascript) && str_contains($javascript, 'data-submit-once')
+        && str_contains($javascript, 'data-saved-filters'),
+    'shared form and saved-filter behavior remains available'
+);
+cc_test(cc_resolve_module(null)['key'] === 'dashboard', 'owner lands on the overview');
+foreach (array_keys(cc_modules()) as $moduleKey) {
+    cc_test(array_key_exists((string) cc_active_main_navigation($moduleKey), cc_main_navigation()), 'every existing module belongs to one owner destination');
+}
+cc_test(
+    array_keys(cc_context_navigation('service')) === ['service', 'features', 'growth', 'settings'],
+    'application settings keep maintenance, features, renewal and runtime details reachable'
+);
+cc_test(
+    is_string($layout) && str_contains($layout, 'class="sidebar"')
+        && str_contains($layout, 'context-nav') && str_contains($layout, 'cc_context_navigation($activeKey)')
+        && str_contains($layout, 'bottom-nav'),
+    'reference sidebar, contextual tools and mobile bottom navigation remain keyboard reachable'
 );
 cc_test(is_string($login) && str_contains($login, 'FOR UPDATE') && str_contains($login, 'beginTransaction()') && str_contains($login, 'commit()'), 'owner lockout updates are serialized in a database transaction');
 cc_test(is_string($login) && str_contains($login, 'cc_login_record_accepts_password(') && !str_contains($login, 'password_hash('), 'unknown-user login does not generate a request-specific password hash');
@@ -179,7 +194,8 @@ cc_test(
         !preg_match('/\$details\s*=\s*\[[^\]]*[\'\"](?:password|access_code)[\'\"]\s*=>/i', $resellerAdapter),
     'reseller audit details omit passwords and access-code values'
 );
-cc_test(is_string($resellerView) && str_contains($resellerView, 'code-reveal') && str_contains($resellerView, 'credential-value'), 'reseller access codes are masked with explicit reveal behavior');
+cc_test(is_string($resellerView) && str_contains($resellerView, 'credential-value') && !str_contains($resellerView, 'code-reveal'), 'reseller access codes are shown directly to the authorized owner');
+cc_test(is_string($resellerView) && str_contains($resellerView, 'المتصلون الآن') && str_contains($resellerView, 'code_online_available'), 'hosts show per-code online subscription counts');
 
 $definitions = cc_dashboard_metric_definitions();
 $expectedDashboardDefinitions = [
@@ -286,13 +302,36 @@ cc_test(
 );
 cc_test(
     is_string($dashboardView) &&
-        str_contains($dashboardView, 'النشطون الآن') &&
+        str_contains($dashboardView, 'اشتراكات نشطة') &&
+        str_contains($dashboardView, 'أجهزة متصلة') &&
+        str_contains($dashboardView, 'جلسات الآن') &&
         str_contains($dashboardView, 'جلسات اليوم') &&
-        str_contains($dashboardView, 'أجهزة نشطة') &&
+        str_contains($dashboardView, 'online_subscriptions') &&
+        str_contains($dashboardView, 'online_devices') &&
         str_contains($dashboardView, 'online_now') &&
         str_contains($dashboardView, 'sessions_today') &&
-        str_contains($dashboardView, 'active_devices'),
-    'authoritative Phase 6 Presence metrics replace their Dashboard placeholders'
+        !str_contains($dashboardView, 'هوستات عليها نشاط'),
+    'authoritative Presence metrics replace their Dashboard placeholders'
+);
+cc_test(
+    is_string($dashboardView) &&
+        str_contains($dashboardView, 'chart=7') &&
+        str_contains($dashboardView, 'chart=30') &&
+        str_contains($dashboardView, 'aria-pressed') &&
+        str_contains($dashboardView, 'cc_presence_subscription_token') &&
+        str_contains($dashboardView, 'subscription-target'),
+    'Overview chart controls and exact subscription details links are wired'
+);
+cc_test(
+    is_string($index) &&
+        str_contains($index, 'cc_presence_online_now_target_group') &&
+        !str_contains($index, 'cc_presence_online_now_locate'),
+    'subscription details resolve by exact identity instead of page rank'
+);
+cc_test(
+    str_contains((string) file_get_contents($root . '/views/online-now.php'), 'name="subscription"') &&
+        str_contains($index, "\$_POST['subscription']"),
+    'subscriber actions retain the selected subscription token'
 );
 cc_test(
     is_string($dashboardView) &&
@@ -324,10 +363,13 @@ cc_test(!is_file($root . '/config.php'), 'runtime config is not present in sourc
 
 require __DIR__ . '/presence.php';
 require __DIR__ . '/online-now.php';
+require __DIR__ . '/code-online.php';
 require __DIR__ . '/subscriber.php';
 require __DIR__ . '/phase6.php';
 require __DIR__ . '/phase7.php';
 require __DIR__ . '/phase8.php';
+require __DIR__ . '/host-code-pages.php';
+require __DIR__ . '/host-code-navigation.php';
 require __DIR__ . '/pairing.php';
 
 fwrite(STDOUT, "PASS: {$tests} HULK Control Center checks.\n");

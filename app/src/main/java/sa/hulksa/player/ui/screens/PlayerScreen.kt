@@ -104,6 +104,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -398,6 +399,42 @@ internal fun playerRetrySeekTarget(
     isLive || resumePromptPending -> 0L
     else -> maxOf(preservedPositionMs, playerPositionMs).coerceAtLeast(0L)
 }
+
+internal data class PlayerReplacementPreparation(
+    val seekTargetMs: Long?,
+    val playWhenReady: Boolean,
+)
+
+/**
+ * Final start policy for an already-prepared replacement player. A pending Resume/Restart
+ * decision owns the start state at this point, not only when Retry was pressed: preparation must
+ * stay at zero and paused until the user accepts a decision.
+ */
+internal fun playerReplacementPreparation(
+    isLive: Boolean,
+    resumePromptPending: Boolean,
+    pendingSeekAuthoritative: Boolean,
+    pendingSeekMs: Long,
+    replacementPositionMs: Long?,
+    restoredPlayWhenReady: Boolean?,
+    replacementPlayWhenReady: Boolean,
+): PlayerReplacementPreparation = PlayerReplacementPreparation(
+    seekTargetMs = when {
+        isLive -> replacementPositionMs
+        resumePromptPending -> 0L
+        pendingSeekAuthoritative -> pendingSeekMs
+        pendingSeekMs > 0L -> pendingSeekMs
+        else -> replacementPositionMs
+    },
+    playWhenReady = !resumePromptPending &&
+        (restoredPlayWhenReady ?: replacementPlayWhenReady),
+)
+
+/** Accepted Resume keeps the saved position; Restart starts from a legitimate zero. */
+internal fun playerResumeDecisionSeekTarget(
+    resumeFromSaved: Boolean,
+    savedPositionMs: Long,
+): Long = if (resumeFromSaved) savedPositionMs.coerceAtLeast(0L) else 0L
 
 internal data class MovieOfflineCardCopy(
     val title: String,
@@ -1101,19 +1138,18 @@ fun PlayerScreen(
             playerPositionMs = player.currentPosition,
         )
         recoveryDelayMs = 0L
-        if (audioOutputMode != PlayerAudioOutputMode.NORMAL) {
-            pendingPlayerReplacement = captureReplacementState(
-                targetCandidateIndex = targetCandidateIndex,
-                targetOutputMode = PlayerAudioOutputMode.NORMAL,
-            )
-            audioOutputMode = PlayerAudioOutputMode.NORMAL
-            playerInstanceGeneration += 1
-        } else if (targetCandidateIndex != candidateIndex) {
-            player.trackSelectionParameters = player.trackSelectionParameters.forPlayerReplacement(
-                outputMode = PlayerAudioOutputMode.NORMAL,
-                sourceChanged = true,
-            )
+        // A failed Amlogic decoder can leave the player/surface pair unusable even though a new
+        // codec can be initialized on it. Recreate the engine so Retry follows the same
+        // fresh-player/fresh-surface path that is proven to recover after exit/reopen.
+        val targetOutputMode = PlayerAudioOutputMode.NORMAL
+        pendingPlayerReplacement = captureReplacementState(
+            targetCandidateIndex = targetCandidateIndex,
+            targetOutputMode = targetOutputMode,
+        ).copy(playWhenReady = true)
+        if (audioOutputMode != targetOutputMode) {
+            audioOutputMode = targetOutputMode
         }
+        playerInstanceGeneration += 1
         candidateIndex = targetCandidateIndex
         retryNonce += 1
     }
@@ -1776,22 +1812,26 @@ fun PlayerScreen(
         }
         if (replacement != null) {
             player.trackSelectionParameters = replacement.trackSelectionParameters
-            val restoreSeekTarget = when {
-                request.isLive -> replacement.positionMs
-                resumePromptVisible -> 0L
-                pendingSeekAuthoritative -> pendingSeekMs
-                pendingSeekMs > 0L -> pendingSeekMs
-                else -> replacement.positionMs
-            }
-            restoreSeekTarget?.let(player::seekTo)
+            val preparation = playerReplacementPreparation(
+                isLive = request.isLive,
+                resumePromptPending = resumePromptVisible,
+                pendingSeekAuthoritative = pendingSeekAuthoritative,
+                pendingSeekMs = pendingSeekMs,
+                replacementPositionMs = replacement.positionMs,
+                restoredPlayWhenReady = restoredPlayWhenReady,
+                replacementPlayWhenReady = replacement.playWhenReady,
+            )
+            preparation.seekTargetMs?.let(player::seekTo)
             player.setPlaybackSpeed(replacement.speed)
             player.volume = replacement.volume
+            // Apply the start decision before prepare so a pending Resume/Restart decision never
+            // starts playback in the gap between prepare() and the post-prepare state write.
+            player.playWhenReady = preparation.playWhenReady
             player.prepare()
             android.util.Log.i(
                 "HulkPlayer",
                 "prepare issued t=${android.os.SystemClock.elapsedRealtime()} streamId=${request.streamId}",
             )
-            player.playWhenReady = restoredPlayWhenReady ?: replacement.playWhenReady
             pendingPlayerReplacement = null
             pendingSeekMs = 0L
             pendingSeekAuthoritative = false
@@ -2338,45 +2378,50 @@ fun PlayerScreen(
             }
             .then(interactionModifier),
     ) {
-        AndroidView(
-            factory = { viewContext ->
-                PlayerView(viewContext).apply {
-                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                    useController = false
-                    controllerAutoShow = false
-                    layoutDirection = View.LAYOUT_DIRECTION_LTR
-                    resizeMode = resizeModes[resizeModeIndex]
-                    setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
-                    keepScreenOn = playbackSettings.keepScreenOn
-                    isFocusable = false
-                    isFocusableInTouchMode = false
-                    descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-                    this.player = player
-                }
-            },
-            update = { view ->
-                view.player = player
-                view.useController = false
-                view.resizeMode = resizeModes[resizeModeIndex]
-                view.keepScreenOn = playbackSettings.keepScreenOn
-                view.subtitleView?.apply {
-                    val sizes = floatArrayOf(16f, 21f, 27f)
-                    setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, sizes[subtitleSizeIndex])
-                    setBottomPaddingFraction(if (subtitleRaised) .20f else .08f)
-                    setStyle(
-                        CaptionStyleCompat(
-                            AndroidColor.WHITE,
-                            AndroidColor.TRANSPARENT,
-                            AndroidColor.TRANSPARENT,
-                            CaptionStyleCompat.EDGE_TYPE_OUTLINE,
-                            AndroidColor.BLACK,
-                            null,
-                        ),
-                    )
-                }
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
+        // The Amlogic video decoder reports fillBuffer::storeFenceInMeta / 0xffffffc2 when a new
+        // player inherits the previous episode's SurfaceView. Bind the view to player identity so
+        // every new episode/retry gets a fresh surface, matching the proven exit/reopen recovery.
+        key(player) {
+            AndroidView(
+                factory = { viewContext ->
+                    PlayerView(viewContext).apply {
+                        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                        useController = false
+                        controllerAutoShow = false
+                        layoutDirection = View.LAYOUT_DIRECTION_LTR
+                        resizeMode = resizeModes[resizeModeIndex]
+                        setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+                        keepScreenOn = playbackSettings.keepScreenOn
+                        isFocusable = false
+                        isFocusableInTouchMode = false
+                        descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+                        this.player = player
+                    }
+                },
+                update = { view ->
+                    view.player = player
+                    view.useController = false
+                    view.resizeMode = resizeModes[resizeModeIndex]
+                    view.keepScreenOn = playbackSettings.keepScreenOn
+                    view.subtitleView?.apply {
+                        val sizes = floatArrayOf(16f, 21f, 27f)
+                        setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, sizes[subtitleSizeIndex])
+                        setBottomPaddingFraction(if (subtitleRaised) .20f else .08f)
+                        setStyle(
+                            CaptionStyleCompat(
+                                AndroidColor.WHITE,
+                                AndroidColor.TRANSPARENT,
+                                AndroidColor.TRANSPARENT,
+                                CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                                AndroidColor.BLACK,
+                                null,
+                            ),
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
 
         // A pending Resume decision is presented over the player's black backdrop only. The eager
         // preparation above can present the first decoded frame while the decision is still
@@ -2693,8 +2738,12 @@ fun PlayerScreen(
                         blocked = vodProgressPersistenceBlocked,
                         decisionAccepted = true,
                     )
-                    player.seekTo(request.resumePositionMs)
-                    currentPositionMs = request.resumePositionMs
+                    val resumePositionMs = playerResumeDecisionSeekTarget(
+                        resumeFromSaved = true,
+                        savedPositionMs = request.resumePositionMs,
+                    )
+                    player.seekTo(resumePositionMs)
+                    currentPositionMs = resumePositionMs
                     resumePromptVisible = false
                     controlsVisible = true
                     player.play()
@@ -2704,8 +2753,12 @@ fun PlayerScreen(
                         blocked = vodProgressPersistenceBlocked,
                         decisionAccepted = true,
                     )
-                    player.seekTo(0L)
-                    currentPositionMs = 0L
+                    val restartPositionMs = playerResumeDecisionSeekTarget(
+                        resumeFromSaved = false,
+                        savedPositionMs = request.resumePositionMs,
+                    )
+                    player.seekTo(restartPositionMs)
+                    currentPositionMs = restartPositionMs
                     resumePromptVisible = false
                     controlsVisible = true
                     player.play()

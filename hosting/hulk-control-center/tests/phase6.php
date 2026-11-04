@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+require_once __DIR__ . '/legacy-host-fixture.php';
 
 $phaseSixRoot = dirname(__DIR__);
 $phaseSixDomainPath = $phaseSixRoot . '/lib/presence-read-model.php';
@@ -45,6 +46,7 @@ $phaseSixReseller->exec(
     . 'reseller_id INTEGER PRIMARY KEY, reseller_name TEXT NOT NULL, access_code TEXT NOT NULL, '
     . 'access_code_hash TEXT NOT NULL, host TEXT NOT NULL, status TEXT NOT NULL)'
 );
+cc_test_legacy_host_views($phaseSixReseller);
 $phaseSixReseller->exec(
     "INSERT INTO resellers VALUES "
     . "(7, 'Synthetic One', 'HULK-ABCD-EFGH-JKMN-PQRS', 'hash-one', 'https://current.invalid', 'active'), "
@@ -280,3 +282,14 @@ cc_test(is_string($phaseSixIndex) && strpos($phaseSixIndex, 'cc_require_admin()'
 cc_test(is_string($phaseSixSessionsView) && str_contains($phaseSixSessionsView, 'iptv_password') && !str_contains($phaseSixSessionsView, 'reveal'), 'owner session view displays direct credential snapshots without reveal UX');
 cc_test(is_string($phaseSixDashboard) && str_contains($phaseSixDashboard, 'غير متاح لعدم وجود هوية حساب ثابتة'), 'unsupported users-today metric remains explicitly unavailable');
 cc_test(!str_contains((string) $phaseSixSource, 'account_id'), 'Phase 6 does not invent an account identity');
+
+// Codes sharing a host retain independent, case-sensitive usage statistics
+$phaseSixControl->exec("UPDATE cc_app_sessions SET access_code_snapshot='Case-Code' WHERE id=1");
+$phaseSixControl->exec("UPDATE cc_app_sessions SET access_code_snapshot='case-code' WHERE id=3");
+$exactUsage=cc_presence_usage_for_resellers($phaseSixControl,[
+ ['reseller_id'=>7,'code_id'=>101,'access_code'=>'Case-Code'],
+ ['reseller_id'=>7,'code_id'=>102,'access_code'=>'case-code'],
+], 'access-codes',$phaseSixNow,180);
+cc_test(isset($exactUsage[101],$exactUsage[102]),'sibling codes are indexed independently by code identity');
+
+cc_test($exactUsage[101]['sessions']===1 && $exactUsage[102]['sessions']===1,'case-distinct sibling code statistics never merge');

@@ -2,111 +2,92 @@
 
 declare(strict_types=1);
 
+// Each markup response binds its assets to their bytes, including warm browser caches.
+function cc_shell_asset(string $name): string
+{
+    return cc_asset_url($name . '?v=' . substr(hash_file('sha256', __DIR__ . '/../assets/' . $name), 0, 16));
+}
+
 function cc_page_start(array $resolved, array $admin): void
 {
     $activeKey = (string) $resolved['key'];
     $module = $resolved['module'];
     $mainNavigation = cc_main_navigation();
-    $activeMain = cc_active_main_navigation($activeKey);
-    $secondaryGroups = cc_secondary_navigation_groups();
+    $activeMain = cc_active_main_navigation($activeKey) ?? 'dashboard';
+    $contextNavigation = cc_context_navigation($activeKey);
+    $label = (string) ($mainNavigation[$activeMain]['label'] ?? $module['title']);
+    $groups = [
+        ['label' => null, 'keys' => ['dashboard']],
+        ['label' => 'المتابعة', 'keys' => ['live-users', 'sessions']],
+        ['label' => 'إدارة الوصول', 'keys' => ['hosts']],
+        ['label' => 'إدارة التطبيق', 'keys' => ['announcements', 'releases', 'service']],
+    ];
+    $renderSections = static function () use ($groups, $mainNavigation, $activeMain): void {
+        foreach ($groups as $group): ?>
+            <?php if ($group['label'] !== null): ?><span class="side-label"><?= cc_e($group['label']) ?></span><?php endif; ?>
+            <?php foreach ($group['keys'] as $key): $item = $mainNavigation[$key]; ?>
+                <a class="nav-btn" href="<?= cc_e(cc_url($key)) ?>" <?= $activeMain === $key ? 'aria-current="page"' : '' ?>>
+                    <?= cc_icon((string) $item['icon']) ?><span><?= cc_e((string) $item['label']) ?></span>
+                </a>
+            <?php endforeach; ?>
+        <?php endforeach;
+    };
+    $GLOBALS['cc_active_main_navigation'] = $activeMain;
     ?>
     <!doctype html>
     <html lang="ar" dir="rtl">
     <head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
         <meta name="robots" content="noindex,nofollow">
-        <meta name="color-scheme" content="dark">
-        <meta name="theme-color" content="#030402">
-        <title><?= cc_e((string) $module['title']) ?> — HULK SA Control Center</title>
+        <meta name="color-scheme" content="light dark">
+        <meta name="theme-color" content="#f7f6f2" media="(min-width: 761px)">
+        <meta name="theme-color" content="#0B1423" media="(max-width: 760px)">
+        <title><?= cc_e((string) $module['title']) ?> — HULK SA</title>
         <link rel="icon" href="<?= cc_e(cc_asset_url('hulk-sa-mark.svg')) ?>" type="image/svg+xml">
-        <link rel="stylesheet" href="<?= cc_e(cc_asset_url('app.css?v=6.2.0')) ?>">
+        <link rel="stylesheet" href="<?= cc_e(cc_shell_asset('app.css')) ?>">
+        <link rel="stylesheet" href="<?= cc_e(cc_shell_asset('reference.css')) ?>">
+        <link rel="stylesheet" media="(max-width: 760px)" href="<?= cc_e(cc_shell_asset('mobile.css')) ?>">
     </head>
-    <body>
-    <a class="skip-link" href="#main-content">انتقل إلى المحتوى</a>
-    <div class="app-shell">
-        <header class="app-header">
-            <div class="app-header__bar">
-                <a class="brand" href="<?= cc_e(cc_url()) ?>" aria-label="HULK SA Control Center — الرئيسية">
-                    <span class="brand__mark"><img src="<?= cc_e(cc_asset_url('hulk-sa-mark.svg')) ?>" alt=""></span>
-                    <span class="brand__copy"><strong>HULK SA</strong><small>CONTROL CENTER</small></span>
+    <body class="cc-control" data-screen="<?= cc_e($activeMain) ?>">
+    <a class="skip-link" href="#main-content">انتقل الى المحتوى</a>
+    <div class="shell">
+        <aside class="sidebar">
+            <a class="brand" href="<?= cc_e(cc_url('dashboard')) ?>" aria-label="HULK SA — الرئيسية">
+                <img src="<?= cc_e(cc_asset_url('hulk-sa-mark.svg')) ?>" alt="">
+                <div><b dir="ltr">HULK SA</b><small>لوحة التحكم</small></div>
+            </a>
+            <nav class="side-nav" aria-label="أقسام اللوحة">
+                <?php $renderSections(); ?>
+            </nav>
+            <div class="side-foot">HULK SA · لوحة التحكم</div>
+        </aside>
+        <div class="content">
+            <header class="top">
+                <a class="top-brand" href="<?= cc_e(cc_url('dashboard')) ?>" aria-label="HULK SA — الرئيسية">
+                    <img src="<?= cc_e(cc_asset_url('hulk-sa-mark.svg')) ?>" alt=""><b dir="ltr">HULK SA</b>
                 </a>
-                <div class="app-header__actions">
-                    <details class="settings-menu" data-settings-menu>
-                        <summary class="icon-button settings-menu__trigger" aria-label="الإعدادات والخدمة" title="الإعدادات والخدمة">
-                            <?= cc_icon('settings') ?>
-                        </summary>
-                        <div class="settings-menu__panel">
-                            <header class="settings-menu__header">
-                                <span class="settings-menu__header-icon"><?= cc_icon('settings') ?></span>
-                                <span><strong>الإعدادات والخدمة</strong><small>الحالة والصيانة والدعم وإدارة المركز</small></span>
-                            </header>
-                            <div class="settings-menu__service-grid">
-                                <a class="settings-menu__service" href="<?= cc_e(cc_url('service')) ?>">
-                                    <span class="settings-menu__service-icon"><?= cc_icon('pulse') ?></span>
-                                    <span><strong>حالة الخدمة والصيانة</strong><small>الحالة المنشورة ورسائل الصيانة</small></span>
-                                </a>
-                                <a class="settings-menu__service" href="<?= cc_e(cc_url('growth')) ?>">
-                                    <span class="settings-menu__service-icon"><?= cc_icon('trend') ?></span>
-                                    <span><strong>الدعم والتجديد</strong><small>قنوات الدعم وروابط التجديد</small></span>
-                                </a>
-                            </div>
-                            <div class="settings-menu__groups">
-                                <?php foreach ($secondaryGroups as $groupKey => $group): ?>
-                                    <section class="settings-menu__group" aria-labelledby="settings-group-<?= cc_e($groupKey) ?>">
-                                        <h2 class="settings-menu__group-title" id="settings-group-<?= cc_e($groupKey) ?>"><?= cc_e($group['label']) ?></h2>
-                                        <div class="settings-menu__links">
-                                            <?php foreach ($group['items'] as $key => $label): ?>
-                                                <a href="<?= cc_e(cc_url($key)) ?>"><?= cc_e($label) ?></a>
-                                            <?php endforeach; ?>
-                                        </div>
-                                    </section>
-                                <?php endforeach; ?>
-                            </div>
-                            <footer class="settings-menu__footer">
-                                <a href="<?= cc_e(cc_url('settings')) ?>">
-                                    <span class="settings-menu__footer-icon"><?= cc_icon('settings') ?></span>
-                                    <span><strong>إعدادات المركز</strong><small>حدود التشغيل والجهات المسؤولة</small></span>
-                                </a>
-                            </footer>
-                        </div>
-                    </details>
-                    <div class="admin-menu">
-                        <span class="admin-menu__avatar" aria-hidden="true"><?= cc_e(cc_initial((string) $admin['username'])) ?></span>
-                        <span class="admin-menu__copy"><strong><?= cc_e((string) $admin['username']) ?></strong><small>مسؤول النظام</small></span>
-                    </div>
+                <div class="crumb"><span>إدارة التطبيق</span><span aria-hidden="true">‹</span><b><?= cc_e($label) ?></b></div>
+                <div class="top-tools">
+                    <a class="top-bell" href="<?= cc_e(cc_url('announcements')) ?>" aria-label="الرسائل"><?= cc_icon('bell') ?></a>
+                    <span class="top-owner"><?= cc_e((string) $admin['username']) ?></span>
                     <form action="<?= cc_e(cc_base_path() . '/logout.php') ?>" method="post">
                         <input type="hidden" name="csrf_token" value="<?= cc_e(cc_csrf_token()) ?>">
-                        <button class="button button--quiet logout-button" type="submit" aria-label="تسجيل الخروج">
-                            <span class="logout-button__icon"><?= cc_icon('arrow-left') ?></span>
-                            <span class="logout-button__text">تسجيل الخروج</span>
-                        </button>
+                        <button class="account" type="submit" aria-label="تسجيل الخروج"><span>تسجيل الخروج</span><?= cc_icon('user') ?></button>
                     </form>
                 </div>
-            </div>
-            <nav class="primary-tabs" aria-label="التنقل الرئيسي">
-                <div class="primary-tabs__track" data-primary-tabs>
-                    <?php foreach ($mainNavigation as $key => $item): ?>
-                        <a class="primary-tab<?= $activeMain === $key ? ' is-active' : '' ?>"
-                           href="<?= cc_e(cc_url($key)) ?>"
-                           title="<?= cc_e((string) $item['label']) ?>"
-                           <?= $activeMain === $key ? 'aria-current="page"' : '' ?>>
-                            <span class="primary-tab__icon"><?= cc_icon((string) $item['icon']) ?></span>
-                            <span class="primary-tab__text"><?= cc_e((string) $item['label']) ?></span>
-                        </a>
-                    <?php endforeach; ?>
-                </div>
-            </nav>
-        </header>
-
-        <div class="workspace">
-            <main class="main-content" id="main-content" tabindex="-1">
-                <header class="page-header">
-                    <div>
-                        <h1><?= cc_e((string) $module['title']) ?></h1>
-                        <p><?= cc_e((string) $module['description']) ?></p>
-                    </div>
+            </header>
+            <main id="main-content" class="cc-main" tabindex="-1">
+                <header class="page-title cc-screen-heading">
+                    <div><span class="cc-mobile-wordmark" dir="ltr">HULK SA</span><h1 tabindex="-1"><?= cc_e((string) $module['title']) ?></h1><p class="subtitle"><?= cc_e((string) $module['description']) ?></p></div>
                 </header>
+                <?php if ($resolved['valid'] && count($contextNavigation) > 1): ?>
+                    <nav class="context-nav" aria-label="أدوات <?= cc_e($label) ?>">
+                        <?php foreach ($contextNavigation as $key => $contextLabel): ?>
+                            <a href="<?= cc_e(cc_url($key)) ?>"<?= $activeKey === $key ? ' class="is-active" aria-current="page"' : '' ?>><?= cc_e($contextLabel) ?></a>
+                        <?php endforeach; ?>
+                    </nav>
+                <?php endif; ?>
     <?php
 }
 
@@ -114,10 +95,33 @@ function cc_page_end(): void
 {
     ?>
             </main>
-            <footer class="app-footer"><span>HULK SA Control Center</span><span>واجهة إدارية عربية موحّدة</span></footer>
         </div>
     </div>
-    <script src="<?= cc_e(cc_asset_url('app.js?v=6.1.0')) ?>" defer></script>
+    <nav class="bottom-nav cc-mobile-bar" aria-label="أقسام الجوال">
+        <?php
+        $nav = cc_main_navigation();
+        $activeBottom = $GLOBALS['cc_active_main_navigation'] ?? 'dashboard';
+        $moreKeys = ['sessions', 'announcements', 'releases', 'service'];
+        $moreActive = in_array($activeBottom, $moreKeys, true);
+        $bottom = ['dashboard' => 'نظرة عامة', 'live-users' => 'المتصلون', 'hosts' => 'الهوستات'];
+        ?>
+        <?php foreach ($bottom as $key => $text): ?>
+            <a href="<?= cc_e(cc_url($key)) ?>" <?= $activeBottom === $key ? 'aria-current="page"' : '' ?>>
+                <?= cc_icon((string) ($nav[$key]['icon'] ?? 'dashboard')) ?><span><?= cc_e($text) ?></span>
+            </a>
+        <?php endforeach; ?>
+        <details class="more-nav" data-mobile-more>
+            <summary <?= $moreActive ? 'aria-current="page"' : '' ?>><?= cc_icon('menu') ?><span>المزيد</span></summary>
+            <nav aria-label="المزيد من الأقسام">
+                <?php foreach ($moreKeys as $key): ?>
+                    <a href="<?= cc_e(cc_url($key)) ?>" <?= $activeBottom === $key ? 'aria-current="page"' : '' ?>>
+                        <?= cc_icon((string) ($nav[$key]['icon'] ?? 'dashboard')) ?><span><?= cc_e((string) $nav[$key]['label']) ?></span>
+                    </a>
+                <?php endforeach; ?>
+            </nav>
+        </details>
+    </nav>
+    <script src="<?= cc_e(cc_shell_asset('app.js')) ?>" defer></script>
     </body>
     </html>
     <?php
