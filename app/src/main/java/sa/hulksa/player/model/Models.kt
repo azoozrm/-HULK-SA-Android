@@ -77,6 +77,11 @@ data class PlaybackRequest(
     val episodeNumber: Int? = null,
     val episodeTitle: String? = null,
     val parentContentId: Int? = null,
+    /**
+     * Trustworthy original-language metadata from the provider's explicit original-language field.
+     * A dub or the currently selected audio language never populates this value.
+     */
+    val originalLanguage: String? = null,
 )
 
 data class HistoryEntry(
@@ -167,6 +172,11 @@ data class ContentDetails(
     val cast: String? = null,
     val releaseDate: String? = null,
     val backdropUrl: String? = null,
+    /**
+     * Only an explicit provider original-language field is accepted. Generic `language`/`country`
+     * values are intentionally not used because they may describe a dub or production country.
+     */
+    val originalLanguage: String? = null,
 )
 
 data class SeriesBundle(

@@ -1210,27 +1210,42 @@ class HulkViewModel internal constructor(
 
     fun playSelectedMovie() {
         val activeSession = session ?: return
-        val movie = mutableState.value.selectedItem?.takeIf { it.type == ContentType.MOVIE } ?: return
+        val state = mutableState.value
+        val movie = state.selectedItem?.takeIf { it.type == ContentType.MOVIE } ?: return
         playerReturnScreen = HulkScreen.MOVIE_DETAILS
-        startPlayback(repository.playback(activeSession, movie))
+        startPlayback(
+            repository.playback(activeSession, movie).copy(
+                originalLanguage = state.selectedDetails?.originalLanguage,
+            ),
+        )
     }
 
     fun playEpisode(episode: Episode) {
         val activeSession = session ?: return
-        val series = mutableState.value.selectedSeries ?: return
+        val state = mutableState.value
+        val series = state.selectedSeries ?: return
         playerReturnScreen = HulkScreen.SERIES
-        startPlayback(repository.playback(activeSession, series, episode))
+        startPlayback(
+            repository.playback(activeSession, series, episode).copy(
+                originalLanguage = state.selectedDetails?.originalLanguage,
+            ),
+        )
     }
 
     fun playNextEpisode(): Boolean {
         val activeSession = session ?: return false
-        val series = mutableState.value.selectedSeries ?: return false
-        val current = mutableState.value.playback?.takeIf { it.streamKind == "series" } ?: return false
-        val ordered = mutableState.value.episodes.sortedWith(compareBy(Episode::season, Episode::episodeNumber))
+        val state = mutableState.value
+        val series = state.selectedSeries ?: return false
+        val current = state.playback?.takeIf { it.streamKind == "series" } ?: return false
+        val ordered = state.episodes.sortedWith(compareBy(Episode::season, Episode::episodeNumber))
         val currentIndex = ordered.indexOfFirst { it.id == current.streamId }
         val next = ordered.getOrNull(currentIndex + 1) ?: return false
         playerReturnScreen = HulkScreen.SERIES
-        startPlayback(repository.playback(activeSession, series, next))
+        startPlayback(
+            repository.playback(activeSession, series, next).copy(
+                originalLanguage = state.selectedDetails?.originalLanguage,
+            ),
+        )
         return true
     }
 
@@ -3742,7 +3757,11 @@ class HulkViewModel internal constructor(
                     }
                 pendingTvDeepLink = null
                 playerReturnScreen = HulkScreen.MAIN
-                startPlayback(repository.playback(activeSession, resolution.series, episode))
+                startPlayback(
+                    repository.playback(activeSession, resolution.series, episode).copy(
+                        originalLanguage = bundle.details.originalLanguage,
+                    ),
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {

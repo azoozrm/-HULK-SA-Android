@@ -63,6 +63,7 @@ import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
@@ -458,13 +459,30 @@ private enum class PlayerPanel { AUDIO, SUBTITLES, SPEED, RESIZE, QUALITY, SERVE
 internal data class PlayerTrackOption(
     val key: String,
     val label: String,
-    val secondary: String,
     val groupIndex: Int,
     val trackIndex: Int,
     val selected: Boolean,
     val trackType: Int,
     val ownerToken: Any,
     val trackGroup: TrackGroup,
+    val languageCode: String?,
+    val identityKey: String,
+    val languageOrdinal: Int,
+    val fallbackLabel: String,
+)
+
+internal fun PlayerTrackOption.toDescriptor(): VodTrackDescriptor = VodTrackDescriptor(
+    identityKey = identityKey,
+    languageCode = languageCode,
+    languageOrdinal = languageOrdinal,
+    fallbackLabel = fallbackLabel,
+    selected = selected,
+)
+
+internal fun PlayerTrackOption.toChoice(): VodTrackChoice = VodTrackChoice(
+    identityKey = identityKey,
+    languageCode = languageCode,
+    languageOrdinal = languageOrdinal,
 )
 
 private data class PlayerReplacementState(
@@ -736,6 +754,14 @@ fun PlayerScreen(
     var subtitleTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
     var videoTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
     var subtitlesDisabled by remember(request) { mutableStateOf(false) }
+    var manualAudioChoice by remember(request) { mutableStateOf<VodTrackChoice?>(null) }
+    var manualSubtitleChoice by remember(request) { mutableStateOf<VodSubtitleChoice?>(null) }
+    // Recovery may deliberately select another working audio track; the automatic/manual policy
+    // must not immediately fight that recovery selection on the next track callback.
+    var audioRecoveryOverrideActive by remember(request) { mutableStateOf(false) }
+    val originalLanguageClass = remember(request.originalLanguage) {
+        vodOriginalLanguage(request.originalLanguage)
+    }
     var hasActiveAudio by remember(request) { mutableStateOf(false) }
     var hasActiveSubtitles by remember(request) { mutableStateOf(false) }
     var audioLanguageLabel by remember(request) { mutableStateOf("") }
@@ -1059,6 +1085,9 @@ fun PlayerScreen(
                     .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
                     .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, track.trackIndex))
                     .build()
+                // Keep the recovery-selected working audio track until the user explicitly picks
+                // another one; the defaults policy must not immediately revert it.
+                audioRecoveryOverrideActive = true
                 if (shouldReprepareAfterAudioTrackOverride(command.trigger)) {
                     recoveryPreparePending = true
                     recoveryDelayMs = command.delayMs
@@ -1138,6 +1167,9 @@ fun PlayerScreen(
         offlineFailure = false
         confirmedOutage = false
         recoveryPreparePending = true
+        // A user-initiated Retry keeps the manual intent authoritative and lets it be re-resolved
+        // against the fresh player's real groups.
+        audioRecoveryOverrideActive = false
         clearFinalErrorState()
         restoredPlayWhenReady = null
         pendingSeekAuthoritative = false
@@ -1226,6 +1258,103 @@ fun PlayerScreen(
         return true
     }
 
+    /**
+     * One owner for the automatic and manual VOD audio/subtitle selection.
+     *
+     * Automatic behavior is Arabic-first: prefer Arabic audio; for foreign/unknown content select
+     * real Arabic subtitles only, otherwise OFF; for positively Arabic-original content subtitles
+     * stay OFF. A manual choice is resolved against the current groups by stable identity/ordinal
+     * and always takes priority. Recovery may deliberately replace the audio track; that selection
+     * is not immediately undone by this policy.
+     */
+    fun applyVodTrackSelection() {
+        if (request.isLive) return
+        val current = player.trackSelectionParameters
+        val builder = current.buildUpon()
+        var changed = false
+
+        val preferredAudio = manualAudioChoice?.languageCode ?: VOD_ARABIC_LANGUAGE_CODE
+        if (current.preferredAudioLanguages.firstOrNull() != preferredAudio) {
+            builder.setPreferredAudioLanguage(preferredAudio)
+            changed = true
+        }
+        if (current.preferredTextLanguages.firstOrNull() != VOD_ARABIC_LANGUAGE_CODE) {
+            builder.setPreferredTextLanguage(VOD_ARABIC_LANGUAGE_CODE)
+            changed = true
+        }
+
+        fun selectIfNeeded(option: PlayerTrackOption, type: Int) {
+            val disabled = current.disabledTrackTypes.contains(type)
+            if (!option.selected || disabled) {
+                builder.setTrackTypeDisabled(type, false)
+                builder.setOverrideForType(
+                    TrackSelectionOverride(option.trackGroup, option.trackIndex),
+                )
+                changed = true
+            }
+        }
+
+        val manualAudio = manualAudioChoice
+        if (manualAudio != null && !audioRecoveryOverrideActive) {
+            val index = vodResolveTrackChoiceIndex(
+                choice = manualAudio,
+                tracks = audioTracks.map { it.toDescriptor() },
+            )
+            index?.let(audioTracks::getOrNull)?.let { selectIfNeeded(it, C.TRACK_TYPE_AUDIO) }
+        } else if (manualAudio == null && !audioRecoveryOverrideActive) {
+            // Explicit Arabic selection avoids depending on language-code normalization in the
+            // selector; no Arabic track means the existing playable fallback is untouched.
+            audioTracks.firstOrNull { it.languageCode == VOD_ARABIC_LANGUAGE_CODE }
+                ?.let { selectIfNeeded(it, C.TRACK_TYPE_AUDIO) }
+        }
+
+        when (val manualSubtitle = manualSubtitleChoice) {
+            null -> {
+                val autoTrack = vodAutoSubtitleTrack(
+                    originalLanguage = originalLanguageClass,
+                    tracks = subtitleTracks.map { it.toDescriptor() },
+                )
+                val autoIndex = autoTrack?.let { chosen ->
+                    subtitleTracks.indexOfFirst {
+                        it.languageCode == chosen.languageCode &&
+                            it.languageOrdinal == chosen.languageOrdinal
+                    }
+                } ?: -1
+                if (autoIndex >= 0) {
+                    selectIfNeeded(subtitleTracks[autoIndex], C.TRACK_TYPE_TEXT)
+                } else if (!current.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) {
+                    builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    changed = true
+                }
+            }
+            VodSubtitleChoice.Off -> {
+                if (!current.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) {
+                    builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    changed = true
+                }
+            }
+            is VodSubtitleChoice.Track -> {
+                val index = vodResolveTrackChoiceIndex(
+                    choice = manualSubtitle.choice,
+                    tracks = subtitleTracks.map { it.toDescriptor() },
+                )
+                val option = index?.let(subtitleTracks::getOrNull)
+                if (option != null) {
+                    selectIfNeeded(option, C.TRACK_TYPE_TEXT)
+                } else if (!current.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) {
+                    builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    changed = true
+                }
+            }
+        }
+
+        if (changed) {
+            player.trackSelectionParameters = builder.build()
+            subtitlesDisabled = player.trackSelectionParameters.disabledTrackTypes
+                .contains(C.TRACK_TYPE_TEXT)
+        }
+    }
+
     fun openLiveMorePanel() {
         liveMoreMenuFocusRow = PlayerLiveMoreRow.MUTE
         liveMorePanel = PlayerLiveMorePanelView.MENU
@@ -1267,16 +1396,47 @@ fun PlayerScreen(
         vodMorePanel = VodMorePanelView.MENU
     }
 
-    fun openVodAudioTracks() {
+    fun openVodAudioSubtitles() {
         refreshVodTrackOptions()
-        vodMoreMenuFocusRow = VodMoreRow.AUDIO_TRACKS
-        vodMorePanel = VodMorePanelView.AUDIO_TRACKS
+        vodMoreMenuFocusRow = VodMoreRow.AUDIO_SUBTITLES
+        vodMorePanel = VodMorePanelView.AUDIO_SUBTITLES
     }
 
-    fun openVodSubtitleTracks() {
-        refreshVodTrackOptions()
-        vodMoreMenuFocusRow = VodMoreRow.SUBTITLE_TRACKS
-        vodMorePanel = VodMorePanelView.SUBTITLE_TRACKS
+    // Establish Arabic-first defaults before preparation, then re-evaluate whenever the real track
+    // groups or either manual intent changes. Both effects are request-scoped so a new title or
+    // episode never inherits another item's overrides or manual choices.
+    LaunchedEffect(player, request) {
+        if (request.isLive) return@LaunchedEffect
+        android.util.Log.i(
+            "HulkPlayer",
+            "vod track defaults streamId=${request.streamId} " +
+                "original=${request.originalLanguage} classification=$originalLanguageClass",
+        )
+        // Track options belong to the previous player instance until this new one publishes its
+        // own groups. Clear them before applying any policy so stale groups can never be selected.
+        audioTracks = emptyList()
+        subtitleTracks = emptyList()
+        videoTracks = emptyList()
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setPreferredAudioLanguage(
+                manualAudioChoice?.languageCode ?: VOD_ARABIC_LANGUAGE_CODE,
+            )
+            .setPreferredTextLanguage(VOD_ARABIC_LANGUAGE_CODE)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .build()
+        subtitlesDisabled = true
+        applyVodTrackSelection()
+    }
+
+    LaunchedEffect(
+        player,
+        audioTracks,
+        subtitleTracks,
+        manualAudioChoice,
+        manualSubtitleChoice,
+        audioRecoveryOverrideActive,
+    ) {
+        applyVodTrackSelection()
     }
 
     fun closeVodMorePanelToTrigger() {
@@ -2686,8 +2846,7 @@ fun PlayerScreen(
                                         vodMoreMenuFocusRow = VodMoreRow.PICTURE_SIZE
                                         vodMorePanel = VodMorePanelView.PICTURE_SIZE
                                     },
-                                    onOpenAudioTracks = ::openVodAudioTracks,
-                                    onOpenSubtitleTracks = ::openVodSubtitleTracks,
+                                    onOpenAudioSubtitles = ::openVodAudioSubtitles,
                                     onSelectSpeed = { speed ->
                                         applyVodPlaybackSpeed(speed)
                                         closeVodMorePanelForSelection()
@@ -2698,16 +2857,22 @@ fun PlayerScreen(
                                     },
                                     onSelectAudioTrack = { option ->
                                         if (applyTrack(C.TRACK_TYPE_AUDIO, option)) {
+                                            audioRecoveryOverrideActive = false
+                                            manualAudioChoice = option.toChoice()
                                             closeVodMorePanelForSelection()
                                         }
                                     },
                                     onSelectSubtitleTrack = { option ->
                                         if (applyTrack(C.TRACK_TYPE_TEXT, option)) {
+                                            manualSubtitleChoice = VodSubtitleChoice.Track(
+                                                option.toChoice(),
+                                            )
                                             closeVodMorePanelForSelection()
                                         }
                                     },
                                     onDisableSubtitles = {
                                         if (applyTrack(C.TRACK_TYPE_TEXT, null)) {
+                                            manualSubtitleChoice = VodSubtitleChoice.Off
                                             closeVodMorePanelForSelection()
                                         }
                                     },
@@ -3130,6 +3295,7 @@ private fun PlayerTopBar(
             primary = false,
             outlined = true,
             compact = true,
+            trailingIcon = Icons.AutoMirrored.Rounded.ArrowBack,
             modifier = Modifier
                 .then(if (backFocusRequester != null) Modifier.focusRequester(backFocusRequester) else Modifier)
                 .then(
@@ -4281,12 +4447,18 @@ private fun LiveMorePanel(
             LiveMoreHeaderAction(
                 caption = if (view == PlayerLiveMorePanelView.MENU) "اغلاق" else "رجوع",
                 onClick = if (view == PlayerLiveMorePanelView.MENU) onClose else onBackToMenu,
+                icon = if (view == PlayerLiveMorePanelView.MENU) {
+                    null
+                } else {
+                    Icons.AutoMirrored.Rounded.ArrowBack
+                },
             )
         }
         Spacer(Modifier.height(8.dp))
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .weight(1f, fill = false)
                 .verticalScroll(rememberScrollState()),
         ) {
             when (view) {
@@ -4446,9 +4618,14 @@ private fun LiveMoreRow(
     var focused by remember { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
     val shape = RoundedCornerShape(11.dp)
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
     val glyphTint = if (showFocused) colors.goldBright else colors.gold
+    LaunchedEffect(focused) {
+        if (focused) runCatching { bringIntoViewRequester.bringIntoView() }
+    }
     Row(
         modifier = modifier
+            .bringIntoViewRequester(bringIntoViewRequester)
             .fillMaxWidth()
             .clip(shape)
             .background(
@@ -4817,8 +4994,7 @@ private fun VodMorePanel(
     onOpenGoToTime: () -> Unit,
     onOpenSpeed: () -> Unit,
     onOpenPictureSize: () -> Unit,
-    onOpenAudioTracks: () -> Unit,
-    onOpenSubtitleTracks: () -> Unit,
+    onOpenAudioSubtitles: () -> Unit,
     onSelectSpeed: (Float) -> Unit,
     onSelectPictureSize: (Int) -> Unit,
     onSelectAudioTrack: (PlayerTrackOption) -> Unit,
@@ -4834,8 +5010,7 @@ private fun VodMorePanel(
     val goToTimeFocus = remember { FocusRequester() }
     val speedFocus = remember { FocusRequester() }
     val pictureFocus = remember { FocusRequester() }
-    val audioFocus = remember { FocusRequester() }
-    val subtitlesFocus = remember { FocusRequester() }
+    val audioSubtitlesFocus = remember { FocusRequester() }
     val restartFocus = remember { FocusRequester() }
     val lockFocus = remember { FocusRequester() }
     val headerFocus = remember { FocusRequester() }
@@ -4862,15 +5037,14 @@ private fun VodMorePanel(
             goToTimeFocus,
             speedFocus,
             pictureFocus,
-            audioFocus,
-            subtitlesFocus,
+            audioSubtitlesFocus,
             restartFocus,
             lockFocus,
         )
         VodMorePanelView.SPEED -> speedOptionFocus
         VodMorePanelView.PICTURE_SIZE -> pictureOptionFocus
-        VodMorePanelView.AUDIO_TRACKS -> audioOptionFocus
-        VodMorePanelView.SUBTITLE_TRACKS -> listOf(subtitleOffFocus) + subtitleOptionFocus
+        VodMorePanelView.AUDIO_SUBTITLES ->
+            audioOptionFocus + subtitleOffFocus + subtitleOptionFocus
     }
     val movieNodes = listOf(headerFocus) + movieRowFocus
     fun movieUp(nodeIndex: Int): FocusRequester =
@@ -4880,11 +5054,15 @@ private fun VodMorePanel(
     val selectedOptionIndex = when (view) {
         VodMorePanelView.SPEED -> VOD_PLAYER_SPEED_OPTIONS.indexOfFirst { kotlin.math.abs(it - speed) < 0.001f }
         VodMorePanelView.PICTURE_SIZE -> pictureSizeIndex
-        VodMorePanelView.AUDIO_TRACKS -> audioTracks.indexOfFirst { it.selected }.coerceAtLeast(0)
-        VodMorePanelView.SUBTITLE_TRACKS -> if (subtitlesOff) {
-            0
-        } else {
-            1 + subtitleTracks.indexOfFirst { it.selected }.coerceAtLeast(0)
+        VodMorePanelView.AUDIO_SUBTITLES -> {
+            val audioIndex = audioTracks.indexOfFirst { it.selected }
+            when {
+                audioIndex >= 0 -> audioIndex
+                audioTracks.isNotEmpty() -> 0
+                subtitlesOff -> audioTracks.size
+                else -> audioTracks.size + 1 +
+                    subtitleTracks.indexOfFirst { it.selected }.coerceAtLeast(0)
+            }
         }
         VodMorePanelView.MENU -> -1
     }
@@ -4895,15 +5073,13 @@ private fun VodMorePanel(
                 VodMoreRow.GO_TO_TIME -> goToTimeFocus
                 VodMoreRow.SPEED -> speedFocus
                 VodMoreRow.PICTURE_SIZE -> pictureFocus
-                VodMoreRow.AUDIO_TRACKS -> audioFocus
-                VodMoreRow.SUBTITLE_TRACKS -> subtitlesFocus
+                VodMoreRow.AUDIO_SUBTITLES -> audioSubtitlesFocus
                 VodMoreRow.RESTART -> restartFocus
                 VodMoreRow.LOCK -> lockFocus
             }
             VodMorePanelView.SPEED,
             VodMorePanelView.PICTURE_SIZE,
-            VodMorePanelView.AUDIO_TRACKS,
-            VodMorePanelView.SUBTITLE_TRACKS,
+            VodMorePanelView.AUDIO_SUBTITLES,
             -> movieRowFocus.getOrNull(selectedOptionIndex) ?: headerFocus
         }
         withFrameNanos { }
@@ -4936,8 +5112,7 @@ private fun VodMorePanel(
                     VodMorePanelView.MENU -> "المزيد"
                     VodMorePanelView.SPEED -> "سرعة التشغيل"
                     VodMorePanelView.PICTURE_SIZE -> "حجم الصورة"
-                    VodMorePanelView.AUDIO_TRACKS -> "مسارات الصوت"
-                    VodMorePanelView.SUBTITLE_TRACKS -> "الترجمة"
+                    VodMorePanelView.AUDIO_SUBTITLES -> "الصوت والترجمة"
                 },
                 color = colors.text,
                 fontSize = 16.sp,
@@ -4949,7 +5124,11 @@ private fun VodMorePanel(
             LiveMoreHeaderAction(
                 caption = if (view == VodMorePanelView.MENU) "اغلاق" else "رجوع",
                 onClick = onBackToMenu,
-                icon = if (view == VodMorePanelView.MENU) Icons.Rounded.Close else null,
+                icon = if (view == VodMorePanelView.MENU) {
+                    Icons.Rounded.Close
+                } else {
+                    Icons.AutoMirrored.Rounded.ArrowBack
+                },
                 focusRequester = headerFocus,
                 upFocus = movieUp(0),
                 downFocus = movieDown(0),
@@ -4960,6 +5139,7 @@ private fun VodMorePanel(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .weight(1f, fill = false)
                 .verticalScroll(rememberScrollState()),
         ) {
             when (view) {
@@ -5000,31 +5180,22 @@ private fun VodMorePanel(
                     )
                     VodPanelDivider()
                     VodMoreRow(
-                        text = "مسارات الصوت",
-                        icon = Icons.Rounded.Audiotrack,
-                        value = audioTracks.firstOrNull { it.selected }?.label,
+                        text = "الصوت والترجمة",
+                        icon = Icons.Rounded.Subtitles,
+                        value = listOfNotNull(
+                            audioTracks.firstOrNull { it.selected }?.label,
+                            when {
+                                subtitleTracks.isEmpty() -> null
+                                subtitlesOff -> "ايقاف"
+                                else -> selectedSubtitle?.label
+                            },
+                        ).joinToString(" • ").takeIf { it.isNotBlank() },
                         showChevron = true,
-                        onClick = onOpenAudioTracks,
-                        focusRequester = audioFocus,
+                        onClick = onOpenAudioSubtitles,
+                        focusRequester = audioSubtitlesFocus,
                         inputMuted = inputMuted,
                         upFocus = movieUp(4),
                         downFocus = movieDown(4),
-                    )
-                    VodPanelDivider()
-                    VodMoreRow(
-                        text = "الترجمة",
-                        icon = Icons.Rounded.Subtitles,
-                        value = when {
-                            subtitleTracks.isEmpty() -> null
-                            subtitlesOff -> "ايقاف"
-                            else -> selectedSubtitle?.label
-                        },
-                        showChevron = true,
-                        onClick = onOpenSubtitleTracks,
-                        focusRequester = subtitlesFocus,
-                        inputMuted = inputMuted,
-                        upFocus = movieUp(5),
-                        downFocus = movieDown(5),
                     )
                     VodPanelDivider()
                     VodDirectActionRow(
@@ -5033,8 +5204,8 @@ private fun VodMorePanel(
                         onClick = onRestart,
                         focusRequester = restartFocus,
                         inputMuted = inputMuted,
-                        upFocus = movieUp(6),
-                        downFocus = movieDown(6),
+                        upFocus = movieUp(5),
+                        downFocus = movieDown(5),
                     )
                     VodPanelDivider()
                     VodDirectActionRow(
@@ -5043,8 +5214,8 @@ private fun VodMorePanel(
                         onClick = onLock,
                         focusRequester = lockFocus,
                         inputMuted = inputMuted,
-                        upFocus = movieUp(7),
-                        downFocus = movieDown(7),
+                        upFocus = movieUp(6),
+                        downFocus = movieDown(6),
                     )
                 }
                 VodMorePanelView.SPEED -> {
@@ -5077,7 +5248,9 @@ private fun VodMorePanel(
                         )
                     }
                 }
-                VodMorePanelView.AUDIO_TRACKS -> {
+                VodMorePanelView.AUDIO_SUBTITLES -> {
+                    val audioCount = audioTracks.size
+                    VodPanelSectionLabel("مسارات الصوت")
                     if (audioTracks.isEmpty()) {
                         VodPanelEmptyState("لا توجد مسارات صوت في هذا المحتوى")
                     } else {
@@ -5085,7 +5258,6 @@ private fun VodMorePanel(
                             if (index > 0) VodPanelDivider()
                             VodTrackOptionRow(
                                 text = option.label,
-                                secondary = option.secondary,
                                 icon = Icons.Rounded.Audiotrack,
                                 selected = option.selected,
                                 onClick = { onSelectAudioTrack(option) },
@@ -5096,8 +5268,8 @@ private fun VodMorePanel(
                             )
                         }
                     }
-                }
-                VodMorePanelView.SUBTITLE_TRACKS -> {
+                    VodPanelDivider()
+                    VodPanelSectionLabel("الترجمة")
                     VodMoreRow(
                         text = "ايقاف الترجمة",
                         icon = Icons.Rounded.Subtitles,
@@ -5106,8 +5278,8 @@ private fun VodMorePanel(
                         onClick = onDisableSubtitles,
                         focusRequester = subtitleOffFocus,
                         inputMuted = inputMuted,
-                        upFocus = movieUp(1),
-                        downFocus = movieDown(1),
+                        upFocus = movieUp(audioCount + 1),
+                        downFocus = movieDown(audioCount + 1),
                     )
                     if (subtitleTracks.isEmpty()) {
                         VodPanelDivider()
@@ -5117,14 +5289,13 @@ private fun VodMorePanel(
                             VodPanelDivider()
                             VodTrackOptionRow(
                                 text = option.label,
-                                secondary = option.secondary,
                                 icon = Icons.Rounded.Subtitles,
                                 selected = option.selected && !subtitlesOff,
                                 onClick = { onSelectSubtitleTrack(option) },
                                 focusRequester = subtitleOptionFocus[index],
                                 inputMuted = inputMuted,
-                                upFocus = movieUp(index + 2),
-                                downFocus = movieDown(index + 2),
+                                upFocus = movieUp(audioCount + index + 2),
+                                downFocus = movieDown(audioCount + index + 2),
                             )
                         }
                     }
@@ -5132,6 +5303,17 @@ private fun VodMorePanel(
             }
         }
     }
+}
+
+@Composable
+private fun VodPanelSectionLabel(text: String) {
+    Text(
+        text = text,
+        color = LocalHulkColors.current.textMuted,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+    )
 }
 
 @Composable
@@ -5255,14 +5437,13 @@ private fun VodMoreRow(
 }
 
 /**
- * Track option anatomy: semantic glyph beside the real label on the physical right, the complete
- * label and its available distinguishing metadata stacked in the flexible middle, and the reserved
- * selected-check column on the physical left. Labels and metadata wrap instead of being truncated.
+ * Track option anatomy: semantic glyph beside the Arabic label on the physical right, the complete
+ * label in the flexible middle and the reserved selected-check column on the physical left. No
+ * codec/MIME/channel metadata is presented or exposed to accessibility.
  */
 @Composable
 private fun VodTrackOptionRow(
     text: String,
-    secondary: String,
     icon: ImageVector,
     selected: Boolean,
     onClick: () -> Unit,
@@ -5310,9 +5491,7 @@ private fun VodTrackOptionRow(
             }
             .onFocusChanged { focused = it.isFocused }
             .clickable(enabled = !inputMuted, role = Role.Button, onClick = onClick)
-            .semantics(mergeDescendants = true) {
-                contentDescription = if (secondary.isBlank()) text else "$text $secondary"
-            }
+            .semantics(mergeDescendants = true) { contentDescription = text }
             .padding(horizontal = 11.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(9.dp),
@@ -5323,24 +5502,13 @@ private fun VodTrackOptionRow(
             tint = if (showFocused) colors.goldBright else colors.gold,
             modifier = Modifier.size(19.dp),
         )
-        Column(
+        Text(
+            text = text,
+            color = colors.text,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            Text(
-                text = text,
-                color = colors.text,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            if (secondary.isNotBlank()) {
-                Text(
-                    text = secondary,
-                    color = colors.textMuted,
-                    fontSize = 11.sp,
-                )
-            }
-        }
+        )
         Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
             if (selected) {
                 Icon(
@@ -5722,6 +5890,7 @@ private fun VodGoToTimeDialog(
                     outlined = true,
                     scaleOnFocus = false,
                     textMaxLines = 1,
+                    trailingIcon = Icons.AutoMirrored.Rounded.ArrowBack,
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 46.dp)
@@ -6035,7 +6204,7 @@ private fun ResumePrompt(
                 val iconPx = with(density) { 17.dp.roundToPx() }
                 val gapPx = with(density) { 6.dp.roundToPx() }
                 val bufferPx = with(density) { 6.dp.roundToPx() }
-                listOf("اكمل المشاهدة" to true, "من البداية" to true, "رجوع" to false).map { (caption, hasIcon) ->
+                listOf("اكمل المشاهدة" to true, "من البداية" to true, "رجوع" to true).map { (caption, hasIcon) ->
                     movieActionRequiredWidthPx(
                         captionWidthPx = textMeasurer.measure(caption, captionStyle).size.width,
                         iconSizePx = if (hasIcon) iconPx else 0,
@@ -6085,6 +6254,7 @@ private fun ResumePrompt(
                     outlined = true,
                     scaleOnFocus = false,
                     textMaxLines = 1,
+                    trailingIcon = Icons.AutoMirrored.Rounded.ArrowBack,
                     modifier = actionModifier
                         .heightIn(min = 46.dp)
                         .focusRequester(backFocusRequester)
@@ -6333,6 +6503,7 @@ private fun MoviePlayerErrorCard(
                     compact = true,
                     scaleOnFocus = false,
                     textMaxLines = 1,
+                    trailingIcon = Icons.AutoMirrored.Rounded.ArrowBack,
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 46.dp)
@@ -6554,7 +6725,10 @@ private fun PlayerErrorModalAction.liveCaption(): String = when (this) {
     PlayerErrorModalAction.BACK -> "رجوع"
 }
 
-private fun PlayerErrorModalAction.liveHasIcon(): Boolean = this != PlayerErrorModalAction.BACK
+private fun PlayerErrorModalAction.liveHasIcon(isLive: Boolean): Boolean = when (this) {
+    PlayerErrorModalAction.BACK -> true
+    else -> isLive
+}
 
 @Composable
 private fun PlayerErrorPanel(
@@ -6697,6 +6871,7 @@ private fun PlayerErrorPanel(
                 primary = !livePresentation && focusedAction == PlayerErrorModalAction.BACK,
                 outlined = livePresentation,
                 compact = true,
+                trailingIcon = Icons.AutoMirrored.Rounded.ArrowBack,
             )
         }
     }
@@ -6809,7 +6984,7 @@ private fun PlayerErrorPanel(
                             val textWidth = with(density) { layout.size.width.toDp() }
                             val textHeight = with(density) { layout.size.height.toDp() }
                             val width = textWidth +
-                                (if (action.liveHasIcon()) iconAllowance else 0.dp) +
+                                (if (action.liveHasIcon(livePresentation)) iconAllowance else 0.dp) +
                                 horizontalPadding
                             val height = maxOf(textHeight, 17.dp) + verticalPadding
                             width to height
@@ -6883,7 +7058,7 @@ private fun TrackSelectionPanel(
         } else {
             options.forEach { option ->
                 FocusButton(
-                    text = if (option.secondary.isBlank()) option.label else "${option.label}  •  ${option.secondary}",
+                    text = option.label,
                     onClick = { onSelect(option) },
                     primary = option.selected,
                     compact = true,
@@ -6912,7 +7087,7 @@ private fun SubtitleSelectionPanel(
         Spacer(Modifier.height(8.dp))
         options.forEach { option ->
             FocusButton(
-                if (option.secondary.isBlank()) option.label else "${option.label}  •  ${option.secondary}",
+                option.label,
                 { onSelect(option) },
                 primary = option.selected,
                 compact = true,
@@ -7052,30 +7227,69 @@ internal fun extractTrackOptions(
                 add(
                     PlayerTrackOption(
                         key = "$groupIndex:$trackIndex",
-                        label = trackLabel(format, type, trackIndex),
-                        secondary = trackSecondary(format, type),
+                        label = if (type == C.TRACK_TYPE_VIDEO) qualityLabel(format.height) else "",
                         groupIndex = groupIndex,
                         trackIndex = trackIndex,
                         selected = group.isTrackSelected(trackIndex),
                         trackType = type,
                         ownerToken = ownerToken,
                         trackGroup = group.mediaTrackGroup,
+                        languageCode = if (
+                            type == C.TRACK_TYPE_AUDIO || type == C.TRACK_TYPE_TEXT
+                        ) {
+                            trackLanguageCode(format)
+                        } else {
+                            null
+                        },
+                        identityKey = trackIdentityKey(group.mediaTrackGroup, format),
+                        languageOrdinal = 0,
+                        fallbackLabel = "",
                     ),
                 )
             }
         }
     }.distinctBy { it.key }
 
-    // A real track without language/label metadata still gets a truthful numbered row; it is
-    // never rendered blank and no language is invented.
+    // Arabic presentation, with a same-language ordinal only when two tracks share a language. A
+    // real track without language metadata keeps a truthful numbered fallback and never invents a
+    // language. Technical codec/MIME/channel metadata is retained only in the internal identity.
+    val languageOrdinals = mutableMapOf<String, Int>()
     return options.mapIndexed { index, option ->
-        if (option.label.isBlank()) {
-            option.copy(label = vodTrackFallbackLabel(type, index + 1))
-        } else {
-            option
-        }
+        if (option.trackType == C.TRACK_TYPE_VIDEO) return@mapIndexed option
+        val fallback = vodTrackFallbackLabel(option.trackType, index + 1)
+        // Unknown-language tracks also receive an ordinal so a manual choice can be re-resolved
+        // among them without reusing a stale group/track index. Their displayed label stays the
+        // truthful numbered fallback.
+        val ordinalKey = option.languageCode ?: ""
+        val ordinal = (languageOrdinals[ordinalKey] ?: 0) + 1
+        languageOrdinals[ordinalKey] = ordinal
+        option.copy(
+            label = vodTrackDisplayName(option.languageCode, ordinal, fallback),
+            languageOrdinal = ordinal,
+            fallbackLabel = fallback,
+        )
     }
 }
+
+private fun trackLanguageCode(format: Format): String? =
+    vodLanguageCode(format.language)
+        ?: vodLanguageCode(format.label)
+        ?: vodLanguageCode(format.id)
+        ?: vodLanguageCode(format.metadata?.toString())
+
+private fun trackIdentityKey(group: TrackGroup, format: Format): String = listOf(
+    group.id.orEmpty(),
+    format.id.orEmpty(),
+    format.language.orEmpty(),
+    format.label.orEmpty(),
+    format.sampleMimeType.orEmpty(),
+    format.codecs.orEmpty(),
+    format.channelCount.toString(),
+    format.width.toString(),
+    format.height.toString(),
+    format.selectionFlags.toString(),
+    format.roleFlags.toString(),
+).joinToString("|")
 
 /**
  * A committed choice is valid only for the player/request that produced it and only while the
@@ -7099,95 +7313,13 @@ internal fun playerTrackOptionMatches(
     supported = currentGroup?.isTrackSupported(option.trackIndex, true) == true,
 )
 
-private fun trackLabel(format: Format, type: Int, index: Int): String {
-    val language = mediaTrackLanguage(format)
-    val explicit = format.label?.trim()?.takeIf(String::isNotBlank)
-    return when (type) {
-        C.TRACK_TYPE_VIDEO -> qualityLabel(format.height)
-        C.TRACK_TYPE_AUDIO -> language ?: explicit?.let(::languageFromExplicitLabel) ?: ""
-        C.TRACK_TYPE_TEXT -> language ?: explicit?.let(::languageFromExplicitLabel) ?: ""
-        else -> explicit ?: "مسار ${index + 1}"
-    }
-}
-
-private fun detectedTrackLanguage(tracks: Tracks, type: Int): String? {
-    val candidates = buildList {
-        tracks.groups.forEach { group ->
-            if (group.type != type) return@forEach
-            for (trackIndex in 0 until group.length) {
-                if (!group.isTrackSupported(trackIndex, true) && !group.isTrackSelected(trackIndex)) continue
-                val format = group.getTrackFormat(trackIndex)
-                val label = mediaTrackLanguage(format) ?: continue
-                add(group.isTrackSelected(trackIndex) to label)
-            }
-        }
-    }
-    return candidates.firstOrNull { it.first }?.second
-        ?: candidates.singleOrNull()?.second
-}
-
-private fun mediaTrackLanguage(format: Format): String? {
-    format.language
-        ?.trim()
-        ?.takeIf(String::isNotBlank)
-        ?.takeUnless(::isUndeterminedLanguage)
-        ?.let(::languageLabel)
-        ?.let { return it }
-
-    languageFromExplicitLabel(format.label)?.let { return it }
-    languageFromExplicitLabel(format.id)?.let { return it }
-    languageFromExplicitLabel(format.metadata?.toString())?.let { return it }
-    return null
-}
-
-private fun trackSecondary(format: Format, type: Int): String = when (type) {
-    C.TRACK_TYPE_AUDIO -> listOfNotNull(
-        vodAudioChannelLabel(format.channelCount),
-        format.codecs?.trim()?.takeIf(String::isNotBlank)
-            ?: format.sampleMimeType?.substringAfterLast('/')?.takeIf(String::isNotBlank),
-    ).joinToString(" • ")
-    C.TRACK_TYPE_VIDEO -> format.bitrate.takeIf { it > 0 }?.let { "${it / 1_000_000f} Mbps" }.orEmpty()
-    C.TRACK_TYPE_TEXT -> listOfNotNull(
-        format.codecs?.trim()?.takeIf(String::isNotBlank)
-            ?: format.sampleMimeType?.substringAfterLast('/')?.takeIf(String::isNotBlank),
-        "إجباري".takeIf { format.selectionFlags and C.SELECTION_FLAG_FORCED != 0 },
-    ).joinToString(" • ")
-    else -> format.sampleMimeType?.substringAfterLast('/').orEmpty()
-}
+private fun mediaTrackLanguage(format: Format): String? =
+    trackLanguageCode(format)?.let(::vodArabicLanguageName)
 
 private fun selectedTrackLabel(options: List<PlayerTrackOption>, fallback: String): String =
     options.firstOrNull { it.selected && it.label.isNotBlank() }?.label
         ?: options.firstOrNull { it.label.isNotBlank() }?.label
         ?: fallback
-
-private fun isUndeterminedLanguage(value: String): Boolean =
-    value.lowercase(Locale.ROOT).replace('_', '-').substringBefore('-') in setOf("und", "zxx", "mul")
-
-private fun languageFromExplicitLabel(raw: String?): String? {
-    val value = raw?.trim()?.lowercase(Locale.ROOT)?.takeIf(String::isNotBlank) ?: return null
-    when {
-        value.contains("arabic") || value.contains("العربية") || value.contains("العربيه") || value.contains("عربي") -> return "Arabic"
-        value.contains("english") -> return "English"
-        value.contains("french") || value.contains("français") -> return "French"
-        value.contains("spanish") || value.contains("español") -> return "Spanish"
-        value.contains("turkish") || value.contains("türk") -> return "Turkish"
-        value.contains("german") || value.contains("deutsch") -> return "German"
-        value.contains("italian") || value.contains("italiano") -> return "Italian"
-        value.contains("portuguese") || value.contains("português") -> return "Portuguese"
-        value.contains("russian") || value.contains("рус") -> return "Russian"
-        value.contains("persian") || value.contains("farsi") || value.contains("فارسی") -> return "Persian"
-        value.contains("urdu") || value.contains("اردو") -> return "Urdu"
-        value.contains("hindi") || value.contains("हिन्दी") || value.contains("हिंदी") -> return "Hindi"
-        value.contains("japanese") || value.contains("日本") -> return "Japanese"
-        value.contains("korean") || value.contains("한국") -> return "Korean"
-        value.contains("chinese") || value.contains("中文") -> return "Chinese"
-    }
-    return value
-        .split(Regex("[^\\p{L}\\p{N}]+"))
-        .asSequence()
-        .mapNotNull(::languageLabel)
-        .firstOrNull()
-}
 
 private fun inferSubtitleLanguageFromText(text: String): String? {
     val letters = text.filter(Char::isLetter)
@@ -7195,79 +7327,30 @@ private fun inferSubtitleLanguageFromText(text: String): String? {
     fun countIn(range: CharRange): Int = letters.count { it in range }
 
     val arabic = letters.count { it in '\u0600'..'\u06FF' || it in '\u0750'..'\u077F' }
-    if (arabic >= 3 && arabic * 2 >= letters.length) return "Arabic"
+    if (arabic >= 3 && arabic * 2 >= letters.length) return "العربية"
 
     val hebrew = countIn('\u0590'..'\u05FF')
-    if (hebrew >= 3 && hebrew * 2 >= letters.length) return "Hebrew"
+    if (hebrew >= 3 && hebrew * 2 >= letters.length) return "العبرية"
 
     val cyrillic = countIn('\u0400'..'\u04FF')
-    if (cyrillic >= 3 && cyrillic * 2 >= letters.length) return "Russian"
+    if (cyrillic >= 3 && cyrillic * 2 >= letters.length) return "الروسية"
 
     val greek = countIn('\u0370'..'\u03FF')
-    if (greek >= 3 && greek * 2 >= letters.length) return "Greek"
+    if (greek >= 3 && greek * 2 >= letters.length) return "اليونانية"
 
     val devanagari = countIn('\u0900'..'\u097F')
-    if (devanagari >= 3 && devanagari * 2 >= letters.length) return "Hindi"
+    if (devanagari >= 3 && devanagari * 2 >= letters.length) return "الهندية"
 
     val hangul = letters.count { it in '\uAC00'..'\uD7AF' || it in '\u1100'..'\u11FF' }
-    if (hangul >= 3 && hangul * 2 >= letters.length) return "Korean"
+    if (hangul >= 3 && hangul * 2 >= letters.length) return "الكورية"
 
     val kana = letters.count { it in '\u3040'..'\u30FF' }
-    if (kana >= 2) return "Japanese"
+    if (kana >= 2) return "اليابانية"
 
     val han = letters.count { it in '\u4E00'..'\u9FFF' }
-    if (han >= 2) return "Chinese"
+    if (han >= 2) return "الصينية"
 
     return null
-}
-
-private fun languageLabel(code: String): String? {
-    val normalized = code.trim().lowercase(Locale.ROOT).replace('_', '-').substringBefore('-')
-    val known = when (normalized) {
-        "ar", "ara" -> "Arabic"
-        "en", "eng" -> "English"
-        "fr", "fra", "fre" -> "French"
-        "es", "spa" -> "Spanish"
-        "tr", "tur" -> "Turkish"
-        "de", "deu", "ger" -> "German"
-        "it", "ita" -> "Italian"
-        "pt", "por" -> "Portuguese"
-        "ru", "rus" -> "Russian"
-        "fa", "fas", "per" -> "Persian"
-        "ur", "urd" -> "Urdu"
-        "hi", "hin" -> "Hindi"
-        "ja", "jpn" -> "Japanese"
-        "ko", "kor" -> "Korean"
-        "zh", "zho", "chi" -> "Chinese"
-        "id", "ind" -> "Indonesian"
-        "ms", "msa", "may" -> "Malay"
-        "th", "tha" -> "Thai"
-        "nl", "nld", "dut" -> "Dutch"
-        "sv", "swe" -> "Swedish"
-        "pl", "pol" -> "Polish"
-        "uk", "ukr" -> "Ukrainian"
-        "he", "heb" -> "Hebrew"
-        "el", "ell", "gre" -> "Greek"
-        "cs", "ces", "cze" -> "Czech"
-        "ro", "ron", "rum" -> "Romanian"
-        "hu", "hun" -> "Hungarian"
-        "bn", "ben" -> "Bengali"
-        "vi", "vie" -> "Vietnamese"
-        else -> null
-    }
-    if (known != null) return known
-    if (normalized.isBlank() || isUndeterminedLanguage(normalized)) return null
-
-    return runCatching {
-        val locale = Locale.forLanguageTag(normalized)
-        locale.getDisplayLanguage(Locale.ENGLISH)
-            .trim()
-            .takeIf { display ->
-                display.isNotBlank() &&
-                    !display.equals(normalized, ignoreCase = true) &&
-                    !display.equals("Unknown language", ignoreCase = true)
-            }
-    }.getOrNull()
 }
 
 private fun qualityLabel(height: Int): String = when {

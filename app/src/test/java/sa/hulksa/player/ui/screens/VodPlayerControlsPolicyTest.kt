@@ -23,6 +23,18 @@ class VodPlayerControlsPolicyTest {
         containerExtension = "mp4",
     )
 
+    private fun descriptor(
+        identityKey: String,
+        languageCode: String?,
+        languageOrdinal: Int,
+    ): VodTrackDescriptor = VodTrackDescriptor(
+        identityKey = identityKey,
+        languageCode = languageCode,
+        languageOrdinal = languageOrdinal,
+        fallbackLabel = "fallback",
+        selected = false,
+    )
+
     @Test
     fun toolsShareTheRowWidthOnlyWhenIntrinsicCaptionsOverflow() {
         assertFalse(vodToolsUseWeightedSlots(availableWidthPx = 2_000, requiredWidthPx = 320))
@@ -138,8 +150,7 @@ class VodPlayerControlsPolicyTest {
     fun morePanelChildReturnsToMenuAndMenuCloses() {
         assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.SPEED))
         assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.PICTURE_SIZE))
-        assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.AUDIO_TRACKS))
-        assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.SUBTITLE_TRACKS))
+        assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.AUDIO_SUBTITLES))
         assertNull(vodMorePanelBack(VodMorePanelView.MENU))
     }
 
@@ -147,8 +158,7 @@ class VodPlayerControlsPolicyTest {
     fun morePanelOriginRowIsDeterministic() {
         assertEquals(VodMoreRow.SPEED, vodMorePanelOriginRow(VodMorePanelView.SPEED))
         assertEquals(VodMoreRow.PICTURE_SIZE, vodMorePanelOriginRow(VodMorePanelView.PICTURE_SIZE))
-        assertEquals(VodMoreRow.AUDIO_TRACKS, vodMorePanelOriginRow(VodMorePanelView.AUDIO_TRACKS))
-        assertEquals(VodMoreRow.SUBTITLE_TRACKS, vodMorePanelOriginRow(VodMorePanelView.SUBTITLE_TRACKS))
+        assertEquals(VodMoreRow.AUDIO_SUBTITLES, vodMorePanelOriginRow(VodMorePanelView.AUDIO_SUBTITLES))
         assertNull(vodMorePanelOriginRow(VodMorePanelView.MENU))
     }
 
@@ -163,13 +173,98 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
-    fun audioChannelMetadataIsTruthfulForKnownLayouts() {
-        assertNull(vodAudioChannelLabel(0))
-        assertEquals("أحادي", vodAudioChannelLabel(1))
-        assertEquals("ستيريو", vodAudioChannelLabel(2))
-        assertEquals("5.1", vodAudioChannelLabel(6))
-        assertEquals("7.1", vodAudioChannelLabel(8))
-        assertEquals("3 قنوات", vodAudioChannelLabel(3))
+    fun arabicLanguageNamesCoverSupportedCodesRegionsAndLabels() {
+        assertEquals("العربية", vodArabicLanguageName("ar"))
+        assertEquals("العربية", vodArabicLanguageName("ara"))
+        assertEquals("العربية", vodArabicLanguageName("ar-SA"))
+        assertEquals("العربية", vodArabicLanguageName("Arabic"))
+        assertEquals("الانجليزية", vodArabicLanguageName("en"))
+        assertEquals("الانجليزية", vodArabicLanguageName("eng"))
+        assertEquals("الانجليزية", vodArabicLanguageName("en-US"))
+        assertEquals("الفرنسية", vodArabicLanguageName("fr"))
+        assertEquals("البنغالية", vodArabicLanguageName("bn"))
+        assertEquals("الصينية", vodArabicLanguageName("zh-Hans"))
+        assertEquals("الالمانية", vodArabicLanguageName("de"))
+        assertEquals("التركية", vodArabicLanguageName("tr"))
+        assertEquals("الاوردية", vodArabicLanguageName("ur"))
+        assertEquals("الروسية", vodArabicLanguageName("ru"))
+        assertNull(vodArabicLanguageName("und"))
+        assertNull(vodArabicLanguageName("klingon"))
+    }
+
+    @Test
+    fun languageCodesHandleRegionalTagsAndExplicitMetadata() {
+        assertEquals("en", vodLanguageCode("English 5.1"))
+        assertEquals("ar", vodLanguageCode("Arabic (Dubai)"))
+        assertEquals("ar", vodLanguageCode("ara"))
+        assertEquals("ar", vodLanguageCode("العربية"))
+        assertEquals("en", vodLanguageCode("en-US"))
+        assertEquals("zh", vodLanguageCode("zh-Hans"))
+        assertEquals("fr", vodLanguageCode("français"))
+        assertEquals("es", vodLanguageCode("español"))
+        assertEquals("ja", vodLanguageCode("日本語"))
+        assertEquals("ko", vodLanguageCode("한국어"))
+        assertEquals("ru", vodLanguageCode("language=rus"))
+        assertNull(vodLanguageCode("1"))
+        assertNull(vodLanguageCode(""))
+        assertNull(vodLanguageCode(null))
+        assertNull(vodLanguageCode("und"))
+    }
+
+    @Test
+    fun originalLanguageUsesOnlyReliableExplicitMetadata() {
+        assertEquals(VodOriginalLanguage.ARABIC, vodOriginalLanguage("ar"))
+        assertEquals(VodOriginalLanguage.ARABIC, vodOriginalLanguage("Arabic"))
+        assertEquals(VodOriginalLanguage.FOREIGN, vodOriginalLanguage("en"))
+        assertEquals(VodOriginalLanguage.FOREIGN, vodOriginalLanguage("fr-FR"))
+        assertEquals(VodOriginalLanguage.UNKNOWN, vodOriginalLanguage(null))
+        assertEquals(VodOriginalLanguage.UNKNOWN, vodOriginalLanguage(""))
+        assertEquals(VodOriginalLanguage.UNKNOWN, vodOriginalLanguage("und"))
+        assertEquals(VodOriginalLanguage.UNKNOWN, vodOriginalLanguage("Klingon"))
+    }
+
+    @Test
+    fun trackDisplayNamesUseArabicOrdinalsOnlyForDuplicates() {
+        assertEquals("العربية", vodTrackDisplayName("ar", 1, "مسار صوت 1"))
+        assertEquals("الانجليزية", vodTrackDisplayName("en", 1, "مسار صوت 1"))
+        assertEquals("الانجليزية 2", vodTrackDisplayName("en", 2, "مسار صوت 2"))
+        assertEquals("مسار صوت 3", vodTrackDisplayName(null, 0, "مسار صوت 3"))
+        assertEquals("ترجمة 2", vodTrackDisplayName(null, 0, "ترجمة 2"))
+    }
+
+    @Test
+    fun automaticSubtitlesPreferArabicOnlyForForeignOrUnknown() {
+        val arabic = descriptor("ar-track", "ar", 1)
+        val english = descriptor("en-track", "en", 1)
+
+        assertEquals(arabic, vodAutoSubtitleTrack(VodOriginalLanguage.FOREIGN, listOf(english, arabic)))
+        assertEquals(arabic, vodAutoSubtitleTrack(VodOriginalLanguage.UNKNOWN, listOf(english, arabic)))
+        assertNull(vodAutoSubtitleTrack(VodOriginalLanguage.ARABIC, listOf(arabic)))
+        assertNull(vodAutoSubtitleTrack(VodOriginalLanguage.FOREIGN, listOf(english)))
+        assertNull(vodAutoSubtitleTrack(VodOriginalLanguage.UNKNOWN, emptyList()))
+    }
+
+    @Test
+    fun manualChoiceResolvesByIdentityAfterReorderAndFallsBackByLanguageOrdinal() {
+        val choice = VodTrackChoice(
+            identityKey = "en-main",
+            languageCode = "en",
+            languageOrdinal = 2,
+        )
+        val reordered = listOf(
+            descriptor("en-commentary", "en", 1),
+            descriptor("en-main", "en", 2),
+        )
+        assertEquals(1, vodResolveTrackChoiceIndex(choice, reordered))
+
+        val changedIdentity = listOf(
+            descriptor("new-en-1", "en", 1),
+            descriptor("new-en-2", "en", 2),
+        )
+        assertEquals(1, vodResolveTrackChoiceIndex(choice, changedIdentity))
+
+        val gone = listOf(descriptor("fr-only", "fr", 1))
+        assertNull(vodResolveTrackChoiceIndex(choice, gone))
     }
 
     @Test

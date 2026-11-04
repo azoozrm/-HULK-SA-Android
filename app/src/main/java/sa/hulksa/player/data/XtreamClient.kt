@@ -455,6 +455,13 @@ open class XtreamClient(
         releaseDate = info.optNullableString("releasedate")
             ?: info.optNullableString("release_date"),
         backdropUrl = info.xtreamPresentationArtworkUrl(portalBaseUrl),
+        // Only explicit original-language fields are trustworthy. Generic `language`/`country`
+        // may describe the current dub or production country and must not classify the title.
+        originalLanguage = info.optNullableString("original_language")
+            ?: info.optNullableString("original_language_iso")
+            ?: info.optNullableString("original_language_iso_639_1")
+            ?: info.optNullableString("original_language_code")
+            ?: info.optNullableString("original_language_name"),
     )
 
     private fun JSONObject.optNullableString(key: String): String? = xtreamNullableString(key)
