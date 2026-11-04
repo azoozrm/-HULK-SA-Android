@@ -31,7 +31,8 @@ jobs:
     if: >
       github.repository == 'azoozrm/-HULK-SA-Android' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'fix/home-stability-notifications-r01' &&
+      (github.event.pull_request.head.ref == 'fix/home-stability-notifications-r01' ||
+      github.event.pull_request.head.ref == 'feature/vod-more-audio-subtitles-r01') &&
       github.event.pull_request.base.ref == 'phase-3-v0.9.3.0-adaptive-foundation'
     runs-on: ubuntu-latest
     environment: production-signing
@@ -206,11 +207,12 @@ jobs:
       - name: Package owner-test APK and sanitized evidence
         run: |
           set -euo pipefail
+          apk_name="HULK-SA-OWNER-TEST-${{ github.event.pull_request.number }}-${EXPECTED_VERSION_CODE}-${EXPECTED_VERSION_NAME}.apk"
           cp app/build/outputs/apk/release/app-release.apk \
-            owner-test-artifacts/HULK-SA-HOME-NOTIFICATIONS-69-1.0.1.apk
+            "owner-test-artifacts/${apk_name}"
           (
             cd owner-test-artifacts
-            sha256sum HULK-SA-HOME-NOTIFICATIONS-69-1.0.1.apk > APK-SHA256.txt
+            sha256sum "$apk_name" > APK-SHA256.txt
             find . -type f ! -name SHA256SUMS.txt ! -name APK-SHA256.txt -print0 \
               | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
             sha256sum -c SHA256SUMS.txt
@@ -220,7 +222,7 @@ jobs:
       - name: Upload only signed owner-test APK and sanitized evidence
         uses: actions/upload-artifact@v7
         with:
-          name: HULK-SA-HOME-NOTIFICATIONS-OWNER-TEST-${{ github.run_id }}
+          name: HULK-SA-OWNER-TEST-${{ github.event.pull_request.number }}-${{ github.run_id }}
           path: owner-test-artifacts/
           if-no-files-found: error
           retention-days: 3

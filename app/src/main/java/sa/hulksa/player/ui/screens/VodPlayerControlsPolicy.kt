@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui.screens
 
+import androidx.media3.common.C
 import sa.hulksa.player.model.ContentItem
 import kotlin.math.roundToInt
 
@@ -14,12 +15,16 @@ internal enum class VodMorePanelView {
     MENU,
     SPEED,
     PICTURE_SIZE,
+    AUDIO_TRACKS,
+    SUBTITLE_TRACKS,
 }
 
 internal enum class VodMoreRow {
     GO_TO_TIME,
     SPEED,
     PICTURE_SIZE,
+    AUDIO_TRACKS,
+    SUBTITLE_TRACKS,
     RESTART,
     LOCK,
 }
@@ -41,7 +46,58 @@ internal fun vodMorePanelOriginRow(currentView: VodMorePanelView): VodMoreRow? =
         VodMorePanelView.MENU -> null
         VodMorePanelView.SPEED -> VodMoreRow.SPEED
         VodMorePanelView.PICTURE_SIZE -> VodMoreRow.PICTURE_SIZE
+        VodMorePanelView.AUDIO_TRACKS -> VodMoreRow.AUDIO_TRACKS
+        VodMorePanelView.SUBTITLE_TRACKS -> VodMoreRow.SUBTITLE_TRACKS
     }
+
+/** Numbered fallback for a real track without language/label metadata. Never invent a language. */
+internal fun vodTrackFallbackLabel(type: Int, ordinal: Int): String {
+    val index = ordinal.coerceAtLeast(1)
+    return when (type) {
+        C.TRACK_TYPE_AUDIO -> "مسار صوت $index"
+        C.TRACK_TYPE_TEXT -> "ترجمة $index"
+        else -> "مسار $index"
+    }
+}
+
+/** Truthful channel layout wording; unknown/zero counts contribute no metadata row. */
+internal fun vodAudioChannelLabel(channelCount: Int): String? = when {
+    channelCount <= 0 -> null
+    channelCount == 1 -> "أحادي"
+    channelCount == 2 -> "ستيريو"
+    channelCount == 6 -> "5.1"
+    channelCount == 8 -> "7.1"
+    else -> "$channelCount قنوات"
+}
+
+/** Subtitle OFF is real only when the type is disabled or no subtitle track is selected. */
+internal fun vodSubtitleSelectionOff(disabled: Boolean, selectedTrackCount: Int): Boolean =
+    disabled || selectedTrackCount <= 0
+
+/**
+ * A committed track choice belongs to the exact player/request and Media3 group that produced it.
+ * The player passes opaque identity tokens so this decision stays independent of Android runtime
+ * objects and can be tested directly.
+ */
+internal fun vodTrackChoiceIsCurrent(
+    expectedType: Int,
+    expectedOwnerToken: Any,
+    expectedGroupToken: Any,
+    expectedTrackIndex: Int,
+    requestedType: Int,
+    currentOwnerToken: Any,
+    currentGroupToken: Any?,
+    currentGroupType: Int,
+    currentGroupLength: Int,
+    supported: Boolean,
+): Boolean {
+    if (expectedType != requestedType) return false
+    if (expectedOwnerToken !== currentOwnerToken) return false
+    if (currentGroupToken == null || currentGroupToken !== expectedGroupToken) return false
+    if (currentGroupType != requestedType) return false
+    if (expectedTrackIndex !in 0 until currentGroupLength) return false
+    return supported
+}
 
 internal data class VodFavoriteControl(
     val enabled: Boolean,

@@ -138,6 +138,8 @@ class VodPlayerControlsPolicyTest {
     fun morePanelChildReturnsToMenuAndMenuCloses() {
         assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.SPEED))
         assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.PICTURE_SIZE))
+        assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.AUDIO_TRACKS))
+        assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.SUBTITLE_TRACKS))
         assertNull(vodMorePanelBack(VodMorePanelView.MENU))
     }
 
@@ -145,7 +147,75 @@ class VodPlayerControlsPolicyTest {
     fun morePanelOriginRowIsDeterministic() {
         assertEquals(VodMoreRow.SPEED, vodMorePanelOriginRow(VodMorePanelView.SPEED))
         assertEquals(VodMoreRow.PICTURE_SIZE, vodMorePanelOriginRow(VodMorePanelView.PICTURE_SIZE))
+        assertEquals(VodMoreRow.AUDIO_TRACKS, vodMorePanelOriginRow(VodMorePanelView.AUDIO_TRACKS))
+        assertEquals(VodMoreRow.SUBTITLE_TRACKS, vodMorePanelOriginRow(VodMorePanelView.SUBTITLE_TRACKS))
         assertNull(vodMorePanelOriginRow(VodMorePanelView.MENU))
+    }
+
+    @Test
+    fun trackFallbackLabelsAreNumberedAndNeverBlank() {
+        assertEquals("مسار صوت 1", vodTrackFallbackLabel(androidx.media3.common.C.TRACK_TYPE_AUDIO, 1))
+        assertEquals("مسار صوت 2", vodTrackFallbackLabel(androidx.media3.common.C.TRACK_TYPE_AUDIO, 2))
+        assertEquals("ترجمة 1", vodTrackFallbackLabel(androidx.media3.common.C.TRACK_TYPE_TEXT, 1))
+        assertEquals("ترجمة 2", vodTrackFallbackLabel(androidx.media3.common.C.TRACK_TYPE_TEXT, 2))
+        assertEquals("مسار صوت 1", vodTrackFallbackLabel(androidx.media3.common.C.TRACK_TYPE_AUDIO, 0))
+        assertEquals("مسار 3", vodTrackFallbackLabel(androidx.media3.common.C.TRACK_TYPE_VIDEO, 3))
+    }
+
+    @Test
+    fun audioChannelMetadataIsTruthfulForKnownLayouts() {
+        assertNull(vodAudioChannelLabel(0))
+        assertEquals("أحادي", vodAudioChannelLabel(1))
+        assertEquals("ستيريو", vodAudioChannelLabel(2))
+        assertEquals("5.1", vodAudioChannelLabel(6))
+        assertEquals("7.1", vodAudioChannelLabel(8))
+        assertEquals("3 قنوات", vodAudioChannelLabel(3))
+    }
+
+    @Test
+    fun subtitleOffIsExplicitOnlyForDisabledOrUnselectedState() {
+        assertTrue(vodSubtitleSelectionOff(disabled = true, selectedTrackCount = 0))
+        assertTrue(vodSubtitleSelectionOff(disabled = false, selectedTrackCount = 0))
+        assertFalse(vodSubtitleSelectionOff(disabled = false, selectedTrackCount = 1))
+        assertTrue(vodSubtitleSelectionOff(disabled = true, selectedTrackCount = 1))
+    }
+
+    @Test
+    fun trackChoiceIsRejectedWhenPlayerRequestTypeGroupOrSupportChanged() {
+        val owner = Any()
+        val group = Any()
+        fun current(
+            requestedType: Int = 2,
+            currentOwner: Any = owner,
+            currentGroup: Any? = group,
+            currentGroupType: Int = 2,
+            currentGroupLength: Int = 1,
+            supported: Boolean = true,
+        ): Boolean = vodTrackChoiceIsCurrent(
+            expectedType = 2,
+            expectedOwnerToken = owner,
+            expectedGroupToken = group,
+            expectedTrackIndex = 0,
+            requestedType = requestedType,
+            currentOwnerToken = currentOwner,
+            currentGroupToken = currentGroup,
+            currentGroupType = currentGroupType,
+            currentGroupLength = currentGroupLength,
+            supported = supported,
+        )
+
+        assertTrue(current())
+        // A stale option from another request/player is rejected.
+        assertFalse(current(currentOwner = Any()))
+        // A stale option from another title/group at the same group index is rejected.
+        assertFalse(current(currentGroup = Any()))
+        assertFalse(current(currentGroup = null))
+        // A group that disappeared, changed type, shrank, or is no longer supported is rejected.
+        assertFalse(current(currentGroupLength = 0))
+        assertFalse(current(currentGroupType = 1))
+        assertFalse(current(supported = false))
+        // The requested type must match the option's originating type.
+        assertFalse(current(requestedType = 3))
     }
 
     @Test
