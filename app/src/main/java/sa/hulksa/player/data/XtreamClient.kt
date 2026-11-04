@@ -253,6 +253,7 @@ open class XtreamClient(
             season = entry.season,
             episodeNumber = entry.episodeNumber,
             episodeTitle = entry.episodeTitle,
+            originalLanguage = entry.originalLanguage,
         )
     }
 

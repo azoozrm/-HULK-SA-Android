@@ -3662,7 +3662,11 @@ class HulkViewModel internal constructor(
                 tvDeepLinkEpisodeJob = null
                 if (resolution.resumePlayback) {
                     playerReturnScreen = HulkScreen.MAIN
-                    startPlayback(repository.playback(activeSession, resolution.item))
+                    startPlayback(
+                        repository.playback(activeSession, resolution.item).copy(
+                            originalLanguage = resolution.originalLanguage,
+                        ),
+                    )
                 } else {
                     open(resolution.item)
                 }
@@ -3759,7 +3763,8 @@ class HulkViewModel internal constructor(
                 playerReturnScreen = HulkScreen.MAIN
                 startPlayback(
                     repository.playback(activeSession, resolution.series, episode).copy(
-                        originalLanguage = bundle.details.originalLanguage,
+                        originalLanguage = bundle.details.originalLanguage
+                            ?: resolution.originalLanguage,
                     ),
                 )
             } catch (cancelled: CancellationException) {

@@ -453,6 +453,38 @@ class TvPlatformIntegrationTest {
     }
 
     @Test
+    fun tvResumeCarriesOriginalLanguageFromCurrentProfileHistory() {
+        val movieResolution = resolveTvDeepLink(
+            target = TvDeepLinkTarget.Movie(movieId = movie.id, resumePlayback = true),
+            movieCatalog = movies,
+            seriesCatalog = seriesCatalog,
+            history = listOf(movieHistory(movie.id, originalLanguage = "ar")),
+            profileKind = ProfileKind.STANDARD,
+            verifiedKidsContentKeys = emptySet(),
+        )
+        assertTrue(movieResolution is TvDeepLinkResolution.OpenMovie)
+        assertEquals("ar", (movieResolution as TvDeepLinkResolution.OpenMovie).originalLanguage)
+
+        val episodeResolution = resolveTvDeepLink(
+            target = TvDeepLinkTarget.Episode(
+                seriesId = series.id,
+                episodeId = 503,
+                resumePlayback = true,
+            ),
+            movieCatalog = movies,
+            seriesCatalog = seriesCatalog,
+            history = listOf(episodeHistory(id = 503, originalLanguage = "ar")),
+            profileKind = ProfileKind.STANDARD,
+            verifiedKidsContentKeys = emptySet(),
+        )
+        assertTrue(episodeResolution is TvDeepLinkResolution.OpenEpisode)
+        assertEquals(
+            "ar",
+            (episodeResolution as TvDeepLinkResolution.OpenEpisode).originalLanguage,
+        )
+    }
+
+    @Test
     fun firstPlaybackProgressTriggersSyncQuickly() {
         assertFalse(shouldSyncTvProgress(0L, 4_999L, 100_000L))
         assertTrue(shouldSyncTvProgress(0L, 5_000L, 100_000L))
@@ -609,6 +641,7 @@ class TvPlatformIntegrationTest {
         position: Long = 25_000L,
         duration: Long = 100_000L,
         updatedAt: Long = 100L,
+        originalLanguage: String? = null,
     ) = HistoryEntry(
         key = "MOVIE:$id",
         title = "Movie $id",
@@ -620,11 +653,13 @@ class TvPlatformIntegrationTest {
         positionMs = position,
         durationMs = duration,
         updatedAtEpochMs = updatedAt,
+        originalLanguage = originalLanguage,
     )
 
     private fun episodeHistory(
         id: Int = 503,
         updatedAt: Long = 200L,
+        originalLanguage: String? = null,
     ) = HistoryEntry(
         key = "SERIES:$id",
         title = "Series · Episode",
@@ -641,5 +676,6 @@ class TvPlatformIntegrationTest {
         episodeNumber = 2,
         episodeTitle = "Episode",
         parentContentId = 82,
+        originalLanguage = originalLanguage,
     )
 }

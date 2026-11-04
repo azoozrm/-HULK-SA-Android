@@ -59,6 +59,35 @@ class UserLibraryHistoryDispatchTest {
     }
 
     @Test
+    fun `record start retains explicit original language across later progress writes`() = runBlocking {
+        val fixture = Fixture()
+        val first = fixture.library.recordStartForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request("movie:1", id = 1).copy(originalLanguage = "ar"),
+            historyAttempt = fixture.library.currentHistoryAttempt(),
+        )
+        assertEquals("ar", first!!.first { it.key == "movie:1" }.originalLanguage)
+
+        val second = fixture.library.recordStartForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request("movie:1", id = 1),
+            historyAttempt = fixture.library.currentHistoryAttempt(),
+        )
+        assertEquals("ar", second!!.first { it.key == "movie:1" }.originalLanguage)
+        assertEquals(
+            "ar",
+            readHistoryDocument(
+                fixture.userPreferences,
+                HISTORY_KEY,
+            ).entries.first { it.key == "movie:1" }.originalLanguage,
+        )
+    }
+
+    @Test
     fun `record start caller can progress while recovery IO is blocked and stale account cannot write`() = runBlocking {
         val fixture = Fixture()
         fixture.seedPartialHistory(position = 4_000L)

@@ -451,14 +451,15 @@ internal fun vodTrackChoiceIsCurrent(
     currentGroupToken: Any?,
     currentGroupType: Int,
     currentGroupLength: Int,
-    supported: Boolean,
+    supported: () -> Boolean,
 ): Boolean {
     if (expectedType != requestedType) return false
     if (expectedOwnerToken !== currentOwnerToken) return false
     if (currentGroupToken == null || currentGroupToken !== expectedGroupToken) return false
     if (currentGroupType != requestedType) return false
     if (expectedTrackIndex !in 0 until currentGroupLength) return false
-    return supported
+    // This is the first indexed Media3 access; all bounds/identity guards have passed.
+    return supported()
 }
 
 internal data class VodFavoriteControl(

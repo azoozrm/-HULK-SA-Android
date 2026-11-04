@@ -100,6 +100,8 @@ data class HistoryEntry(
     val episodeNumber: Int? = null,
     val episodeTitle: String? = null,
     val parentContentId: Int? = null,
+    /** Explicit provider original language retained across history/Continue Watching entry paths. */
+    val originalLanguage: String? = null,
 )
 
 enum class OfflineStatus {

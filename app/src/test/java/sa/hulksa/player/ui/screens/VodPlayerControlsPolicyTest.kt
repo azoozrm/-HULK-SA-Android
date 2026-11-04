@@ -296,7 +296,7 @@ class VodPlayerControlsPolicyTest {
             currentGroupToken = currentGroup,
             currentGroupType = currentGroupType,
             currentGroupLength = currentGroupLength,
-            supported = supported,
+            supported = { supported },
         )
 
         assertTrue(current())

@@ -5,6 +5,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import sa.hulksa.player.model.HistoryEntry
@@ -64,6 +65,29 @@ class HistoryIntegrityTest {
         assertEquals(2, series.season)
         assertEquals(4, series.episodeNumber)
         assertEquals(30, series.parentContentId)
+    }
+
+    @Test
+    fun `original language survives history persistence and legacy entries stay unknown`() {
+        val preferences = FakeSharedPreferences()
+        val raw = JSONArray()
+            .put(
+                historyJson(key = "movie:1", title = "Arabic original", id = 1, position = 5_000L)
+                    .put("originalLanguage", "ar"),
+            )
+            .put(historyJson(key = "movie:2", title = "Legacy entry", id = 2, position = 6_000L))
+            .toString()
+        preferences.edit().putString(HISTORY_KEY, raw).apply()
+
+        val read = readHistoryDocument(preferences, HISTORY_KEY)
+        assertEquals(HistoryDocumentState.VALID, read.state)
+        assertEquals("ar", read.entries.first { it.key == "movie:1" }.originalLanguage)
+        assertNull(read.entries.first { it.key == "movie:2" }.originalLanguage)
+
+        assertTrue(writeHistoryDocument(preferences, HISTORY_KEY, read.entries, read))
+        val restarted = readHistoryDocument(preferences.restart(), HISTORY_KEY)
+        assertEquals("ar", restarted.entries.first { it.key == "movie:1" }.originalLanguage)
+        assertNull(restarted.entries.first { it.key == "movie:2" }.originalLanguage)
     }
 
     @Test

@@ -367,6 +367,7 @@ class UserLibrary internal constructor(
                 episodeNumber = request.episodeNumber ?: previous?.episodeNumber,
                 episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
                 parentContentId = request.parentContentId ?: previous?.parentContentId,
+                originalLanguage = request.originalLanguage ?: previous?.originalLanguage,
             )
             val normalized = normalizeHistory(
                 entries = listOf(entry) + read.entries.filterNot { it.key == entry.key },
@@ -449,6 +450,7 @@ class UserLibrary internal constructor(
                 episodeNumber = request.episodeNumber ?: previous?.episodeNumber,
                 episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
                 parentContentId = request.parentContentId ?: previous?.parentContentId,
+                originalLanguage = request.originalLanguage ?: previous?.originalLanguage,
             )
             val normalized = normalizeHistory(
                 entries = listOf(entry) + currentHistory.filterNot { it.key == entry.key },

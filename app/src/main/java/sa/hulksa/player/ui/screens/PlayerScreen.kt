@@ -7310,7 +7310,9 @@ internal fun playerTrackOptionMatches(
     currentGroupToken = currentGroup?.mediaTrackGroup,
     currentGroupType = currentGroup?.type ?: C.TRACK_TYPE_UNKNOWN,
     currentGroupLength = currentGroup?.length ?: 0,
-    supported = currentGroup?.isTrackSupported(option.trackIndex, true) == true,
+    // Called only after the helper's owner/type/identity/bounds guards pass; the track-support
+    // array is never indexed for a stale or out-of-range option.
+    supported = { currentGroup?.isTrackSupported(option.trackIndex, true) == true },
 )
 
 private fun mediaTrackLanguage(format: Format): String? =

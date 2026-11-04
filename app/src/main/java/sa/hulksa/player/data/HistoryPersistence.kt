@@ -170,6 +170,7 @@ internal fun encodeHistoryDocument(entries: List<HistoryEntry>): String {
                     entry.episodeNumber?.let { put("episodeNumber", it) }
                     entry.episodeTitle?.let { put("episodeTitle", it) }
                     entry.parentContentId?.let { put("parentContentId", it) }
+                    entry.originalLanguage?.let { put("originalLanguage", it) }
                 },
         )
     }
@@ -218,4 +219,5 @@ private fun decodeHistoryEntry(item: JSONObject): HistoryEntry = HistoryEntry(
     parentContentId = item.optInt("parentContentId").takeIf {
         item.has("parentContentId") && !item.isNull("parentContentId") && it > 0
     },
+    originalLanguage = item.optString("originalLanguage").takeUnless { it.isBlank() },
 )
