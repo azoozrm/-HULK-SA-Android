@@ -2123,6 +2123,7 @@ private fun CinemaHomeScreen(
                         errorTitle = homeErrorCopy?.title,
                         errorBody = homeErrorCopy?.body,
                         networkFailure = !homeNetworkUsable,
+                        showRetry = state.errorRetryable,
                         refreshModifier = Modifier.focusRequester(homeHeroFocusRequester),
                         refreshFocusRequester = homeHeroFocusRequester,
                         topActions = homeTopActions,
@@ -2167,6 +2168,7 @@ private fun CinemaHomeScreen(
                         onRetry = requestHomeRefresh,
                         isTv = isTv,
                         networkFailure = !homeNetworkUsable,
+                        showRetry = state.errorRetryable,
                         modifier = Modifier.padding(
                             horizontal = if (isTv) 0.dp else 14.dp,
                             vertical = if (isTv) 4.dp else 6.dp,
@@ -3857,6 +3859,7 @@ private fun HomePlaceholder(
     errorTitle: String? = null,
     errorBody: String? = null,
     networkFailure: Boolean = true,
+    showRetry: Boolean = true,
     refreshModifier: Modifier = Modifier,
     refreshFocusRequester: FocusRequester? = null,
     topActions: @Composable () -> Unit,
@@ -3908,7 +3911,8 @@ private fun HomePlaceholder(
                 title = errorTitle,
                 body = errorBody,
                 networkFailure = networkFailure,
-                retryRequester = refreshFocusRequester,
+                showRetry = showRetry,
+                retryRequester = refreshFocusRequester.takeIf { showRetry },
                 modifier = Modifier.padding(horizontal = if (isTv) 16.dp else 14.dp),
             )
 

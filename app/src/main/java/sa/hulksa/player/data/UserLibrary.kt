@@ -131,6 +131,46 @@ class UserLibrary internal constructor(
     private val historyPersistenceLock = Any()
     private val historyFinalWriteLock = Any()
     private val favoritesMutationLock = Any()
+    private val trackPreferenceIntents = TrackPreferenceIntentStore()
+
+    /**
+     * Publishes the latest explicit intent synchronously, before any disk work. The returned
+     * snapshot is immediately usable by every playback entry path through [trackPreferenceIntent].
+     */
+    internal fun publishTrackPreferenceIntent(
+        expectedAccountId: String,
+        expectedProfileId: String,
+        request: PlaybackRequest,
+        audioPreference: String? = null,
+        subtitlePreference: String? = null,
+    ): TrackPreferenceIntent? {
+        if (request.isLive) return null
+        if (expectedAccountId.isBlank() || expectedProfileId.isBlank()) return null
+        if (accountScope.activeAccountId() != expectedAccountId) return null
+        if (profileStore.activeProfileId() != expectedProfileId) return null
+        if (audioPreference == null && subtitlePreference == null) return null
+        return trackPreferenceIntents.publish(
+            accountId = expectedAccountId,
+            profileId = expectedProfileId,
+            historyKey = request.historyKey,
+            audioPreference = audioPreference,
+            subtitlePreference = subtitlePreference,
+        )
+    }
+
+    internal fun trackPreferenceIntent(
+        accountId: String,
+        profileId: String,
+        historyKey: String,
+    ): TrackPreferenceIntent? = trackPreferenceIntents.snapshot(accountId, profileId, historyKey)
+
+    internal fun clearTrackPreferenceIntents(
+        accountId: String,
+        profileId: String,
+        historyKey: String? = null,
+    ) {
+        trackPreferenceIntents.clear(accountId, profileId, historyKey)
+    }
 
     internal fun beginProgressMutation(): UserLibraryHistoryMutationGate.ProgressAttempt =
         historyMutationGate.beginProgress()
@@ -314,6 +354,9 @@ class UserLibrary internal constructor(
         profile: UserProfile,
     ): UserLibrarySnapshot? = runUserLibraryStartupOffMain {
         if (!matchesOwner(expectedAccountId, profile.id)) return@runUserLibraryStartupOffMain null
+        // Live intents belong to the previous profile/session; durable history remains the source
+        // after a profile (re)load.
+        trackPreferenceIntents.clearAll()
         val scopedPreferences = accountScope.preferences(PREFERENCES_NAME, expectedAccountId)
         migrateLegacyLibraryIfNeeded(scopedPreferences)
         if (!matchesOwner(expectedAccountId, profile.id)) return@runUserLibraryStartupOffMain null
@@ -351,6 +394,11 @@ class UserLibrary internal constructor(
                 return@synchronized read.entries
             }
             val previous = read.entries.firstOrNull { it.key == request.historyKey }
+            val intent = trackPreferenceIntents.snapshot(
+                expectedAccountId,
+                expectedProfileId,
+                request.historyKey,
+            )
             val entry = HistoryEntry(
                 key = request.historyKey,
                 title = request.title,
@@ -368,11 +416,13 @@ class UserLibrary internal constructor(
                 episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
                 parentContentId = request.parentContentId ?: previous?.parentContentId,
                 originalLanguage = request.originalLanguage ?: previous?.originalLanguage,
-                // The stored preference is newer than the immutable playback request; progress and
-                // a fresh record-start must never roll an explicit choice back.
-                savedAudioPreference = previous?.savedAudioPreference
+                // A live explicit intent is newer than disk and the immutable playback request;
+                // progress and a fresh record-start must never roll an explicit choice back.
+                savedAudioPreference = intent?.audioPreference
+                    ?: previous?.savedAudioPreference
                     ?: request.savedAudioPreference,
-                savedSubtitlePreference = previous?.savedSubtitlePreference
+                savedSubtitlePreference = intent?.subtitlePreference
+                    ?: previous?.savedSubtitlePreference
                     ?: request.savedSubtitlePreference,
             )
             val normalized = normalizeHistory(
@@ -409,6 +459,8 @@ class UserLibrary internal constructor(
         request: PlaybackRequest,
         audioPreference: String? = null,
         subtitlePreference: String? = null,
+        audioRevision: Long? = null,
+        subtitleRevision: Long? = null,
         historyAttempt: UserLibraryHistoryMutationGate.HistoryAttempt,
     ): List<HistoryEntry>? = runUserLibraryHistoryPersistenceOffMain {
         if (audioPreference == null && subtitlePreference == null) return@runUserLibraryHistoryPersistenceOffMain null
@@ -431,10 +483,44 @@ class UserLibrary internal constructor(
             if (profile.kind == ProfileKind.KIDS && !kidsContentFilterStore.isAllowed(request)) {
                 return@synchronized read.entries
             }
+            val audioCurrent = audioPreference == null || audioRevision == null ||
+                trackPreferenceIntents.isCurrent(
+                    expectedAccountId,
+                    expectedProfileId,
+                    request.historyKey,
+                    TrackPreferenceSetting.AUDIO,
+                    audioRevision,
+                )
+            val subtitleCurrent = subtitlePreference == null || subtitleRevision == null ||
+                trackPreferenceIntents.isCurrent(
+                    expectedAccountId,
+                    expectedProfileId,
+                    request.historyKey,
+                    TrackPreferenceSetting.SUBTITLE,
+                    subtitleRevision,
+                )
+            // An older queued write must never overwrite a newer explicit intent. At least one
+            // setting in this write must still be current; a stale setting is never applied.
+            val anyCurrent = (audioPreference != null && audioCurrent) ||
+                (subtitlePreference != null && subtitleCurrent)
+            if (!anyCurrent) return@synchronized null
             val previous = read.entries.firstOrNull { it.key == request.historyKey }
+            val intent = trackPreferenceIntents.snapshot(
+                expectedAccountId,
+                expectedProfileId,
+                request.historyKey,
+            )
+            val resolvedAudio = intent?.audioPreference
+                ?: audioPreference.takeIf { audioCurrent }
+                ?: previous?.savedAudioPreference
+                ?: request.savedAudioPreference
+            val resolvedSubtitle = intent?.subtitlePreference
+                ?: subtitlePreference.takeIf { subtitleCurrent }
+                ?: previous?.savedSubtitlePreference
+                ?: request.savedSubtitlePreference
             val entry = previous?.copy(
-                savedAudioPreference = audioPreference ?: previous.savedAudioPreference,
-                savedSubtitlePreference = subtitlePreference ?: previous.savedSubtitlePreference,
+                savedAudioPreference = resolvedAudio,
+                savedSubtitlePreference = resolvedSubtitle,
             ) ?: HistoryEntry(
                 key = request.historyKey,
                 title = request.title,
@@ -452,8 +538,8 @@ class UserLibrary internal constructor(
                 episodeTitle = request.episodeTitle,
                 parentContentId = request.parentContentId,
                 originalLanguage = request.originalLanguage,
-                savedAudioPreference = audioPreference ?: request.savedAudioPreference,
-                savedSubtitlePreference = subtitlePreference ?: request.savedSubtitlePreference,
+                savedAudioPreference = resolvedAudio,
+                savedSubtitlePreference = resolvedSubtitle,
             )
             val normalized = normalizeHistory(
                 entries = listOf(entry) + read.entries.filterNot { it.key == entry.key },
@@ -520,6 +606,11 @@ class UserLibrary internal constructor(
                 return@synchronized currentHistory
             }
             val previous = currentHistory.firstOrNull { it.key == request.historyKey }
+            val intent = trackPreferenceIntents.snapshot(
+                expectedOwner.accountId,
+                expectedProfileId,
+                request.historyKey,
+            )
             val entry = HistoryEntry(
                 key = request.historyKey,
                 title = request.title,
@@ -537,11 +628,13 @@ class UserLibrary internal constructor(
                 episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
                 parentContentId = request.parentContentId ?: previous?.parentContentId,
                 originalLanguage = request.originalLanguage ?: previous?.originalLanguage,
-                // The stored preference is newer than the immutable playback request; progress and
-                // a fresh record-start must never roll an explicit choice back.
-                savedAudioPreference = previous?.savedAudioPreference
+                // A live explicit intent is newer than disk and the immutable playback request;
+                // progress and a fresh record-start must never roll an explicit choice back.
+                savedAudioPreference = intent?.audioPreference
+                    ?: previous?.savedAudioPreference
                     ?: request.savedAudioPreference,
-                savedSubtitlePreference = previous?.savedSubtitlePreference
+                savedSubtitlePreference = intent?.subtitlePreference
+                    ?: previous?.savedSubtitlePreference
                     ?: request.savedSubtitlePreference,
             )
             val normalized = normalizeHistory(
@@ -606,6 +699,7 @@ class UserLibrary internal constructor(
             ) {
                 null
             } else {
+                trackPreferenceIntents.clear(expectedAccountId, expectedProfileId, key)
                 normalized
             }
         }
@@ -621,6 +715,7 @@ class UserLibrary internal constructor(
         synchronized(historyFinalWriteLock) {
             preferences.edit().remove(historyKey).apply()
         }
+        trackPreferenceIntents.clearAll()
         return emptyList()
     }
 

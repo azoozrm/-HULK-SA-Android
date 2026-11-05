@@ -3,6 +3,7 @@ package sa.hulksa.player
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import sa.hulksa.player.data.TrackPreferenceIntent
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.PlaybackRequest
 
@@ -54,6 +55,42 @@ class PlaybackRequestSavedPreferenceTest {
             savedSubtitlePreference = "off",
         )
         assertNull(request.withSavedTrackPreferences(listOf(otherEpisode)).savedAudioPreference)
+    }
+
+    @Test
+    fun `live intent overrides a stale history snapshot immediately`() {
+        val request = movieRequest(7)
+        val stale = HistoryEntry(
+            key = "MOVIE:7",
+            title = "Movie",
+            posterUrl = null,
+            streamKind = "movie",
+            streamId = 7,
+            extension = "mp4",
+            isLive = false,
+            positionMs = 10_000L,
+            durationMs = 100_000L,
+            updatedAtEpochMs = 1L,
+            savedAudioPreference = "old-audio",
+            savedSubtitlePreference = null,
+        )
+        val intent = TrackPreferenceIntent(
+            audioPreference = "new-audio",
+            subtitlePreference = "off",
+            audioRevision = 2L,
+            subtitleRevision = 3L,
+        )
+        val attached = request
+            .withSavedTrackPreferences(listOf(stale))
+            .withTrackPreferenceIntent(intent)
+        assertEquals("new-audio", attached.savedAudioPreference)
+        assertEquals("off", attached.savedSubtitlePreference)
+
+        val withoutIntent = request
+            .withSavedTrackPreferences(listOf(stale))
+            .withTrackPreferenceIntent(null)
+        assertEquals("old-audio", withoutIntent.savedAudioPreference)
+        assertNull(withoutIntent.savedSubtitlePreference)
     }
 
     private fun movieRequest(id: Int): PlaybackRequest = PlaybackRequest(

@@ -42,6 +42,7 @@ import sa.hulksa.player.data.SessionOwnershipCleanupGate
 import sa.hulksa.player.data.SessionOwnershipCleanupResult
 import sa.hulksa.player.data.SessionPublicationGate
 import sa.hulksa.player.data.SessionPublicationResult
+import sa.hulksa.player.data.TrackPreferenceIntent
 import sa.hulksa.player.data.EpisodeNotificationStoreResult
 import sa.hulksa.player.data.FavoriteMutationGate
 import sa.hulksa.player.data.FavoriteMutationOutcome
@@ -196,6 +197,8 @@ data class HulkUiState(
     val isLoading: Boolean = false,
     val loadingTypes: Set<ContentType> = emptySet(),
     val errorMessage: String? = null,
+    /** False for memory-pressure failures; the accepted error card must not offer a plain Retry. */
+    val errorRetryable: Boolean = true,
     val loginFailure: LoginFailure? = null,
     val loginValidationAttempt: Long = 0,
     val account: AccountInfo? = null,
@@ -229,12 +232,43 @@ data class HulkUiState(
     }
 }
 
+internal fun isMemoryPressureFailure(error: Throwable): Boolean {
+    if (error is OutOfMemoryError) return true
+    val message = error.message.orEmpty()
+    return message.contains("OutOfMemory", ignoreCase = true) ||
+        message.contains("Failed to allocate", ignoreCase = true) ||
+        message.contains("until OOM", ignoreCase = true) ||
+        message.contains("heap free after GC", ignoreCase = true)
+}
+
+private fun looksLikeRawTechnicalMessage(message: String): Boolean {
+    val lower = message.lowercase()
+    return lower.startsWith("java.") ||
+        lower.contains("exception") ||
+        lower.contains("r8-map-id") ||
+        lower.contains("failed to allocate") ||
+        lower.contains("outofmemory") ||
+        lower.contains("sqlite") ||
+        lower.contains("json")
+}
+
+internal fun userFacingFailureMessage(error: Throwable): String =
+    when {
+        isMemoryPressureFailure(error) ->
+            "تعذر تحميل المحتوى بسبب ضغط في ذاكرة الجهاز. اعد تشغيل التطبيق."
+        else -> error.message
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && !looksLikeRawTechnicalMessage(it) }
+            ?: "حدث خطا غير متوقع. حاول مرة اخرى"
+    }
+
 /** Actual failure-to-state projection shared by normal, restore and paired authentication. */
 internal fun HulkUiState.finishLoginFailure(error: Throwable): HulkUiState = copy(
     isStarting = false,
     isLoading = false,
     isAccountRefreshing = false,
-    errorMessage = error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى",
+    errorMessage = userFacingFailureMessage(error),
+    errorRetryable = !isMemoryPressureFailure(error),
     loginFailure = loginFailureFor(error),
 )
 
@@ -243,6 +277,7 @@ internal fun HulkUiState.finishExpiredOwnerFailure(message: String?): HulkUiStat
     isLoading = false,
     isAccountRefreshing = false,
     errorMessage = message,
+    errorRetryable = true,
     loginFailure = LoginFailure(LoginFailureCategory.UNKNOWN, LoginFailureStage.LOCAL_PERSISTENCE),
 )
 
@@ -255,6 +290,7 @@ internal fun HulkUiState.rejectLoginValidation(failure: LoginFailure): HulkUiSta
 
 internal fun HulkUiState.finishInvalidTvDeepLink(): HulkUiState = copy(
     errorMessage = "تعذر فتح هذا الرابط",
+    errorRetryable = true,
     loginFailure = if (screen == HulkScreen.LOGIN && loginFailure == null) {
         LoginFailure(LoginFailureCategory.LINK_UNAVAILABLE, LoginFailureStage.VALIDATION)
     } else loginFailure,
@@ -478,6 +514,20 @@ internal fun PlaybackRequest.withSavedTrackPreferences(
     )
 }
 
+/**
+ * Applies the latest live explicit intent over the persisted history snapshot. Absence stays
+ * automatic; an explicit OFF is the literal `off` and is never treated as absent.
+ */
+internal fun PlaybackRequest.withTrackPreferenceIntent(
+    intent: TrackPreferenceIntent?,
+): PlaybackRequest {
+    if (intent == null) return this
+    return copy(
+        savedAudioPreference = intent.audioPreference ?: savedAudioPreference,
+        savedSubtitlePreference = intent.subtitlePreference ?: savedSubtitlePreference,
+    )
+}
+
 class HulkViewModel internal constructor(
     application: Application,
     private val repository: HulkRepository,
@@ -578,19 +628,25 @@ class HulkViewModel internal constructor(
     private var sessionOwnershipEpoch = 0L
     private val loadedCatalogs = mutableMapOf<ContentType, Catalog>()
     private val homeCatalogs = mutableMapOf<ContentType, Catalog>()
+    // Catalog payloads can be large (the guard permits up to 32 MiB / 75k items). Loading Movie
+    // and Series concurrently used to hold two complete JSON trees plus two item lists and could
+    // exceed the process heap. One catalog at a time keeps the peak bounded without truncating.
+    private val catalogLoadMutex = Mutex()
     private val catalogRequestOwner = CatalogRequestOwner(
         scope = viewModelScope,
         load = { activeSession, type ->
-            val full = repository.catalog(activeSession, type)
-            val snapshot = mutableState.value
-            val home = if (type == ContentType.MOVIE || type == ContentType.SERIES) {
-                withContext(Dispatchers.Default) {
-                    compactHomeCatalogForHome(full, snapshot.favorites, snapshot.history)
+            catalogLoadMutex.withLock {
+                val full = repository.catalog(activeSession, type)
+                val snapshot = mutableState.value
+                val home = if (type == ContentType.MOVIE || type == ContentType.SERIES) {
+                    withContext(Dispatchers.Default) {
+                        compactHomeCatalogForHome(full, snapshot.favorites, snapshot.history)
+                    }
+                } else {
+                    full
                 }
-            } else {
-                full
+                CatalogLoadResult(full = full, home = home)
             }
-            CatalogLoadResult(full = full, home = home)
         },
         hasLoaded = { type -> loadedCatalogs[type] != null },
         isSessionCurrent = { activeSession -> session === activeSession },
@@ -1621,9 +1677,21 @@ class HulkViewModel internal constructor(
         audioPreference: String? = null,
         subtitlePreference: String? = null,
     ) {
+        if (request.isLive) return
         val owner = AuthenticatedSessionRegistry.currentOwner() ?: return
         if (owner.session !== session) return
         val expectedProfileId = profileStore.activeProfileId()
+        if (expectedProfileId.isBlank()) return
+        val intent = userLibrary.publishTrackPreferenceIntent(
+            expectedAccountId = owner.accountId,
+            expectedProfileId = expectedProfileId,
+            request = request,
+            audioPreference = audioPreference,
+            subtitlePreference = subtitlePreference,
+        ) ?: return
+        // Publish the live intent immediately; this is the owner every replay path consults even
+        // before the durable write completes.
+        publishTrackPreferenceToHistory(request, intent)
         val historyAttempt = userLibrary.currentHistoryAttempt()
         viewModelScope.launch {
             val updated = userLibrary.updateTrackPreferenceForOwner(
@@ -1633,12 +1701,25 @@ class HulkViewModel internal constructor(
                 request = request,
                 audioPreference = audioPreference,
                 subtitlePreference = subtitlePreference,
+                audioRevision = intent.audioRevision.takeIf { audioPreference != null },
+                subtitleRevision = intent.subtitleRevision.takeIf { subtitlePreference != null },
                 historyAttempt = historyAttempt,
             ) ?: return@launch
             if (
                 !AuthenticatedSessionRegistry.isCurrent(owner) ||
                 session !== owner.session ||
                 profileStore.activeProfileId() != expectedProfileId
+            ) return@launch
+            // A newer explicit intent already owns the live value. Its own write will publish;
+            // this older completion must not roll the state back.
+            val currentIntent = userLibrary.trackPreferenceIntent(
+                accountId = owner.accountId,
+                profileId = expectedProfileId,
+                historyKey = request.historyKey,
+            ) ?: return@launch
+            if (
+                currentIntent.audioRevision != intent.audioRevision ||
+                currentIntent.subtitleRevision != intent.subtitleRevision
             ) return@launch
             val saved = updated.firstOrNull {
                 it.key == request.historyKey && it.streamId == request.streamId
@@ -1661,6 +1742,35 @@ class HulkViewModel internal constructor(
         }
     }
 
+    private fun publishTrackPreferenceToHistory(
+        request: PlaybackRequest,
+        intent: TrackPreferenceIntent,
+    ) {
+        mutableState.update { state ->
+            val existing = state.history.firstOrNull {
+                it.key == request.historyKey && it.streamId == request.streamId
+            }
+            if (existing == null) {
+                state
+            } else {
+                state.copy(
+                    history = state.history.map { entry ->
+                        if (entry.key != existing.key) {
+                            entry
+                        } else {
+                            entry.copy(
+                                savedAudioPreference = intent.audioPreference
+                                    ?: entry.savedAudioPreference,
+                                savedSubtitlePreference = intent.subtitlePreference
+                                    ?: entry.savedSubtitlePreference,
+                            )
+                        }
+                    },
+                )
+            }
+        }
+    }
+
     fun removeHistoryEntry(key: String, onResult: (Boolean) -> Unit = {}) {
         val expectedOwner = AuthenticatedSessionRegistry.currentOwner()
         if (expectedOwner == null) {
@@ -1676,6 +1786,12 @@ class HulkViewModel internal constructor(
             return
         }
         val expectedProfileId = profileStore.activeProfileId()
+        // Removal wins over a queued preference write; a later explicit selection is a new intent.
+        userLibrary.clearTrackPreferenceIntents(
+            accountId = expectedOwner.accountId,
+            profileId = expectedProfileId,
+            historyKey = key,
+        )
         val historyAttempt = userLibrary.beginHistoryMutation()
         viewModelScope.launch {
             val updated = userLibrary.removeHistoryForOwner(
@@ -3990,9 +4106,21 @@ class HulkViewModel internal constructor(
         }
         val expectedProfileId = profileStore.activeProfileId()
         playerProgressProfileOwner = expectedProfileId
-        val resumable = request.copy(resumePositionMs = userLibrary.resumePosition(request.historyKey))
         val expectedOwner = AuthenticatedSessionRegistry.currentOwner()
             ?.takeIf { it.session === session }
+        // Every replay entry path converges here. A just-committed explicit intent wins over the
+        // history snapshot even while its disk write is still queued.
+        val liveIntent = expectedOwner?.let {
+            userLibrary.trackPreferenceIntent(
+                accountId = it.accountId,
+                profileId = expectedProfileId,
+                historyKey = request.historyKey,
+            )
+        }
+        val resumable = request
+            .withSavedTrackPreferences(mutableState.value.history)
+            .withTrackPreferenceIntent(liveIntent)
+            .copy(resumePositionMs = userLibrary.resumePosition(request.historyKey))
         val historyAttempt = userLibrary.currentHistoryAttempt()
         mutableState.update {
             it.copy(

@@ -850,6 +850,7 @@ internal fun MoviesErrorNotice(
     modifier: Modifier = Modifier,
     isTv: Boolean = false,
     networkFailure: Boolean = true,
+    showRetry: Boolean = true,
     retryRequester: FocusRequester? = null,
     onRetryFocusChanged: ((Boolean) -> Unit)? = null,
     onRetryUp: (() -> Boolean)? = null,
@@ -879,12 +880,16 @@ internal fun MoviesErrorNotice(
                 style = bodyStyle,
             ).size.width
             val messageWidthPx = maxOf(titleRowWidthPx, minOf(bodyNaturalWidthPx, innerAvailablePx))
-            val retryWidthPx = textMeasurer.measure(
-                text = AnnotatedString("اعادة المحاولة"),
-                style = titleStyle,
-                maxLines = 1,
-            ).size.width + with(density) { 23.dp.roundToPx() } + 2 * horizontalPaddingPx
-            val fitsRow = isTv && moviesErrorNoticeFitsRow(
+            val retryWidthPx = if (showRetry) {
+                textMeasurer.measure(
+                    text = AnnotatedString("اعادة المحاولة"),
+                    style = titleStyle,
+                    maxLines = 1,
+                ).size.width + with(density) { 23.dp.roundToPx() } + 2 * horizontalPaddingPx
+            } else {
+                0
+            }
+            val fitsRow = showRetry && isTv && moviesErrorNoticeFitsRow(
                 availableWidthPx = innerAvailablePx,
                 messageWidthPx = messageWidthPx,
                 retryWidthPx = retryWidthPx,
@@ -931,14 +936,16 @@ internal fun MoviesErrorNotice(
                         networkFailure = networkFailure,
                         centered = true,
                     )
-                    Spacer(Modifier.height(8.dp))
-                    MoviesErrorNoticeRetry(
-                        onRetry = onRetry,
-                        retryRequester = retryRequester,
-                        onRetryFocusChanged = onRetryFocusChanged,
-                        onRetryUp = onRetryUp,
-                        onRetryDown = onRetryDown,
-                    )
+                    if (showRetry) {
+                        Spacer(Modifier.height(8.dp))
+                        MoviesErrorNoticeRetry(
+                            onRetry = onRetry,
+                            retryRequester = retryRequester,
+                            onRetryFocusChanged = onRetryFocusChanged,
+                            onRetryUp = onRetryUp,
+                            onRetryDown = onRetryDown,
+                        )
+                    }
                 }
             }
         }
@@ -1039,6 +1046,7 @@ internal fun MoviesOfflineEmptyState(
     title: String = "لا يوجد اتصال بالانترنت",
     body: String? = "تعذر تحميل المحتوى ، تحقق من الاتصال وحاول مرة اخرى",
     networkFailure: Boolean = true,
+    showRetry: Boolean = true,
     retryRequester: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
@@ -1069,16 +1077,22 @@ internal fun MoviesOfflineEmptyState(
                 textAlign = TextAlign.Center,
             )
         }
-        Spacer(Modifier.height(14.dp))
-        FocusButton(
-            text = "اعادة المحاولة",
-            onClick = onRetry,
-            compact = true,
-            trailingIcon = Icons.Rounded.Refresh,
-            scaleOnFocus = false,
-            textMaxLines = 1,
-            modifier = if (retryRequester != null) Modifier.focusRequester(retryRequester) else Modifier,
-        )
+        if (showRetry) {
+            Spacer(Modifier.height(14.dp))
+            FocusButton(
+                text = "اعادة المحاولة",
+                onClick = onRetry,
+                compact = true,
+                trailingIcon = Icons.Rounded.Refresh,
+                scaleOnFocus = false,
+                textMaxLines = 1,
+                modifier = if (retryRequester != null) {
+                    Modifier.focusRequester(retryRequester)
+                } else {
+                    Modifier
+                },
+            )
+        }
     }
 }
 

@@ -465,6 +465,160 @@ class UserLibraryHistoryDispatchTest {
         assertTrue(fixture.library.history().isEmpty())
     }
 
+    @Test
+    fun `newer explicit intent wins over an older queued persistence`() = runBlocking {
+        val fixture = Fixture()
+        fixture.library.recordStartForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request("movie:1", id = 1),
+            historyAttempt = fixture.library.currentHistoryAttempt(),
+        )
+        val request = request("movie:1", id = 1)
+        val first = fixture.library.publishTrackPreferenceIntent(
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request,
+            audioPreference = "audio-A",
+        )!!
+        val second = fixture.library.publishTrackPreferenceIntent(
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request,
+            audioPreference = "audio-B",
+        )!!
+        assertEquals(
+            "audio-B",
+            fixture.library.trackPreferenceIntent(
+                ACCOUNT_ID,
+                PRIMARY_PROFILE_ID,
+                "movie:1",
+            )!!.audioPreference,
+        )
+
+        val stale = fixture.library.updateTrackPreferenceForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request,
+            audioPreference = "audio-A",
+            audioRevision = first.audioRevision,
+            historyAttempt = fixture.library.currentHistoryAttempt(),
+        )
+        assertNull(stale)
+
+        val current = fixture.library.updateTrackPreferenceForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request,
+            audioPreference = "audio-B",
+            audioRevision = second.audioRevision,
+            historyAttempt = fixture.library.currentHistoryAttempt(),
+        )
+        assertNotNull(current)
+        assertEquals("audio-B", current!!.first { it.key == "movie:1" }.savedAudioPreference)
+        val disk = readHistoryDocument(fixture.userPreferences.restart(), HISTORY_KEY)
+        assertEquals("audio-B", disk.entries.first { it.key == "movie:1" }.savedAudioPreference)
+    }
+
+    @Test
+    fun `audio and subtitle intents persist independently and explicit off survives`() = runBlocking {
+        val fixture = Fixture()
+        val request = request("movie:1", id = 1)
+        fixture.library.recordStartForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request,
+            historyAttempt = fixture.library.currentHistoryAttempt(),
+        )
+        val audio = fixture.library.publishTrackPreferenceIntent(
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request,
+            audioPreference = "audio-A",
+        )!!
+        val subtitle = fixture.library.publishTrackPreferenceIntent(
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request,
+            subtitlePreference = "off",
+        )!!
+
+        val audioWrite = fixture.library.updateTrackPreferenceForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request,
+            audioPreference = "audio-A",
+            audioRevision = audio.audioRevision,
+            historyAttempt = fixture.library.currentHistoryAttempt(),
+        )
+        assertNotNull(audioWrite)
+        val subtitleWrite = fixture.library.updateTrackPreferenceForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request,
+            subtitlePreference = "off",
+            subtitleRevision = subtitle.subtitleRevision,
+            historyAttempt = fixture.library.currentHistoryAttempt(),
+        )
+        assertNotNull(subtitleWrite)
+        assertEquals("audio-A", subtitleWrite!!.first { it.key == "movie:1" }.savedAudioPreference)
+        assertEquals("off", subtitleWrite.first { it.key == "movie:1" }.savedSubtitlePreference)
+        val disk = readHistoryDocument(fixture.userPreferences.restart(), HISTORY_KEY)
+        assertEquals("audio-A", disk.entries.first { it.key == "movie:1" }.savedAudioPreference)
+        assertEquals("off", disk.entries.first { it.key == "movie:1" }.savedSubtitlePreference)
+    }
+
+    @Test
+    fun `remove history clears the live intent and stale account cannot publish`() = runBlocking {
+        val fixture = Fixture()
+        val request = request("movie:1", id = 1)
+        fixture.library.recordStartForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request,
+            historyAttempt = fixture.library.currentHistoryAttempt(),
+        )
+        assertNotNull(
+            fixture.library.publishTrackPreferenceIntent(
+                expectedAccountId = ACCOUNT_ID,
+                expectedProfileId = PRIMARY_PROFILE_ID,
+                request = request,
+                subtitlePreference = "off",
+            ),
+        )
+        assertNull(
+            fixture.library.publishTrackPreferenceIntent(
+                expectedAccountId = "account-2",
+                expectedProfileId = PRIMARY_PROFILE_ID,
+                request = request,
+                subtitlePreference = "off",
+            ),
+        )
+        val attempt = fixture.library.beginHistoryMutation()
+        val removed = fixture.library.removeHistoryForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            key = "movie:1",
+            historyAttempt = attempt,
+        )
+        assertNotNull(removed)
+        assertNull(
+            fixture.library.trackPreferenceIntent(
+                ACCOUNT_ID,
+                PRIMARY_PROFILE_ID,
+                "movie:1",
+            ),
+        )
+    }
+
     private class Fixture {
         val scopeState = FakeSharedPreferences()
         val profilePreferences = FakeSharedPreferences()

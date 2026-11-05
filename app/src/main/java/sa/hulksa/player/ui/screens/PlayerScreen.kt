@@ -2153,27 +2153,25 @@ fun PlayerScreen(
             if (manualSeekTargetMs == null) {
                 currentPositionMs = player.currentPosition.coerceAtLeast(0L)
             }
-            val tracks = player.currentTracks
-            val detectedAudioTracks = extractTrackOptions(tracks, C.TRACK_TYPE_AUDIO, trackOwnerToken)
-            val detectedSubtitleTracks = extractTrackOptions(tracks, C.TRACK_TYPE_TEXT, trackOwnerToken)
-            if (detectedAudioTracks != audioTracks) audioTracks = detectedAudioTracks
-            if (detectedSubtitleTracks != subtitleTracks) subtitleTracks = detectedSubtitleTracks
+            // Track options are owned by onTracksChanged. Rebuilding the rich identity/display
+            // list here duplicated that work and allocated every 500 ms; the health tick only
+            // needs the already-published track state plus the player's current formats.
             subtitlesDisabled = player.trackSelectionParameters.disabledTrackTypes
                 .contains(C.TRACK_TYPE_TEXT)
 
-            val audioActive = player.audioFormat != null || detectedAudioTracks.any { it.selected }
+            val audioActive = player.audioFormat != null || audioTracks.any { it.selected }
             hasActiveAudio = audioActive
             if (audioActive) {
                 val resolvedAudioLanguage = player.audioFormat?.let(::mediaTrackLanguage)
-                    ?: selectedTrackLabel(detectedAudioTracks, "")
+                    ?: selectedTrackLabel(audioTracks, "")
                 if (resolvedAudioLanguage.isNotBlank()) audioLanguageLabel = resolvedAudioLanguage
             } else {
                 audioLanguageLabel = ""
             }
 
-            hasActiveSubtitles = detectedSubtitleTracks.any { it.selected }
+            hasActiveSubtitles = subtitleTracks.any { it.selected }
             if (hasActiveSubtitles && subtitleLanguageLabel.isBlank()) {
-                subtitleLanguageLabel = selectedTrackLabel(detectedSubtitleTracks, "")
+                subtitleLanguageLabel = selectedTrackLabel(subtitleTracks, "")
             } else if (!hasActiveSubtitles) {
                 subtitleLanguageLabel = ""
             }
@@ -2660,6 +2658,7 @@ fun PlayerScreen(
                     showPanel = liveMorePanel != null,
                     gap = 10.dp,
                     minimumPanelHeight = minimumMorePanelHeight,
+                    topPadding = liveControlsLayout.outerTopPaddingDp.dp,
                     panelModifier = Modifier.padding(
                         end = liveControlsLayout.outerHorizontalPaddingDp.dp,
                     ),
@@ -2762,6 +2761,7 @@ fun PlayerScreen(
                     showPanel = vodMorePanel != null,
                     gap = 10.dp,
                     minimumPanelHeight = minimumVodPanelHeight,
+                    topPadding = liveControlsLayout.outerTopPaddingDp.dp,
                     panelModifier = Modifier.padding(
                         end = liveControlsLayout.outerHorizontalPaddingDp.dp,
                     ),
@@ -3134,7 +3134,7 @@ fun PlayerScreen(
         activePanel?.let { panel ->
             when (panel) {
                 PlayerPanel.AUDIO -> TrackSelectionPanel(
-                    title = "مسارات الصوت",
+                    title = "الصوت",
                     emptyMessage = "لا توجد مسارات صوت اضافية في هذا المحتوى",
                     options = audioTracks,
                     showOff = false,
@@ -3847,6 +3847,7 @@ private fun LiveBottomOverlay(
     showPanel: Boolean,
     gap: Dp,
     minimumPanelHeight: Dp,
+    topPadding: Dp = 0.dp,
     strip: @Composable () -> Unit,
     panel: @Composable (maxHeight: Dp, modifier: Modifier) -> Unit,
     modifier: Modifier = Modifier,
@@ -3856,6 +3857,7 @@ private fun LiveBottomOverlay(
     SubcomposeLayout(modifier = modifier) { constraints ->
         val gapPx = gap.roundToPx()
         val minimumPanelPx = minimumPanelHeight.roundToPx()
+        val topPaddingPx = topPadding.roundToPx()
         val stripPlaceable = subcompose(LiveBottomOverlaySlot.STRIP) { strip() }
             .firstOrNull()
             ?.measure(constraints)
@@ -3868,7 +3870,13 @@ private fun LiveBottomOverlay(
                 stripPlaceable.place(0, 0)
             }
         }
-        val remainderPx = (boundedHeight - stripPlaceable.height - gapPx).coerceAtLeast(0)
+        val availableHeightPx = (boundedHeight - topPaddingPx).coerceAtLeast(0)
+        val remainderPx = liveBottomOverlayPanelMaxHeightPx(
+            boundedHeightPx = boundedHeight,
+            topPaddingPx = topPaddingPx,
+            stripHeightPx = stripPlaceable.height,
+            gapPx = gapPx,
+        )
         when (liveBottomOverlayMode(remainderPx, minimumPanelPx)) {
             LiveBottomOverlayMode.NORMAL -> {
                 val panelPlaceable = subcompose(LiveBottomOverlaySlot.PANEL) {
@@ -3892,9 +3900,9 @@ private fun LiveBottomOverlay(
             }
             LiveBottomOverlayMode.FALLBACK -> {
                 val panelPlaceable = subcompose(LiveBottomOverlaySlot.FALLBACK) {
-                    panel(boundedHeight.toDp(), fallbackPanelModifier)
+                    panel(availableHeightPx.toDp(), fallbackPanelModifier)
                 }.firstOrNull()?.measure(
-                    Constraints(maxWidth = constraints.maxWidth, maxHeight = boundedHeight),
+                    Constraints(maxWidth = constraints.maxWidth, maxHeight = availableHeightPx),
                 )
                 if (panelPlaceable == null) {
                     layout(constraints.maxWidth, 0) { }
@@ -5101,7 +5109,7 @@ private fun VodMorePanel(
                     VodMorePanelView.MENU -> "المزيد"
                     VodMorePanelView.SPEED -> "سرعة التشغيل"
                     VodMorePanelView.PICTURE_SIZE -> "حجم الصورة"
-                    VodMorePanelView.AUDIO_TRACKS -> "مسارات الصوت"
+                    VodMorePanelView.AUDIO_TRACKS -> "الصوت"
                     VodMorePanelView.SUBTITLE_TRACKS -> "الترجمة"
                 },
                 color = colors.text,
@@ -5170,7 +5178,7 @@ private fun VodMorePanel(
                     )
                     VodPanelDivider()
                     VodMoreRow(
-                        text = "مسارات الصوت",
+                        text = "الصوت",
                         icon = Icons.Rounded.Audiotrack,
                         value = audioTracks.firstOrNull { it.selected }?.label,
                         showChevron = true,
