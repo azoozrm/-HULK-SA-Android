@@ -457,8 +457,8 @@ internal fun SeriesDetailsActionsBar(
     onPlay: () -> Unit,
     onToggleFavorite: () -> Unit,
     onToggleNotifications: () -> Unit,
-    onWatchActionPlaced: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    onWatchActionPlaced: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     val density = LocalDensity.current

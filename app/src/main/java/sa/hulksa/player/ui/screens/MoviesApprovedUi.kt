@@ -1291,8 +1291,8 @@ internal fun MovieDetailsActionsBar(
     onToggleFavorite: () -> Unit,
     onDownload: () -> Unit,
     onOpenDownloadPanel: () -> Unit,
-    onWatchActionPlaced: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    onWatchActionPlaced: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     val density = LocalDensity.current
