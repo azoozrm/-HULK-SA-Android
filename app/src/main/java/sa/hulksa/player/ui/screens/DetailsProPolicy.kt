@@ -1,5 +1,8 @@
 package sa.hulksa.player.ui.screens
 
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.Episode
 import java.util.Locale
@@ -98,6 +101,38 @@ internal fun detailsProEpisodeColumns(screenWidthDp: Int, isTv: Boolean): Int {
         width >= 340 -> 2
         else -> 1
     }
+}
+
+internal enum class DetailsInitialFocusAction { NONE, REQUEST_PLAY }
+
+/**
+ * One-shot readiness policy for the details primary action. The action becomes the initial focus
+ * owner only when it is attached, the entry is not an explicit episode target, no error owns the
+ * screen, and (for Series) the playable current episode exists. A tab/action move or a completed
+ * request clears [initialFocusPending], so a late arrival cannot steal focus.
+ */
+internal fun detailsInitialFocusAction(
+    isSeries: Boolean,
+    targetEpisodePresent: Boolean,
+    playActionAttached: Boolean,
+    currentEpisodePresent: Boolean,
+    initialFocusPending: Boolean,
+    errorPresent: Boolean,
+): DetailsInitialFocusAction = when {
+    !initialFocusPending || errorPresent -> DetailsInitialFocusAction.NONE
+    targetEpisodePresent -> DetailsInitialFocusAction.NONE
+    !playActionAttached -> DetailsInitialFocusAction.NONE
+    isSeries && !currentEpisodePresent -> DetailsInitialFocusAction.NONE
+    else -> DetailsInitialFocusAction.REQUEST_PLAY
+}
+
+internal suspend fun detailsProRelatedItemsOffMain(
+    source: ContentItem,
+    candidates: List<ContentItem>,
+    limit: Int = 12,
+    dispatcher: CoroutineDispatcher = Dispatchers.Default,
+): List<ContentItem> = withContext(dispatcher) {
+    detailsProRelatedItems(source = source, candidates = candidates, limit = limit)
 }
 
 internal fun detailsProRelatedItems(

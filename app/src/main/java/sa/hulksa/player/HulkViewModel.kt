@@ -636,7 +636,9 @@ class HulkViewModel internal constructor(
         scope = viewModelScope,
         load = { activeSession, type ->
             catalogLoadMutex.withLock {
+                val startedNs = System.nanoTime()
                 val full = repository.catalog(activeSession, type)
+                val compactStartedNs = System.nanoTime()
                 val snapshot = mutableState.value
                 val home = if (type == ContentType.MOVIE || type == ContentType.SERIES) {
                     withContext(Dispatchers.Default) {
@@ -644,6 +646,11 @@ class HulkViewModel internal constructor(
                     }
                 } else {
                     full
+                }
+                hulkPerfLog {
+                    "catalog type=$type items=${full.items.size} categories=${full.categories.size} " +
+                        "loadMs=${(compactStartedNs - startedNs) / 1_000_000} compactMs=" +
+                        "${(System.nanoTime() - compactStartedNs) / 1_000_000}"
                 }
                 CatalogLoadResult(full = full, home = home)
             }
@@ -1178,6 +1185,7 @@ class HulkViewModel internal constructor(
                 }
                 detailsJob = viewModelScope.launch {
                     try {
+                        val detailsStartedNs = System.nanoTime()
                         val details = try {
                             repository.contentDetails(activeSession, item.id)
                         } catch (cancelled: CancellationException) {
@@ -1189,6 +1197,10 @@ class HulkViewModel internal constructor(
                             return@launch
                         }
                         if (!isCurrentDetailsRequest(detailsRequest)) return@launch
+                        hulkPerfLog {
+                            "details type=MOVIE id=${item.id} ms=" +
+                                "${(System.nanoTime() - detailsStartedNs) / 1_000_000}"
+                        }
                         mutableState.update {
                             it.copy(selectedDetails = details, isLoading = false)
                         }
@@ -1228,6 +1240,7 @@ class HulkViewModel internal constructor(
         }
         detailsJob = viewModelScope.launch {
             try {
+                val detailsStartedNs = System.nanoTime()
                 val bundle = try {
                     repository.seriesBundle(activeSession, item.id)
                 } catch (cancelled: CancellationException) {
@@ -1254,6 +1267,10 @@ class HulkViewModel internal constructor(
                         it.season == target.seasonNumber &&
                             it.episodeNumber == target.episodeNumber
                     }
+                }
+                hulkPerfLog {
+                    "details type=SERIES id=${item.id} episodes=${bundle.episodes.size} ms=" +
+                        "${(System.nanoTime() - detailsStartedNs) / 1_000_000}"
                 }
                 mutableState.update {
                     it.copy(

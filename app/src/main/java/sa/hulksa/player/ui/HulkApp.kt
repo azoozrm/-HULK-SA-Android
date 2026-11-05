@@ -74,7 +74,7 @@ import sa.hulksa.player.ui.screens.NavigationMemoryStore
 import sa.hulksa.player.ui.screens.PlayerProScreen
 import sa.hulksa.player.ui.screens.ScopedHomeActionNotice
 import sa.hulksa.player.ui.screens.SeriesDetailsProPolishedScreen
-import sa.hulksa.player.ui.screens.detailsProRelatedItems
+import sa.hulksa.player.ui.screens.detailsProRelatedItemsOffMain
 import sa.hulksa.player.ui.screens.downloadPrimaryActionIntent
 import sa.hulksa.player.ui.screens.favoriteFeedbackIcon
 import sa.hulksa.player.ui.screens.favoriteMutationFeedback
@@ -99,6 +99,26 @@ internal fun pairingEntryOffered(
     hardwareTelevision: Boolean,
     pairingAvailable: Boolean,
 ): Boolean = hardwareTelevision && pairingAvailable
+
+/**
+ * Related items are scored/sorted off the composition thread. The catalog token is identity based,
+ * so a large immutable items list is not compared element-by-element on Main during recomposition.
+ */
+@Composable
+private fun rememberDetailsRelatedItems(
+    source: ContentItem,
+    candidates: List<ContentItem>,
+): List<ContentItem> {
+    val candidateToken = System.identityHashCode(candidates)
+    var related by remember(source.id, source.type, candidateToken) {
+        mutableStateOf(emptyList<ContentItem>())
+    }
+    LaunchedEffect(source.id, source.type, candidateToken) {
+        val snapshot = candidates
+        related = detailsProRelatedItemsOffMain(source = source, candidates = snapshot)
+    }
+    return related
+}
 
 @Composable
 fun HulkApp(
@@ -457,7 +477,7 @@ fun HulkApp(
                     HulkScreen.MOVIE_DETAILS -> {
                         val item = state.selectedItem
                         if (item != null) {
-                            val relatedMovies = detailsProRelatedItems(
+                            val relatedMovies = rememberDetailsRelatedItems(
                                 source = item,
                                 candidates = state.catalogs[ContentType.MOVIE]?.items.orEmpty(),
                             )
@@ -516,7 +536,7 @@ fun HulkApp(
                         val series = state.selectedSeries
                         if (series != null) {
                             seriesDetailsStateHolder.SaveableStateProvider("series_details_${series.id}") {
-                            val relatedSeries = detailsProRelatedItems(
+                            val relatedSeries = rememberDetailsRelatedItems(
                                 source = series,
                                 candidates = state.catalogs[ContentType.SERIES]?.items.orEmpty(),
                             )
@@ -528,6 +548,7 @@ fun HulkApp(
                                     remoteLoading = state.isLoading,
                                     immediateShellAvailable = state.selectedDetails != null,
                                 ),
+                                detailsFetchInFlight = state.isLoading,
                                 errorMessage = state.errorMessage,
                                 isTv = isTv,
                                 isFavorite = viewModel.isFavorite(series),

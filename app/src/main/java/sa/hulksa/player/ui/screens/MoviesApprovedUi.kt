@@ -61,6 +61,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -1290,6 +1291,7 @@ internal fun MovieDetailsActionsBar(
     onToggleFavorite: () -> Unit,
     onDownload: () -> Unit,
     onOpenDownloadPanel: () -> Unit,
+    onWatchActionPlaced: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
@@ -1393,7 +1395,8 @@ internal fun MovieDetailsActionsBar(
                 onFocused = { onActionFocused(playRequester) },
                 modifier = actionModifier
                     .focusRequester(playRequester)
-                    .then(focusWiring(0)),
+                    .then(focusWiring(0))
+                    .onPlaced { onWatchActionPlaced?.invoke() },
             )
         }
         val favoriteAction: @Composable (Modifier) -> Unit = { actionModifier ->

@@ -57,6 +57,102 @@ class DetailsProPolicyTest {
         assertNull(detailsProAdjacentEpisode(episodes, 20, 1))
     }
 
+    @Test
+    fun initialFocusWaitsForAttachedPlayableSeriesAction() {
+        assertEquals(
+            DetailsInitialFocusAction.NONE,
+            detailsInitialFocusAction(
+                isSeries = true,
+                targetEpisodePresent = false,
+                playActionAttached = true,
+                currentEpisodePresent = false,
+                initialFocusPending = true,
+                errorPresent = false,
+            ),
+        )
+        assertEquals(
+            DetailsInitialFocusAction.REQUEST_PLAY,
+            detailsInitialFocusAction(
+                isSeries = true,
+                targetEpisodePresent = false,
+                playActionAttached = true,
+                currentEpisodePresent = true,
+                initialFocusPending = true,
+                errorPresent = false,
+            ),
+        )
+        assertEquals(
+            DetailsInitialFocusAction.NONE,
+            detailsInitialFocusAction(
+                isSeries = true,
+                targetEpisodePresent = false,
+                playActionAttached = false,
+                currentEpisodePresent = true,
+                initialFocusPending = true,
+                errorPresent = false,
+            ),
+        )
+        assertEquals(
+            DetailsInitialFocusAction.NONE,
+            detailsInitialFocusAction(
+                isSeries = true,
+                targetEpisodePresent = true,
+                playActionAttached = true,
+                currentEpisodePresent = true,
+                initialFocusPending = true,
+                errorPresent = false,
+            ),
+        )
+        assertEquals(
+            DetailsInitialFocusAction.NONE,
+            detailsInitialFocusAction(
+                isSeries = true,
+                targetEpisodePresent = false,
+                playActionAttached = true,
+                currentEpisodePresent = true,
+                initialFocusPending = false,
+                errorPresent = false,
+            ),
+        )
+        assertEquals(
+            DetailsInitialFocusAction.NONE,
+            detailsInitialFocusAction(
+                isSeries = true,
+                targetEpisodePresent = false,
+                playActionAttached = true,
+                currentEpisodePresent = true,
+                initialFocusPending = true,
+                errorPresent = true,
+            ),
+        )
+    }
+
+    @Test
+    fun movieInitialFocusNeedsOnlyTheAttachedPrimaryAction() {
+        assertEquals(
+            DetailsInitialFocusAction.REQUEST_PLAY,
+            detailsInitialFocusAction(
+                isSeries = false,
+                targetEpisodePresent = false,
+                playActionAttached = true,
+                currentEpisodePresent = false,
+                initialFocusPending = true,
+                errorPresent = false,
+            ),
+        )
+        assertEquals(
+            DetailsInitialFocusAction.NONE,
+            detailsInitialFocusAction(
+                isSeries = false,
+                targetEpisodePresent = false,
+                playActionAttached = true,
+                currentEpisodePresent = true,
+                initialFocusPending = true,
+                errorPresent = true,
+            ),
+        )
+    }
+
     private fun item(
         id: Int,
         name: String,
