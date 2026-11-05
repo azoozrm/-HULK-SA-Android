@@ -76,6 +76,33 @@ internal class TrackPreferenceIntentStore {
         entries[Key(accountId, profileId, historyKey)]?.toIntent()
     }
 
+    /**
+     * Every live explicit intent for one account/profile. A same-profile library reload reconciles
+     * these overlays into the durable snapshot so a queued write cannot be lost when the store is
+     * re-read. Other account/profile keys are removed only while the caller still owns the active
+     * scope; the check runs under this store lock so a newer scope cannot publish into a purge.
+     */
+    fun snapshotFor(
+        accountId: String,
+        profileId: String,
+    ): Map<String, TrackPreferenceIntent> = synchronized(lock) {
+        entries.entries
+            .asSequence()
+            .filter { (key, _) -> key.accountId == accountId && key.profileId == profileId }
+            .associate { (key, entry) -> key.historyKey to entry.toIntent() }
+    }
+
+    fun retainOnlyIf(
+        accountId: String,
+        profileId: String,
+        canRetain: () -> Boolean,
+    ) = synchronized(lock) {
+        if (!canRetain()) return@synchronized
+        entries.keys.removeAll { key ->
+            key.accountId != accountId || key.profileId != profileId
+        }
+    }
+
     fun isCurrent(
         accountId: String,
         profileId: String,

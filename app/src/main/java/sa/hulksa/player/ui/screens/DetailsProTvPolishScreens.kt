@@ -499,6 +499,11 @@ private fun MovieDetailsProTvPolished(
                         primary = false,
                         outlined = true,
                         compact = true,
+                        onFocused = {
+                            // Deliberate Back focus cancels the pending primary-action grant;
+                            // late episode data must never pull focus away from Back.
+                            initialFocusPending = false
+                        },
                         modifier = Modifier
                             .focusRequester(backRequester)
                             .focusProperties {
@@ -1402,6 +1407,11 @@ private fun SeriesDetailsProTvPolished(
                         primary = false,
                         outlined = true,
                         compact = true,
+                        onFocused = {
+                            // Deliberate Back focus cancels the pending primary-action grant;
+                            // late episode data must never pull focus away from Back.
+                            initialFocusPending = false
+                        },
                         modifier = Modifier
                             .focusRequester(backRequester)
                             .focusProperties {

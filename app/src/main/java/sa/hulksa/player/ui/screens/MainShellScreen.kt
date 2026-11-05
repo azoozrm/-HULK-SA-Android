@@ -151,6 +151,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -199,6 +200,7 @@ import sa.hulksa.player.data.FavoriteMutationOutcome
 import sa.hulksa.player.data.FavoriteMutationStatus
 import sa.hulksa.player.data.GrowthAction
 import sa.hulksa.player.data.HomeHeroMetadataStore
+import sa.hulksa.player.hulkPerfLog
 import sa.hulksa.player.data.HomeHeroTechnicalMetadata
 import sa.hulksa.player.data.OperationsAnnouncement
 import sa.hulksa.player.data.OperationsAnnouncementSeverity
@@ -2866,6 +2868,7 @@ private fun CinemaHero(
     )
     // One selected-hero load: technical facts plus the bounded presentation backfill, shared with
     // the facts row so artwork and copy never start competing requests.
+    val heroIdentity = "${item.type}:${item.id}"
     val metadataStore = remember(context) { HomeHeroMetadataStore.get(context) }
     val metadataOwner = metadataStore.currentOwner()
     var heroMetadata by remember(item.type, item.id, metadataOwner) {
@@ -2873,7 +2876,14 @@ private fun CinemaHero(
     }
     LaunchedEffect(item.type, item.id, metadataOwner) {
         val owner = metadataOwner ?: return@LaunchedEffect
+        val startedNs = System.nanoTime()
+        hulkPerfLog { "homeHeroMetadataStart identity=$heroIdentity cached=${heroMetadata.quality != null}" }
         val loaded = metadataStore.metadata(owner, item, requirePresentation = true)
+        hulkPerfLog {
+            "homeHeroMetadata identity=$heroIdentity " +
+                "ms=${(System.nanoTime() - startedNs) / 1_000_000} " +
+                "artwork=${loaded.artworkUrl != null}"
+        }
         metadataStore.publishIfCurrent(owner) { heroMetadata = loaded }
     }
     val artworkCandidates = remember(heroMetadata.artworkUrl, item.backdropUrl, item.posterUrl) {
@@ -2886,11 +2896,18 @@ private fun CinemaHero(
     val heroPlot = (heroMetadata.plot ?: item.plot)
         ?.trim()
         ?.takeIf(String::isNotBlank)
+    val heroPlacementLogged = remember(heroIdentity) { booleanArrayOf(false) }
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
             .height(heroHeight)
-            .background(Color(0xFF0A0B08)),
+            .background(Color(0xFF0A0B08))
+            .onPlaced {
+                if (!heroPlacementLogged[0]) {
+                    heroPlacementLogged[0] = true
+                    hulkPerfLog { "homeHeroPlaced identity=$heroIdentity" }
+                }
+            },
     ) {
         // One-row fit resolved from the real title/subtitle at the current font scale and the
         // natural-width action group, minus the header's own horizontal padding.
@@ -2927,6 +2944,7 @@ private fun CinemaHero(
         }
         HeroArtwork(
             candidates = artworkCandidates,
+            identity = heroIdentity,
             contentDescription = item.name,
             phonePortrait = isPortraitPhone,
             phoneWindowHeightDp = (configuration.screenWidthDp * 9f / 16f).dp,
@@ -3040,6 +3058,7 @@ private fun CinemaHero(
             HeroCopy(
                 title = item.name,
                 item = item,
+                heroIdentity = heroIdentity,
                 isTv = isTv,
                 heroMetadata = heroMetadata,
                 heroPlot = heroPlot,
@@ -3292,6 +3311,7 @@ internal enum class HeroArtworkLayoutMode {
 private fun HeroCopy(
     title: String,
     item: ContentItem,
+    heroIdentity: String,
     isTv: Boolean,
     heroMetadata: HomeHeroTechnicalMetadata,
     heroPlot: String?,
@@ -3302,6 +3322,7 @@ private fun HeroCopy(
     onFocused: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val heroActionsPlacedLogged = remember(heroIdentity) { booleanArrayOf(false) }
     val density = LocalDensity.current
     val titleFontSize = if (isTv) 36.sp else 28.sp
     val titleLineHeight = if (isTv) 42.sp else 34.sp
@@ -3350,6 +3371,12 @@ private fun HeroCopy(
                 onToggleFavorite = onToggleFavorite,
                 watchModifier = watchModifier,
                 onFocused = onFocused,
+                onPlaced = {
+                    if (!heroActionsPlacedLogged[0]) {
+                        heroActionsPlacedLogged[0] = true
+                        hulkPerfLog { "homeHeroActionsPlaced identity=$heroIdentity" }
+                    }
+                },
             )
         }.first().measure(Constraints(maxWidth = width))
 
@@ -3512,6 +3539,7 @@ internal fun heroArtworkOnFailed(
 @Composable
 private fun BoxScope.HeroArtwork(
     candidates: List<String>,
+    identity: String,
     contentDescription: String,
     phonePortrait: Boolean,
     phoneWindowHeightDp: Dp,
@@ -3519,6 +3547,15 @@ private fun BoxScope.HeroArtwork(
 ) {
     var selection by remember(candidates) { mutableStateOf(HeroArtworkSelectionState()) }
     val painters = remember(candidates) { mutableStateMapOf<Int, Painter>() }
+    val artworkStartLogged = remember(identity, candidates) { booleanArrayOf(false) }
+    val artworkDecoded = remember(identity, candidates) { mutableSetOf<Int>() }
+    val artworkDisplayed = remember(identity, candidates) { booleanArrayOf(false) }
+    LaunchedEffect(identity, candidates) {
+        if (!artworkStartLogged[0]) {
+            artworkStartLogged[0] = true
+            hulkPerfLog { "homeHeroArtworkStart identity=$identity candidates=${candidates.size}" }
+        }
+    }
 
     val currentIndex = selection.candidateIndex
     val currentUrl = if (selection.settled) null else candidates.getOrNull(currentIndex)
@@ -3531,11 +3568,18 @@ private fun BoxScope.HeroArtwork(
             contentScale = ContentScale.Fit,
             onSuccess = { state ->
                 val size = state.painter.intrinsicSize
+                val landscape = homeHeroArtworkIsLandscape(size.width, size.height)
                 painters[currentIndex] = state.painter
+                if (artworkDecoded.add(currentIndex)) {
+                    hulkPerfLog {
+                        "homeHeroArtworkDecoded identity=$identity index=$currentIndex " +
+                            "landscape=$landscape width=${size.width} height=${size.height}"
+                    }
+                }
                 selection = heroArtworkOnLoaded(
                     state = selection,
                     index = currentIndex,
-                    isLandscape = homeHeroArtworkIsLandscape(size.width, size.height),
+                    isLandscape = landscape,
                     candidateCount = candidates.size,
                 )
             },
@@ -3551,6 +3595,13 @@ private fun BoxScope.HeroArtwork(
     }
 
     val painter = selection.displayIndex?.let(painters::get)
+    val displayedIndex = selection.displayIndex
+    LaunchedEffect(identity, displayedIndex, painter != null) {
+        if (displayedIndex != null && painter != null && !artworkDisplayed[0]) {
+            artworkDisplayed[0] = true
+            hulkPerfLog { "homeHeroArtworkDisplayed identity=$identity index=$displayedIndex" }
+        }
+    }
     if (painter == null) {
         if (phonePortrait) {
             // Phone: the brand fallback stays inside the same reserved 16:9 window.
@@ -3623,6 +3674,7 @@ private fun HomeHeroActions(
     onToggleFavorite: () -> Unit,
     watchModifier: Modifier,
     onFocused: () -> Unit,
+    onPlaced: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -3658,7 +3710,11 @@ private fun HomeHeroActions(
     val favoriteCaption = "المفضلة"
     val favoriteRequiredPx = maxOf(requiredWidthPx("المفضلة"), requiredWidthPx("في المفضلة"))
     val rowGapPx = with(density) { 9.dp.roundToPx() }
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    BoxWithConstraints(
+        Modifier
+            .fillMaxWidth()
+            .onPlaced { onPlaced?.invoke() },
+    ) {
         val availableWidthPx = with(density) { maxWidth.roundToPx() }
         val fitsRow = primaryRequiredPx + favoriteRequiredPx + rowGapPx <= availableWidthPx
         if (fitsRow) {

@@ -127,6 +127,35 @@ class DetailsProPolicyTest {
         )
     }
 
+
+    @Test
+    fun `deliberate back focus suppresses the late episode primary grant`() {
+        // Back focus is wired to clear initialFocusPending before delayed episode data arrives.
+        assertEquals(
+            DetailsInitialFocusAction.NONE,
+            detailsInitialFocusAction(
+                isSeries = true,
+                targetEpisodePresent = false,
+                playActionAttached = true,
+                currentEpisodePresent = true,
+                initialFocusPending = false,
+                errorPresent = false,
+            ),
+        )
+        // An untouched entry keeps the pending grant and resolves to the primary action.
+        assertEquals(
+            DetailsInitialFocusAction.REQUEST_PLAY,
+            detailsInitialFocusAction(
+                isSeries = true,
+                targetEpisodePresent = false,
+                playActionAttached = true,
+                currentEpisodePresent = true,
+                initialFocusPending = true,
+                errorPresent = false,
+            ),
+        )
+    }
+
     @Test
     fun movieInitialFocusNeedsOnlyTheAttachedPrimaryAction() {
         assertEquals(

@@ -637,6 +637,7 @@ class HulkViewModel internal constructor(
         load = { activeSession, type ->
             catalogLoadMutex.withLock {
                 val startedNs = System.nanoTime()
+                hulkPerfLog { "catalogBegin type=$type" }
                 val full = repository.catalog(activeSession, type)
                 val compactStartedNs = System.nanoTime()
                 val snapshot = mutableState.value
@@ -661,6 +662,10 @@ class HulkViewModel internal constructor(
             mutableState.update { it.copy(loadingTypes = loadingTypes) }
         },
         onLoaded = { type, result, remaining ->
+            hulkPerfLog {
+                "catalogPublished type=$type items=${result.full.items.size} " +
+                    "remaining=${remaining.size}"
+            }
             loadedCatalogs[type] = result.full
             homeCatalogs[type] = result.home
             mutableState.update { state ->
@@ -948,8 +953,14 @@ class HulkViewModel internal constructor(
                 .toMap()
             if (sourceCatalogs.isEmpty()) return@launch
             val rebuiltHomeCatalogs = withContext(Dispatchers.Default) {
-                sourceCatalogs.mapValues { (_, catalog) ->
-                    compactHomeCatalogForHome(catalog, favorites, history)
+                sourceCatalogs.mapValues { (type, catalog) ->
+                    val startedNs = System.nanoTime()
+                    compactHomeCatalogForHome(catalog, favorites, history).also {
+                        hulkPerfLog {
+                            "homeRecompact type=$type items=${catalog.items.size} " +
+                                "ms=${(System.nanoTime() - startedNs) / 1_000_000}"
+                        }
+                    }
                 }
             }
             rebuiltHomeCatalogs.forEach { (type, catalog) ->
@@ -981,7 +992,9 @@ class HulkViewModel internal constructor(
     )
 
     private fun ensureDestinationCatalogs(destination: MainDestination) {
-        catalogTypesForDestination(destination).forEach(::ensureCatalog)
+        val types = catalogTypesForDestination(destination)
+        hulkPerfLog { "catalogEnsure destination=$destination types=$types" }
+        types.forEach(::ensureCatalog)
     }
 
     fun selectType(type: ContentType) {
@@ -3817,6 +3830,7 @@ class HulkViewModel internal constructor(
             }
             return
         }
+        hulkPerfLog { "catalogRequest type=$type force=$force" }
         mutableState.update { it.copy(errorMessage = null) }
     }
 

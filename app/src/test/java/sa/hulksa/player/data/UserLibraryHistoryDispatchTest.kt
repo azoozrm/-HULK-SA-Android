@@ -619,6 +619,101 @@ class UserLibraryHistoryDispatchTest {
         )
     }
 
+
+    @Test
+    fun `same profile reload keeps a delayed audio and explicit off intent durable`() = runBlocking {
+        val fixture = Fixture()
+        val request = request("movie:1", id = 1)
+        fixture.library.recordStartForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request,
+            historyAttempt = fixture.library.currentHistoryAttempt(),
+        )
+        val audioIntent = fixture.library.publishTrackPreferenceIntent(
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request,
+            audioPreference = "audio-A",
+        )!!
+        val subtitleIntent = fixture.library.publishTrackPreferenceIntent(
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request,
+            subtitlePreference = "off",
+        )!!
+
+        // The durable write is still queued while the same profile is re-selected/reloaded.
+        val reloaded = fixture.library.initializeForProfile(
+            expectedAccountId = ACCOUNT_ID,
+            profile = fixture.profileStore.activeProfile(),
+        )
+        assertNotNull(reloaded)
+        assertNotNull(
+            fixture.library.trackPreferenceIntent(
+                ACCOUNT_ID,
+                PRIMARY_PROFILE_ID,
+                "movie:1",
+            ),
+        )
+        val reloadedEntry = reloaded!!.history.first { it.key == "movie:1" }
+        assertEquals("audio-A", reloadedEntry.savedAudioPreference)
+        assertEquals("off", reloadedEntry.savedSubtitlePreference)
+
+        val written = fixture.library.updateTrackPreferenceForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request,
+            audioPreference = "audio-A",
+            subtitlePreference = "off",
+            audioRevision = audioIntent.audioRevision,
+            subtitleRevision = subtitleIntent.subtitleRevision,
+            historyAttempt = fixture.library.currentHistoryAttempt(),
+        )
+        assertNotNull(written)
+        val disk = readHistoryDocument(fixture.userPreferences.restart(), HISTORY_KEY)
+        val durable = disk.entries.first { it.key == "movie:1" }
+        assertEquals("audio-A", durable.savedAudioPreference)
+        assertEquals("off", durable.savedSubtitlePreference)
+    }
+
+    @Test
+    fun `switching profile still clears intents owned by the previous profile`() = runBlocking {
+        val fixture = Fixture()
+        val request = request("movie:1", id = 1)
+        fixture.library.recordStartForOwner(
+            expectedOwner = fixture.owner,
+            expectedAccountId = ACCOUNT_ID,
+            expectedProfileId = PRIMARY_PROFILE_ID,
+            request = request,
+            historyAttempt = fixture.library.currentHistoryAttempt(),
+        )
+        assertNotNull(
+            fixture.library.publishTrackPreferenceIntent(
+                expectedAccountId = ACCOUNT_ID,
+                expectedProfileId = PRIMARY_PROFILE_ID,
+                request = request,
+                audioPreference = "audio-A",
+            ),
+        )
+        fixture.seedSecondProfile()
+        assertTrue(fixture.profileStore.setActiveProfile(SECONDARY_PROFILE_ID))
+        val reloaded = fixture.library.initializeForProfile(
+            expectedAccountId = ACCOUNT_ID,
+            profile = fixture.profileStore.activeProfile(),
+        )
+        assertNotNull(reloaded)
+        assertNull(
+            fixture.library.trackPreferenceIntent(
+                ACCOUNT_ID,
+                PRIMARY_PROFILE_ID,
+                "movie:1",
+            ),
+        )
+    }
+
     private class Fixture {
         val scopeState = FakeSharedPreferences()
         val profilePreferences = FakeSharedPreferences()

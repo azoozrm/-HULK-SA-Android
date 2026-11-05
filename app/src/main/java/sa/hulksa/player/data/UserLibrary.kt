@@ -354,17 +354,46 @@ class UserLibrary internal constructor(
         profile: UserProfile,
     ): UserLibrarySnapshot? = runUserLibraryStartupOffMain {
         if (!matchesOwner(expectedAccountId, profile.id)) return@runUserLibraryStartupOffMain null
-        // Live intents belong to the previous profile/session; durable history remains the source
-        // after a profile (re)load.
-        trackPreferenceIntents.clearAll()
+        // A same-profile reload must not discard an explicit audio/subtitle intent whose durable
+        // write is still queued. Intents for any other account/profile are cleared while the
+        // caller is still the active owner. Durable history remains the persisted source.
+        trackPreferenceIntents.retainOnlyIf(expectedAccountId, profile.id) {
+            matchesOwner(expectedAccountId, profile.id)
+        }
+        if (!matchesOwner(expectedAccountId, profile.id)) return@runUserLibraryStartupOffMain null
         val scopedPreferences = accountScope.preferences(PREFERENCES_NAME, expectedAccountId)
         migrateLegacyLibraryIfNeeded(scopedPreferences)
         if (!matchesOwner(expectedAccountId, profile.id)) return@runUserLibraryStartupOffMain null
+        val pending = trackPreferenceIntents.snapshotFor(expectedAccountId, profile.id)
         val snapshot = UserLibrarySnapshot(
             favorites = favorites(scopedPreferences, profile),
-            history = history(scopedPreferences, profile) { true },
+            history = applyTrackPreferenceIntents(
+                entries = history(scopedPreferences, profile) { true },
+                pending = pending,
+            ),
         )
         snapshot.takeIf { matchesOwner(expectedAccountId, profile.id) }
+    }
+
+    /**
+     * Reconciles a live explicit choice over a reloaded durable snapshot. Null intent fields mean
+     * "no choice for this setting", so the durable value is retained; an explicit OFF is the
+     * non-null string "off" and wins. Entries are not added or reordered here: the durable history
+     * remains the structural owner while a queued preference write is still in flight.
+     */
+    private fun applyTrackPreferenceIntents(
+        entries: List<HistoryEntry>,
+        pending: Map<String, TrackPreferenceIntent>,
+    ): List<HistoryEntry> {
+        if (pending.isEmpty()) return entries
+        return entries.map { entry ->
+            val intent = pending[entry.key] ?: return@map entry
+            entry.copy(
+                savedAudioPreference = intent.audioPreference ?: entry.savedAudioPreference,
+                savedSubtitlePreference = intent.subtitlePreference
+                    ?: entry.savedSubtitlePreference,
+            )
+        }
     }
 
     internal suspend fun recordStartForOwner(

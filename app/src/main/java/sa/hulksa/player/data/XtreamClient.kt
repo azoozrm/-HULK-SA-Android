@@ -16,6 +16,7 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import sa.hulksa.player.BuildConfig
+import sa.hulksa.player.hulkPerfLog
 import sa.hulksa.player.model.AccountInfo
 import sa.hulksa.player.model.AuthenticatedSession
 import sa.hulksa.player.model.Catalog
@@ -94,17 +95,38 @@ open class XtreamClient(
                     ContentType.SERIES -> "get_series"
                 }
 
+                val startedNs = System.nanoTime()
                 val categories = async {
-                    parseCategories(requestArray(session.portal, session.credentials, categoryAction), type)
+                    val partStartedNs = System.nanoTime()
+                    val parsed = parseCategories(
+                        requestArray(session.portal, session.credentials, categoryAction),
+                        type,
+                    )
+                    hulkPerfLog {
+                        "catalogPart type=$type part=categories count=${parsed.size} " +
+                            "ms=${(System.nanoTime() - partStartedNs) / 1_000_000}"
+                    }
+                    parsed
                 }
                 val items = async {
-                    parseItems(
+                    val partStartedNs = System.nanoTime()
+                    val parsed = parseItems(
                         requestArray(session.portal, session.credentials, contentAction),
                         type,
                         session.portal.baseUrl,
                     )
+                    hulkPerfLog {
+                        "catalogPart type=$type part=items count=${parsed.size} " +
+                            "ms=${(System.nanoTime() - partStartedNs) / 1_000_000}"
+                    }
+                    parsed
                 }
-                Catalog(categories.await(), items.await())
+                Catalog(categories.await(), items.await()).also {
+                    hulkPerfLog {
+                        "catalogFetch type=$type items=${it.items.size} categories=${it.categories.size} " +
+                            "ms=${(System.nanoTime() - startedNs) / 1_000_000}"
+                    }
+                }
             }
         }
 
@@ -309,10 +331,17 @@ open class XtreamClient(
         action: String,
     ): JSONArray = withContext(Dispatchers.IO) {
         try {
+            val startedNs = System.nanoTime()
             val body = request(portal, credentials, action)
+            val httpNs = System.nanoTime()
             currentCoroutineContext().ensureActive()
             val parsed = XtreamJsonParser.parseArray(body)
             currentCoroutineContext().ensureActive()
+            hulkPerfLog {
+                "xtreamArray action=$action chars=${body.length} " +
+                    "httpMs=${(httpNs - startedNs) / 1_000_000} " +
+                    "parseMs=${(System.nanoTime() - httpNs) / 1_000_000}"
+            }
             parsed
         } catch (error: XtreamJsonGuardException) {
             throw error.asXtreamException()
