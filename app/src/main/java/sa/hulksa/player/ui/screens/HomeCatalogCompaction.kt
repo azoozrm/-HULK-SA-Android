@@ -65,18 +65,16 @@ private fun selectTop(
     }
     items.forEachIndexed { index, item ->
         val score = scoreOf(item) ?: return@forEachIndexed
-        val candidate = RankedCatalogItem(item, index, score)
         if (heap.size < limit) {
-            heap.add(candidate)
+            heap.add(RankedCatalogItem(item, index, score))
             return@forEachIndexed
         }
         val worst = heap.peek()
-        val wins = compareValues(candidate.score, worst.score) > 0 ||
-            (compareValues(candidate.score, worst.score) == 0 &&
-                candidate.sourceIndex < worst.sourceIndex)
+        val wins = compareValues(score, worst.score) > 0 ||
+            (compareValues(score, worst.score) == 0 && index < worst.sourceIndex)
         if (wins) {
             heap.poll()
-            heap.add(candidate)
+            heap.add(RankedCatalogItem(item, index, score))
         }
     }
     return heap.sortedWith(
