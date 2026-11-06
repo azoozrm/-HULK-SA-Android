@@ -628,33 +628,30 @@ class HulkViewModel internal constructor(
     private var sessionOwnershipEpoch = 0L
     private val loadedCatalogs = mutableMapOf<ContentType, Catalog>()
     private val homeCatalogs = mutableMapOf<ContentType, Catalog>()
-    // Catalog payloads can be large (the guard permits up to 32 MiB / 75k items). Loading Movie
-    // and Series concurrently used to hold two complete JSON trees plus two item lists and could
-    // exceed the process heap. One catalog at a time keeps the peak bounded without truncating.
-    private val catalogLoadMutex = Mutex()
+    // Catalog payloads can be large (the guard permits up to 32 MiB / 75k items). The request
+    // owner admits exactly one full-catalog pipeline at a time; foreground priority only reorders
+    // pending work, so the memory bound is retained without overlapping full catalogs.
     private val catalogRequestOwner = CatalogRequestOwner(
         scope = viewModelScope,
         load = { activeSession, type ->
-            catalogLoadMutex.withLock {
-                val startedNs = System.nanoTime()
-                hulkPerfLog { "catalogBegin type=$type" }
-                val full = repository.catalog(activeSession, type)
-                val compactStartedNs = System.nanoTime()
-                val snapshot = mutableState.value
-                val home = if (type == ContentType.MOVIE || type == ContentType.SERIES) {
-                    withContext(Dispatchers.Default) {
-                        compactHomeCatalogForHome(full, snapshot.favorites, snapshot.history)
-                    }
-                } else {
-                    full
+            val startedNs = System.nanoTime()
+            hulkPerfLog { "catalogBegin type=$type" }
+            val full = repository.catalog(activeSession, type)
+            val compactStartedNs = System.nanoTime()
+            val snapshot = mutableState.value
+            val home = if (type == ContentType.MOVIE || type == ContentType.SERIES) {
+                withContext(Dispatchers.Default) {
+                    compactHomeCatalogForHome(full, snapshot.favorites, snapshot.history)
                 }
-                hulkPerfLog {
-                    "catalog type=$type items=${full.items.size} categories=${full.categories.size} " +
-                        "loadMs=${(compactStartedNs - startedNs) / 1_000_000} compactMs=" +
-                        "${(System.nanoTime() - compactStartedNs) / 1_000_000}"
-                }
-                CatalogLoadResult(full = full, home = home)
+            } else {
+                full
             }
+            hulkPerfLog {
+                "catalog type=$type items=${full.items.size} categories=${full.categories.size} " +
+                    "loadMs=${(compactStartedNs - startedNs) / 1_000_000} compactMs=" +
+                    "${(System.nanoTime() - compactStartedNs) / 1_000_000}"
+            }
+            CatalogLoadResult(full = full, home = home)
         },
         hasLoaded = { type -> loadedCatalogs[type] != null },
         isSessionCurrent = { activeSession -> session === activeSession },
@@ -873,7 +870,7 @@ class HulkViewModel internal constructor(
             current.searchQuery.isBlank() &&
             current.errorMessage == null
         ) {
-            ensureDestinationCatalogs(destination)
+            ensureDestinationCatalogs(destination, foreground = true)
             return
         }
 
@@ -889,7 +886,7 @@ class HulkViewModel internal constructor(
                 errorMessage = null,
             )
         }
-        ensureDestinationCatalogs(destination)
+        ensureDestinationCatalogs(destination, foreground = true)
     }
 
     fun refreshProfileLibrary(
@@ -991,9 +988,15 @@ class HulkViewModel internal constructor(
         home = homeCatalogs,
     )
 
-    private fun ensureDestinationCatalogs(destination: MainDestination) {
+    private fun ensureDestinationCatalogs(
+        destination: MainDestination,
+        foreground: Boolean = false,
+    ) {
         val types = catalogTypesForDestination(destination)
-        hulkPerfLog { "catalogEnsure destination=$destination types=$types" }
+        if (foreground) {
+            catalogRequestOwner.prioritize(destination.catalogTypeOrNull())
+        }
+        hulkPerfLog { "catalogEnsure destination=$destination types=$types foreground=$foreground" }
         types.forEach(::ensureCatalog)
     }
 
@@ -1048,8 +1051,10 @@ class HulkViewModel internal constructor(
 
     fun refresh() {
         refreshOperations(force = true)
-        val types = catalogTypesForDestination(mutableState.value.destination)
+        val destination = mutableState.value.destination
+        val types = catalogTypesForDestination(destination)
         if (types.isEmpty()) return
+        catalogRequestOwner.prioritize(destination.catalogTypeOrNull())
         mutableState.update { it.copy(errorMessage = null) }
         types.forEach { ensureCatalog(it, force = true) }
         scanSubscribedSeries(NotificationScanTrigger.MANUAL_REFRESH)
@@ -3288,6 +3293,7 @@ class HulkViewModel internal constructor(
                             catalogRequestOwner.replaceSession(
                                 session = refreshed,
                                 requiredTypes = catalogTypesForDestination(mutableState.value.destination),
+                                foregroundType = mutableState.value.destination.catalogTypeOrNull(),
                             )
                             publishPresenceOwnership(refreshed)
                             onResult("تم تحديث بيانات الاشتراك من السيرفر.")
