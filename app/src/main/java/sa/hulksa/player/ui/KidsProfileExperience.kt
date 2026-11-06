@@ -370,6 +370,8 @@ fun KidsProfileExperience(
                             onActionNotice = onActionNotice,
                             onBack = viewModel::back,
                             onProgress = viewModel::onPlaybackProgress,
+                            onAudioPreferenceChanged = viewModel::saveAudioTrackPreference,
+                            onSubtitlePreferenceChanged = viewModel::saveSubtitleTrackPreference,
                             nextEpisodeTitle = nextEpisode?.let {
                                 "الموسم ${it.season} • الحلقة ${it.episodeNumber} • ${it.title}"
                             },

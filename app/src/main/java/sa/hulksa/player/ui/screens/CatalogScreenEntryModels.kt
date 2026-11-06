@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import sa.hulksa.player.MainDestination
+import sa.hulksa.player.hulkPerfLog
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
@@ -301,7 +302,14 @@ internal class CatalogScreenEntryModelStore(
             latestHomeInput = input
             homeModel?.takeIf { it.input == input }
         }?.let { return it }
+        val startedNs = System.nanoTime()
         val derived = withContext(dispatcher) { homeBuilder(input) }
+        hulkPerfLog {
+            "homeModel movies=${input.movieCatalog?.items?.size ?: 0} " +
+                "series=${input.seriesCatalog?.items?.size ?: 0} " +
+                "live=${input.liveCatalog?.items?.size ?: 0} ms=" +
+                "${(System.nanoTime() - startedNs) / 1_000_000}"
+        }
         val keyed = KeyedHomeContentModel(input, derived)
         return synchronized(lock) {
             homeModel

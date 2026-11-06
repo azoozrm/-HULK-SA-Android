@@ -16,6 +16,7 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import sa.hulksa.player.BuildConfig
+import sa.hulksa.player.hulkPerfLog
 import sa.hulksa.player.model.AccountInfo
 import sa.hulksa.player.model.AuthenticatedSession
 import sa.hulksa.player.model.Catalog
@@ -94,17 +95,38 @@ open class XtreamClient(
                     ContentType.SERIES -> "get_series"
                 }
 
+                val startedNs = System.nanoTime()
                 val categories = async {
-                    parseCategories(requestArray(session.portal, session.credentials, categoryAction), type)
+                    val partStartedNs = System.nanoTime()
+                    val parsed = parseCategories(
+                        requestArray(session.portal, session.credentials, categoryAction),
+                        type,
+                    )
+                    hulkPerfLog {
+                        "catalogPart type=$type part=categories count=${parsed.size} " +
+                            "ms=${(System.nanoTime() - partStartedNs) / 1_000_000}"
+                    }
+                    parsed
                 }
                 val items = async {
-                    parseItems(
+                    val partStartedNs = System.nanoTime()
+                    val parsed = parseItems(
                         requestArray(session.portal, session.credentials, contentAction),
                         type,
                         session.portal.baseUrl,
                     )
+                    hulkPerfLog {
+                        "catalogPart type=$type part=items count=${parsed.size} " +
+                            "ms=${(System.nanoTime() - partStartedNs) / 1_000_000}"
+                    }
+                    parsed
                 }
-                Catalog(categories.await(), items.await())
+                Catalog(categories.await(), items.await()).also {
+                    hulkPerfLog {
+                        "catalogFetch type=$type items=${it.items.size} categories=${it.categories.size} " +
+                            "ms=${(System.nanoTime() - startedNs) / 1_000_000}"
+                    }
+                }
             }
         }
 
@@ -253,6 +275,9 @@ open class XtreamClient(
             season = entry.season,
             episodeNumber = entry.episodeNumber,
             episodeTitle = entry.episodeTitle,
+            originalLanguage = entry.originalLanguage,
+            savedAudioPreference = entry.savedAudioPreference,
+            savedSubtitlePreference = entry.savedSubtitlePreference,
         )
     }
 
@@ -306,10 +331,17 @@ open class XtreamClient(
         action: String,
     ): JSONArray = withContext(Dispatchers.IO) {
         try {
+            val startedNs = System.nanoTime()
             val body = request(portal, credentials, action)
+            val httpNs = System.nanoTime()
             currentCoroutineContext().ensureActive()
             val parsed = XtreamJsonParser.parseArray(body)
             currentCoroutineContext().ensureActive()
+            hulkPerfLog {
+                "xtreamArray action=$action chars=${body.length} " +
+                    "httpMs=${(httpNs - startedNs) / 1_000_000} " +
+                    "parseMs=${(System.nanoTime() - httpNs) / 1_000_000}"
+            }
             parsed
         } catch (error: XtreamJsonGuardException) {
             throw error.asXtreamException()
@@ -409,6 +441,8 @@ open class XtreamClient(
         portalBaseUrl: String,
     ): List<ContentItem> = try {
         val idKey = if (type == ContentType.SERIES) "series_id" else "stream_id"
+        // One base parse for the whole catalog; absolute artwork never needs it at all.
+        val artworkBase = (portalBaseUrl.trimEnd('/') + "/").toHttpUrlOrNull()
         buildList {
             array.forEachUniqueObject(
                 maxUniqueItems = XtreamJsonLimits.CATALOG.maxUniqueItems!!,
@@ -424,7 +458,7 @@ open class XtreamClient(
                         type = type,
                         posterUrl = normalizeArtworkUrl(
                             item.optNullableString(if (type == ContentType.SERIES) "cover" else "stream_icon"),
-                            portalBaseUrl,
+                            artworkBase,
                         ),
                         rating = item.optNullableString("rating") ?: item.optNullableString("rating_5based"),
                         year = item.optNullableString("year"),
@@ -437,7 +471,7 @@ open class XtreamClient(
                         }?.toLongOrNull(),
                         plot = item.optNullableString("plot"),
                         genre = item.optNullableString("genre"),
-                        backdropUrl = normalizeArtworkUrl(item.firstImageUrl("backdrop_path"), portalBaseUrl),
+                        backdropUrl = normalizeArtworkUrl(item.firstImageUrl("backdrop_path"), artworkBase),
                     ),
                 )
             }
@@ -455,6 +489,13 @@ open class XtreamClient(
         releaseDate = info.optNullableString("releasedate")
             ?: info.optNullableString("release_date"),
         backdropUrl = info.xtreamPresentationArtworkUrl(portalBaseUrl),
+        // Only explicit original-language fields are trustworthy. Generic `language`/`country`
+        // may describe the current dub or production country and must not classify the title.
+        originalLanguage = info.optNullableString("original_language")
+            ?: info.optNullableString("original_language_iso")
+            ?: info.optNullableString("original_language_iso_639_1")
+            ?: info.optNullableString("original_language_code")
+            ?: info.optNullableString("original_language_name"),
     )
 
     private fun JSONObject.optNullableString(key: String): String? = xtreamNullableString(key)
@@ -562,19 +603,27 @@ private fun normalizeLiveOutputFormat(rawValue: String?): String? = rawValue
     ?.takeIf { it == "ts" || it == "m3u8" }
 
 internal fun normalizeArtworkUrl(raw: String?, portalBaseUrl: String): String? {
-    val clean = raw
-        ?.trim()
-        ?.takeUnless { it.isBlank() || it.equals("null", ignoreCase = true) }
-        ?: return null
-    val base = (portalBaseUrl.trimEnd('/') + "/").toHttpUrlOrNull()
+    val clean = cleanArtworkUrl(raw) ?: return null
+    if (clean.isAbsoluteHttpUrl()) return clean
+    return normalizeArtworkUrl(clean, (portalBaseUrl.trimEnd('/') + "/").toHttpUrlOrNull())
+}
+
+private fun normalizeArtworkUrl(raw: String?, base: HttpUrl?): String? {
+    val clean = cleanArtworkUrl(raw) ?: return null
+    if (clean.isAbsoluteHttpUrl()) return clean
     return when {
-        clean.startsWith("http://", ignoreCase = true) ||
-            clean.startsWith("https://", ignoreCase = true) -> clean
         clean.startsWith("//") && base != null -> "${base.scheme}:$clean"
         base != null -> base.resolve(clean.replace('\\', '/'))?.toString() ?: clean
         else -> clean
     }
 }
+
+private fun cleanArtworkUrl(raw: String?): String? = raw
+    ?.trim()
+    ?.takeUnless { it.isBlank() || it.equals("null", ignoreCase = true) }
+
+private fun String.isAbsoluteHttpUrl(): Boolean =
+    startsWith("http://", ignoreCase = true) || startsWith("https://", ignoreCase = true)
 
 sealed class XtreamException(message: String, cause: Throwable? = null) : Exception(message, cause), LoginFailureSource {
     override val loginFailure: LoginFailure

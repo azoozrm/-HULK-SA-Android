@@ -53,6 +53,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -457,6 +458,7 @@ internal fun SeriesDetailsActionsBar(
     onToggleFavorite: () -> Unit,
     onToggleNotifications: () -> Unit,
     modifier: Modifier = Modifier,
+    onWatchActionPlaced: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     val density = LocalDensity.current
@@ -556,7 +558,8 @@ internal fun SeriesDetailsActionsBar(
                 onFocused = { onActionFocused(playRequester) },
                 modifier = actionModifier
                     .focusRequester(playRequester)
-                    .then(focusWiring(0)),
+                    .then(focusWiring(0))
+                    .onPlaced { onWatchActionPlaced?.invoke() },
             )
         }
         val favoriteAction: @Composable (Modifier) -> Unit = { actionModifier ->

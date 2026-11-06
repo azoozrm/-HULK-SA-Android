@@ -42,6 +42,7 @@ import sa.hulksa.player.data.SessionOwnershipCleanupGate
 import sa.hulksa.player.data.SessionOwnershipCleanupResult
 import sa.hulksa.player.data.SessionPublicationGate
 import sa.hulksa.player.data.SessionPublicationResult
+import sa.hulksa.player.data.TrackPreferenceIntent
 import sa.hulksa.player.data.EpisodeNotificationStoreResult
 import sa.hulksa.player.data.FavoriteMutationGate
 import sa.hulksa.player.data.FavoriteMutationOutcome
@@ -196,6 +197,8 @@ data class HulkUiState(
     val isLoading: Boolean = false,
     val loadingTypes: Set<ContentType> = emptySet(),
     val errorMessage: String? = null,
+    /** False for memory-pressure failures; the accepted error card must not offer a plain Retry. */
+    val errorRetryable: Boolean = true,
     val loginFailure: LoginFailure? = null,
     val loginValidationAttempt: Long = 0,
     val account: AccountInfo? = null,
@@ -229,12 +232,43 @@ data class HulkUiState(
     }
 }
 
+internal fun isMemoryPressureFailure(error: Throwable): Boolean {
+    if (error is OutOfMemoryError) return true
+    val message = error.message.orEmpty()
+    return message.contains("OutOfMemory", ignoreCase = true) ||
+        message.contains("Failed to allocate", ignoreCase = true) ||
+        message.contains("until OOM", ignoreCase = true) ||
+        message.contains("heap free after GC", ignoreCase = true)
+}
+
+private fun looksLikeRawTechnicalMessage(message: String): Boolean {
+    val lower = message.lowercase()
+    return lower.startsWith("java.") ||
+        lower.contains("exception") ||
+        lower.contains("r8-map-id") ||
+        lower.contains("failed to allocate") ||
+        lower.contains("outofmemory") ||
+        lower.contains("sqlite") ||
+        lower.contains("json")
+}
+
+internal fun userFacingFailureMessage(error: Throwable): String =
+    when {
+        isMemoryPressureFailure(error) ->
+            "تعذر تحميل المحتوى بسبب ضغط في ذاكرة الجهاز. اعد تشغيل التطبيق."
+        else -> error.message
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && !looksLikeRawTechnicalMessage(it) }
+            ?: "حدث خطا غير متوقع. حاول مرة اخرى"
+    }
+
 /** Actual failure-to-state projection shared by normal, restore and paired authentication. */
 internal fun HulkUiState.finishLoginFailure(error: Throwable): HulkUiState = copy(
     isStarting = false,
     isLoading = false,
     isAccountRefreshing = false,
-    errorMessage = error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى",
+    errorMessage = userFacingFailureMessage(error),
+    errorRetryable = !isMemoryPressureFailure(error),
     loginFailure = loginFailureFor(error),
 )
 
@@ -243,6 +277,7 @@ internal fun HulkUiState.finishExpiredOwnerFailure(message: String?): HulkUiStat
     isLoading = false,
     isAccountRefreshing = false,
     errorMessage = message,
+    errorRetryable = true,
     loginFailure = LoginFailure(LoginFailureCategory.UNKNOWN, LoginFailureStage.LOCAL_PERSISTENCE),
 )
 
@@ -255,6 +290,7 @@ internal fun HulkUiState.rejectLoginValidation(failure: LoginFailure): HulkUiSta
 
 internal fun HulkUiState.finishInvalidTvDeepLink(): HulkUiState = copy(
     errorMessage = "تعذر فتح هذا الرابط",
+    errorRetryable = true,
     loginFailure = if (screen == HulkScreen.LOGIN && loginFailure == null) {
         LoginFailure(LoginFailureCategory.LINK_UNAVAILABLE, LoginFailureStage.VALIDATION)
     } else loginFailure,
@@ -460,6 +496,38 @@ internal fun playerProgressProfileOwnerAllowed(
     activeProfileId: String,
 ): Boolean = expectedProfileId == activeProfileId
 
+/**
+ * Attach the saved audio/subtitle preference from this exact profile-scoped content entry. The
+ * helper is shared by details playback, Continue Watching, TV resume and download replay.
+ */
+internal fun PlaybackRequest.withSavedTrackPreferences(
+    history: List<HistoryEntry>,
+): PlaybackRequest {
+    val entry = history.firstOrNull {
+        it.key == historyKey &&
+            it.streamId == streamId &&
+            it.streamKind.equals(streamKind, ignoreCase = true)
+    } ?: return this
+    return copy(
+        savedAudioPreference = entry.savedAudioPreference,
+        savedSubtitlePreference = entry.savedSubtitlePreference,
+    )
+}
+
+/**
+ * Applies the latest live explicit intent over the persisted history snapshot. Absence stays
+ * automatic; an explicit OFF is the literal `off` and is never treated as absent.
+ */
+internal fun PlaybackRequest.withTrackPreferenceIntent(
+    intent: TrackPreferenceIntent?,
+): PlaybackRequest {
+    if (intent == null) return this
+    return copy(
+        savedAudioPreference = intent.audioPreference ?: savedAudioPreference,
+        savedSubtitlePreference = intent.subtitlePreference ?: savedSubtitlePreference,
+    )
+}
+
 class HulkViewModel internal constructor(
     application: Application,
     private val repository: HulkRepository,
@@ -560,10 +628,16 @@ class HulkViewModel internal constructor(
     private var sessionOwnershipEpoch = 0L
     private val loadedCatalogs = mutableMapOf<ContentType, Catalog>()
     private val homeCatalogs = mutableMapOf<ContentType, Catalog>()
+    // Catalog payloads can be large (the guard permits up to 32 MiB / 75k items). The request
+    // owner admits exactly one full-catalog pipeline at a time; foreground priority only reorders
+    // pending work, so the memory bound is retained without overlapping full catalogs.
     private val catalogRequestOwner = CatalogRequestOwner(
         scope = viewModelScope,
         load = { activeSession, type ->
+            val startedNs = System.nanoTime()
+            hulkPerfLog { "catalogBegin type=$type" }
             val full = repository.catalog(activeSession, type)
+            val compactStartedNs = System.nanoTime()
             val snapshot = mutableState.value
             val home = if (type == ContentType.MOVIE || type == ContentType.SERIES) {
                 withContext(Dispatchers.Default) {
@@ -571,6 +645,11 @@ class HulkViewModel internal constructor(
                 }
             } else {
                 full
+            }
+            hulkPerfLog {
+                "catalog type=$type items=${full.items.size} categories=${full.categories.size} " +
+                    "loadMs=${(compactStartedNs - startedNs) / 1_000_000} compactMs=" +
+                    "${(System.nanoTime() - compactStartedNs) / 1_000_000}"
             }
             CatalogLoadResult(full = full, home = home)
         },
@@ -580,6 +659,10 @@ class HulkViewModel internal constructor(
             mutableState.update { it.copy(loadingTypes = loadingTypes) }
         },
         onLoaded = { type, result, remaining ->
+            hulkPerfLog {
+                "catalogPublished type=$type items=${result.full.items.size} " +
+                    "remaining=${remaining.size}"
+            }
             loadedCatalogs[type] = result.full
             homeCatalogs[type] = result.home
             mutableState.update { state ->
@@ -787,7 +870,7 @@ class HulkViewModel internal constructor(
             current.searchQuery.isBlank() &&
             current.errorMessage == null
         ) {
-            ensureDestinationCatalogs(destination)
+            ensureDestinationCatalogs(destination, foreground = true)
             return
         }
 
@@ -803,7 +886,7 @@ class HulkViewModel internal constructor(
                 errorMessage = null,
             )
         }
-        ensureDestinationCatalogs(destination)
+        ensureDestinationCatalogs(destination, foreground = true)
     }
 
     fun refreshProfileLibrary(
@@ -867,8 +950,14 @@ class HulkViewModel internal constructor(
                 .toMap()
             if (sourceCatalogs.isEmpty()) return@launch
             val rebuiltHomeCatalogs = withContext(Dispatchers.Default) {
-                sourceCatalogs.mapValues { (_, catalog) ->
-                    compactHomeCatalogForHome(catalog, favorites, history)
+                sourceCatalogs.mapValues { (type, catalog) ->
+                    val startedNs = System.nanoTime()
+                    compactHomeCatalogForHome(catalog, favorites, history).also {
+                        hulkPerfLog {
+                            "homeRecompact type=$type items=${catalog.items.size} " +
+                                "ms=${(System.nanoTime() - startedNs) / 1_000_000}"
+                        }
+                    }
                 }
             }
             rebuiltHomeCatalogs.forEach { (type, catalog) ->
@@ -899,8 +988,16 @@ class HulkViewModel internal constructor(
         home = homeCatalogs,
     )
 
-    private fun ensureDestinationCatalogs(destination: MainDestination) {
-        catalogTypesForDestination(destination).forEach(::ensureCatalog)
+    private fun ensureDestinationCatalogs(
+        destination: MainDestination,
+        foreground: Boolean = false,
+    ) {
+        val types = catalogTypesForDestination(destination)
+        if (foreground) {
+            catalogRequestOwner.prioritize(destination.catalogTypeOrNull())
+        }
+        hulkPerfLog { "catalogEnsure destination=$destination types=$types foreground=$foreground" }
+        types.forEach(::ensureCatalog)
     }
 
     fun selectType(type: ContentType) {
@@ -954,8 +1051,10 @@ class HulkViewModel internal constructor(
 
     fun refresh() {
         refreshOperations(force = true)
-        val types = catalogTypesForDestination(mutableState.value.destination)
+        val destination = mutableState.value.destination
+        val types = catalogTypesForDestination(destination)
         if (types.isEmpty()) return
+        catalogRequestOwner.prioritize(destination.catalogTypeOrNull())
         mutableState.update { it.copy(errorMessage = null) }
         types.forEach { ensureCatalog(it, force = true) }
         scanSubscribedSeries(NotificationScanTrigger.MANUAL_REFRESH)
@@ -1104,6 +1203,7 @@ class HulkViewModel internal constructor(
                 }
                 detailsJob = viewModelScope.launch {
                     try {
+                        val detailsStartedNs = System.nanoTime()
                         val details = try {
                             repository.contentDetails(activeSession, item.id)
                         } catch (cancelled: CancellationException) {
@@ -1115,6 +1215,10 @@ class HulkViewModel internal constructor(
                             return@launch
                         }
                         if (!isCurrentDetailsRequest(detailsRequest)) return@launch
+                        hulkPerfLog {
+                            "details type=MOVIE id=${item.id} ms=" +
+                                "${(System.nanoTime() - detailsStartedNs) / 1_000_000}"
+                        }
                         mutableState.update {
                             it.copy(selectedDetails = details, isLoading = false)
                         }
@@ -1154,6 +1258,7 @@ class HulkViewModel internal constructor(
         }
         detailsJob = viewModelScope.launch {
             try {
+                val detailsStartedNs = System.nanoTime()
                 val bundle = try {
                     repository.seriesBundle(activeSession, item.id)
                 } catch (cancelled: CancellationException) {
@@ -1180,6 +1285,10 @@ class HulkViewModel internal constructor(
                         it.season == target.seasonNumber &&
                             it.episodeNumber == target.episodeNumber
                     }
+                }
+                hulkPerfLog {
+                    "details type=SERIES id=${item.id} episodes=${bundle.episodes.size} ms=" +
+                        "${(System.nanoTime() - detailsStartedNs) / 1_000_000}"
                 }
                 mutableState.update {
                     it.copy(
@@ -1210,27 +1319,42 @@ class HulkViewModel internal constructor(
 
     fun playSelectedMovie() {
         val activeSession = session ?: return
-        val movie = mutableState.value.selectedItem?.takeIf { it.type == ContentType.MOVIE } ?: return
+        val state = mutableState.value
+        val movie = state.selectedItem?.takeIf { it.type == ContentType.MOVIE } ?: return
         playerReturnScreen = HulkScreen.MOVIE_DETAILS
-        startPlayback(repository.playback(activeSession, movie))
+        startPlayback(
+            repository.playback(activeSession, movie)
+                .withSavedTrackPreferences(state.history)
+                .copy(originalLanguage = state.selectedDetails?.originalLanguage),
+        )
     }
 
     fun playEpisode(episode: Episode) {
         val activeSession = session ?: return
-        val series = mutableState.value.selectedSeries ?: return
+        val state = mutableState.value
+        val series = state.selectedSeries ?: return
         playerReturnScreen = HulkScreen.SERIES
-        startPlayback(repository.playback(activeSession, series, episode))
+        startPlayback(
+            repository.playback(activeSession, series, episode)
+                .withSavedTrackPreferences(state.history)
+                .copy(originalLanguage = state.selectedDetails?.originalLanguage),
+        )
     }
 
     fun playNextEpisode(): Boolean {
         val activeSession = session ?: return false
-        val series = mutableState.value.selectedSeries ?: return false
-        val current = mutableState.value.playback?.takeIf { it.streamKind == "series" } ?: return false
-        val ordered = mutableState.value.episodes.sortedWith(compareBy(Episode::season, Episode::episodeNumber))
+        val state = mutableState.value
+        val series = state.selectedSeries ?: return false
+        val current = state.playback?.takeIf { it.streamKind == "series" } ?: return false
+        val ordered = state.episodes.sortedWith(compareBy(Episode::season, Episode::episodeNumber))
         val currentIndex = ordered.indexOfFirst { it.id == current.streamId }
         val next = ordered.getOrNull(currentIndex + 1) ?: return false
         playerReturnScreen = HulkScreen.SERIES
-        startPlayback(repository.playback(activeSession, series, next))
+        startPlayback(
+            repository.playback(activeSession, series, next)
+                .withSavedTrackPreferences(state.history)
+                .copy(originalLanguage = state.selectedDetails?.originalLanguage),
+        )
         return true
     }
 
@@ -1302,7 +1426,7 @@ class HulkViewModel internal constructor(
                 streamKind = item.streamKind,
                 streamId = item.streamId,
                 extension = item.extension,
-            ),
+            ).withSavedTrackPreferences(mutableState.value.history),
         )
     }
 
@@ -1575,6 +1699,113 @@ class HulkViewModel internal constructor(
         }
     }
 
+    fun saveAudioTrackPreference(request: PlaybackRequest, preference: String) {
+        saveTrackPreference(request = request, audioPreference = preference)
+    }
+
+    fun saveSubtitleTrackPreference(request: PlaybackRequest, preference: String) {
+        saveTrackPreference(request = request, subtitlePreference = preference)
+    }
+
+    private fun saveTrackPreference(
+        request: PlaybackRequest,
+        audioPreference: String? = null,
+        subtitlePreference: String? = null,
+    ) {
+        if (request.isLive) return
+        val owner = AuthenticatedSessionRegistry.currentOwner() ?: return
+        if (owner.session !== session) return
+        val expectedProfileId = profileStore.activeProfileId()
+        if (expectedProfileId.isBlank()) return
+        val intent = userLibrary.publishTrackPreferenceIntent(
+            expectedAccountId = owner.accountId,
+            expectedProfileId = expectedProfileId,
+            request = request,
+            audioPreference = audioPreference,
+            subtitlePreference = subtitlePreference,
+        ) ?: return
+        // Publish the live intent immediately; this is the owner every replay path consults even
+        // before the durable write completes.
+        publishTrackPreferenceToHistory(request, intent)
+        val historyAttempt = userLibrary.currentHistoryAttempt()
+        viewModelScope.launch {
+            val updated = userLibrary.updateTrackPreferenceForOwner(
+                expectedOwner = owner,
+                expectedAccountId = owner.accountId,
+                expectedProfileId = expectedProfileId,
+                request = request,
+                audioPreference = audioPreference,
+                subtitlePreference = subtitlePreference,
+                audioRevision = intent.audioRevision.takeIf { audioPreference != null },
+                subtitleRevision = intent.subtitleRevision.takeIf { subtitlePreference != null },
+                historyAttempt = historyAttempt,
+            ) ?: return@launch
+            if (
+                !AuthenticatedSessionRegistry.isCurrent(owner) ||
+                session !== owner.session ||
+                profileStore.activeProfileId() != expectedProfileId
+            ) return@launch
+            // A newer explicit intent already owns the live value. Its own write will publish;
+            // this older completion must not roll the state back.
+            val currentIntent = userLibrary.trackPreferenceIntent(
+                accountId = owner.accountId,
+                profileId = expectedProfileId,
+                historyKey = request.historyKey,
+            ) ?: return@launch
+            if (
+                currentIntent.audioRevision != intent.audioRevision ||
+                currentIntent.subtitleRevision != intent.subtitleRevision
+            ) return@launch
+            val saved = updated.firstOrNull {
+                it.key == request.historyKey && it.streamId == request.streamId
+            } ?: return@launch
+            mutableState.update { state ->
+                val existing = state.history.firstOrNull { it.key == saved.key }
+                // Keep newer progress fields from the in-memory entry and update only the durable
+                // preference. If the entry is not in memory yet, add the persisted one so a rapid
+                // exit/reopen still resolves the choice.
+                val merged = existing?.copy(
+                    savedAudioPreference = saved.savedAudioPreference,
+                    savedSubtitlePreference = saved.savedSubtitlePreference,
+                ) ?: saved
+                state.copy(
+                    history = (listOf(merged) + state.history.filterNot {
+                        it.key == merged.key
+                    }).sortedByDescending(HistoryEntry::updatedAtEpochMs),
+                )
+            }
+        }
+    }
+
+    private fun publishTrackPreferenceToHistory(
+        request: PlaybackRequest,
+        intent: TrackPreferenceIntent,
+    ) {
+        mutableState.update { state ->
+            val existing = state.history.firstOrNull {
+                it.key == request.historyKey && it.streamId == request.streamId
+            }
+            if (existing == null) {
+                state
+            } else {
+                state.copy(
+                    history = state.history.map { entry ->
+                        if (entry.key != existing.key) {
+                            entry
+                        } else {
+                            entry.copy(
+                                savedAudioPreference = intent.audioPreference
+                                    ?: entry.savedAudioPreference,
+                                savedSubtitlePreference = intent.subtitlePreference
+                                    ?: entry.savedSubtitlePreference,
+                            )
+                        }
+                    },
+                )
+            }
+        }
+    }
+
     fun removeHistoryEntry(key: String, onResult: (Boolean) -> Unit = {}) {
         val expectedOwner = AuthenticatedSessionRegistry.currentOwner()
         if (expectedOwner == null) {
@@ -1590,6 +1821,12 @@ class HulkViewModel internal constructor(
             return
         }
         val expectedProfileId = profileStore.activeProfileId()
+        // Removal wins over a queued preference write; a later explicit selection is a new intent.
+        userLibrary.clearTrackPreferenceIntents(
+            accountId = expectedOwner.accountId,
+            profileId = expectedProfileId,
+            historyKey = key,
+        )
         val historyAttempt = userLibrary.beginHistoryMutation()
         viewModelScope.launch {
             val updated = userLibrary.removeHistoryForOwner(
@@ -3056,6 +3293,7 @@ class HulkViewModel internal constructor(
                             catalogRequestOwner.replaceSession(
                                 session = refreshed,
                                 requiredTypes = catalogTypesForDestination(mutableState.value.destination),
+                                foregroundType = mutableState.value.destination.catalogTypeOrNull(),
                             )
                             publishPresenceOwnership(refreshed)
                             onResult("تم تحديث بيانات الاشتراك من السيرفر.")
@@ -3598,6 +3836,7 @@ class HulkViewModel internal constructor(
             }
             return
         }
+        hulkPerfLog { "catalogRequest type=$type force=$force" }
         mutableState.update { it.copy(errorMessage = null) }
     }
 
@@ -3647,7 +3886,11 @@ class HulkViewModel internal constructor(
                 tvDeepLinkEpisodeJob = null
                 if (resolution.resumePlayback) {
                     playerReturnScreen = HulkScreen.MAIN
-                    startPlayback(repository.playback(activeSession, resolution.item))
+                    startPlayback(
+                        repository.playback(activeSession, resolution.item)
+                            .withSavedTrackPreferences(mutableState.value.history)
+                            .copy(originalLanguage = resolution.originalLanguage),
+                    )
                 } else {
                     open(resolution.item)
                 }
@@ -3742,7 +3985,14 @@ class HulkViewModel internal constructor(
                     }
                 pendingTvDeepLink = null
                 playerReturnScreen = HulkScreen.MAIN
-                startPlayback(repository.playback(activeSession, resolution.series, episode))
+                startPlayback(
+                    repository.playback(activeSession, resolution.series, episode)
+                        .withSavedTrackPreferences(mutableState.value.history)
+                        .copy(
+                            originalLanguage = bundle.details.originalLanguage
+                                ?: resolution.originalLanguage,
+                        ),
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -3893,9 +4143,21 @@ class HulkViewModel internal constructor(
         }
         val expectedProfileId = profileStore.activeProfileId()
         playerProgressProfileOwner = expectedProfileId
-        val resumable = request.copy(resumePositionMs = userLibrary.resumePosition(request.historyKey))
         val expectedOwner = AuthenticatedSessionRegistry.currentOwner()
             ?.takeIf { it.session === session }
+        // Every replay entry path converges here. A just-committed explicit intent wins over the
+        // history snapshot even while its disk write is still queued.
+        val liveIntent = expectedOwner?.let {
+            userLibrary.trackPreferenceIntent(
+                accountId = it.accountId,
+                profileId = expectedProfileId,
+                historyKey = request.historyKey,
+            )
+        }
+        val resumable = request
+            .withSavedTrackPreferences(mutableState.value.history)
+            .withTrackPreferenceIntent(liveIntent)
+            .copy(resumePositionMs = userLibrary.resumePosition(request.historyKey))
         val historyAttempt = userLibrary.currentHistoryAttempt()
         mutableState.update {
             it.copy(

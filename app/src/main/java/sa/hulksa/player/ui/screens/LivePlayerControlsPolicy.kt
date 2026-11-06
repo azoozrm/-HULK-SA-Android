@@ -131,6 +131,23 @@ internal fun liveBottomOverlayMode(
     if (remainingHeightPx >= minimumPanelHeightPx) LiveBottomOverlayMode.NORMAL else LiveBottomOverlayMode.FALLBACK
 
 /**
+ * Usable panel height after reserving the accepted top safe spacing and the measured strip/gap.
+ * The bottom overlay is bottom-aligned, so this budget is what keeps the panel's full border,
+ * corners and fixed header inside the player's safe rectangle instead of touching the top edge.
+ */
+internal fun liveBottomOverlayPanelMaxHeightPx(
+    boundedHeightPx: Int,
+    topPaddingPx: Int,
+    stripHeightPx: Int,
+    gapPx: Int,
+): Int = (
+    boundedHeightPx -
+        topPaddingPx.coerceAtLeast(0) -
+        stripHeightPx.coerceAtLeast(0) -
+        gapPx.coerceAtLeast(0)
+    ).coerceAtLeast(0)
+
+/**
  * Minimum usable More-panel height for the current typography scale: shell padding, the header row
  * (title and text-only close action), the header/body gap and one full body row.
  *

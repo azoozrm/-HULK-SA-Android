@@ -131,6 +131,46 @@ class UserLibrary internal constructor(
     private val historyPersistenceLock = Any()
     private val historyFinalWriteLock = Any()
     private val favoritesMutationLock = Any()
+    private val trackPreferenceIntents = TrackPreferenceIntentStore()
+
+    /**
+     * Publishes the latest explicit intent synchronously, before any disk work. The returned
+     * snapshot is immediately usable by every playback entry path through [trackPreferenceIntent].
+     */
+    internal fun publishTrackPreferenceIntent(
+        expectedAccountId: String,
+        expectedProfileId: String,
+        request: PlaybackRequest,
+        audioPreference: String? = null,
+        subtitlePreference: String? = null,
+    ): TrackPreferenceIntent? {
+        if (request.isLive) return null
+        if (expectedAccountId.isBlank() || expectedProfileId.isBlank()) return null
+        if (accountScope.activeAccountId() != expectedAccountId) return null
+        if (profileStore.activeProfileId() != expectedProfileId) return null
+        if (audioPreference == null && subtitlePreference == null) return null
+        return trackPreferenceIntents.publish(
+            accountId = expectedAccountId,
+            profileId = expectedProfileId,
+            historyKey = request.historyKey,
+            audioPreference = audioPreference,
+            subtitlePreference = subtitlePreference,
+        )
+    }
+
+    internal fun trackPreferenceIntent(
+        accountId: String,
+        profileId: String,
+        historyKey: String,
+    ): TrackPreferenceIntent? = trackPreferenceIntents.snapshot(accountId, profileId, historyKey)
+
+    internal fun clearTrackPreferenceIntents(
+        accountId: String,
+        profileId: String,
+        historyKey: String? = null,
+    ) {
+        trackPreferenceIntents.clear(accountId, profileId, historyKey)
+    }
 
     internal fun beginProgressMutation(): UserLibraryHistoryMutationGate.ProgressAttempt =
         historyMutationGate.beginProgress()
@@ -314,14 +354,46 @@ class UserLibrary internal constructor(
         profile: UserProfile,
     ): UserLibrarySnapshot? = runUserLibraryStartupOffMain {
         if (!matchesOwner(expectedAccountId, profile.id)) return@runUserLibraryStartupOffMain null
+        // A same-profile reload must not discard an explicit audio/subtitle intent whose durable
+        // write is still queued. Intents for any other account/profile are cleared while the
+        // caller is still the active owner. Durable history remains the persisted source.
+        trackPreferenceIntents.retainOnlyIf(expectedAccountId, profile.id) {
+            matchesOwner(expectedAccountId, profile.id)
+        }
+        if (!matchesOwner(expectedAccountId, profile.id)) return@runUserLibraryStartupOffMain null
         val scopedPreferences = accountScope.preferences(PREFERENCES_NAME, expectedAccountId)
         migrateLegacyLibraryIfNeeded(scopedPreferences)
         if (!matchesOwner(expectedAccountId, profile.id)) return@runUserLibraryStartupOffMain null
+        val pending = trackPreferenceIntents.snapshotFor(expectedAccountId, profile.id)
         val snapshot = UserLibrarySnapshot(
             favorites = favorites(scopedPreferences, profile),
-            history = history(scopedPreferences, profile) { true },
+            history = applyTrackPreferenceIntents(
+                entries = history(scopedPreferences, profile) { true },
+                pending = pending,
+            ),
         )
         snapshot.takeIf { matchesOwner(expectedAccountId, profile.id) }
+    }
+
+    /**
+     * Reconciles a live explicit choice over a reloaded durable snapshot. Null intent fields mean
+     * "no choice for this setting", so the durable value is retained; an explicit OFF is the
+     * non-null string "off" and wins. Entries are not added or reordered here: the durable history
+     * remains the structural owner while a queued preference write is still in flight.
+     */
+    private fun applyTrackPreferenceIntents(
+        entries: List<HistoryEntry>,
+        pending: Map<String, TrackPreferenceIntent>,
+    ): List<HistoryEntry> {
+        if (pending.isEmpty()) return entries
+        return entries.map { entry ->
+            val intent = pending[entry.key] ?: return@map entry
+            entry.copy(
+                savedAudioPreference = intent.audioPreference ?: entry.savedAudioPreference,
+                savedSubtitlePreference = intent.subtitlePreference
+                    ?: entry.savedSubtitlePreference,
+            )
+        }
     }
 
     internal suspend fun recordStartForOwner(
@@ -351,6 +423,11 @@ class UserLibrary internal constructor(
                 return@synchronized read.entries
             }
             val previous = read.entries.firstOrNull { it.key == request.historyKey }
+            val intent = trackPreferenceIntents.snapshot(
+                expectedAccountId,
+                expectedProfileId,
+                request.historyKey,
+            )
             val entry = HistoryEntry(
                 key = request.historyKey,
                 title = request.title,
@@ -367,6 +444,131 @@ class UserLibrary internal constructor(
                 episodeNumber = request.episodeNumber ?: previous?.episodeNumber,
                 episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
                 parentContentId = request.parentContentId ?: previous?.parentContentId,
+                originalLanguage = request.originalLanguage ?: previous?.originalLanguage,
+                // A live explicit intent is newer than disk and the immutable playback request;
+                // progress and a fresh record-start must never roll an explicit choice back.
+                savedAudioPreference = intent?.audioPreference
+                    ?: previous?.savedAudioPreference
+                    ?: request.savedAudioPreference,
+                savedSubtitlePreference = intent?.subtitlePreference
+                    ?: previous?.savedSubtitlePreference
+                    ?: request.savedSubtitlePreference,
+            )
+            val normalized = normalizeHistory(
+                entries = listOf(entry) + read.entries.filterNot { it.key == entry.key },
+                profile = profile,
+            )
+            if (!canWrite()) return@synchronized null
+            if (!writeHistoryDocument(
+                    preferences = scopedPreferences,
+                    historyKey = profileKey(profile.id, KEY_HISTORY),
+                    entries = normalized,
+                    read = read,
+                    canWrite = ::canWrite,
+                    finalWriteLock = historyFinalWriteLock,
+                )
+            ) {
+                null
+            } else {
+                normalized
+            }
+        }
+    }
+
+    /**
+     * Persists an explicit audio/subtitle choice into this content's existing profile-scoped history
+     * entry as soon as the customer commits it. It never creates a competing persistence owner.
+     * A missing entry is created from the current request; an existing entry keeps its position,
+     * duration, original language and the other saved preference.
+     */
+    internal suspend fun updateTrackPreferenceForOwner(
+        expectedOwner: AuthenticatedSessionOwner,
+        expectedAccountId: String,
+        expectedProfileId: String,
+        request: PlaybackRequest,
+        audioPreference: String? = null,
+        subtitlePreference: String? = null,
+        audioRevision: Long? = null,
+        subtitleRevision: Long? = null,
+        historyAttempt: UserLibraryHistoryMutationGate.HistoryAttempt,
+    ): List<HistoryEntry>? = runUserLibraryHistoryPersistenceOffMain {
+        if (audioPreference == null && subtitlePreference == null) return@runUserLibraryHistoryPersistenceOffMain null
+        val operationContext = currentCoroutineContext()
+        fun canWrite(): Boolean =
+            operationContext.isActive &&
+                expectedOwner.accountId == expectedAccountId &&
+                AuthenticatedSessionRegistry.isCurrent(expectedOwner) &&
+                accountScope.activeAccountId() == expectedAccountId &&
+                profileStore.activeProfileId() == expectedProfileId &&
+                historyMutationGate.isCurrentHistory(historyAttempt)
+
+        if (!canWrite() || request.isLive) return@runUserLibraryHistoryPersistenceOffMain null
+        synchronized(historyPersistenceLock) {
+            if (!canWrite()) return@synchronized null
+            val profile = profileStore.activeProfile()
+            if (profile.id != expectedProfileId) return@synchronized null
+            val scopedPreferences = accountScope.preferences(PREFERENCES_NAME, expectedAccountId)
+            val read = readHistoryForProfile(scopedPreferences, profile, ::canWrite)
+            if (profile.kind == ProfileKind.KIDS && !kidsContentFilterStore.isAllowed(request)) {
+                return@synchronized read.entries
+            }
+            val audioCurrent = audioPreference == null || audioRevision == null ||
+                trackPreferenceIntents.isCurrent(
+                    expectedAccountId,
+                    expectedProfileId,
+                    request.historyKey,
+                    TrackPreferenceSetting.AUDIO,
+                    audioRevision,
+                )
+            val subtitleCurrent = subtitlePreference == null || subtitleRevision == null ||
+                trackPreferenceIntents.isCurrent(
+                    expectedAccountId,
+                    expectedProfileId,
+                    request.historyKey,
+                    TrackPreferenceSetting.SUBTITLE,
+                    subtitleRevision,
+                )
+            // An older queued write must never overwrite a newer explicit intent. At least one
+            // setting in this write must still be current; a stale setting is never applied.
+            val anyCurrent = (audioPreference != null && audioCurrent) ||
+                (subtitlePreference != null && subtitleCurrent)
+            if (!anyCurrent) return@synchronized null
+            val previous = read.entries.firstOrNull { it.key == request.historyKey }
+            val intent = trackPreferenceIntents.snapshot(
+                expectedAccountId,
+                expectedProfileId,
+                request.historyKey,
+            )
+            val resolvedAudio = intent?.audioPreference
+                ?: audioPreference.takeIf { audioCurrent }
+                ?: previous?.savedAudioPreference
+                ?: request.savedAudioPreference
+            val resolvedSubtitle = intent?.subtitlePreference
+                ?: subtitlePreference.takeIf { subtitleCurrent }
+                ?: previous?.savedSubtitlePreference
+                ?: request.savedSubtitlePreference
+            val entry = previous?.copy(
+                savedAudioPreference = resolvedAudio,
+                savedSubtitlePreference = resolvedSubtitle,
+            ) ?: HistoryEntry(
+                key = request.historyKey,
+                title = request.title,
+                posterUrl = persistableExternalUrlOrNull(request.posterUrl),
+                streamKind = request.streamKind,
+                streamId = request.streamId,
+                extension = request.extension,
+                isLive = request.isLive,
+                positionMs = request.resumePositionMs.coerceAtLeast(0L),
+                durationMs = 0L,
+                updatedAtEpochMs = System.currentTimeMillis(),
+                seriesTitle = request.seriesTitle,
+                season = request.season,
+                episodeNumber = request.episodeNumber,
+                episodeTitle = request.episodeTitle,
+                parentContentId = request.parentContentId,
+                originalLanguage = request.originalLanguage,
+                savedAudioPreference = resolvedAudio,
+                savedSubtitlePreference = resolvedSubtitle,
             )
             val normalized = normalizeHistory(
                 entries = listOf(entry) + read.entries.filterNot { it.key == entry.key },
@@ -433,6 +635,11 @@ class UserLibrary internal constructor(
                 return@synchronized currentHistory
             }
             val previous = currentHistory.firstOrNull { it.key == request.historyKey }
+            val intent = trackPreferenceIntents.snapshot(
+                expectedOwner.accountId,
+                expectedProfileId,
+                request.historyKey,
+            )
             val entry = HistoryEntry(
                 key = request.historyKey,
                 title = request.title,
@@ -449,6 +656,15 @@ class UserLibrary internal constructor(
                 episodeNumber = request.episodeNumber ?: previous?.episodeNumber,
                 episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
                 parentContentId = request.parentContentId ?: previous?.parentContentId,
+                originalLanguage = request.originalLanguage ?: previous?.originalLanguage,
+                // A live explicit intent is newer than disk and the immutable playback request;
+                // progress and a fresh record-start must never roll an explicit choice back.
+                savedAudioPreference = intent?.audioPreference
+                    ?: previous?.savedAudioPreference
+                    ?: request.savedAudioPreference,
+                savedSubtitlePreference = intent?.subtitlePreference
+                    ?: previous?.savedSubtitlePreference
+                    ?: request.savedSubtitlePreference,
             )
             val normalized = normalizeHistory(
                 entries = listOf(entry) + currentHistory.filterNot { it.key == entry.key },
@@ -512,6 +728,7 @@ class UserLibrary internal constructor(
             ) {
                 null
             } else {
+                trackPreferenceIntents.clear(expectedAccountId, expectedProfileId, key)
                 normalized
             }
         }
@@ -527,6 +744,7 @@ class UserLibrary internal constructor(
         synchronized(historyFinalWriteLock) {
             preferences.edit().remove(historyKey).apply()
         }
+        trackPreferenceIntents.clearAll()
         return emptyList()
     }
 

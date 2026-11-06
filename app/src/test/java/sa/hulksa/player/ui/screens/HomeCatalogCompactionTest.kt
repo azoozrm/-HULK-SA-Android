@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui.screens
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -80,6 +81,67 @@ class HomeCatalogCompactionTest {
         assertTrue(compacted.items.any { it.id == 17 })
     }
 
+
+    @Test
+    fun `bounded top selection preserves the accepted stable catalog order`() {
+        val items = (1..900).map { id ->
+            movie(
+                id = id,
+                addedAt = (id % 41).toLong(),
+                rating = when {
+                    id % 17 == 0 -> null
+                    id % 13 == 0 -> "invalid"
+                    id % 11 == 0 -> "7.0"
+                    id % 7 == 0 -> "9.0"
+                    else -> (id % 5).toDouble().toString()
+                },
+            )
+        }
+        val catalog = Catalog(categories = emptyList(), items = items)
+        val favorites = setOf("MOVIE:3", "MOVIE:500")
+        val history = listOf(movieHistory(streamId = 17))
+        val actual = compactHomeCatalogForHome(catalog, favorites, history)
+        val expected = referenceCompact(catalog, favorites, history)
+        assertEquals(expected.map(ContentItem::id), actual.items.map(ContentItem::id))
+        assertEquals(expected.map(ContentItem::rating), actual.items.map(ContentItem::rating))
+    }
+
+    private fun referenceCompact(
+        catalog: Catalog,
+        favorites: Set<String>,
+        history: List<HistoryEntry>,
+    ): List<ContentItem> {
+        if (catalog.items.size <= HOME_CATALOG_LIMIT) return catalog.items
+        val pinned = favorites + history.asSequence().mapNotNull(HistoryEntry::catalogPinnedKey).toSet()
+        return buildList {
+            addAll(catalog.items.filter { "${it.type.name}:${it.id}" in pinned })
+            addAll(
+                catalog.items.asSequence()
+                    .sortedByDescending { it.addedAtEpochSeconds ?: 0L }
+                    .take(HOME_RECENT_LIMIT),
+            )
+            addAll(
+                catalog.items.asSequence()
+                    .filter { it.rating?.toDoubleOrNull() != null }
+                    .sortedByDescending { it.rating?.toDoubleOrNull() ?: 0.0 }
+                    .take(HOME_RATED_LIMIT),
+            )
+        }.distinctBy { "${it.type.name}:${it.id}" }.take(HOME_CATALOG_LIMIT)
+    }
+
+    private fun movieHistory(streamId: Int): HistoryEntry = HistoryEntry(
+        key = "MOVIE:$streamId",
+        title = "Movie",
+        posterUrl = null,
+        streamKind = "movie",
+        streamId = streamId,
+        extension = "mp4",
+        isLive = false,
+        positionMs = 10L,
+        durationMs = 100L,
+        updatedAtEpochMs = 1L,
+    )
+
     private fun seriesCatalog(): Catalog {
         val regular = (1..HOME_CATALOG_LIMIT).map { id ->
             series(id, addedAt = if (id == 42) 0L else 1_000L + id)
@@ -102,13 +164,13 @@ class HomeCatalogCompactionTest {
         addedAtEpochSeconds = addedAt,
     )
 
-    private fun movie(id: Int, addedAt: Long): ContentItem = ContentItem(
+    private fun movie(id: Int, addedAt: Long, rating: String? = null): ContentItem = ContentItem(
         id = id,
         name = "Movie $id",
         categoryId = "movie",
         type = ContentType.MOVIE,
         posterUrl = null,
-        rating = null,
+        rating = rating,
         year = null,
         containerExtension = "mp4",
         addedAtEpochSeconds = addedAt,
