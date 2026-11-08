@@ -10,10 +10,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -243,6 +245,107 @@ class CatalogRequestOwnerTest {
         awaitUntil { loadedLive === published && owner.loadingTypes().isEmpty() }
         assertTrue(failures.isEmpty())
         assertSame(published, loadedLive)
+        scope.cancel()
+    }
+
+    @Test
+    fun `next restore type follows the latest foreground selection`() {
+        val pending = linkedSetOf(ContentType.MOVIE, ContentType.SERIES, ContentType.LIVE)
+
+        assertEquals(ContentType.LIVE, nextCatalogRestoreType(ContentType.LIVE, pending))
+        assertEquals(ContentType.MOVIE, nextCatalogRestoreType(null, pending))
+        assertEquals(ContentType.MOVIE, nextCatalogRestoreType(ContentType.LIVE, setOf(ContentType.MOVIE)))
+        assertNull(nextCatalogRestoreType(ContentType.LIVE, emptySet()))
+    }
+
+    @Test
+    fun `heavy permit serializes restore and forced refresh and honors a later foreground type`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val session = session()
+        val calls = CopyOnWriteArrayList<ContentType>()
+        val loaded = Collections.synchronizedMap(mutableMapOf<ContentType, CatalogLoadResult>())
+        val permitHeld = CompletableDeferred<Unit>()
+        val releasePermit = CompletableDeferred<Unit>()
+
+        val owner = CatalogRequestOwner(
+            scope = scope,
+            load = { _, type ->
+                calls += type
+                result(
+                    movie = 1.takeIf { type == ContentType.MOVIE },
+                    series = 2.takeIf { type == ContentType.SERIES },
+                    live = 3.takeIf { type == ContentType.LIVE },
+                )
+            },
+            hasLoaded = { loaded[it] != null },
+            isSessionCurrent = { it === session },
+            onLoadingChanged = {},
+            onLoaded = { type, result, _ -> loaded[type] = result },
+            onFailure = { _, _, _ -> },
+        )
+
+        val restore = launch(Dispatchers.Default) {
+            owner.withHeavyPermit {
+                permitHeld.complete(Unit)
+                releasePermit.await()
+            }
+        }
+        permitHeld.await()
+
+        // Forced refresh and normal requests are admitted to the owner but must wait for the
+        // physical restore permit.
+        owner.request(session, ContentType.MOVIE, force = true)
+        owner.request(session, ContentType.SERIES, force = false)
+        delay(120L)
+        assertTrue("network load must not overlap the held restore", calls.isEmpty())
+
+        // A later Live selection must be the next physical load, not the earlier Series batch.
+        owner.prioritize(ContentType.LIVE)
+        owner.request(session, ContentType.LIVE, force = false)
+        releasePermit.complete(Unit)
+        awaitUntil { calls.isNotEmpty() }
+        assertEquals(ContentType.LIVE, calls.first())
+        awaitUntil { calls.size == 3 && loaded.size == 3 }
+        assertEquals(
+            setOf(ContentType.MOVIE, ContentType.SERIES, ContentType.LIVE),
+            loaded.keys,
+        )
+        restore.join()
+        scope.cancel()
+    }
+
+    @Test
+    fun `invalidation during a held restore admits no stale load`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val session = session()
+        val calls = CopyOnWriteArrayList<ContentType>()
+        val permitHeld = CompletableDeferred<Unit>()
+        val releasePermit = CompletableDeferred<Unit>()
+
+        val owner = CatalogRequestOwner(
+            scope = scope,
+            load = { _, type -> calls += type; result(live = 9) },
+            hasLoaded = { false },
+            isSessionCurrent = { it === session },
+            onLoadingChanged = {},
+            onLoaded = { _, _, _ -> },
+            onFailure = { _, _, _ -> },
+        )
+
+        val restore = launch(Dispatchers.Default) {
+            owner.withHeavyPermit {
+                permitHeld.complete(Unit)
+                releasePermit.await()
+            }
+        }
+        permitHeld.await()
+        owner.request(session, ContentType.LIVE, force = true)
+        owner.invalidate()
+        releasePermit.complete(Unit)
+        delay(180L)
+        assertTrue("invalidated request must not start after the permit is released", calls.isEmpty())
+        assertTrue(owner.loadingTypes().isEmpty())
+        restore.join()
         scope.cancel()
     }
 

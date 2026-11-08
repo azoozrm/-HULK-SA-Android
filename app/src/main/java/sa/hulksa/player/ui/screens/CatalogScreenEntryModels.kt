@@ -77,6 +77,30 @@ internal data class KeyedCatalogScreenModel(
     val model: CatalogScreenModel,
 )
 
+/**
+ * Stable ordering and category/key indexes for one immutable catalog revision. The newest order is
+ * computed once per catalog identity; category/query/favorites/history changes only filter this
+ * reusable structure. The catalog reference is the revision boundary.
+ */
+internal class CatalogRevisionIndex(
+    val catalog: Catalog?,
+    val newestItems: List<ContentItem>,
+    val itemsByCategory: Map<String, List<ContentItem>>,
+    val itemByKey: Map<String, ContentItem>,
+) {
+    companion object {
+        fun build(catalog: Catalog?): CatalogRevisionIndex {
+            val ordered = newest(catalog?.items.orEmpty())
+            return CatalogRevisionIndex(
+                catalog = catalog,
+                newestItems = ordered,
+                itemsByCategory = ordered.groupBy(ContentItem::categoryId),
+                itemByKey = ordered.associateBy { item -> "${item.type}:${item.id}" },
+            )
+        }
+    }
+}
+
 internal class HomeContentModelInput(
     val movieCatalog: Catalog?,
     val seriesCatalog: Catalog?,
@@ -224,12 +248,25 @@ internal fun initialHomePresentation(
         featuredCandidates = emptyList(),
     )
 
-internal fun deriveCatalogScreenModel(input: CatalogScreenModelInput): CatalogScreenModel {
-    val ordered = newest(input.catalog?.items.orEmpty())
-    val visible = ordered.filter { item ->
-        categoryMatches(item, input.categoryId, input.favorites::contains) &&
-            item.matchesSearch(input.query)
+internal fun deriveCatalogScreenModel(
+    input: CatalogScreenModelInput,
+    revisionIndex: CatalogRevisionIndex? = null,
+): CatalogScreenModel {
+    val ordered = revisionIndex
+        ?.takeIf { it.catalog === input.catalog }
+        ?.newestItems
+        ?: newest(input.catalog?.items.orEmpty())
+    val categoryBase = when (input.categoryId) {
+        null -> ordered
+        FAVORITES_CATEGORY_ID -> ordered.filter { input.favorites.contains(it) }
+        CONTINUE_CATEGORY_ID -> emptyList()
+        else -> revisionIndex
+            ?.takeIf { it.catalog === input.catalog }
+            ?.itemsByCategory
+            ?.get(input.categoryId)
+            ?: ordered.filter { it.categoryId == input.categoryId }
     }
+    val visible = categoryBase.filter { item -> item.matchesSearch(input.query) }
     val kind = if (input.type == ContentType.MOVIE) "movie" else "series"
     val normalizedQuery = input.query.trim()
     val continueWatching = input.history.filter { entry ->
@@ -326,13 +363,18 @@ private data class KeyedLiveProjection(
 internal class CatalogScreenEntryModelStore(
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val catalogBuilder: (CatalogScreenModelInput) -> CatalogScreenModel = ::deriveCatalogScreenModel,
+    private val indexedCatalogBuilder: ((CatalogScreenModelInput, CatalogRevisionIndex) -> CatalogScreenModel)? = null,
     private val homeBuilder: (HomeContentModelInput) -> HomeContentSnapshot = ::deriveHomeContentModel,
     private val liveBuilder: (LiveCatalogProjectionInput) -> List<ContentItem> =
         ::deriveLiveCatalogProjection,
+    private val revisionIndexBuilder: (Catalog?) -> CatalogRevisionIndex = CatalogRevisionIndex::build,
 ) {
     private val lock = Any()
     private val catalogModels = EnumMap<MainDestination, KeyedCatalogScreenModel>(MainDestination::class.java)
     private val latestCatalogInputs = EnumMap<MainDestination, CatalogScreenModelInput>(MainDestination::class.java)
+    private val catalogRevisionIndexes = EnumMap<MainDestination, CatalogRevisionIndex>(MainDestination::class.java)
+    private val latestRevisionCatalogs = EnumMap<MainDestination, Catalog?>(MainDestination::class.java)
+    private var catalogRevisionEpoch = 0L
     private var homeModel: KeyedHomeContentModel? = null
     private var homePresentationFallback: KeyedHomeContentModel? = null
     private var latestHomeInput: HomeContentModelInput? = null
@@ -352,9 +394,17 @@ internal class CatalogScreenEntryModelStore(
     suspend fun catalog(input: CatalogScreenModelInput): KeyedCatalogScreenModel {
         synchronized(lock) {
             latestCatalogInputs[input.destination] = input
+            latestRevisionCatalogs[input.destination] = input.catalog
             catalogModels[input.destination]?.takeIf { it.input == input }
         }?.let { return it }
-        val derived = withContext(dispatcher) { catalogBuilder(input) }
+        val revisionIndex = indexedCatalogBuilder?.let { revisionIndex(input) }
+        val derived = withContext(dispatcher) {
+            if (revisionIndex == null) {
+                catalogBuilder(input)
+            } else {
+                requireNotNull(indexedCatalogBuilder).invoke(input, revisionIndex)
+            }
+        }
         val keyed = KeyedCatalogScreenModel(input, derived)
         return synchronized(lock) {
             catalogModels[input.destination]
@@ -364,6 +414,29 @@ internal class CatalogScreenEntryModelStore(
                         catalogModels[input.destination] = it
                     }
                 }
+        }
+    }
+
+    private suspend fun revisionIndex(input: CatalogScreenModelInput): CatalogRevisionIndex {
+        val catalog = input.catalog
+        val startEpoch: Long
+        synchronized(lock) {
+            catalogRevisionIndexes[input.destination]
+                ?.takeIf { it.catalog === catalog }
+                ?.let { return it }
+            startEpoch = catalogRevisionEpoch
+        }
+        val built = withContext(dispatcher) { revisionIndexBuilder(catalog) }
+        return synchronized(lock) {
+            // A clear() or a newer catalog revision that completed while this build was suspended
+            // must not be repopulated or evicted by the late result.
+            if (
+                startEpoch == catalogRevisionEpoch &&
+                latestRevisionCatalogs[input.destination] === catalog
+            ) {
+                catalogRevisionIndexes[input.destination] = built
+            }
+            built
         }
     }
 
@@ -482,8 +555,11 @@ internal class CatalogScreenEntryModelStore(
     /** Releases heavy derived payloads while keeping the owning profile's navigation store alive. */
     fun clear() {
         synchronized(lock) {
+            catalogRevisionEpoch += 1L
             catalogModels.clear()
             latestCatalogInputs.clear()
+            catalogRevisionIndexes.clear()
+            latestRevisionCatalogs.clear()
             homeModel = null
             homePresentationFallback = null
             latestHomeInput = null

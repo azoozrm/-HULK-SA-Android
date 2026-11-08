@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui.screens
 
+import java.security.MessageDigest
 import java.util.EnumMap
 import java.util.PriorityQueue
 import sa.hulksa.player.model.Catalog
@@ -121,6 +122,126 @@ internal class HomeCompactionCache(
             latestKeys.clear()
             typeGenerations.clear()
         }
+    }
+}
+
+/**
+ * Stable bounded identity of the profile-owned inputs that shape the Home seed: favorites and the
+ * history keys that can pin a catalog card. It deliberately excludes playback positions and
+ * unrelated metadata so a seed is rejected/reconciled only when its selection inputs changed.
+ */
+internal fun homeBootstrapPersonalizationKey(
+    favorites: Set<String>,
+    history: List<HistoryEntry>,
+): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    fun update(value: String) {
+        digest.update(value.toByteArray(Charsets.UTF_8))
+        digest.update(0.toByte())
+    }
+    favorites.sorted().forEach(::update)
+    history.asSequence()
+        .mapNotNull(HistoryEntry::catalogPinnedKey)
+        .distinct()
+        .sorted()
+        .forEach(::update)
+    return digest.digest().joinToString(separator = "") { byte ->
+        "%02x".format(byte.toInt() and 0xff)
+    }
+}
+
+/**
+ * Bounded Live seed that keeps current favorite/history channels even when they are beyond the
+ * provider prefix that used to define the first 320 Home Live items.
+ */
+internal fun compactHomeLiveCatalogForHome(
+    catalog: Catalog,
+    favorites: Set<String>,
+    history: List<HistoryEntry>,
+): Catalog {
+    val pinned = HashSet<String>()
+    favorites.filterTo(pinned) { it.startsWith("${ContentType.LIVE.name}:") }
+    history.asSequence()
+        .filter { it.isLive }
+        .mapNotNull { entry ->
+            entry.catalogPinnedKey() ?: entry.streamId
+                .takeIf { it > 0 }
+                ?.let { "LIVE:$it" }
+        }
+        .forEach(pinned::add)
+    val pinnedItems = catalog.items.filter { catalogKey(it) in pinned }
+    val pinnedKeys = pinnedItems.mapTo(HashSet(), ::catalogKey)
+    val remaining = catalog.items.filter { catalogKey(it) !in pinnedKeys }
+    return catalog.copy(
+        items = (pinnedItems + remaining).distinctBy(::catalogKey).take(HOME_CATALOG_LIMIT),
+    )
+}
+
+/**
+ * Re-applies the current profile pins to a bounded seed when its stored personalization identity
+ * changed. New pins outside the bounded seed are intentionally left to the complete cached type
+ * restore that follows; old pins are never presented as current.
+ */
+/**
+ * Splits a candidate Home seed into healthy, confirmed-empty and unbound types.
+ *
+ * Confirmed-empty types are omitted from the Home seed and its metadata; the complete full-catalog
+ * cache still keeps their real zero counts. An authoritative all-empty selection is represented by
+ * empty [catalogs] plus a non-empty [confirmedEmptyTypes], allowing the caller to delete an obsolete
+ * nonempty Home seed. Unbound types (no positive source revision) block that destructive deletion.
+ */
+internal data class HomeBootstrapSeedSelection(
+    val catalogs: Map<ContentType, Catalog>,
+    val sourceGenerations: Map<ContentType, Long>,
+    val confirmedEmptyTypes: Set<ContentType>,
+    val unboundTypes: Set<ContentType>,
+    val missingTypes: Set<ContentType>,
+)
+
+internal fun selectHomeBootstrapSeed(
+    seeds: Map<ContentType, Catalog>,
+    sourceGenerations: Map<ContentType, Long>,
+    requiredTypes: Set<ContentType> = ContentType.entries.toSet(),
+): HomeBootstrapSeedSelection {
+    val catalogs = LinkedHashMap<ContentType, Catalog>()
+    val generations = LinkedHashMap<ContentType, Long>()
+    val confirmedEmpty = linkedSetOf<ContentType>()
+    val unbound = linkedSetOf<ContentType>()
+    seeds.forEach { (type, catalog) ->
+        val generation = sourceGenerations[type] ?: 0L
+        when {
+            generation <= 0L -> unbound += type
+            catalog.items.isEmpty() -> confirmedEmpty += type
+            else -> {
+                catalogs[type] = catalog
+                generations[type] = generation
+            }
+        }
+    }
+    return HomeBootstrapSeedSelection(
+        catalogs = catalogs,
+        sourceGenerations = generations,
+        confirmedEmptyTypes = confirmedEmpty,
+        unboundTypes = unbound,
+        missingTypes = requiredTypes - seeds.keys,
+    )
+}
+
+internal fun reconcileHomeBootstrapCatalogs(
+    catalogs: Map<ContentType, Catalog>,
+    favorites: Set<String>,
+    history: List<HistoryEntry>,
+): Map<ContentType, Catalog> = catalogs.mapValues { (type, catalog) ->
+    if (type == ContentType.LIVE) {
+        compactHomeLiveCatalogForHome(catalog, favorites, history)
+    } else {
+        val pinned = favorites + history.asSequence()
+            .mapNotNull(HistoryEntry::catalogPinnedKey)
+            .toSet()
+        val ordered = newest(catalog.items)
+        val pinnedItems = ordered.filter { catalogKey(it) in pinned }
+        val remaining = ordered.filter { catalogKey(it) !in pinned }
+        catalog.copy(items = (pinnedItems + remaining).take(HOME_CATALOG_LIMIT))
     }
 }
 

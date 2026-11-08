@@ -728,7 +728,9 @@ internal fun nextHomeHeroIdentity(
 
 class NavigationMemoryStore {
     private val positions = mutableMapOf<MainDestination, NavigationPosition>()
-    private val screenEntryModels = CatalogScreenEntryModelStore()
+    private val screenEntryModels = CatalogScreenEntryModelStore(
+        indexedCatalogBuilder = ::deriveCatalogScreenModel,
+    )
 
     fun position(destination: MainDestination): NavigationPosition =
         positions[destination] ?: NavigationPosition()

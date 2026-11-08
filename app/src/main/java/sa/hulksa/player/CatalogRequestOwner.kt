@@ -14,6 +14,8 @@ import sa.hulksa.player.model.ContentType
 internal data class CatalogLoadResult(
     val full: Catalog,
     val home: Catalog,
+    /** Profile whose favorites/history produced [home]; null when not profile-ranked. */
+    val homeProfileId: String? = null,
 )
 
 /**
@@ -141,6 +143,13 @@ internal class CatalogRequestOwner(
     }
 
     internal fun loadingTypes(): Set<ContentType> = synchronized(lock) { loading.toSet() }
+
+    /**
+     * The same physical permit that fences full network loads also fences disk restore and Home
+     * compaction. It is held across non-cooperative work, so cancellation cannot overlap a
+     * replacement generation with a parser/reader that has not physically returned yet.
+     */
+    internal suspend fun <T> withHeavyPermit(block: suspend () -> T): T = pipeline.withLock { block() }
 
     private suspend fun runLoop(token: Long) {
         try {

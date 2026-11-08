@@ -30,6 +30,11 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import sa.hulksa.player.data.AuthenticatedSessionOwner
 import sa.hulksa.player.data.AuthenticatedSessionRegistry
+import sa.hulksa.player.data.CatalogSnapshotKey
+import sa.hulksa.player.data.HomeBootstrapKey
+import sa.hulksa.player.data.CatalogPersistBaselines
+import sa.hulksa.player.data.CatalogWriteGate
+import sa.hulksa.player.data.HomeBootstrapSnapshot
 import sa.hulksa.player.data.ContentMetadataRequestKey
 import sa.hulksa.player.data.DownloadActionClaim
 import sa.hulksa.player.data.DownloadActionIntent
@@ -116,6 +121,11 @@ import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.model.PlaybackRequest
 import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
+import sa.hulksa.player.ui.screens.HOME_CATALOG_LIMIT
+import sa.hulksa.player.ui.screens.compactHomeLiveCatalogForHome
+import sa.hulksa.player.ui.screens.homeBootstrapPersonalizationKey
+import sa.hulksa.player.ui.screens.reconcileHomeBootstrapCatalogs
+import sa.hulksa.player.ui.screens.selectHomeBootstrapSeed
 import sa.hulksa.player.security.CredentialEnvelopeRemovalException
 import sa.hulksa.player.tv.TvDeepLinkDispatchDecision
 import sa.hulksa.player.ui.screens.DownloadFeedback
@@ -656,6 +666,33 @@ class HulkViewModel internal constructor(
     private var sessionOwnershipEpoch = 0L
     private val loadedCatalogs = mutableMapOf<ContentType, Catalog>()
     private val homeCatalogs = mutableMapOf<ContentType, Catalog>()
+    // Home bootstrap is a small profile-owned first frame read from disk. It never stands in for
+    // a complete catalog on Movies/Series/Live, and it is never used for Kids profiles.
+    private val homeBootstrapCatalogs = java.util.EnumMap<ContentType, Catalog>(ContentType::class.java)
+    private val freshCatalogTypes = linkedSetOf<ContentType>()
+    private val cacheRestoreAttempted = linkedSetOf<ContentType>()
+    private val pendingCatalogRequests = linkedSetOf<ContentType>()
+    // Monotonic source revision per published full catalog. Home seeds bind each type to this
+    // revision instead of a scalar max across unrelated types.
+    private val catalogSourceGenerations =
+        java.util.EnumMap<ContentType, Long>(ContentType::class.java)
+    // Last content known to be on disk. After an identical revalidation this points at the same
+    // canonical object as loadedCatalogs, so it never pins a second complete graph.
+    private val persistedCatalogBaselines = CatalogPersistBaselines()
+    private val catalogWriteGate = CatalogWriteGate()
+    private val catalogPersistJobs =
+        java.util.EnumMap<ContentType, Job>(ContentType::class.java)
+    private var cacheRestoreJob: Job? = null
+    private var cacheRestoreGeneration = 0L
+    private var homeBootstrapPersistJob: Job? = null
+    // Profile ownership of the library/catalog presentation state. A profile change resets the
+    // disk-restore attempt so the next profile's bootstrap and sections are restored safely.
+    private var profileLibraryProfileId: String? = null
+    // Kind of the profile that owns the current library generation. Cached to keep destination
+    // navigation from re-reading and parsing the profile document for every catalog type.
+    private var profileLibraryKind: ProfileKind? = null
+    // Profile whose favorites/history produced each compacted Home catalog.
+    private val homeRankingProfiles = java.util.EnumMap<ContentType, String>(ContentType::class.java)
     private val homeCompactionCache = HomeCompactionCache()
     // Catalog payloads can be large (the guard permits up to 32 MiB / 75k items). The request
     // owner admits exactly one full-catalog pipeline at a time; foreground priority only reorders
@@ -668,6 +705,7 @@ class HulkViewModel internal constructor(
             val full = repository.catalog(activeSession, type)
             val compactStartedNs = System.nanoTime()
             val snapshot = mutableState.value
+            val rankingProfileId = profileStore.activeProfileId()
             val home = if (type == ContentType.MOVIE || type == ContentType.SERIES) {
                 withContext(Dispatchers.Default) {
                     homeCompactionCache.compact(type, full, snapshot.favorites, snapshot.history)
@@ -680,9 +718,9 @@ class HulkViewModel internal constructor(
                     "loadMs=${(compactStartedNs - startedNs) / 1_000_000} compactMs=" +
                     "${(System.nanoTime() - compactStartedNs) / 1_000_000}"
             }
-            CatalogLoadResult(full = full, home = home)
+            CatalogLoadResult(full = full, home = home, homeProfileId = rankingProfileId)
         },
-        hasLoaded = { type -> loadedCatalogs[type] != null },
+        hasLoaded = { type -> freshCatalogTypes.contains(type) },
         isSessionCurrent = { activeSession -> session === activeSession },
         onLoadingChanged = { loadingTypes ->
             mutableState.update { it.copy(loadingTypes = loadingTypes) }
@@ -692,8 +730,17 @@ class HulkViewModel internal constructor(
                 "catalogPublished type=$type items=${result.full.items.size} " +
                     "remaining=${remaining.size}"
             }
+            freshCatalogTypes += type
+            catalogSourceGenerations[type] = (catalogSourceGenerations[type] ?: 0L) + 1L
             loadedCatalogs[type] = result.full
-            homeCatalogs[type] = result.home
+            val rankingProfileId = result.homeProfileId ?: profileStore.activeProfileId()
+            // A load that started under another profile may not replace the active profile's Home
+            // ranking. The full catalog is still published and revalidated for every screen.
+            if (type == ContentType.LIVE || rankingProfileId == profileStore.activeProfileId()) {
+                homeCatalogs[type] = result.home
+                homeRankingProfiles[type] = rankingProfileId
+                homeBootstrapCatalogs.remove(type)
+            }
             mutableState.update { state ->
                 val base = state.catalogs + (type to result.full)
                 val failures = state.catalogFailures - type
@@ -719,6 +766,10 @@ class HulkViewModel internal constructor(
             }
             resolvePendingTvDeepLink()
             scheduleTvPlatformSync(immediate = false)
+            session?.let { activeSession ->
+                persistCatalogSnapshot(activeSession, type, result.full)
+                scheduleHomeBootstrapPersist()
+            }
         },
         onFailure = { type, error, remaining ->
             if (isInvalidSessionFailure(error)) {
@@ -957,6 +1008,16 @@ class HulkViewModel internal constructor(
     ) {
         val activeSession = session ?: return
         invalidatePlayerProgressPersistence()
+        val profileChanged = profileLibraryProfileId != profile.id
+        profileLibraryProfileId = profile.id
+        profileLibraryKind = profile.kind
+        if (profileChanged) {
+            resetCatalogRestoreForProfileChange()
+        }
+        if (profile.kind == ProfileKind.KIDS) {
+            // General Home bootstrap must never remain as a fallback for a Kids profile.
+            homeBootstrapCatalogs.clear()
+        }
         profileLibraryRefreshJob?.cancel()
         // Preserve the previous immutable snapshots when the reload returns identical content.
         // Reusing their identity avoids a needless Home recompaction and model rebuild.
@@ -993,6 +1054,12 @@ class HulkViewModel internal constructor(
                             errorMessage = "تعذر تهيئة مكتبة هذا الملف الشخصي بأمان",
                         )
                     }
+                    ensureDestinationCatalogs(mutableState.value.destination, foreground = true)
+                    if (profileChanged && profile.kind != ProfileKind.KIDS &&
+                        profileStore.activeProfileId() == profile.id
+                    ) {
+                        startCacheRestore(activeSession)
+                    }
                 }
                 return@launch
             } ?: return@launch
@@ -1012,6 +1079,14 @@ class HulkViewModel internal constructor(
             }
             refreshNotificationState(clearPopup = false)
             scanSubscribedSeries(NotificationScanTrigger.LIBRARY_REFRESH)
+            // Profile/library readiness is the cache/Kids gate. Queue the destination now; the
+            // cache restore runner reads complete snapshots before admitting network refresh.
+            ensureDestinationCatalogs(mutableState.value.destination, foreground = true)
+            if (profileChanged && profile.kind != ProfileKind.KIDS &&
+                profileStore.activeProfileId() == profile.id
+            ) {
+                startCacheRestore(activeSession)
+            }
 
             val sourceCatalogs = loadedCatalogs
                 .filterKeys { it == ContentType.MOVIE || it == ContentType.SERIES }
@@ -1030,12 +1105,14 @@ class HulkViewModel internal constructor(
             }
             rebuiltHomeCatalogs.forEach { (type, catalog) ->
                 homeCatalogs[type] = catalog
+                homeRankingProfiles[type] = profile.id
             }
             mutableState.update { state ->
                 state.copy(
                     catalogs = catalogsForDestination(state.destination, state.catalogs),
                 )
             }
+            scheduleHomeBootstrapPersist()
         }
     }
 
@@ -1054,6 +1131,7 @@ class HulkViewModel internal constructor(
         current = current,
         loaded = loadedCatalogs,
         home = homeCatalogs,
+        bootstrap = homeBootstrapCatalogs,
     )
 
     private fun ensureDestinationCatalogs(
@@ -3544,8 +3622,25 @@ class HulkViewModel internal constructor(
 
     private fun clearCatalogMemory() {
         profileLibraryStartupGate.invalidate()
+        cacheRestoreGeneration += 1L
+        cacheRestoreJob?.cancel()
+        cacheRestoreJob = null
+        homeBootstrapPersistJob?.cancel()
+        homeBootstrapPersistJob = null
+        pendingCatalogRequests.clear()
+        cacheRestoreAttempted.clear()
+        freshCatalogTypes.clear()
+        catalogSourceGenerations.clear()
+        persistedCatalogBaselines.clear()
+        catalogWriteGate.invalidateAll()
+        catalogPersistJobs.values.forEach(Job::cancel)
+        catalogPersistJobs.clear()
+        profileLibraryProfileId = null
+        profileLibraryKind = null
+        homeRankingProfiles.clear()
         loadedCatalogs.clear()
         homeCatalogs.clear()
+        homeBootstrapCatalogs.clear()
         homeCompactionCache.clear()
         synchronized(tvArtworkSnapshotLock) { tvArtworkSnapshotCache = null }
         selectedCategoryByType.clear()
@@ -3913,6 +4008,45 @@ class HulkViewModel internal constructor(
 
     private fun ensureCatalog(type: ContentType, force: Boolean = false) {
         val activeSession = session ?: return
+        if (force) {
+            requestCatalogNetwork(activeSession, type, force = true)
+            return
+        }
+        if (!mutableState.value.isProfileLibraryReady) {
+            // Profile/library readiness is the gate for profile-owned Home content and Kids
+            // eligibility. Queue the request; the library-ready publication flushes it.
+            pendingCatalogRequests += type
+            return
+        }
+        val profileKind = profileLibraryKind ?: profileStore.activeProfile().kind
+        if (!canUseGeneralCatalogCache(profileKind, true)) {
+            // General catalog snapshots must never bypass the verified Kids source.
+            requestCatalogNetwork(activeSession, type, force = false)
+            return
+        }
+        if (cacheRestoreJob?.isActive == true && !freshCatalogTypes.contains(type)) {
+            // Never admit a network refresh for a type while the disk restore owner is still
+            // restoring this session's cached types. The runner requests network after restore.
+            if (!cacheRestoreAttempted.contains(type)) pendingCatalogRequests += type
+            return
+        }
+        if (freshCatalogTypes.contains(type) || catalogRequestOwner.loadingTypes().contains(type)) {
+            requestCatalogNetwork(activeSession, type, force = false)
+            return
+        }
+        if (!cacheRestoreAttempted.contains(type)) {
+            pendingCatalogRequests += type
+            startCacheRestore(activeSession)
+            return
+        }
+        requestCatalogNetwork(activeSession, type, force = false)
+    }
+
+    private fun requestCatalogNetwork(
+        activeSession: AuthenticatedSession,
+        type: ContentType,
+        force: Boolean,
+    ) {
         if (!catalogRequestOwner.request(activeSession, type, force)) {
             if (!force) {
                 mutableState.update { state ->
@@ -3932,6 +4066,404 @@ class HulkViewModel internal constructor(
                     errorMessage = if (clearGlobal) null else state.errorMessage,
                     errorRetryable = if (clearGlobal) true else state.errorRetryable,
                 )
+            }
+        }
+    }
+
+    private fun startCacheRestore(activeSession: AuthenticatedSession) {
+        if (cacheRestoreJob?.isActive == true) return
+        val generation = cacheRestoreGeneration
+        cacheRestoreJob = viewModelScope.launch {
+            try {
+                restoreCachedCatalogs(activeSession, generation)
+            } finally {
+                if (cacheRestoreGeneration == generation) {
+                    cacheRestoreJob = null
+                    if (
+                        pendingCatalogRequests.isNotEmpty() &&
+                        session === activeSession &&
+                        AuthenticatedSessionRegistry.currentOwner()?.session === activeSession
+                    ) {
+                        startCacheRestore(activeSession)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * A profile switch must not reuse another profile's restore attempt, pending queue or Home
+     * bootstrap. Account-level full catalogs stay in memory because they are not profile-owned;
+     * the runner skips disk reads for types already loaded and still revalidates them.
+     */
+    private fun resetCatalogRestoreForProfileChange() {
+        cacheRestoreGeneration += 1L
+        cacheRestoreJob?.cancel()
+        cacheRestoreJob = null
+        catalogWriteGate.invalidateHome()
+        homeBootstrapPersistJob?.cancel()
+        homeBootstrapPersistJob = null
+        pendingCatalogRequests.clear()
+        cacheRestoreAttempted.clear()
+        homeBootstrapCatalogs.clear()
+        homeRankingProfiles.clear()
+    }
+
+    private suspend fun restoreCachedCatalogs(
+        activeSession: AuthenticatedSession,
+        generation: Long,
+    ) {
+        val owner = AuthenticatedSessionRegistry.currentOwner()
+            ?.takeIf { it.session === activeSession } ?: return
+        val profile = profileStore.activeProfile()
+        if (!canUseGeneralCatalogCache(profile.kind, mutableState.value.isProfileLibraryReady)) {
+            flushPendingCatalogNetwork(activeSession)
+            return
+        }
+        // One physical permit covers disk restore, compaction and the network refresh admitted by
+        // the request owner. A forced refresh therefore waits instead of overlapping a full read.
+        val permitStartedNs = System.nanoTime()
+        catalogRequestOwner.withHeavyPermit {
+            restoreCachedCatalogsUnderPermit(activeSession, generation, owner, profile)
+        }
+        hulkPerfLog {
+            "catalogRestorePermit totalMs=${(System.nanoTime() - permitStartedNs) / 1_000_000}"
+        }
+    }
+
+    private suspend fun restoreCachedCatalogsUnderPermit(
+        activeSession: AuthenticatedSession,
+        generation: Long,
+        owner: AuthenticatedSessionOwner,
+        profile: sa.hulksa.player.model.UserProfile,
+    ) {
+        if (mutableState.value.isProfileLibraryReady) {
+            val bootstrapStartedNs = System.nanoTime()
+            val bootstrap = repository.cachedHomeBootstrap(
+                HomeBootstrapKey(owner.accountId, owner.providerId, profile.id),
+            )
+            if (
+                bootstrap != null &&
+                cacheRestoreGeneration == generation &&
+                session === activeSession &&
+                AuthenticatedSessionRegistry.isCurrent(owner) &&
+                profileStore.activeProfileId() == profile.id
+            ) {
+                val state = mutableState.value
+                val currentPersonalizationKey = withContext(Dispatchers.Default) {
+                    homeBootstrapPersonalizationKey(state.favorites, state.history)
+                }
+                val prepared = if (bootstrap.personalizationKey == currentPersonalizationKey) {
+                    bootstrap
+                } else {
+                    withContext(Dispatchers.Default) {
+                        bootstrap.copy(
+                            catalogs = reconcileHomeBootstrapCatalogs(
+                                catalogs = bootstrap.catalogs,
+                                favorites = state.favorites,
+                                history = state.history,
+                            ),
+                            personalizationKey = currentPersonalizationKey,
+                        )
+                    }
+                }
+                if (
+                    cacheRestoreGeneration == generation &&
+                    session === activeSession &&
+                    AuthenticatedSessionRegistry.isCurrent(owner) &&
+                    profileStore.activeProfileId() == profile.id
+                ) {
+                    publishHomeBootstrap(prepared)
+                    hulkPerfLog {
+                        "homeBootstrapRestore ms=${(System.nanoTime() - bootstrapStartedNs) / 1_000_000} " +
+                            "types=${prepared.catalogs.keys.joinToString(",")}"
+                    }
+                }
+            }
+        }
+
+        val requested = linkedSetOf<ContentType>()
+        while (true) {
+            if (cacheRestoreGeneration != generation || session !== activeSession) return
+            // Re-evaluate the latest foreground type before every next restore, never from a batch
+            // captured before a later Live/Movies/Series selection.
+            val next = nextCatalogRestoreType(
+                selected = mutableState.value.destination.catalogTypeOrNull(),
+                pending = pendingCatalogRequests,
+            ) ?: break
+            pendingCatalogRequests.remove(next)
+            requested += next
+            cacheRestoreAttempted += next
+            // Account catalogs already in memory are still revalidated by the network below;
+            // re-reading the same complete snapshot from disk would only duplicate work.
+            if (loadedCatalogs[next] == null) {
+                val readStartedNs = System.nanoTime()
+                val snapshot = repository.cachedCatalog(
+                    CatalogSnapshotKey(owner.accountId, owner.providerId, next),
+                )
+                hulkPerfLog {
+                    "catalogCacheRead type=$next hit=${snapshot != null} " +
+                        "items=${snapshot?.catalog?.items?.size ?: 0} " +
+                        "ms=${(System.nanoTime() - readStartedNs) / 1_000_000}"
+                }
+                if (
+                    snapshot != null &&
+                    cacheRestoreGeneration == generation &&
+                    session === activeSession &&
+                    mutableState.value.isProfileLibraryReady &&
+                    AuthenticatedSessionRegistry.isCurrent(owner) &&
+                    profileStore.activeProfileId() == profile.id
+                ) {
+                    val published = publishCachedCatalog(
+                        activeSession = activeSession,
+                        owner = owner,
+                        profileId = profile.id,
+                        generation = generation,
+                        type = next,
+                        catalog = snapshot.catalog,
+                    )
+                    if (
+                        published &&
+                        cacheRestoreGeneration == generation &&
+                        session === activeSession &&
+                        AuthenticatedSessionRegistry.isCurrent(owner) &&
+                        profileStore.activeProfileId() == profile.id
+                    ) {
+                        persistedCatalogBaselines.onRestored(next, snapshot.catalog)
+                    }
+                }
+            }
+        }
+        val selected = mutableState.value.destination.catalogTypeOrNull()
+        val networkOrder = buildList {
+            if (selected != null && selected in requested) add(selected)
+            addAll(requested.filter { it != selected })
+        }
+        networkOrder.forEach { type ->
+            if (cacheRestoreGeneration == generation && session === activeSession) {
+                requestCatalogNetwork(activeSession, type, force = false)
+            }
+        }
+        if (cacheRestoreGeneration == generation && session === activeSession) {
+            scheduleHomeBootstrapPersist()
+        }
+    }
+
+    private fun flushPendingCatalogNetwork(activeSession: AuthenticatedSession) {
+        val pending = pendingCatalogRequests.toList()
+        pendingCatalogRequests.clear()
+        pending.forEach { type -> requestCatalogNetwork(activeSession, type, force = false) }
+    }
+
+    private fun publishHomeBootstrap(bootstrap: HomeBootstrapSnapshot) {
+        if (!canUseGeneralCatalogCache(
+                profileStore.activeProfile().kind,
+                mutableState.value.isProfileLibraryReady,
+            )
+        ) return
+        homeBootstrapCatalogs.clear()
+        bootstrap.catalogs.forEach { (type, catalog) ->
+            // A type already restored or network-published must not be replaced by its bootstrap.
+            if (loadedCatalogs[type] == null) homeBootstrapCatalogs[type] = catalog
+        }
+        mutableState.update { state ->
+            state.copy(catalogs = catalogsForDestination(state.destination, state.catalogs))
+        }
+        hulkPerfLog {
+            "homeBootstrapPublished types=${bootstrap.catalogs.keys.joinToString(",")} " +
+                "sourceGenerations=${bootstrap.sourceGenerations}"
+        }
+    }
+
+    private suspend fun publishCachedCatalog(
+        activeSession: AuthenticatedSession,
+        owner: AuthenticatedSessionOwner,
+        profileId: String,
+        generation: Long,
+        type: ContentType,
+        catalog: Catalog,
+    ): Boolean {
+        // A network publication is always newer than the disk snapshot. Never replace it.
+        if (freshCatalogTypes.contains(type)) return false
+        val snapshot = mutableState.value
+        val home = if (type == ContentType.MOVIE || type == ContentType.SERIES) {
+            withContext(Dispatchers.Default) {
+                homeCompactionCache.compact(type, catalog, snapshot.favorites, snapshot.history)
+            }
+        } else {
+            catalog
+        }
+        // Compaction suspends. Re-check every ownership boundary before publishing a stale read.
+        if (freshCatalogTypes.contains(type) ||
+            cacheRestoreGeneration != generation ||
+            session !== activeSession ||
+            !mutableState.value.isProfileLibraryReady ||
+            !AuthenticatedSessionRegistry.isCurrent(owner) ||
+            profileStore.activeProfileId() != profileId
+        ) return false
+        loadedCatalogs[type] = catalog
+        homeCatalogs[type] = home
+        homeRankingProfiles[type] = profileId
+        catalogSourceGenerations[type] = (catalogSourceGenerations[type] ?: 0L) + 1L
+        homeBootstrapCatalogs.remove(type)
+        mutableState.update { state ->
+            state.copy(catalogs = catalogsForDestination(state.destination, state.catalogs))
+        }
+        hulkPerfLog {
+            "catalogCachePublished type=$type items=${catalog.items.size} " +
+                "homeItems=${home.items.size}"
+        }
+        return true
+    }
+
+    private fun persistCatalogSnapshot(
+        activeSession: AuthenticatedSession,
+        type: ContentType,
+        catalog: Catalog,
+    ) {
+        val owner = AuthenticatedSessionRegistry.currentOwner()
+            ?.takeIf { it.session === activeSession } ?: return
+        val key = CatalogSnapshotKey(owner.accountId, owner.providerId, type)
+        val writeRevision = catalogWriteGate.nextCatalog(type)
+        catalogPersistJobs[type]?.cancel()
+        val job = viewModelScope.launch {
+            val isCurrent = {
+                catalogWriteGate.isCatalogCurrent(type, writeRevision) &&
+                    AuthenticatedSessionRegistry.isCurrent(owner)
+            }
+            val baseline = persistedCatalogBaselines.get(type)
+            if (baseline != null && withContext(Dispatchers.Default) { baseline == catalog }) {
+                // Canonicalize the baseline to the graph already published by loadedCatalogs and
+                // extend retention without rewriting the complete rows. If the row is missing or
+                // the touch fails, fall through to a full write instead of pinning a stale skip.
+                if (isCurrent()) {
+                    persistedCatalogBaselines.onIdentical(type, catalog)
+                    if (repository.touchCatalogSnapshot(key, isCurrent)) return@launch
+                } else {
+                    return@launch
+                }
+            }
+            val persistStartedNs = System.nanoTime()
+            val saved = repository.persistCatalog(key, catalog, isCurrent)
+            hulkPerfLog {
+                "catalogCachePersist type=$type hit=${saved != null} " +
+                    "items=${catalog.items.size} " +
+                    "ms=${(System.nanoTime() - persistStartedNs) / 1_000_000}"
+            }
+            if (saved == null) {
+                // A failed or obsolete write must not keep the previous complete graph pinned.
+                if (isCurrent()) persistedCatalogBaselines.onWriteFailed(type)
+                return@launch
+            }
+            if (isCurrent()) persistedCatalogBaselines.onWriteSucceeded(type, catalog)
+        }
+        catalogPersistJobs[type] = job
+    }
+
+    private fun scheduleHomeBootstrapPersist() {
+        homeBootstrapPersistJob?.cancel()
+        val writeRevision = catalogWriteGate.nextHome()
+        homeBootstrapPersistJob = viewModelScope.launch {
+            val activeSession = session ?: return@launch
+            val owner = AuthenticatedSessionRegistry.currentOwner()
+                ?.takeIf { it.session === activeSession } ?: return@launch
+            val profile = profileStore.activeProfile()
+            if (!canUseGeneralCatalogCache(profile.kind, mutableState.value.isProfileLibraryReady)) {
+                return@launch
+            }
+            val state = mutableState.value
+            val isCurrent = {
+                catalogWriteGate.isHomeCurrent(writeRevision) &&
+                    AuthenticatedSessionRegistry.isCurrent(owner) &&
+                    profileStore.activeProfileId() == profile.id
+            }
+            val personalizationKey = withContext(Dispatchers.Default) {
+                homeBootstrapPersonalizationKey(state.favorites, state.history)
+            }
+            // Home seed compaction is a full-catalog scan for Movie/Series/Live; it shares the
+            // same physical permit as restore/network work and never runs on Main. Source
+            // generations are captured under the same permit so the metadata cannot claim a
+            // revision newer than the seed it describes.
+            val seeded = catalogRequestOwner.withHeavyPermit {
+                // Capture Main-owned maps while the physical permit is held; the background build
+                // must never read an EnumMap that a logout can clear concurrently.
+                val movie = loadedCatalogs[ContentType.MOVIE]
+                val series = loadedCatalogs[ContentType.SERIES]
+                val live = loadedCatalogs[ContentType.LIVE]
+                val sourceGenerationsSnapshot =
+                    java.util.EnumMap<ContentType, Long>(ContentType::class.java)
+                        .apply { putAll(catalogSourceGenerations) }
+                withContext(Dispatchers.Default) {
+                    val seeds = LinkedHashMap<ContentType, Catalog>()
+                    movie?.let { full ->
+                        seeds[ContentType.MOVIE] = homeCompactionCache.compact(
+                            ContentType.MOVIE,
+                            full,
+                            state.favorites,
+                            state.history,
+                        )
+                    }
+                    series?.let { full ->
+                        seeds[ContentType.SERIES] = homeCompactionCache.compact(
+                            ContentType.SERIES,
+                            full,
+                            state.favorites,
+                            state.history,
+                        )
+                    }
+                    live?.let { catalog ->
+                        seeds[ContentType.LIVE] = compactHomeLiveCatalogForHome(
+                            catalog = catalog,
+                            favorites = state.favorites,
+                            history = state.history,
+                        )
+                    }
+                    selectHomeBootstrapSeed(seeds, sourceGenerationsSnapshot)
+                }
+            }
+            val selection = seeded
+            if (selection.catalogs.isNotEmpty()) {
+                val snapshot = HomeBootstrapSnapshot(
+                    catalogs = selection.catalogs,
+                    sourceGenerations = selection.sourceGenerations,
+                    personalizationKey = personalizationKey,
+                    completedAtEpochMs = System.currentTimeMillis(),
+                )
+                val homePersistStartedNs = System.nanoTime()
+                val saved = repository.persistHomeBootstrap(
+                    HomeBootstrapKey(owner.accountId, owner.providerId, profile.id),
+                    snapshot,
+                    isCurrent,
+                )
+                hulkPerfLog {
+                    "homeBootstrapPersist hit=$saved " +
+                        "types=${snapshot.catalogs.keys.joinToString(",")} " +
+                        "emptyOmitted=${selection.confirmedEmptyTypes.joinToString(",")} " +
+                        "ms=${(System.nanoTime() - homePersistStartedNs) / 1_000_000}"
+                }
+                if (saved) {
+                    hulkPerfLog { "homeBootstrapPersisted profile=${profile.id}" }
+                }
+            } else if (
+                selection.confirmedEmptyTypes.isNotEmpty() &&
+                selection.unboundTypes.isEmpty() &&
+                selection.missingTypes.isEmpty()
+            ) {
+                // Every complete local type is authoritatively empty: remove the obsolete nonempty
+                // seed instead of leaving stale Home content for the next process start.
+                val key = HomeBootstrapKey(owner.accountId, owner.providerId, profile.id)
+                val cleared = repository.deleteHomeBootstrap(key, isCurrent)
+                hulkPerfLog {
+                    "homeBootstrapCleared hit=$cleared " +
+                        "emptyTypes=${selection.confirmedEmptyTypes.joinToString(",")}"
+                }
+            } else if (selection.confirmedEmptyTypes.isNotEmpty()) {
+                hulkPerfLog {
+                    "homeBootstrapKeptForIncomplete " +
+                        "emptyTypes=${selection.confirmedEmptyTypes.joinToString(",")} " +
+                        "unbound=${selection.unboundTypes.joinToString(",")} " +
+                        "missing=${selection.missingTypes.joinToString(",")}"
+                }
             }
         }
     }
@@ -4397,9 +4929,11 @@ class HulkViewModel internal constructor(
     }
 
     private fun hasUsableCatalogForDestination(destination: MainDestination): Boolean = when (destination) {
-        MainDestination.HOME -> loadedCatalogs.keys.any {
-            it == ContentType.MOVIE || it == ContentType.SERIES || it == ContentType.LIVE
-        }
+        MainDestination.HOME -> homeBootstrapCatalogs.isNotEmpty() ||
+            homeCatalogs.isNotEmpty() ||
+            loadedCatalogs.keys.any {
+                it == ContentType.MOVIE || it == ContentType.SERIES || it == ContentType.LIVE
+            }
         MainDestination.LIVE -> loadedCatalogs[ContentType.LIVE] != null
         MainDestination.MOVIES -> loadedCatalogs[ContentType.MOVIE] != null
         MainDestination.SERIES -> loadedCatalogs[ContentType.SERIES] != null
@@ -4512,20 +5046,28 @@ internal fun projectCatalogsForDestination(
     current: Map<ContentType, Catalog>,
     loaded: Map<ContentType, Catalog>,
     home: Map<ContentType, Catalog>,
+    bootstrap: Map<ContentType, Catalog> = emptyMap(),
 ): Map<ContentType, Catalog> {
-    if (loaded.isEmpty()) return current
+    if (loaded.isEmpty() && home.isEmpty() && bootstrap.isEmpty()) return current
     val displayed = current.toMutableMap()
+    // The bounded Home bootstrap is a Home-only first frame. Catalog/Favorites/Search screens
+    // must not present it as a complete section before the full cached type is restored.
+    if (destination != MainDestination.HOME) {
+        bootstrap.keys.forEach { type ->
+            if (loaded[type] == null) displayed.remove(type)
+        }
+    }
     fun showFull(type: ContentType) {
         loaded[type]?.let { displayed[type] = it }
     }
     fun showHome(type: ContentType) {
-        (home[type] ?: loaded[type])?.let { displayed[type] = it }
+        (home[type] ?: bootstrap[type] ?: loaded[type])?.let { displayed[type] = it }
     }
     when (destination) {
         MainDestination.HOME -> {
             showHome(ContentType.MOVIE)
             showHome(ContentType.SERIES)
-            showFull(ContentType.LIVE)
+            showHome(ContentType.LIVE)
         }
         MainDestination.LIVE -> showFull(ContentType.LIVE)
         MainDestination.MOVIES -> showFull(ContentType.MOVIE)
@@ -4538,6 +5080,28 @@ internal fun projectCatalogsForDestination(
     }
     return displayed
 }
+
+/**
+ * General catalog snapshots are profile-owned presentation accelerators, not an authorization
+ * source. They are usable only after the profile library is ready and never for Kids profiles,
+ * whose content must come from the verified Kids source.
+ */
+/**
+ * Selects the next cached type from the current pending set. The foreground destination wins even
+ * when a later selection arrived after the restore runner started.
+ */
+internal fun nextCatalogRestoreType(
+    selected: ContentType?,
+    pending: Set<ContentType>,
+): ContentType? = when {
+    selected != null && selected in pending -> selected
+    else -> pending.firstOrNull()
+}
+
+internal fun canUseGeneralCatalogCache(
+    profileKind: ProfileKind,
+    profileLibraryReady: Boolean,
+): Boolean = profileLibraryReady && profileKind != ProfileKind.KIDS
 
 /**
  * A loaded catalog satisfies a non-forced entry; an in-flight request always satisfies both

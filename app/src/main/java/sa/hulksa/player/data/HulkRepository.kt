@@ -62,6 +62,7 @@ class HulkRepository internal constructor(
     )
 
     private val appContext = context.applicationContext
+    private val catalogSnapshotCache = CatalogSnapshotCache(SqliteCatalogSnapshotStore(appContext))
     private val kidsCatalogClient = KidsServerCatalogClient()
     private val kidsContentFilterStore = KidsContentFilterStore(appContext)
     private val movieCardMetadataClient = MovieCardMetadataClient()
@@ -418,6 +419,34 @@ class HulkRepository internal constructor(
 
     suspend fun catalog(session: AuthenticatedSession, type: ContentType): Catalog =
         client.catalog(session, type)
+
+    internal suspend fun cachedCatalog(key: CatalogSnapshotKey): CatalogSnapshot? =
+        catalogSnapshotCache.restore(key)
+
+    internal suspend fun persistCatalog(
+        key: CatalogSnapshotKey,
+        catalog: Catalog,
+        isCurrent: () -> Boolean,
+    ): CatalogSnapshot? = catalogSnapshotCache.persist(key, catalog, isCurrent)
+
+    internal suspend fun touchCatalogSnapshot(
+        key: CatalogSnapshotKey,
+        isCurrent: () -> Boolean,
+    ): Boolean = catalogSnapshotCache.touch(key, isCurrent)
+
+    internal suspend fun cachedHomeBootstrap(key: HomeBootstrapKey): HomeBootstrapSnapshot? =
+        catalogSnapshotCache.restoreHomeBootstrap(key)
+
+    internal suspend fun persistHomeBootstrap(
+        key: HomeBootstrapKey,
+        snapshot: HomeBootstrapSnapshot,
+        isCurrent: () -> Boolean,
+    ): Boolean = catalogSnapshotCache.persistHomeBootstrap(key, snapshot, isCurrent)
+
+    internal suspend fun deleteHomeBootstrap(
+        key: HomeBootstrapKey,
+        isCurrent: () -> Boolean,
+    ): Boolean = catalogSnapshotCache.deleteHomeBootstrap(key, isCurrent)
 
     suspend fun verifiedKidsCatalog(session: AuthenticatedSession): VerifiedKidsCatalogSnapshot {
         val owner = withContext(Dispatchers.IO) {
