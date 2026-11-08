@@ -1886,6 +1886,10 @@ fun PlayerScreen(
                     onPlayNextEpisode != null &&
                     nextEpisodeTitle != null
                 ) {
+                    // The More panel suppresses the countdown prompt. Close it when the episode
+                    // ends so the real next-episode decision is visible instead of a black screen.
+                    vodMorePanel = null
+                    vodGoToTimeVisible = false
                     nextCountdown = NEXT_EPISODE_SECONDS
                     controlsVisible = false
                 }

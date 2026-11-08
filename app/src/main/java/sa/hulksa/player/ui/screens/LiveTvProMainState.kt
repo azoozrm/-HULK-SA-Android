@@ -20,10 +20,38 @@ import sa.hulksa.player.model.ContentType
 internal fun liveTvProDecorateMainState(
     state: HulkUiState,
     context: Context,
+): HulkUiState = liveTvProDecorateMainState(
+    state = state,
+    recentChannelIds = context.liveTvProRecentChannelIds(),
+)
+
+internal fun liveTvProDecorateMainState(
+    state: HulkUiState,
+    recentChannelIds: List<Int>,
 ): HulkUiState {
     if (state.destination != MainDestination.LIVE) return state
     val liveCatalog = state.catalogs[ContentType.LIVE] ?: return state
+    return state.copy(
+        catalogs = state.catalogs + (
+            ContentType.LIVE to liveTvProDecoratedCatalog(
+                liveCatalog = liveCatalog,
+                selectedCategoryId = state.selectedCategoryId,
+                recentChannelIds = recentChannelIds,
+            )
+        ),
+    )
+}
 
+/**
+ * The expensive Live-only decoration. Callers cache this Catalog by its three real inputs and
+ * combine it with the current state so unrelated query/favorite/loading/failure changes are never
+ * masked by a cached HulkUiState.
+ */
+internal fun liveTvProDecoratedCatalog(
+    liveCatalog: Catalog,
+    selectedCategoryId: String?,
+    recentChannelIds: List<Int>,
+): Catalog {
     val recentCategory = Category(
         id = LIVE_TV_PRO_MAIN_RECENT_CATEGORY,
         name = "اخر مشاهدة",
@@ -32,22 +60,18 @@ internal fun liveTvProDecorateMainState(
     val categories = (listOf(recentCategory) + liveCatalog.categories)
         .distinctBy(Category::id)
 
-    val presentedItems = if (state.selectedCategoryId == LIVE_TV_PRO_MAIN_RECENT_CATEGORY) {
+    val presentedItems = if (selectedCategoryId == LIVE_TV_PRO_MAIN_RECENT_CATEGORY) {
         liveTvProRecentOverlayItems(
             items = liveCatalog.items,
-            recentChannelIds = context.liveTvProRecentChannelIds(),
+            recentChannelIds = recentChannelIds,
         )
     } else {
         liveCatalog.items
     }
 
-    return state.copy(
-        catalogs = state.catalogs + (
-            ContentType.LIVE to Catalog(
-                categories = categories,
-                items = presentedItems,
-            )
-        ),
+    return Catalog(
+        categories = categories,
+        items = presentedItems,
     )
 }
 

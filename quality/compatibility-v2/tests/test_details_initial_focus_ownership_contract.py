@@ -65,6 +65,15 @@ class DetailsInitialFocusOwnershipContractTest(unittest.TestCase):
             with self.subTest(action_bar=name):
                 self.assertIn(".onPlaced { onWatchActionPlaced?.invoke() }", bar)
 
+    def test_blocking_error_cancels_pending_grant_on_both_paths(self) -> None:
+        for name, section in (("movie", self.movie_screen()), ("series", self.series_screen())):
+            with self.subTest(screen=name):
+                grant_index = section.index("detailsInitialFocusAction(")
+                grant_end = section.index("withFrameNanos { }", grant_index)
+                block = section[grant_index:grant_end]
+                self.assertIn("errorMessage != null", block)
+                self.assertIn("initialFocusPending = false", block)
+
     def test_tab_and_non_play_action_moves_still_cancel_pending_grant(self) -> None:
         for name, section in (("movie", self.movie_screen()), ("series", self.series_screen())):
             with self.subTest(screen=name):

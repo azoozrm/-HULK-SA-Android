@@ -112,6 +112,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -192,6 +193,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import sa.hulksa.player.BuildConfig
+import sa.hulksa.player.CatalogFailure
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.MainDestination
 import sa.hulksa.player.data.AccountProfileStateScope
@@ -341,7 +343,7 @@ internal fun Modifier.extendCategoryViewportTowardStart(extraWidth: Dp): Modifie
     }
 }
 
-private data class CategoryContentFocusRequest(
+internal data class CategoryContentFocusRequest(
     val categoryId: String?,
     val requestId: Long,
     val focusFirstItem: Boolean,
@@ -758,6 +760,33 @@ class NavigationMemoryStore {
 
     internal suspend fun homeModel(input: HomeContentModelInput): KeyedHomeContentModel =
         screenEntryModels.home(input)
+
+    internal fun cachedFavoriteProjection(input: FavoriteCatalogProjectionInput): List<ContentItem>? =
+        screenEntryModels.cachedFavoriteProjection(input)
+
+    internal fun lastGoodFavoriteProjection(
+        catalogs: Map<ContentType, Catalog>,
+    ): List<ContentItem>? = screenEntryModels.lastGoodFavoriteProjection(catalogs)
+
+    internal suspend fun favoriteProjection(
+        input: FavoriteCatalogProjectionInput,
+    ): List<ContentItem> = screenEntryModels.favoriteProjection(input)
+
+    internal fun cachedLiveProjection(
+        input: LiveCatalogProjectionInput,
+    ): LiveCatalogProjectionResult? = screenEntryModels.cachedLiveProjection(input)
+
+    internal fun lastGoodLiveProjection(catalog: Catalog?): List<ContentItem>? =
+        screenEntryModels.lastGoodLiveProjection(catalog)
+
+    internal suspend fun liveProjection(
+        input: LiveCatalogProjectionInput,
+    ): LiveCatalogProjectionResult = screenEntryModels.liveProjection(input)
+
+    /** Drops derived catalog payloads for an inactive profile; navigation positions remain. */
+    internal fun releaseDerivedModels() {
+        screenEntryModels.clear()
+    }
 }
 
 @Composable
@@ -1096,6 +1125,7 @@ fun MainShellScreen(
     onRemoveHistoryEntry: (String, (Boolean) -> Unit) -> Unit,
     onToggleFavoriteWithResult: (ContentItem, (FavoriteMutationOutcome) -> Unit) -> Unit,
     onRefresh: () -> Unit,
+    onRetryCatalog: (ContentType) -> Unit = {},
     onOpenNotifications: () -> Unit,
     onClearHistory: () -> Unit,
     onPlayDownload: (OfflineDownload) -> Unit,
@@ -1329,6 +1359,7 @@ fun MainShellScreen(
                         onFavoritesRemovalStarted = favoritesRemovalInputGuard::begin,
                         onRecentRemovalStarted = recentRemovalInputGuard::begin,
                         onRefresh = onRefresh,
+                        onRetryCatalog = onRetryCatalog,
                         onOpenNotifications = onOpenNotifications,
                         onGrowthAction = openGrowthDestination,
                         onSelectDestination = onSelectDestination,
@@ -1390,6 +1421,7 @@ fun MainShellScreen(
                         onFavoritesRemovalStarted = favoritesRemovalInputGuard::begin,
                         onRecentRemovalStarted = recentRemovalInputGuard::begin,
                         onRefresh = onRefresh,
+                        onRetryCatalog = onRetryCatalog,
                         onOpenNotifications = onOpenNotifications,
                         onGrowthAction = openGrowthDestination,
                         onSelectDestination = onSelectDestination,
@@ -1625,6 +1657,7 @@ private fun DestinationContent(
     onFavoritesRemovalStarted: () -> Unit,
     onRecentRemovalStarted: () -> Unit,
     onRefresh: () -> Unit,
+    onRetryCatalog: (ContentType) -> Unit,
     onOpenNotifications: () -> Unit,
     onGrowthAction: (GrowthDestination) -> Unit,
     onSelectDestination: (MainDestination) -> Unit,
@@ -1669,6 +1702,7 @@ private fun DestinationContent(
             onRemoveHistoryEntry = onRemoveHistoryEntry,
             onToggleFavorite = onToggleFavorite,
             onRefresh = onRefresh,
+            onRetryCatalog = onRetryCatalog,
             onOpenNotifications = onOpenNotifications,
             onGrowthAction = onGrowthAction,
             onOpenDownloads = { onSelectDestination(MainDestination.DOWNLOADS) },
@@ -1746,6 +1780,7 @@ private fun DestinationContent(
             onToggleFavorite = onToggleFavorite,
             onFavoritesRemovalStarted = onFavoritesRemovalStarted,
             onRefresh = onRefresh,
+            onRetryCatalog = onRetryCatalog,
         )
         MainDestination.SEARCH -> UnifiedSearchScreen(state, isTv, navigationMemory, isFavorite, onSearch, onOpen, onToggleFavorite)
         MainDestination.DOWNLOADS -> DownloadsScreen(
@@ -1802,6 +1837,7 @@ private fun CinemaHomeScreen(
     onRemoveHistoryEntry: (String, (Boolean) -> Unit) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
+    onRetryCatalog: (ContentType) -> Unit,
     onOpenNotifications: () -> Unit,
     onGrowthAction: (GrowthDestination) -> Unit,
     onOpenDownloads: () -> Unit,
@@ -1934,6 +1970,20 @@ private fun CinemaHomeScreen(
     val homeErrorCopy = state.errorMessage?.let { message ->
         moviesCatalogErrorCopy(offline = !homeNetworkUsable, serverMessage = message)
     }
+    val homeScopedFailureCopy = scopedCatalogFailureCopy(state.catalogFailures)
+    val homeNoticeCopy = when {
+        homeErrorCopy != null && homeScopedFailureCopy != null ->
+            homeErrorCopy.copy(body = homeScopedFailureCopy.body)
+        homeErrorCopy != null -> homeErrorCopy
+        else -> homeScopedFailureCopy
+    }
+    val retryableHomeFailures = retryableCatalogFailureTypes(state.catalogFailures)
+    val homeNoticeRetryable = if (state.catalogFailures.isNotEmpty()) {
+        retryableHomeFailures.isNotEmpty()
+    } else {
+        state.errorRetryable
+    }
+
     val remembered = navigationMemory.position(MainDestination.HOME)
     // One Home message zone owns the non-blocking renewal, announcement and optional-update
     // presentation. GrowthPolicy, the eligible Operations announcement and the current OPTIONAL
@@ -1958,7 +2008,7 @@ private fun CinemaHomeScreen(
 
     var rowCursor = homeRowCursorStart(isTv)
     val messageRow = if (hasHomeMessages) rowCursor++ else -1
-    if (state.errorMessage != null) rowCursor++
+    if (homeNoticeCopy != null) rowCursor++
     val continueRow = if (continueWatching.isNotEmpty()) rowCursor++ else -1
     val downloadsRow = if (activeDownloads.isNotEmpty()) rowCursor++ else -1
     val becauseRow = if (becauseYouWatched.isNotEmpty()) rowCursor++ else -1
@@ -2025,6 +2075,11 @@ private fun CinemaHomeScreen(
     val requestHomeRefresh = {
         if (featured == null) homeRefreshFocusState.requested = true
         onRefresh()
+    }
+    val homeRetryAction: () -> Unit = if (state.catalogFailures.isNotEmpty()) {
+        { retryableHomeFailures.forEach(onRetryCatalog) }
+    } else {
+        requestHomeRefresh
     }
     // One Home restoration owner for the remembered row. It waits for the exact model when Home
     // is still staging, brings the remembered row into the vertical viewport, and uses the hero
@@ -2118,14 +2173,14 @@ private fun CinemaHomeScreen(
                 } else {
                     HomePlaceholder(
                         loading = loading,
-                        onRefresh = requestHomeRefresh,
+                        onRefresh = homeRetryAction,
                         isTv = isTv,
                         unreadNotificationCount = state.unreadNotificationCount,
                         onOpenNotifications = onOpenNotifications,
                         errorTitle = homeErrorCopy?.title,
                         errorBody = homeErrorCopy?.body,
                         networkFailure = !homeNetworkUsable,
-                        showRetry = state.errorRetryable,
+                        showRetry = homeNoticeRetryable,
                         refreshModifier = Modifier.focusRequester(homeHeroFocusRequester),
                         refreshFocusRequester = homeHeroFocusRequester,
                         topActions = homeTopActions,
@@ -2161,16 +2216,16 @@ private fun CinemaHomeScreen(
                 }
             }
         }
-        if (homeErrorCopy != null) {
+        if (homeNoticeCopy != null) {
             item(key = "error-notice") {
                 HomeSectionPadding(isTv) {
                     MoviesErrorNotice(
-                        title = homeErrorCopy.title,
-                        body = homeErrorCopy.body,
-                        onRetry = requestHomeRefresh,
+                        title = homeNoticeCopy.title,
+                        body = homeNoticeCopy.body,
+                        onRetry = homeRetryAction,
                         isTv = isTv,
                         networkFailure = !homeNetworkUsable,
-                        showRetry = state.errorRetryable,
+                        showRetry = homeNoticeRetryable,
                         modifier = Modifier.padding(
                             horizontal = if (isTv) 0.dp else 14.dp,
                             vertical = if (isTv) 4.dp else 6.dp,
@@ -4534,7 +4589,7 @@ internal fun PosterCatalogScreen(
     val continueWatching = model?.continueWatching.orEmpty()
     val showingContinue = state.selectedCategoryId == CONTINUE_CATEGORY_ID
     val resultCount = if (showingContinue) continueWatching.size else visible.size
-    val catalogErrorMessage = state.errorMessage
+    val catalogErrorMessage = state.catalogFailures[type]?.message ?: state.errorMessage
     val moviesNetworkUsable by rememberUsableNetworkState()
     val moviesError = categoryManagement && catalogErrorMessage != null
     val moviesOfflineError = moviesError && !moviesNetworkUsable
@@ -4778,6 +4833,7 @@ internal fun PosterCatalogScreen(
                     onRetry = onRefresh,
                     isTv = isTv,
                     networkFailure = moviesOfflineError,
+                    showRetry = state.catalogFailures[type]?.retryable ?: state.errorRetryable,
                     retryRequester = noticeRetryRequester,
                     onRetryFocusChanged = { noticeRetryFocused = it },
                     onRetryUp = { runCatching { refreshRequester.requestFocus() }.getOrDefault(false) },
@@ -4805,6 +4861,7 @@ internal fun PosterCatalogScreen(
                     title = moviesErrorCopy.title,
                     body = moviesErrorCopy.body,
                     networkFailure = moviesOfflineError,
+                    showRetry = state.catalogFailures[type]?.retryable ?: state.errorRetryable,
                 )
             } else if (model == null) {
                 LoadingRing(label = "جاري تجهيز $title…", modifier = Modifier.align(Alignment.Center))
@@ -4843,6 +4900,7 @@ internal fun PosterCatalogScreen(
                     title = moviesErrorCopy.title,
                     body = moviesErrorCopy.body,
                     networkFailure = moviesOfflineError,
+                    showRetry = state.catalogFailures[type]?.retryable ?: state.errorRetryable,
                 )
                 } else {
                     EmptyState("لا توجد مشاهدة غير مكتملة في $title")
@@ -4857,6 +4915,7 @@ internal fun PosterCatalogScreen(
                     title = moviesErrorCopy.title,
                     body = moviesErrorCopy.body,
                     networkFailure = moviesOfflineError,
+                    showRetry = state.catalogFailures[type]?.retryable ?: state.errorRetryable,
                 )
                 } else {
                     EmptyState("لا توجد نتائج مطابقة")
@@ -5029,6 +5088,33 @@ internal fun liveRemovalRevealDelta(
 
 internal data class LiveCatalogErrorCopy(val title: String, val body: String)
 
+internal fun retryableCatalogFailureTypes(
+    failures: Map<ContentType, CatalogFailure>,
+): Set<ContentType> = failures.filterValues(CatalogFailure::retryable).keys
+
+internal fun catalogFailureLabel(type: ContentType): String = when (type) {
+    ContentType.MOVIE -> "الافلام"
+    ContentType.SERIES -> "المسلسلات"
+    ContentType.LIVE -> "البث المباشر"
+}
+
+/**
+ * One scoped Home notice for failed background catalogs while healthy content stays visible.
+ * Genuine per-type messages are retained; no failure is silently converted to success.
+ */
+internal fun scopedCatalogFailureCopy(
+    failures: Map<ContentType, CatalogFailure>,
+): MoviesErrorCopy? {
+    if (failures.isEmpty()) return null
+    val body = failures.entries.joinToString(separator = "\n") { (type, failure) ->
+        "${catalogFailureLabel(type)}: ${failure.message}"
+    }
+    return MoviesErrorCopy(
+        title = "تعذر تحديث بعض المحتوى",
+        body = body,
+    )
+}
+
 /**
  * Live catalog error copy: validated connectivity selects the offline wording, otherwise a truthful
  * Live load failure keeps the real server message in the same accepted dark/gold/ivory notice.
@@ -5067,12 +5153,33 @@ private fun LiveCatalogScreen(
     val catalog = state.catalogs[ContentType.LIVE]
     // The explicit snapshot is the observed favorite revision for both membership and hearts;
     // the opaque view-model callback is not a Compose state read in this subtree.
-    val visible = remember(catalog, state.selectedCategoryId, state.searchQuery, favorites.persisted) {
-        catalog?.items.orEmpty().filter { item ->
-            categoryMatches(item, state.selectedCategoryId, favorites::contains) &&
-                item.matchesSearch(state.searchQuery)
-        }
+    val projectionInput = remember(
+        catalog,
+        state.selectedCategoryId,
+        state.searchQuery,
+        favorites.persisted,
+        favorites.optimistic,
+    ) {
+        LiveCatalogProjectionInput(
+            catalog = catalog,
+            categoryId = state.selectedCategoryId,
+            query = state.searchQuery,
+            favorites = favorites,
+        )
     }
+    val cachedProjection = remember(projectionInput) {
+        navigationMemory.cachedLiveProjection(projectionInput)
+    }
+    val exactProjection by produceState<LiveCatalogProjectionResult?>(
+        initialValue = cachedProjection,
+        key1 = projectionInput,
+    ) {
+        value = navigationMemory.liveProjection(projectionInput)
+    }
+    val exactVisible = exactProjection?.exactItemsFor(projectionInput)
+    // Display continuity may retain the previous same-catalog list, but focus/preview/request
+    // completion below requires exactVisible for the current category/query/favorite input.
+    val visible = exactVisible ?: navigationMemory.lastGoodLiveProjection(catalog).orEmpty()
     var showCategoryManager by remember { mutableStateOf(false) }
     var restoreManagerEntryFocus by remember { mutableStateOf(false) }
     // One shared committed order + hidden owner for the strip, the manager and the browser. The
@@ -5143,9 +5250,11 @@ private fun LiveCatalogScreen(
     // server error, rendered by the shared MoviesErrorNotice family with the actual Live refresh
     // callback. Cached channels, category, item and scroll identity stay intact.
     val liveNetworkUsable by rememberUsableNetworkState()
-    val liveError = state.errorMessage != null
+    val liveFailure = state.catalogFailures[ContentType.LIVE]
+    val liveErrorMessage = liveFailure?.message ?: state.errorMessage
+    val liveError = liveErrorMessage != null
     val liveOfflineError = liveError && !liveNetworkUsable
-    val liveErrorCopy = liveCatalogErrorCopy(offline = liveOfflineError, serverMessage = state.errorMessage)
+    val liveErrorCopy = liveCatalogErrorCopy(offline = liveOfflineError, serverMessage = liveErrorMessage)
     val noticeRetryRequester = remember { FocusRequester() }
     val refreshRequester = remember { FocusRequester() }
     var noticeRetryFocused by remember { mutableStateOf(false) }
@@ -5161,16 +5270,14 @@ private fun LiveCatalogScreen(
     }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
     val focusedChannelIndex = remember(visible) { intArrayOf(rememberedIndex) }
-    var nextCategoryContentFocusRequestId by remember { mutableLongStateOf(0L) }
-    var categoryContentFocusRequest by remember { mutableStateOf<CategoryContentFocusRequest?>(null) }
+    val liveFocusOwner = remember { LiveFocusRequestOwner() }
     val selectCategoryAndEnterContent: (String?) -> Unit = { categoryId ->
         if (isTv) {
-            nextCategoryContentFocusRequestId += 1L
             val categoryChanged = state.selectedCategoryId != categoryId
-            categoryContentFocusRequest = CategoryContentFocusRequest(
+            liveFocusOwner.requestCategory(
                 categoryId = categoryId,
-                requestId = nextCategoryContentFocusRequestId,
                 focusFirstItem = categoryChanged,
+                activatingChipFocused = categoryFocusRestoreController.focusedCategoryId == categoryId,
             )
             if (categoryChanged) {
                 navigationMemory.save(MainDestination.LIVE, itemKey = "", itemIndex = 0)
@@ -5179,6 +5286,9 @@ private fun LiveCatalogScreen(
         } else {
             onSelectCategory(categoryId)
         }
+    }
+    LaunchedEffect(categoryFocusRestoreController.focusedCategoryId, liveFocusOwner.categoryRequest) {
+        liveFocusOwner.onCategoryFocusChanged(categoryFocusRestoreController.focusedCategoryId)
     }
     val adaptiveUi = LocalAdaptiveUi.current
     val tvSafeInsets = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
@@ -5215,24 +5325,29 @@ private fun LiveCatalogScreen(
         remembered.itemKey
     }
     LaunchedEffect(
-        visible,
+        exactProjection,
         state.selectedCategoryId,
         state.searchQuery,
-        categoryContentFocusRequest,
+        liveFocusOwner.categoryRequest,
+        liveFocusOwner.focusRestorationPending,
     ) {
+        val exact = exactVisible ?: return@LaunchedEffect
+        val exactRememberedIndex = remembered.itemIndex.coerceIn(
+            0,
+            exact.lastIndex.coerceAtLeast(0),
+        )
         previewState.value = resolveLivePreview(
             current = previewState.value,
-            visible = visible,
+            visible = exact,
             rememberedItemKey = remembered.itemKey,
-            rememberedIndex = rememberedIndex,
+            rememberedIndex = exactRememberedIndex,
         )
-        val categoryRequest = categoryContentFocusRequest
-            ?.takeIf { it.categoryId == state.selectedCategoryId }
         val handoff = activeLiveFavoriteMutation
         val handoffApplied = handoff != null &&
-            visible.none { liveChannelKey(it) == handoff.removedKey }
+            exact.none { liveChannelKey(it) == handoff.removedKey }
         if (handoffApplied) {
-            if (visible.isEmpty()) {
+            liveFocusOwner.cancelForUserDeparture()
+            if (exact.isEmpty()) {
                 navigationMemory.save(MainDestination.LIVE, itemKey = "", itemIndex = 0)
                 liveFavoriteMutation = liveFavoriteMutation.clear()
                 withFrameNanos { }
@@ -5243,7 +5358,7 @@ private fun LiveCatalogScreen(
             // already claimed the shell gesture guard and is the only path that takes list focus.
             if (handoff?.origin == LiveFavoriteMutationOrigin.PREVIEW) {
                 previewState.value?.let { fallback ->
-                    val fallbackIndex = visible.indexOfFirst { it.id == fallback.id }
+                    val fallbackIndex = exact.indexOfFirst { it.id == fallback.id }
                     if (fallbackIndex >= 0) {
                         navigationMemory.save(
                             MainDestination.LIVE,
@@ -5256,9 +5371,9 @@ private fun LiveCatalogScreen(
                 return@LaunchedEffect
             }
             if (handoff?.origin == LiveFavoriteMutationOrigin.ROW) {
-                val targetIndex = removalFallbackIndex ?: rememberedIndex
-                if (targetIndex in visible.indices) {
-                    val targetKey = liveChannelKey(visible[targetIndex])
+                val targetIndex = removalFallbackIndex ?: exactRememberedIndex
+                if (targetIndex in exact.indices) {
+                    val targetKey = liveChannelKey(exact[targetIndex])
                     navigationMemory.save(MainDestination.LIVE, targetKey, targetIndex)
                     val layout = listState.layoutInfo
                     val targetInfo = layout.visibleItemsInfo.firstOrNull { it.index == targetIndex }
@@ -5292,7 +5407,8 @@ private fun LiveCatalogScreen(
         // A pending preview removal keeps the button focus. A row intent that has not yet been
         // observed must not replay a list restoration from the disappearing key.
         if (handoff != null && !handoffApplied) {
-            if (visible.isEmpty()) {
+            liveFocusOwner.cancelForUserDeparture()
+            if (exact.isEmpty()) {
                 navigationMemory.save(MainDestination.LIVE, itemKey = "", itemIndex = 0)
                 liveFavoriteMutation = liveFavoriteMutation.clear()
                 withFrameNanos { }
@@ -5300,33 +5416,59 @@ private fun LiveCatalogScreen(
             }
             return@LaunchedEffect
         }
-        if (visible.isEmpty()) {
-            return@LaunchedEffect
-        }
-        if (categoryRequest != null && visible.isEmpty()) {
-            if (
-                ContentType.LIVE !in state.loadingTypes &&
-                categoryContentFocusRequest?.requestId == categoryRequest.requestId
-            ) {
-                categoryContentFocusRequest = null
-            }
-            return@LaunchedEffect
-        }
-        val targetIndex = when {
-            categoryRequest?.focusFirstItem == true && visible.isNotEmpty() -> 0
-            categoryRequest != null && visible.isNotEmpty() -> rememberedIndex
-            state.searchQuery.isBlank() && remembered.itemKey.isNotBlank() && visible.isNotEmpty() -> rememberedIndex
-            else -> null
-        }
-        if (targetIndex != null) {
-            listState.scrollToItem(targetIndex)
-            snapshotFlow { listState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex } }
-                .first { it }
+        if (exact.isEmpty()) return@LaunchedEffect
+
+        val attemptToken = liveFocusOwner.attemptToken()
+        val decision = decideLiveFocusDecision(
+            exactAvailable = true,
+            exactItemCount = exact.size,
+            categoryRequest = liveFocusOwner.categoryRequest,
+            selectedCategoryId = state.selectedCategoryId,
+            searchQuery = state.searchQuery,
+            rememberedItemKey = remembered.itemKey,
+            rememberedIndex = remembered.itemIndex,
+            liveLoading = ContentType.LIVE in state.loadingTypes,
+            restorationPending = liveFocusOwner.focusRestorationPending,
+            categoryBarFocused = categoryFocusRestoreController.focusedCategoryId != null,
+        )
+        if (decision is LiveFocusDecision.Focus) {
+            listState.scrollToItem(decision.index)
+            snapshotFlow {
+                listState.layoutInfo.visibleItemsInfo.any { it.index == decision.index }
+            }.first { it }
+            if (!liveFocusOwner.isCurrent(attemptToken)) return@LaunchedEffect
             withFrameNanos { }
+            if (!liveFocusOwner.isCurrent(attemptToken)) return@LaunchedEffect
             val focused = runCatching { channelRequester.requestFocus() }.getOrDefault(false)
-            if (focused && categoryRequest != null && categoryContentFocusRequest?.requestId == categoryRequest.requestId) {
-                categoryContentFocusRequest = null
-            }
+            liveFocusOwner.completeFocus(attemptToken, decision.requestId, focused)
+        }
+    }
+    // Loading changes alone may complete an exact-empty category request, but this effect never
+    // scrolls or requests channel focus.
+    LaunchedEffect(
+        exactProjection,
+        state.selectedCategoryId,
+        state.searchQuery,
+        state.loadingTypes,
+        liveFocusOwner.categoryRequest,
+        liveFocusOwner.focusRestorationPending,
+    ) {
+        val exact = exactVisible ?: return@LaunchedEffect
+        if (exact.isNotEmpty()) return@LaunchedEffect
+        val decision = decideLiveFocusDecision(
+            exactAvailable = true,
+            exactItemCount = 0,
+            categoryRequest = liveFocusOwner.categoryRequest,
+            selectedCategoryId = state.selectedCategoryId,
+            searchQuery = state.searchQuery,
+            rememberedItemKey = remembered.itemKey,
+            rememberedIndex = remembered.itemIndex,
+            liveLoading = ContentType.LIVE in state.loadingTypes,
+            restorationPending = liveFocusOwner.focusRestorationPending,
+            categoryBarFocused = categoryFocusRestoreController.focusedCategoryId != null,
+        )
+        if (decision is LiveFocusDecision.CompleteRequest) {
+            liveFocusOwner.completeEmptyRequest(decision.requestId)
         }
     }
     LaunchedEffect(state.selectedCategoryId, hiddenCategoryIds) {
@@ -5337,6 +5479,7 @@ private fun LiveCatalogScreen(
             selected != LIVE_TV_PRO_MAIN_RECENT_CATEGORY &&
             selected in hiddenCategoryIds
         if (hiddenSelected) {
+            liveFocusOwner.cancelForUserDeparture()
             navigationMemory.save(MainDestination.LIVE, itemKey = "", itemIndex = 0)
             onSelectCategory(null)
         }
@@ -5349,7 +5492,23 @@ private fun LiveCatalogScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(colors.background)) {
+    // Any focus leaving the Live screen is a deliberate departure, including the navigation
+    // rail. The first focus gain is required so initial composition on another surface cannot
+    // consume entry restoration before it starts.
+    var liveContentHadFocus by remember { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .onFocusChanged { focusState ->
+                if (focusState.hasFocus) {
+                    liveContentHadFocus = true
+                } else if (liveContentHadFocus) {
+                    liveContentHadFocus = false
+                    liveFocusOwner.cancelForUserDeparture()
+                }
+            },
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -5373,6 +5532,7 @@ private fun LiveCatalogScreen(
                 isTv = isTv,
                 onMoveToCategories = categoryFocusRestoreController::requestFromSource,
                 onManageCategories = {
+                    liveFocusOwner.cancelForUserDeparture()
                     managerScope = context.liveCategoryStateScope()
                     restoreManagerEntryFocus = true
                     showCategoryManager = true
@@ -5383,6 +5543,7 @@ private fun LiveCatalogScreen(
                 countUnit = "قناة",
                 refreshRequester = refreshRequester,
                 downOverrideRequester = noticeRetryRequester.takeIf { liveError && catalog != null },
+                onUserFocus = liveFocusOwner::cancelForUserDeparture,
             )
             if (liveError && catalog != null) {
                 Spacer(Modifier.height(9.dp))
@@ -5392,8 +5553,12 @@ private fun LiveCatalogScreen(
                     onRetry = onRefresh,
                     isTv = isTv,
                     networkFailure = liveOfflineError,
+                    showRetry = liveFailure?.retryable ?: state.errorRetryable,
                     retryRequester = noticeRetryRequester,
-                    onRetryFocusChanged = { noticeRetryFocused = it },
+                    onRetryFocusChanged = {
+                        noticeRetryFocused = it
+                        if (it) liveFocusOwner.cancelForUserDeparture()
+                    },
                     onRetryUp = { runCatching { refreshRequester.requestFocus() }.getOrDefault(false) },
                     onRetryDown = { categoryFocusRestoreController.requestFromSource() },
                 )
@@ -5421,6 +5586,7 @@ private fun LiveCatalogScreen(
                 title = liveErrorCopy.title,
                 body = liveErrorCopy.body,
                 networkFailure = liveOfflineError,
+                showRetry = liveFailure?.retryable ?: state.errorRetryable,
             )
         } else if (visible.isEmpty()) {
             EmptyState("لا توجد قنوات مطابقة")
@@ -5469,6 +5635,7 @@ private fun LiveCatalogScreen(
                                     item = channel,
                                     selected = selected,
                                     onFocused = {
+                                        liveFocusOwner.cancelForUserDeparture()
                                         focusedChannelIndex[0] = index
                                         previewState.value = channel
                                         navigationMemory.save(MainDestination.LIVE, key, index)
@@ -5536,6 +5703,7 @@ private fun LiveCatalogScreen(
                                 onToggleFavorite(channel)
                             }
                         },
+                        onUserFocus = liveFocusOwner::cancelForUserDeparture,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -5546,7 +5714,10 @@ private fun LiveCatalogScreen(
                     ChannelListItem(
                         item = channel,
                         selected = false,
-                        onFocused = { navigationMemory.save(MainDestination.LIVE, "${channel.type}:${channel.id}", index) },
+                        onFocused = {
+                            liveFocusOwner.cancelForUserDeparture()
+                            navigationMemory.save(MainDestination.LIVE, "${channel.type}:${channel.id}", index)
+                        },
                         onClick = { onOpen(channel) },
                         isFavorite = favorites.contains(channel),
                         onLongClick = {
@@ -5588,6 +5759,7 @@ private fun LivePreviewStage(
     favoriteRequester: FocusRequester,
     onOpen: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
+    onUserFocus: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val preview = previewState.value
@@ -5599,6 +5771,7 @@ private fun LivePreviewStage(
         favoriteRequester = favoriteRequester,
         onWatch = { previewState.value?.let(onOpen) },
         onToggleFavorite = { previewState.value?.let(onToggleFavorite) },
+        onUserFocus = onUserFocus,
         modifier = modifier,
     )
 }
@@ -5612,10 +5785,14 @@ private fun LiveStage(
     favoriteRequester: FocusRequester,
     onWatch: () -> Unit,
     onToggleFavorite: () -> Unit,
+    onUserFocus: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(15.dp)) {
+    Column(
+        modifier = modifier.onFocusChanged { if (it.hasFocus) onUserFocus() },
+        verticalArrangement = Arrangement.spacedBy(15.dp),
+    ) {
         Box(
             modifier = Modifier.fillMaxWidth().weight(1f)
                 .padding(end = TV_PAGE_GUTTER)
@@ -5825,6 +6002,7 @@ private fun FavoritesScreen(
     onToggleFavorite: (ContentItem) -> Unit,
     onFavoritesRemovalStarted: () -> Unit,
     onRefresh: () -> Unit,
+    onRetryCatalog: (ContentType) -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -5840,11 +6018,22 @@ private fun FavoritesScreen(
     var activeFilter by remember(navigationMemory) {
         mutableStateOf(favoritesTypeFilterFromMemoryKey(remembered.rowKey))
     }
-    val allContent = remember(state.catalogs, state.favorites) {
-        favoriteCatalogProjection(state.catalogs.values, isFavorite)
+    val projectionInput = remember(state.catalogs, state.favorites) {
+        FavoriteCatalogProjectionInput(state.catalogs, state.favorites)
     }
+    val cachedProjection = remember(projectionInput) {
+        navigationMemory.cachedFavoriteProjection(projectionInput)
+    }
+    val allContentState by produceState<List<ContentItem>?>(
+        initialValue = cachedProjection ?: navigationMemory.lastGoodFavoriteProjection(state.catalogs),
+        key1 = projectionInput,
+    ) {
+        value = navigationMemory.favoriteProjection(projectionInput)
+    }
+    val allContent = allContentState
+    val favoritesReady = allContent != null
     val content = remember(allContent, activeFilter) {
-        filterFavoritesByType(allContent, activeFilter)
+        allContent?.let { filterFavoritesByType(it, activeFilter) }.orEmpty()
     }
     val contentKeys = remember(content) { content.map { "${it.type}:${it.id}" } }
     val contentKeyIndex = remember(contentKeys) { indexContentKeys(contentKeys) }
@@ -5852,8 +6041,19 @@ private fun FavoritesScreen(
         FavoritesTypeFilter.entries.associateWith { FocusRequester() }
     }
     val networkUsable by rememberUsableNetworkState()
-    val errorMessage = state.errorMessage
+    val errorMessage = state.catalogFailures.values.firstOrNull()?.message ?: state.errorMessage
     val offline = errorMessage != null && !networkUsable
+    val retryableFavoritesFailures = retryableCatalogFailureTypes(state.catalogFailures)
+    val favoritesRetryAction: () -> Unit = if (retryableFavoritesFailures.isNotEmpty()) {
+        { retryableFavoritesFailures.forEach(onRetryCatalog) }
+    } else {
+        onRefresh
+    }
+    val favoritesRetryable = if (state.catalogFailures.isNotEmpty()) {
+        retryableFavoritesFailures.isNotEmpty()
+    } else {
+        state.errorRetryable
+    }
     val resolving = state.loadingTypes.isNotEmpty()
     val errorCopy = if (offline) {
         MoviesErrorCopy(
@@ -5870,7 +6070,8 @@ private fun FavoritesScreen(
     // surviving card: focus returns to the always-attached type selector, which stays composed
     // through the content change (no readiness guess is needed for a control that never detaches).
     var previouslyHadContent by remember(navigationMemory) { mutableStateOf(content.isNotEmpty()) }
-    LaunchedEffect(content.isNotEmpty(), activeFilter) {
+    LaunchedEffect(favoritesReady, content.isNotEmpty(), activeFilter) {
+        if (!favoritesReady) return@LaunchedEffect
         val hasContent = content.isNotEmpty()
         if (previouslyHadContent && !hasContent) {
             withFrameNanos { }
@@ -5941,15 +6142,16 @@ private fun FavoritesScreen(
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
-                content.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
+                favoritesReady && content.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
                     // Cached cards stay usable on a recoverable failure; one bounded notice only.
                     if (errorMessage != null) {
                         MoviesErrorNotice(
                             title = errorCopy.title,
                             body = errorCopy.body,
-                            onRetry = onRefresh,
+                            onRetry = favoritesRetryAction,
                             isTv = isTv,
                             networkFailure = offline,
+                            showRetry = favoritesRetryable,
                         )
                     }
                     TvCatalogGrid(
@@ -5966,12 +6168,12 @@ private fun FavoritesScreen(
                         onFavoritesRemovalStarted = onFavoritesRemovalStarted,
                     )
                 }
-                resolving -> LoadingRing(
+                !favoritesReady || resolving -> LoadingRing(
                     label = "جاري تجهيز المفضلة",
                     modifier = Modifier.align(Alignment.Center),
                 )
                 errorMessage != null -> MoviesOfflineEmptyState(
-                    onRetry = onRefresh,
+                    onRetry = favoritesRetryAction,
                     modifier = Modifier.align(Alignment.Center),
                     title = if (offline) {
                         "لا يوجد اتصال بالانترنت ، تحقق من اتصالك وحاول مرة اخرى"
@@ -5980,8 +6182,9 @@ private fun FavoritesScreen(
                     },
                     body = null,
                     networkFailure = offline,
+                    showRetry = favoritesRetryable,
                 )
-                allContent.isEmpty() -> FavoritesEmptyState("لم تضف اي محتوى الى المفضلة بعد")
+                allContent?.isEmpty() == true -> FavoritesEmptyState("لم تضف اي محتوى الى المفضلة بعد")
                 else -> FavoritesFilteredEmptyState(favoritesTypeEmptyMessage(activeFilter))
             }
         }
@@ -8292,9 +8495,20 @@ private fun CatalogHeader(
     toolbarIconTint: Color? = null,
     refreshRequester: FocusRequester? = null,
     downOverrideRequester: FocusRequester? = null,
+    onUserFocus: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
-    Column(Modifier.fillMaxWidth()) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .then(
+                if (onUserFocus == null) {
+                    Modifier
+                } else {
+                    Modifier.onFocusChanged { if (it.hasFocus) onUserFocus() }
+                },
+            ),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -9564,12 +9778,17 @@ private fun EmptyState(message: String) {
 internal fun newest(content: List<ContentItem>): List<ContentItem> =
     content.sortedByDescending { it.addedAtEpochSeconds ?: 0L }
 
-internal fun ContentItem.matchesSearch(rawQuery: String): Boolean {
-    val query = rawQuery.trim()
-    if (query.isBlank()) return true
-    return sequenceOf(name, year, genre, plot, nowPlaying)
-        .filterNotNull()
-        .any { value -> value.contains(query, ignoreCase = true) }
+internal fun ContentItem.matchesSearch(rawQuery: String): Boolean =
+    matchesSearchNormalized(rawQuery.trim())
+
+/** Allocation-free matcher for callers that already trimmed the query. */
+internal fun ContentItem.matchesSearchNormalized(query: String): Boolean {
+    if (query.isEmpty()) return true
+    return name.contains(query, ignoreCase = true) ||
+        year?.contains(query, ignoreCase = true) == true ||
+        genre?.contains(query, ignoreCase = true) == true ||
+        plot?.contains(query, ignoreCase = true) == true ||
+        nowPlaying?.contains(query, ignoreCase = true) == true
 }
 
 internal fun HistoryEntry.isResumable(): Boolean =

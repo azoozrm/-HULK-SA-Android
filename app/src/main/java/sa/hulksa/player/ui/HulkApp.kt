@@ -79,8 +79,9 @@ import sa.hulksa.player.ui.screens.downloadPrimaryActionIntent
 import sa.hulksa.player.ui.screens.favoriteFeedbackIcon
 import sa.hulksa.player.ui.screens.favoriteMutationFeedback
 import sa.hulksa.player.ui.screens.downloadNoticeDisplayText
-import sa.hulksa.player.ui.screens.liveTvProDecorateMainState
+import sa.hulksa.player.ui.screens.liveTvProDecoratedCatalog
 import sa.hulksa.player.ui.screens.liveTvProMainCategoryToContext
+import sa.hulksa.player.ui.screens.liveTvProRecentChannelIds
 import sa.hulksa.player.ui.screens.playerProEpisodeNeighbors
 import sa.hulksa.player.ui.screens.scopedNoticeDisplayText
 import sa.hulksa.player.ui.screens.saveLiveTvProLaunchContext
@@ -393,12 +394,41 @@ fun HulkApp(
                             // Profile changes still replace catalogNavigationMemory and reset the
                             // shell-level state at the existing profile ownership boundary.
                             key(catalogNavigationMemory) {
+                                val liveRecentChannelIds = if (state.destination == MainDestination.LIVE) {
+                                    context.liveTvProRecentChannelIds()
+                                } else {
+                                    emptyList()
+                                }
+                                val liveCatalog = state.catalogs[ContentType.LIVE]
+                                val decoratedLiveCatalog = if (
+                                    state.destination == MainDestination.LIVE &&
+                                    liveCatalog != null
+                                ) {
+                                    remember(
+                                        liveCatalog,
+                                        state.selectedCategoryId,
+                                        liveRecentChannelIds,
+                                    ) {
+                                        liveTvProDecoratedCatalog(
+                                            liveCatalog = liveCatalog,
+                                            selectedCategoryId = state.selectedCategoryId,
+                                            recentChannelIds = liveRecentChannelIds,
+                                        )
+                                    }
+                                } else {
+                                    null
+                                }
+                                val mainShellState = if (decoratedLiveCatalog != null) {
+                                    state.copy(
+                                        catalogs = state.catalogs + (
+                                            ContentType.LIVE to decoratedLiveCatalog
+                                        ),
+                                    )
+                                } else {
+                                    state
+                                }
                                 MainShellScreen(
-                                    state = when (state.destination) {
-                                        MainDestination.HOME -> state
-                                        MainDestination.LIVE -> liveTvProDecorateMainState(state, context)
-                                        else -> state
-                                    },
+                                    state = mainShellState,
                                     isTv = isTv,
                                     navigationMemory = navigationMemory,
                                     isFavorite = viewModel::isFavorite,
@@ -425,6 +455,7 @@ fun HulkApp(
                                         viewModel.toggleFavorite(item, result)
                                     },
                                     onRefresh = viewModel::refresh,
+                                    onRetryCatalog = viewModel::retryCatalog,
                                     onOpenNotifications = openNotificationCenter,
                                     onClearHistory = viewModel::clearHistory,
                                     onPlayDownload = viewModel::playDownload,
@@ -647,13 +678,22 @@ fun HulkApp(
                                 episodes = if (playback.streamKind == "series") state.episodes else emptyList(),
                                 currentStreamId = playback.streamId,
                             )
-                            val vodFavoriteItem = if (playback.isLive) {
-                                null
-                            } else if (playback.streamKind == "series") {
-                                val seriesId = playback.parentContentId ?: playback.streamId
-                                state.catalogs[ContentType.SERIES]?.items?.firstOrNull { it.id == seriesId }
-                            } else {
-                                state.catalogs[ContentType.MOVIE]?.items?.firstOrNull { it.id == playback.streamId }
+                            val vodFavoriteItem = remember(
+                                playback.isLive,
+                                playback.streamKind,
+                                playback.parentContentId,
+                                playback.streamId,
+                                state.catalogs[ContentType.SERIES],
+                                state.catalogs[ContentType.MOVIE],
+                            ) {
+                                if (playback.isLive) {
+                                    null
+                                } else if (playback.streamKind == "series") {
+                                    val seriesId = playback.parentContentId ?: playback.streamId
+                                    state.catalogs[ContentType.SERIES]?.items?.firstOrNull { it.id == seriesId }
+                                } else {
+                                    state.catalogs[ContentType.MOVIE]?.items?.firstOrNull { it.id == playback.streamId }
+                                }
                             }
                             PlayerProScreen(
                                 request = playback,

@@ -120,7 +120,7 @@ import sa.hulksa.player.security.CredentialEnvelopeRemovalException
 import sa.hulksa.player.tv.TvDeepLinkDispatchDecision
 import sa.hulksa.player.ui.screens.DownloadFeedback
 import sa.hulksa.player.ui.screens.DownloadFeedbackGlyph
-import sa.hulksa.player.ui.screens.compactHomeCatalogForHome
+import sa.hulksa.player.ui.screens.HomeCompactionCache
 import sa.hulksa.player.ui.screens.downloadAlreadyCompletedFeedback
 import sa.hulksa.player.ui.screens.downloadAlreadyQueuedFeedback
 import sa.hulksa.player.ui.screens.downloadCancelConfirmedFeedback
@@ -191,11 +191,18 @@ private data class SeriesNotificationToggleOwner(
     val seriesId: Int,
 )
 
+/** One typed catalog failure. A healthy destination keeps this scoped instead of a global error. */
+data class CatalogFailure(
+    val message: String,
+    val retryable: Boolean,
+)
+
 data class HulkUiState(
     val screen: HulkScreen = HulkScreen.LOGIN,
     val isStarting: Boolean = true,
     val isLoading: Boolean = false,
     val loadingTypes: Set<ContentType> = emptySet(),
+    val catalogFailures: Map<ContentType, CatalogFailure> = emptyMap(),
     val errorMessage: String? = null,
     /** False for memory-pressure failures; the accepted error card must not offer a plain Retry. */
     val errorRetryable: Boolean = true,
@@ -261,6 +268,27 @@ internal fun userFacingFailureMessage(error: Throwable): String =
             ?.takeIf { it.isNotEmpty() && !looksLikeRawTechnicalMessage(it) }
             ?: "حدث خطا غير متوقع. حاول مرة اخرى"
     }
+
+/**
+ * Scoped catalog failure projection: a healthy destination keeps the failure visible per type
+ * instead of replacing usable content with a global error card.
+ */
+internal fun HulkUiState.applyCatalogFailure(
+    type: ContentType,
+    failure: CatalogFailure,
+    remaining: Set<ContentType>,
+    hasUsableContent: Boolean,
+): HulkUiState {
+    val failures = catalogFailures + (type to failure)
+    val firstFailure = failures.values.firstOrNull()
+    val settleGlobalError = !hasUsableContent && remaining.isEmpty() && firstFailure != null
+    return copy(
+        loadingTypes = remaining,
+        catalogFailures = failures,
+        errorMessage = if (settleGlobalError) firstFailure?.message else errorMessage,
+        errorRetryable = if (settleGlobalError) firstFailure?.retryable ?: true else errorRetryable,
+    )
+}
 
 /** Actual failure-to-state projection shared by normal, restore and paired authentication. */
 internal fun HulkUiState.finishLoginFailure(error: Throwable): HulkUiState = copy(
@@ -628,6 +656,7 @@ class HulkViewModel internal constructor(
     private var sessionOwnershipEpoch = 0L
     private val loadedCatalogs = mutableMapOf<ContentType, Catalog>()
     private val homeCatalogs = mutableMapOf<ContentType, Catalog>()
+    private val homeCompactionCache = HomeCompactionCache()
     // Catalog payloads can be large (the guard permits up to 32 MiB / 75k items). The request
     // owner admits exactly one full-catalog pipeline at a time; foreground priority only reorders
     // pending work, so the memory bound is retained without overlapping full catalogs.
@@ -641,7 +670,7 @@ class HulkViewModel internal constructor(
             val snapshot = mutableState.value
             val home = if (type == ContentType.MOVIE || type == ContentType.SERIES) {
                 withContext(Dispatchers.Default) {
-                    compactHomeCatalogForHome(full, snapshot.favorites, snapshot.history)
+                    homeCompactionCache.compact(type, full, snapshot.favorites, snapshot.history)
                 }
             } else {
                 full
@@ -667,17 +696,48 @@ class HulkViewModel internal constructor(
             homeCatalogs[type] = result.home
             mutableState.update { state ->
                 val base = state.catalogs + (type to result.full)
+                val failures = state.catalogFailures - type
+                val previousFailureMessages = state.catalogFailures.values
+                    .mapTo(hashSetOf(), CatalogFailure::message)
+                val usable = hasUsableCatalogForDestination(state.destination)
+                val firstFailure = failures.values.firstOrNull()
                 state.copy(
                     catalogs = catalogsForDestination(state.destination, base),
                     loadingTypes = remaining,
+                    catalogFailures = failures,
+                    errorMessage = when {
+                        !usable && firstFailure != null -> firstFailure.message
+                        state.errorMessage != null && state.errorMessage in previousFailureMessages -> null
+                        else -> state.errorMessage
+                    },
+                    errorRetryable = when {
+                        !usable && firstFailure != null -> firstFailure.retryable
+                        state.errorMessage != null && state.errorMessage in previousFailureMessages -> true
+                        else -> state.errorRetryable
+                    },
                 )
             }
             resolvePendingTvDeepLink()
             scheduleTvPlatformSync(immediate = false)
         },
-        onFailure = { _, error, remaining ->
-            mutableState.update { it.copy(loadingTypes = remaining) }
-            showFailure(error)
+        onFailure = { type, error, remaining ->
+            if (isInvalidSessionFailure(error)) {
+                mutableState.update { it.copy(loadingTypes = remaining) }
+                showFailure(error)
+            } else {
+                val failure = CatalogFailure(
+                    message = userFacingFailureMessage(error),
+                    retryable = !isMemoryPressureFailure(error),
+                )
+                mutableState.update { state ->
+                    state.applyCatalogFailure(
+                        type = type,
+                        failure = failure,
+                        remaining = remaining,
+                        hasUsableContent = hasUsableCatalogForDestination(state.destination),
+                    )
+                }
+            }
         },
     )
     private val selectedCategoryByType = mutableMapOf<ContentType, String?>()
@@ -706,6 +766,8 @@ class HulkViewModel internal constructor(
     private var tvExpectedProfileScopeId: String? = null
     private var tvPublishedProfileScopeId: String? = null
     private val tvLastSyncedPositions = mutableMapOf<String, Long>()
+    private val tvArtworkSnapshotLock = Any()
+    private var tvArtworkSnapshotCache: Pair<TvArtworkSnapshotKey, Map<String, String>>? = null
     private var pendingTvDeepLink: TvDeepLinkTarget? = null
     private var activeOperationsConfig: OperationsConfig? = null
     private var activeOperationsFetchedAtEpochMs: Long = 0L
@@ -896,6 +958,10 @@ class HulkViewModel internal constructor(
         val activeSession = session ?: return
         invalidatePlayerProgressPersistence()
         profileLibraryRefreshJob?.cancel()
+        // Preserve the previous immutable snapshots when the reload returns identical content.
+        // Reusing their identity avoids a needless Home recompaction and model rebuild.
+        val previousFavorites = mutableState.value.favorites
+        val previousHistory = mutableState.value.history
         val attempt = profileLibraryStartupGate.start(
             session = activeSession,
             accountId = expectedAccountId,
@@ -932,8 +998,10 @@ class HulkViewModel internal constructor(
             } ?: return@launch
 
             if (!profileLibraryStartupGate.completeIfCurrent(attempt, session)) return@launch
-            val favorites = snapshot.favorites
-            val history = snapshot.history
+            val favorites = snapshot.favorites.takeUnless { it == previousFavorites }
+                ?: previousFavorites
+            val history = snapshot.history.takeUnless { it == previousHistory }
+                ?: previousHistory
             mutableState.update {
                 it.copy(
                     favorites = favorites,
@@ -952,7 +1020,7 @@ class HulkViewModel internal constructor(
             val rebuiltHomeCatalogs = withContext(Dispatchers.Default) {
                 sourceCatalogs.mapValues { (type, catalog) ->
                     val startedNs = System.nanoTime()
-                    compactHomeCatalogForHome(catalog, favorites, history).also {
+                    homeCompactionCache.compact(type, catalog, favorites, history).also {
                         hulkPerfLog {
                             "homeRecompact type=$type items=${catalog.items.size} " +
                                 "ms=${(System.nanoTime() - startedNs) / 1_000_000}"
@@ -1049,6 +1117,13 @@ class HulkViewModel internal constructor(
         if (currentVoiceSearchOwner() == owner) updateSearch(query)
     }
 
+    /** Manual retry for one failed background catalog; healthy catalogs are not reloaded. */
+    fun retryCatalog(type: ContentType) {
+        if (type !in catalogTypesForDestination(mutableState.value.destination)) return
+        catalogRequestOwner.prioritize(type)
+        ensureCatalog(type, force = true)
+    }
+
     fun refresh() {
         refreshOperations(force = true)
         val destination = mutableState.value.destination
@@ -1092,6 +1167,13 @@ class HulkViewModel internal constructor(
         }
 
         movieCardProbeAttempted += requestKey
+        if (movieCardProbeAttempted.size > MOVIE_CARD_PROBE_ATTEMPT_CACHE_MAX) {
+            val eldest = movieCardProbeAttempted.iterator()
+            if (eldest.hasNext()) {
+                eldest.next()
+                eldest.remove()
+            }
+        }
         movieCardProbeInFlight += requestKey
 
         movieCardProbeJobs[requestKey] = viewModelScope.launch {
@@ -3284,6 +3366,7 @@ class HulkViewModel internal constructor(
                             it.copy(
                                 account = refreshed.account,
                                 isAccountRefreshing = false,
+                                catalogFailures = emptyMap(),
                                 errorMessage = null,
                             )
                         }
@@ -3463,6 +3546,8 @@ class HulkViewModel internal constructor(
         profileLibraryStartupGate.invalidate()
         loadedCatalogs.clear()
         homeCatalogs.clear()
+        homeCompactionCache.clear()
+        synchronized(tvArtworkSnapshotLock) { tvArtworkSnapshotCache = null }
         selectedCategoryByType.clear()
         movieCardProbeJobs.values.forEach { it.cancel() }
         movieCardProbeJobs.clear()
@@ -3533,6 +3618,7 @@ class HulkViewModel internal constructor(
                         isStarting = false,
                         isLoading = false,
                         loadingTypes = emptySet(),
+                        catalogFailures = emptyMap(),
                         account = null,
                         isAccountRefreshing = false,
                         favorites = emptySet(),
@@ -3837,7 +3923,17 @@ class HulkViewModel internal constructor(
             return
         }
         hulkPerfLog { "catalogRequest type=$type force=$force" }
-        mutableState.update { it.copy(errorMessage = null) }
+        if (force) {
+            mutableState.update { state ->
+                val failure = state.catalogFailures[type]
+                val clearGlobal = state.errorMessage == failure?.message
+                state.copy(
+                    catalogFailures = state.catalogFailures - type,
+                    errorMessage = if (clearGlobal) null else state.errorMessage,
+                    errorRetryable = if (clearGlobal) true else state.errorRetryable,
+                )
+            }
+        }
     }
 
     private fun resolvePendingTvDeepLink() {
@@ -4050,10 +4146,18 @@ class HulkViewModel internal constructor(
                 tvExpectedProfileScopeId == expectedProfileScopeId &&
                 tvPlatformIntegration.get().activeProfileScope()?.providerScopeId == expectedProfileScopeId
             ) {
+                // Capture the immutable catalog references on Main; the bounded artwork build then
+                // runs on Default without touching the mutable catalog map.
+                val movieCatalog = loadedCatalogs[ContentType.MOVIE]
+                val seriesCatalog = loadedCatalogs[ContentType.SERIES]
+                val historyKeys = mutableState.value.history.map(HistoryEntry::key)
+                val artworkSnapshot = withContext(Dispatchers.Default) {
+                    tvLandscapeArtworkSnapshot(movieCatalog, seriesCatalog, historyKeys)
+                }
                 val result = tvPlatformIntegration.get().syncActiveProfile(
                     expectedProfileScopeId = expectedProfileScopeId,
                     kidsVerified = true,
-                    landscapeArtworkByContentKey = tvLandscapeArtworkSnapshot(),
+                    landscapeArtworkByContentKey = artworkSnapshot,
                 )
                 if (
                     result is TvPlatformSyncResult.Synced &&
@@ -4072,6 +4176,7 @@ class HulkViewModel internal constructor(
         tvPlatformProfileReady = false
         tvExpectedProfileScopeId = null
         tvLastSyncedPositions.clear()
+        synchronized(tvArtworkSnapshotLock) { tvArtworkSnapshotCache = null }
         tvDeepLinkEpisodeJob?.cancel()
         tvDeepLinkEpisodeJob = null
         clearTvPlatformPrograms(resetPublishedScope)
@@ -4090,17 +4195,26 @@ class HulkViewModel internal constructor(
         }
     }
 
-    private fun tvLandscapeArtworkSnapshot(): Map<String, String> = buildMap {
-        loadedCatalogs[ContentType.MOVIE]?.items.orEmpty().forEach { item ->
-            item.backdropUrl?.trim()?.takeIf(String::isNotEmpty)?.let { backdrop ->
-                put("MOVIE:${item.id}", backdrop)
+    private fun tvLandscapeArtworkSnapshot(
+        movie: Catalog?,
+        series: Catalog?,
+        historyKeys: List<String>,
+    ): Map<String, String> {
+        val key = TvArtworkSnapshotKey(
+            movieCatalog = movie,
+            seriesCatalog = series,
+            historyKeys = historyKeys,
+        )
+        synchronized(tvArtworkSnapshotLock) {
+            tvArtworkSnapshotCache?.let { (cachedKey, cached) ->
+                if (cachedKey == key) return cached
             }
         }
-        loadedCatalogs[ContentType.SERIES]?.items.orEmpty().forEach { item ->
-            item.backdropUrl?.trim()?.takeIf(String::isNotEmpty)?.let { backdrop ->
-                put("SERIES:${item.id}", backdrop)
-            }
+        val snapshot = tvLandscapeArtworkForHistory(historyKeys, movie, series)
+        synchronized(tvArtworkSnapshotLock) {
+            tvArtworkSnapshotCache = key to snapshot
         }
+        return snapshot
     }
 
     private fun invalidateVoiceSearchContext() {
@@ -4282,12 +4396,30 @@ class HulkViewModel internal constructor(
         }
     }
 
-    private fun showFailure(error: Throwable) {
-        val invalidSession = error is XtreamException.InvalidCredentials ||
+    private fun hasUsableCatalogForDestination(destination: MainDestination): Boolean = when (destination) {
+        MainDestination.HOME -> loadedCatalogs.keys.any {
+            it == ContentType.MOVIE || it == ContentType.SERIES || it == ContentType.LIVE
+        }
+        MainDestination.LIVE -> loadedCatalogs[ContentType.LIVE] != null
+        MainDestination.MOVIES -> loadedCatalogs[ContentType.MOVIE] != null
+        MainDestination.SERIES -> loadedCatalogs[ContentType.SERIES] != null
+        MainDestination.FAVORITES,
+        MainDestination.SEARCH,
+        -> loadedCatalogs.isNotEmpty()
+        MainDestination.DOWNLOADS,
+        MainDestination.SETTINGS,
+        -> true
+    }
+
+    private fun isInvalidSessionFailure(error: Throwable): Boolean =
+        error is XtreamException.InvalidCredentials ||
             error is XtreamException.SubscriptionInactive ||
             error is XtreamException.SubscriptionExpired ||
             error is PortalException.InvalidAccessCode ||
             error is PortalException.ResellerInactive
+
+    private fun showFailure(error: Throwable) {
+        val invalidSession = isInvalidSessionFailure(error)
         if (invalidSession) {
             beginLogout(error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى", loginFailureFor(error))
             return
@@ -4298,9 +4430,55 @@ class HulkViewModel internal constructor(
     companion object {
 
         private const val MOVIE_CARD_PROBE_CONCURRENCY = 2
+        private const val MOVIE_CARD_PROBE_ATTEMPT_CACHE_MAX = 1_024
         private const val EPISODE_NOTIFICATION_SCAN_CONCURRENCY = 3
         private const val TV_PLATFORM_SYNC_DEBOUNCE_MS = 350L
     }
+}
+
+private class TvArtworkSnapshotKey(
+    val movieCatalog: Catalog?,
+    val seriesCatalog: Catalog?,
+    val historyKeys: List<String>,
+) {
+    override fun equals(other: Any?): Boolean =
+        other is TvArtworkSnapshotKey &&
+            movieCatalog === other.movieCatalog &&
+            seriesCatalog === other.seriesCatalog &&
+            historyKeys == other.historyKeys
+
+    override fun hashCode(): Int {
+        var result = System.identityHashCode(movieCatalog)
+        result = 31 * result + System.identityHashCode(seriesCatalog)
+        return 31 * result + historyKeys.hashCode()
+    }
+}
+
+/**
+ * TV continue-watching consumes artwork only for history keys. Build that bounded map instead of
+ * materializing every Movie/Series backdrop on each periodic platform sync.
+ */
+internal fun tvLandscapeArtworkForHistory(
+    historyKeys: Collection<String>,
+    movieCatalog: Catalog?,
+    seriesCatalog: Catalog?,
+): Map<String, String> {
+    if (historyKeys.isEmpty()) return emptyMap()
+    val needed = historyKeys.toHashSet()
+    val result = HashMap<String, String>(needed.size)
+    movieCatalog?.items?.forEach { item ->
+        val key = "MOVIE:${item.id}"
+        if (key in needed) {
+            item.backdropUrl?.trim()?.takeIf(String::isNotEmpty)?.let { result[key] = it }
+        }
+    }
+    seriesCatalog?.items?.forEach { item ->
+        val key = "SERIES:${item.id}"
+        if (key in needed) {
+            item.backdropUrl?.trim()?.takeIf(String::isNotEmpty)?.let { result[key] = it }
+        }
+    }
+    return result
 }
 
 /**

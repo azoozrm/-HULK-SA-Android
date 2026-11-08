@@ -1,0 +1,4179 @@
+{
+  "cases": [
+    {
+      "id": "f001",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f001",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f001",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxfV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f002",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoiMSJ9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f002",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoiMSJ9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f002",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoiMSJ9XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f003",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpudWxsfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "null",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f003",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpudWxsfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "null",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f003",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpudWxsfV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f004",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpudWxsLCJjYXRlZ29yeV9pZCI6MWUzLCJyYXRpbmciOjQuNTB9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "null",
+          "categoryId": "1000.0",
+          "posterUrl": null,
+          "rating": "4.5",
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f004",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpudWxsLCJjYXRlZ29yeV9pZCI6MWUzLCJyYXRpbmciOjQuNTB9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "null",
+          "categoryId": "1000.0",
+          "posterUrl": null,
+          "rating": "4.5",
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f004",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpudWxsLCJjYXRlZ29yeV9pZCI6MWUzLCJyYXRpbmciOjQuNTB9XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f005",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6IjFlMyIsInJhdGluZyI6IjQuNTAifV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "1e3",
+          "posterUrl": null,
+          "rating": "4.50",
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f005",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6IjFlMyIsInJhdGluZyI6IjQuNTAifV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "1e3",
+          "posterUrl": null,
+          "rating": "4.50",
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f005",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6IjFlMyIsInJhdGluZyI6IjQuNTAifV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f006",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MWUzfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "1000.0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f006",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MWUzfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "1000.0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f006",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MWUzfV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f007",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6NC41MH1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "4.5",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f007",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6NC41MH1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "4.5",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f007",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6NC41MH1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f008",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MS4wfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "1.0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f008",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MS4wfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "1.0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f008",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MS4wfV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f009",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MDF9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "1",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f009",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MDF9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "1",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f009",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MDF9XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f010",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MHgxMH1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "16",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f010",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MHgxMH1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "16",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f010",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MHgxMH1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f011",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6KzF9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "1",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f011",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6KzF9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "1",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f011",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6KzF9XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f012",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MS59XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "1.0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f012",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MS59XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "1.0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f012",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MS59XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f013",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6LjV9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0.5",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f013",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6LjV9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0.5",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f013",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6LjV9XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f014",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MWV9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "1e",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f014",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MWV9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "1e",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f014",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MWV9XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f015",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6LX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "-",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f015",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6LX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "-",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f015",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6LX1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f016",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MDh9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "8.0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f016",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MDh9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "8.0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f016",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJjYXRlZ29yeV9pZCI6MDh9XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f017",
+      "type": "LIVE",
+      "raw_b64": "77u\/W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiQk9NIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "BOM",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f017",
+      "type": "MOVIE",
+      "raw_b64": "77u\/W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiQk9NIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "BOM",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f017",
+      "type": "SERIES",
+      "raw_b64": "77u\/W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiQk9NIn1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f018",
+      "type": "LIVE",
+      "raw_b64": "Ly8gYwpbeyJzdHJlYW1faWQiOjEsIm5hbWUiOiJsaW5lIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "line",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f018",
+      "type": "MOVIE",
+      "raw_b64": "Ly8gYwpbeyJzdHJlYW1faWQiOjEsIm5hbWUiOiJsaW5lIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "line",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f018",
+      "type": "SERIES",
+      "raw_b64": "Ly8gYwpbeyJzdHJlYW1faWQiOjEsIm5hbWUiOiJsaW5lIn1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f019",
+      "type": "LIVE",
+      "raw_b64": "LyogYyAqL1t7InN0cmVhbV9pZCI6MSwibmFtZSI6ImJsb2NrIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "block",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f019",
+      "type": "MOVIE",
+      "raw_b64": "LyogYyAqL1t7InN0cmVhbV9pZCI6MSwibmFtZSI6ImJsb2NrIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "block",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f019",
+      "type": "SERIES",
+      "raw_b64": "LyogYyAqL1t7InN0cmVhbV9pZCI6MSwibmFtZSI6ImJsb2NrIn1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f020",
+      "type": "LIVE",
+      "raw_b64": "W3snc3RyZWFtX2lkJzoxLCduYW1lJzonc2luZ2xlJ31d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "single",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f020",
+      "type": "MOVIE",
+      "raw_b64": "W3snc3RyZWFtX2lkJzoxLCduYW1lJzonc2luZ2xlJ31d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "single",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f020",
+      "type": "SERIES",
+      "raw_b64": "W3snc3RyZWFtX2lkJzoxLCduYW1lJzonc2luZ2xlJ31d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f021",
+      "type": "LIVE",
+      "raw_b64": "W3tzdHJlYW1faWQ6MTtuYW1lOidzZW1pJztjYXRlZ29yeV9pZD0xZTN9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "semi",
+          "categoryId": "1000.0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f021",
+      "type": "MOVIE",
+      "raw_b64": "W3tzdHJlYW1faWQ6MTtuYW1lOidzZW1pJztjYXRlZ29yeV9pZD0xZTN9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "semi",
+          "categoryId": "1000.0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f021",
+      "type": "SERIES",
+      "raw_b64": "W3tzdHJlYW1faWQ6MTtuYW1lOidzZW1pJztjYXRlZ29yeV9pZD0xZTN9XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f022",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLH1d",
+      "accept": false,
+      "error": "org.json.JSONException: Expected literal value at character 16 of [{\"stream_id\":1,}]"
+    },
+    {
+      "id": "f022",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLH1d",
+      "accept": false,
+      "error": "org.json.JSONException: Expected literal value at character 16 of [{\"stream_id\":1,}]"
+    },
+    {
+      "id": "f022",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLH1d",
+      "accept": false,
+      "error": "org.json.JSONException: Expected literal value at character 16 of [{\"stream_id\":1,}]"
+    },
+    {
+      "id": "f023",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxfSwsXQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f023",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxfSwsXQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f023",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxfSwsXQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f024",
+      "type": "LIVE",
+      "raw_b64": "W31d",
+      "accept": false,
+      "error": "org.json.JSONException: Expected literal value at character 1 of [}]"
+    },
+    {
+      "id": "f024",
+      "type": "MOVIE",
+      "raw_b64": "W31d",
+      "accept": false,
+      "error": "org.json.JSONException: Expected literal value at character 1 of [}]"
+    },
+    {
+      "id": "f024",
+      "type": "SERIES",
+      "raw_b64": "W31d",
+      "accept": false,
+      "error": "org.json.JSONException: Expected literal value at character 1 of [}]"
+    },
+    {
+      "id": "f025",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJyYXRpbmciOjFlMzA5fV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f025",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJyYXRpbmciOjFlMzA5fV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f025",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJyYXRpbmciOjFlMzA5fV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f026",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJ1bnVzZWQiOjFlMzA5fV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f026",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJ1bnVzZWQiOjFlMzA5fV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f026",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJ1bnVzZWQiOjFlMzA5fV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f027",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjp7IngiOjFlMzA5fX1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f027",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjp7IngiOjFlMzA5fX1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f027",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjp7IngiOjFlMzA5fX1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f028",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjpbMWUzMDldfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f028",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjpbMWUzMDldfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f028",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjpbMWUzMDldfV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f029",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjp7ImEiOlsxZTMwOV19fV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f029",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjp7ImEiOlsxZTMwOV19fV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f029",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjp7ImEiOlsxZTMwOV19fV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f030",
+      "type": "LIVE",
+      "raw_b64": "WzFlMzA5LHsic3RyZWFtX2lkIjoxfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f030",
+      "type": "MOVIE",
+      "raw_b64": "WzFlMzA5LHsic3RyZWFtX2lkIjoxfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f030",
+      "type": "SERIES",
+      "raw_b64": "WzFlMzA5LHsic3RyZWFtX2lkIjoxfV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f031",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbMWUzMDldfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f031",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbMWUzMDldfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f031",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbMWUzMDldfV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f032",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbYS8qeCovYl19XQ==",
+      "accept": false,
+      "error": "org.json.JSONException: Unterminated array at character 31 of [{\"stream_id\":1,\"name\":[a\/*x*\/b]}]"
+    },
+    {
+      "id": "f032",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbYS8qeCovYl19XQ==",
+      "accept": false,
+      "error": "org.json.JSONException: Unterminated array at character 31 of [{\"stream_id\":1,\"name\":[a\/*x*\/b]}]"
+    },
+    {
+      "id": "f032",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbYS8qeCovYl19XQ==",
+      "accept": false,
+      "error": "org.json.JSONException: Unterminated array at character 31 of [{\"stream_id\":1,\"name\":[a\/*x*\/b]}]"
+    },
+    {
+      "id": "f033",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbMS8qeCovMl19XQ==",
+      "accept": false,
+      "error": "org.json.JSONException: Unterminated array at character 31 of [{\"stream_id\":1,\"name\":[1\/*x*\/2]}]"
+    },
+    {
+      "id": "f033",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbMS8qeCovMl19XQ==",
+      "accept": false,
+      "error": "org.json.JSONException: Unterminated array at character 31 of [{\"stream_id\":1,\"name\":[1\/*x*\/2]}]"
+    },
+    {
+      "id": "f033",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbMS8qeCovMl19XQ==",
+      "accept": false,
+      "error": "org.json.JSONException: Unterminated array at character 31 of [{\"stream_id\":1,\"name\":[1\/*x*\/2]}]"
+    },
+    {
+      "id": "f034",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbYSJiXX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "[\"a\\\"b\"]",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f034",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbYSJiXX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "[\"a\\\"b\"]",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f034",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbYSJiXX1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f035",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJ1bnVzZWQiOi94fV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Expected literal value at character 25 of [{\"stream_id\":1,\"unused\":\/x}]"
+    },
+    {
+      "id": "f035",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJ1bnVzZWQiOi94fV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Expected literal value at character 25 of [{\"stream_id\":1,\"unused\":\/x}]"
+    },
+    {
+      "id": "f035",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJ1bnVzZWQiOi94fV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Expected literal value at character 25 of [{\"stream_id\":1,\"unused\":\/x}]"
+    },
+    {
+      "id": "f036",
+      "type": "LIVE",
+      "raw_b64": "W3tzdHJlYW1faWQ6MSx7OmZvb31d",
+      "accept": false,
+      "error": "org.json.JSONException: Expected literal value at character 15 of [{stream_id:1,{:foo}]"
+    },
+    {
+      "id": "f036",
+      "type": "MOVIE",
+      "raw_b64": "W3tzdHJlYW1faWQ6MSx7OmZvb31d",
+      "accept": false,
+      "error": "org.json.JSONException: Expected literal value at character 15 of [{stream_id:1,{:foo}]"
+    },
+    {
+      "id": "f036",
+      "type": "SERIES",
+      "raw_b64": "W3tzdHJlYW1faWQ6MSx7OmZvb31d",
+      "accept": false,
+      "error": "org.json.JSONException: Expected literal value at character 15 of [{stream_id:1,{:foo}]"
+    },
+    {
+      "id": "f037",
+      "type": "LIVE",
+      "raw_b64": "W3tzdHJlYW1faWQ6PjEsbmFtZToib25lIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "one",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f037",
+      "type": "MOVIE",
+      "raw_b64": "W3tzdHJlYW1faWQ6PjEsbmFtZToib25lIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "one",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f037",
+      "type": "SERIES",
+      "raw_b64": "W3tzdHJlYW1faWQ6PjEsbmFtZToib25lIn1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f038",
+      "type": "LIVE",
+      "raw_b64": "W3tzdHJlYW1faWQ6PT4xLG5hbWU6Im9uZSJ9XQ==",
+      "accept": false,
+      "error": "org.json.JSONException: Expected literal value at character 12 of [{stream_id:=>1,name:\"one\"}]"
+    },
+    {
+      "id": "f038",
+      "type": "MOVIE",
+      "raw_b64": "W3tzdHJlYW1faWQ6PT4xLG5hbWU6Im9uZSJ9XQ==",
+      "accept": false,
+      "error": "org.json.JSONException: Expected literal value at character 12 of [{stream_id:=>1,name:\"one\"}]"
+    },
+    {
+      "id": "f038",
+      "type": "SERIES",
+      "raw_b64": "W3tzdHJlYW1faWQ6PT4xLG5hbWU6Im9uZSJ9XQ==",
+      "accept": false,
+      "error": "org.json.JSONException: Expected literal value at character 12 of [{stream_id:=>1,name:\"one\"}]"
+    },
+    {
+      "id": "f039",
+      "type": "LIVE",
+      "raw_b64": "W3tzdHJlYW1faWQ6MSxtZXRhOnsvKiB9ICovYToxfSxuYW1lOidvbmUnfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "one",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f039",
+      "type": "MOVIE",
+      "raw_b64": "W3tzdHJlYW1faWQ6MSxtZXRhOnsvKiB9ICovYToxfSxuYW1lOidvbmUnfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "one",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f039",
+      "type": "SERIES",
+      "raw_b64": "W3tzdHJlYW1faWQ6MSxtZXRhOnsvKiB9ICovYToxfSxuYW1lOidvbmUnfV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f040",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVxxYiJ9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "aqb",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f040",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVxxYiJ9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "aqb",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f040",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVxxYiJ9XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f041",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVx1MDAwMGIifV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "a\u0000b",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f041",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVx1MDAwMGIifV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "a\u0000b",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f041",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVx1MDAwMGIifV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f042",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVwvYiJ9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "a\/b",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f042",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVwvYiJ9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "a\/b",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f042",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVwvYiJ9XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f043",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVwnYiJ9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "a'b",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f043",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVwnYiJ9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "a'b",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f043",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVwnYiJ9XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f044",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVwiYiJ9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "a\"b",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f044",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVwiYiJ9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "a\"b",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f044",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVwiYiJ9XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f045",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVx1RDgzQ1x1REZBQyJ9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "a🎬",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f045",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVx1RDgzQ1x1REZBQyJ9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "a🎬",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f045",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVx1RDgzQ1x1REZBQyJ9XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f046",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYSNiIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "a#b",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f046",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYSNiIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "a#b",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f046",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYSNiIn1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f047",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYS8vYiJ9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "a\/\/b",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f047",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYS8vYiJ9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "a\/\/b",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f047",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYS8vYiJ9XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f048",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYS8qYiovYyJ9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "a\/*b*\/c",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f048",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYS8qYiovYyJ9XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "a\/*b*\/c",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f048",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYS8qYiovYyJ9XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f049",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbImEiLDEsbnVsbCx0cnVlXX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "[\"a\",1,null,true]",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f049",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbImEiLDEsbnVsbCx0cnVlXX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "[\"a\",1,null,true]",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f049",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbImEiLDEsbnVsbCx0cnVlXX1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f050",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjp7ImEiOjEsImIiOlsyXX19XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "{\"a\":1,\"b\":[2]}",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f050",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjp7ImEiOjEsImIiOlsyXX19XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "{\"a\":1,\"b\":[2]}",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f050",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjp7ImEiOjEsImIiOlsyXX19XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f051",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjp7YToxfX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "{\"a\":1}",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f051",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjp7YToxfX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "{\"a\":1}",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f051",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjp7YToxfX1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f052",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbXX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "[]",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f052",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbXX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "[]",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f052",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbXX1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f053",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjp7fX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "{}",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f053",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjp7fX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "{}",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f053",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjp7fX1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f054",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbbnVsbF19XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "[null]",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f054",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbbnVsbF19XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "[null]",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f054",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbbnVsbF19XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f055",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbMWUzMDksMl19XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f055",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbMWUzMDksMl19XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f055",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbMWUzMDksMl19XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f056",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJyYXRpbmciOk5hTn1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: NaN"
+    },
+    {
+      "id": "f056",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJyYXRpbmciOk5hTn1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: NaN"
+    },
+    {
+      "id": "f056",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJyYXRpbmciOk5hTn1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: NaN"
+    },
+    {
+      "id": "f057",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJyYXRpbmciOkluZmluaXR5fV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f057",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJyYXRpbmciOkluZmluaXR5fV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f057",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJyYXRpbmciOkluZmluaXR5fV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f058",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJyYXRpbmciOi1JbmZpbml0eX1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: -Infinity"
+    },
+    {
+      "id": "f058",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJyYXRpbmciOi1JbmZpbml0eX1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: -Infinity"
+    },
+    {
+      "id": "f058",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJyYXRpbmciOi1JbmZpbml0eX1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: -Infinity"
+    },
+    {
+      "id": "f059",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjpbTmFOXX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f059",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjpbTmFOXX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f059",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjpbTmFOXX1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f060",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbTmFOXX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f060",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbTmFOXX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f060",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbTmFOXX1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f061",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbSW5maW5pdHldfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f061",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbSW5maW5pdHldfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f061",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbSW5maW5pdHldfV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f062",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoxZTMwOX1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f062",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoxZTMwOX1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f062",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoxZTMwOX1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f063",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpudWxsLCJjYXRlZ29yeV9pZCI6bnVsbCwicmF0aW5nIjpudWxsfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "null",
+          "categoryId": "null",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f063",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpudWxsLCJjYXRlZ29yeV9pZCI6bnVsbCwicmF0aW5nIjpudWxsfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "null",
+          "categoryId": "null",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f063",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpudWxsLCJjYXRlZ29yeV9pZCI6bnVsbCwicmF0aW5nIjpudWxsfV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f064",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxfSx7InN0cmVhbV9pZCI6IjEiLCJuYW1lIjoiZHVwIn0seyJzdHJlYW1faWQiOiJiYWQifSx7InN0cmVhbV9pZCI6Mn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        },
+        {
+          "id": 2,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f064",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxfSx7InN0cmVhbV9pZCI6IjEiLCJuYW1lIjoiZHVwIn0seyJzdHJlYW1faWQiOiJiYWQifSx7InN0cmVhbV9pZCI6Mn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        },
+        {
+          "id": 2,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f064",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxfSx7InN0cmVhbV9pZCI6IjEiLCJuYW1lIjoiZHVwIn0seyJzdHJlYW1faWQiOiJiYWQifSx7InN0cmVhbV9pZCI6Mn1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f065",
+      "type": "LIVE",
+      "raw_b64": "W3sic2VyaWVzX2lkIjoxLCJuYW1lIjoicyIsImNvdmVyIjoiL2MuanBnIiwibGFzdF9tb2RpZmllZCI6IjE3MDAifV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f065",
+      "type": "MOVIE",
+      "raw_b64": "W3sic2VyaWVzX2lkIjoxLCJuYW1lIjoicyIsImNvdmVyIjoiL2MuanBnIiwibGFzdF9tb2RpZmllZCI6IjE3MDAifV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f065",
+      "type": "SERIES",
+      "raw_b64": "W3sic2VyaWVzX2lkIjoxLCJuYW1lIjoicyIsImNvdmVyIjoiL2MuanBnIiwibGFzdF9tb2RpZmllZCI6IjE3MDAifV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "SERIES",
+          "name": "s",
+          "categoryId": "0",
+          "posterUrl": "https:\/\/portal.example\/c.jpg",
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": 1700,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f066",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoibCIsInN0cmVhbV9pY29uIjoiL2wucG5nIiwiZXBnX2NoYW5uZWxfaWQiOiJlIiwiYWRkZWQiOiIxNzAwIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "l",
+          "categoryId": "0",
+          "posterUrl": "https:\/\/portal.example\/l.png",
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": "e",
+          "addedAtEpochSeconds": 1700,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f066",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoibCIsInN0cmVhbV9pY29uIjoiL2wucG5nIiwiZXBnX2NoYW5uZWxfaWQiOiJlIiwiYWRkZWQiOiIxNzAwIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "l",
+          "categoryId": "0",
+          "posterUrl": "https:\/\/portal.example\/l.png",
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": "e",
+          "addedAtEpochSeconds": 1700,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f066",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoibCIsInN0cmVhbV9pY29uIjoiL2wucG5nIiwiZXBnX2NoYW5uZWxfaWQiOiJlIiwiYWRkZWQiOiIxNzAwIn1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f067",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoidCJ9XSB0cmFpbGluZw==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "t",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f067",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoidCJ9XSB0cmFpbGluZw==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "t",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f067",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoidCJ9XSB0cmFpbGluZw==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f068",
+      "type": "LIVE",
+      "raw_b64": "W10=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f068",
+      "type": "MOVIE",
+      "raw_b64": "W10=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f068",
+      "type": "SERIES",
+      "raw_b64": "W10=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f069",
+      "type": "LIVE",
+      "raw_b64": "WywsXQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f069",
+      "type": "MOVIE",
+      "raw_b64": "WywsXQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f069",
+      "type": "SERIES",
+      "raw_b64": "WywsXQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f070",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxfSxd",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f070",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxfSxd",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f070",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxfSxd",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f071",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxfSw7XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f071",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxfSw7XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f071",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxfSw7XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f072",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjpbIiIsIi9iLmpwZyJdfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": "https:\/\/portal.example\/b.jpg"
+        }
+      ]
+    },
+    {
+      "id": "f072",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjpbIiIsIi9iLmpwZyJdfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": "https:\/\/portal.example\/b.jpg"
+        }
+      ]
+    },
+    {
+      "id": "f072",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjpbIiIsIi9iLmpwZyJdfV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f073",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjoiW1wiL3MuanBnXCJdIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": "https:\/\/portal.example\/s.jpg"
+        }
+      ]
+    },
+    {
+      "id": "f073",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjoiW1wiL3MuanBnXCJdIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": "https:\/\/portal.example\/s.jpg"
+        }
+      ]
+    },
+    {
+      "id": "f073",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjoiW1wiL3MuanBnXCJdIn1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f074",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjpbMWUzMDldfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": "https:\/\/portal.example\/base\/Infinity"
+        }
+      ]
+    },
+    {
+      "id": "f074",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjpbMWUzMDldfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": "https:\/\/portal.example\/base\/Infinity"
+        }
+      ]
+    },
+    {
+      "id": "f074",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjpbMWUzMDldfV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f075",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbImEiLHsiYiI6MX1dfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "[\"a\",{\"b\":1}]",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f075",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbImEiLHsiYiI6MX1dfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "[\"a\",{\"b\":1}]",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f075",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbImEiLHsiYiI6MX1dfV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f076",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjp7ImEiOjFlMzA5fX1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f076",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjp7ImEiOjFlMzA5fX1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f076",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjp7ImEiOjFlMzA5fX1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f077",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjp7ImEiOjFlMzA5fX1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f077",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjp7ImEiOjFlMzA5fX1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f077",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjp7ImEiOjFlMzA5fX1d",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f078",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjpbeyJhIjoxZTMwOX1dfV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f078",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjpbeyJhIjoxZTMwOX1dfV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f078",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjpbeyJhIjoxZTMwOX1dfV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Forbidden numeric value: Infinity"
+    },
+    {
+      "id": "f079",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjpbeyJhIjoxfV19XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f079",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjpbeyJhIjoxfV19XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f079",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJtZXRhIjpbeyJhIjoxfV19XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f080",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbImEvKngqL2IiXX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "[\"a\\\/*x*\\\/b\"]",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f080",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbImEvKngqL2IiXX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "[\"a\\\/*x*\\\/b\"]",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f080",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbImEvKngqL2IiXX1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f081",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbImFcImIiXX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "[\"a\\\"b\"]",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f081",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbImFcImIiXX1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "[\"a\\\"b\"]",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f081",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjpbImFcImIiXX1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f082",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYQpiIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "a\nb",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f082",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYQpiIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "a\nb",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f082",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYQpiIn1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f083",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYQliIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "a\tb",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f083",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYQliIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "a\tb",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f083",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYQliIn1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f084",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVx1MTIifV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Invalid escape sequence: 12\"} at character 31 of [{\"stream_id\":1,\"name\":\"a\\u12\"}]"
+    },
+    {
+      "id": "f084",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVx1MTIifV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Invalid escape sequence: 12\"} at character 31 of [{\"stream_id\":1,\"name\":\"a\\u12\"}]"
+    },
+    {
+      "id": "f084",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVx1MTIifV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Invalid escape sequence: 12\"} at character 31 of [{\"stream_id\":1,\"name\":\"a\\u12\"}]"
+    },
+    {
+      "id": "f085",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVwifV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Unterminated string at character 29 of [{\"stream_id\":1,\"name\":\"a\\\"}]"
+    },
+    {
+      "id": "f085",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVwifV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Unterminated string at character 29 of [{\"stream_id\":1,\"name\":\"a\\\"}]"
+    },
+    {
+      "id": "f085",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVwifV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Unterminated string at character 29 of [{\"stream_id\":1,\"name\":\"a\\\"}]"
+    },
+    {
+      "id": "f086",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVx1WlpaWiJ9XQ==",
+      "accept": false,
+      "error": "org.json.JSONException: Invalid escape sequence: ZZZZ at character 31 of [{\"stream_id\":1,\"name\":\"a\\uZZZZ\"}]"
+    },
+    {
+      "id": "f086",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVx1WlpaWiJ9XQ==",
+      "accept": false,
+      "error": "org.json.JSONException: Invalid escape sequence: ZZZZ at character 31 of [{\"stream_id\":1,\"name\":\"a\\uZZZZ\"}]"
+    },
+    {
+      "id": "f086",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYVx1WlpaWiJ9XQ==",
+      "accept": false,
+      "error": "org.json.JSONException: Invalid escape sequence: ZZZZ at character 31 of [{\"stream_id\":1,\"name\":\"a\\uZZZZ\"}]"
+    },
+    {
+      "id": "f087",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjpbLCIvb2suanBnIl19XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": "https:\/\/portal.example\/ok.jpg"
+        }
+      ]
+    },
+    {
+      "id": "f087",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjpbLCIvb2suanBnIl19XQ==",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": "https:\/\/portal.example\/ok.jpg"
+        }
+      ]
+    },
+    {
+      "id": "f087",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjpbLCIvb2suanBnIl19XQ==",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f088",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjpbbnVsbCwiL29rLmpwZyJdfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f088",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjpbbnVsbCwiL29rLmpwZyJdfV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f088",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjpbbnVsbCwiL29rLmpwZyJdfV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f089",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjoiW1wiXCIsXCIvb2suanBnXCJdIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f089",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjoiW1wiXCIsXCIvb2suanBnXCJdIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f089",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjoiW1wiXCIsXCIvb2suanBnXCJdIn1d",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f090",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjoiWyxcIi9vay5qcGdcIl0ifV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f090",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjoiWyxcIi9vay5qcGdcIl0ifV0=",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "بدون اسم",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f090",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJiYWNrZHJvcF9wYXRoIjoiWyxcIi9vay5qcGdcIl0ifV0=",
+      "accept": true,
+      "items": []
+    },
+    {
+      "id": "f091",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLGNhdGVnb3J5X2lkOjEMfV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Unterminated object at character 30 of [{\"stream_id\":1,category_id:1\f}]"
+    },
+    {
+      "id": "f091",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLGNhdGVnb3J5X2lkOjEMfV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Unterminated object at character 30 of [{\"stream_id\":1,category_id:1\f}]"
+    },
+    {
+      "id": "f091",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLGNhdGVnb3J5X2lkOjEMfV0=",
+      "accept": false,
+      "error": "org.json.JSONException: Unterminated object at character 30 of [{\"stream_id\":1,category_id:1\f}]"
+    },
+    {
+      "id": "f092",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLHVudXNlZDp4DH1d",
+      "accept": false,
+      "error": "org.json.JSONException: Unterminated object at character 25 of [{\"stream_id\":1,unused:x\f}]"
+    },
+    {
+      "id": "f092",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLHVudXNlZDp4DH1d",
+      "accept": false,
+      "error": "org.json.JSONException: Unterminated object at character 25 of [{\"stream_id\":1,unused:x\f}]"
+    },
+    {
+      "id": "f092",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLHVudXNlZDp4DH1d",
+      "accept": false,
+      "error": "org.json.JSONException: Unterminated object at character 25 of [{\"stream_id\":1,unused:x\f}]"
+    },
+    {
+      "id": "f093",
+      "type": "LIVE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYQxiIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "LIVE",
+          "name": "a\fb",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f093",
+      "type": "MOVIE",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYQxiIn1d",
+      "accept": true,
+      "items": [
+        {
+          "id": 1,
+          "type": "MOVIE",
+          "name": "a\fb",
+          "categoryId": "0",
+          "posterUrl": null,
+          "rating": null,
+          "year": null,
+          "containerExtension": null,
+          "nowPlaying": null,
+          "addedAtEpochSeconds": null,
+          "plot": null,
+          "genre": null,
+          "backdropUrl": null
+        }
+      ]
+    },
+    {
+      "id": "f093",
+      "type": "SERIES",
+      "raw_b64": "W3sic3RyZWFtX2lkIjoxLCJuYW1lIjoiYQxiIn1d",
+      "accept": true,
+      "items": []
+    }
+  ]
+}

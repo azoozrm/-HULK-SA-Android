@@ -45,6 +45,18 @@ class CatalogRequestOwnerTest {
 
 
     @Test
+    fun `scoped catalog retry reloads only the failed type without touching healthy catalogs`() {
+        val source = File("src/main/java/sa/hulksa/player/HulkViewModel.kt").readText()
+        val retry = source
+            .substringAfter("fun retryCatalog(type: ContentType)")
+            .substringBefore("fun refresh()")
+        assertTrue(retry.contains("catalogRequestOwner.prioritize(type)"))
+        assertTrue(retry.contains("ensureCatalog(type, force = true)"))
+        assertFalse(retry.contains("types.forEach"))
+        assertFalse(retry.contains("ensureDestinationCatalogs"))
+    }
+
+    @Test
     fun `destination selection and refresh mark the selected catalog foreground`() {
         val source = File("src/main/java/sa/hulksa/player/HulkViewModel.kt").readText()
         val selectDestination = source

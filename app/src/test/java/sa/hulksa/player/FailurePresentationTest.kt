@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import sa.hulksa.player.data.XtreamException
+import sa.hulksa.player.model.ContentType
 
 class FailurePresentationTest {
 
@@ -34,6 +35,48 @@ class FailurePresentationTest {
             userFacingFailureMessage(error),
         )
         assertTrue(HulkUiState().finishLoginFailure(error).errorRetryable)
+    }
+
+    @Test
+    fun `healthy destination keeps a background catalog failure scoped`() {
+        val state = HulkUiState().applyCatalogFailure(
+            type = ContentType.SERIES,
+            failure = CatalogFailure("تعذر تحديث المسلسلات", retryable = true),
+            remaining = setOf(ContentType.LIVE),
+            hasUsableContent = true,
+        )
+
+        assertEquals(null, state.errorMessage)
+        assertEquals("تعذر تحديث المسلسلات", state.catalogFailures[ContentType.SERIES]?.message)
+        assertEquals(setOf(ContentType.LIVE), state.loadingTypes)
+    }
+
+    @Test
+    fun `no usable catalog keeps the failure as a global retryable error after loading settles`() {
+        val state = HulkUiState().applyCatalogFailure(
+            type = ContentType.MOVIE,
+            failure = CatalogFailure("انتهت مهلة الاتصال", retryable = false),
+            remaining = emptySet(),
+            hasUsableContent = false,
+        )
+
+        assertEquals("انتهت مهلة الاتصال", state.errorMessage)
+        assertFalse(state.errorRetryable)
+        assertEquals("انتهت مهلة الاتصال", state.catalogFailures[ContentType.MOVIE]?.message)
+    }
+
+    @Test
+    fun `a failure while another catalog is still loading stays scoped until loading settles`() {
+        val state = HulkUiState().applyCatalogFailure(
+            type = ContentType.SERIES,
+            failure = CatalogFailure("انتهت مهلة الاتصال", retryable = true),
+            remaining = setOf(ContentType.MOVIE),
+            hasUsableContent = false,
+        )
+
+        assertEquals(null, state.errorMessage)
+        assertEquals("انتهت مهلة الاتصال", state.catalogFailures[ContentType.SERIES]?.message)
+        assertEquals(setOf(ContentType.MOVIE), state.loadingTypes)
     }
 
     @Test

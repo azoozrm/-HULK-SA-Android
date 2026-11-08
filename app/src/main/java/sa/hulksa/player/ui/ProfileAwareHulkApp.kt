@@ -337,6 +337,13 @@ fun ProfileAwareHulkApp(
             ProfileCatalogNavigationMemory()
         }
     }
+    // Inactive profiles keep their saved positions/filters but not multi-megabyte derived
+    // catalog/search models. Returning to a profile recomputes those from the live catalogs.
+    LaunchedEffect(activeProfileId) {
+        navigationMemoryByProfile.forEach { (profileId, store) ->
+            if (profileId != activeProfileId) store.releaseDerivedModels()
+        }
+    }
     val directEntryCandidate = if (
         authenticated &&
         profileStateReady &&

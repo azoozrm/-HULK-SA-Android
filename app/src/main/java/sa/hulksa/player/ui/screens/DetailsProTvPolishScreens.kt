@@ -433,16 +433,20 @@ private fun MovieDetailsProTvPolished(
     }
 
     LaunchedEffect(initialFocusPending, watchActionPlaced, item.id, errorMessage) {
-        if (
-            detailsInitialFocusAction(
-                isSeries = false,
-                targetEpisodePresent = false,
-                playActionAttached = watchActionPlaced,
-                currentEpisodePresent = true,
-                initialFocusPending = initialFocusPending,
-                errorPresent = errorMessage != null,
-            ) != DetailsInitialFocusAction.REQUEST_PLAY
-        ) return@LaunchedEffect
+        val action = detailsInitialFocusAction(
+            isSeries = false,
+            targetEpisodePresent = false,
+            playActionAttached = watchActionPlaced,
+            currentEpisodePresent = true,
+            initialFocusPending = initialFocusPending,
+            errorPresent = errorMessage != null,
+        )
+        if (action != DetailsInitialFocusAction.REQUEST_PLAY) {
+            // A blocking error owns the screen. Once the owner moves to its Retry/other action,
+            // a later error clear must not re-grant the primary action over that deliberate focus.
+            if (errorMessage != null) initialFocusPending = false
+            return@LaunchedEffect
+        }
         withFrameNanos { }
         if (!initialFocusPending) return@LaunchedEffect
         val granted = runCatching { playRequester.requestFocus() }.getOrDefault(false)

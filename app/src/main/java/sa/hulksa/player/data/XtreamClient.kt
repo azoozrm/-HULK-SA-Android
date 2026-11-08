@@ -13,6 +13,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okio.BufferedSource
 import org.json.JSONArray
 import org.json.JSONObject
 import sa.hulksa.player.BuildConfig
@@ -110,10 +111,11 @@ open class XtreamClient(
                 }
                 val items = async {
                     val partStartedNs = System.nanoTime()
-                    val parsed = parseItems(
-                        requestArray(session.portal, session.credentials, contentAction),
-                        type,
-                        session.portal.baseUrl,
+                    val parsed = requestCatalogItems(
+                        portal = session.portal,
+                        credentials = session.credentials,
+                        action = contentAction,
+                        type = type,
                     )
                     hulkPerfLog {
                         "catalogPart type=$type part=items count=${parsed.size} " +
@@ -348,27 +350,110 @@ open class XtreamClient(
         }
     }
 
+    private suspend fun requestCatalogItems(
+        portal: PortalConfig,
+        credentials: Credentials,
+        action: String,
+        type: ContentType,
+    ): List<ContentItem> = withContext(Dispatchers.IO) {
+        val startedNs = System.nanoTime()
+        val request = apiRequest(portal, credentials, action)
+        val limit = XtreamJsonLimits.forAction(action)
+        val scope = "${type.name.lowercase()} catalog"
+        val context = currentCoroutineContext()
+
+        try {
+            client.executeCancellable(request) { response ->
+                if (!response.isSuccessful) {
+                    val body = try {
+                        BoundedJsonResponseReader.readResponse(response, limit)
+                    } catch (error: XtreamJsonGuardException.PayloadTooLarge) {
+                        throw XtreamException.Http(response.code)
+                    } catch (error: XtreamJsonGuardException.EmptyBody) {
+                        throw XtreamException.Http(response.code)
+                    }
+                    body.challengeCategory()?.let {
+                        throw XtreamException.ServiceBlocked(response.code, it)
+                    }
+                    throw XtreamException.Http(response.code)
+                }
+
+                val body = response.body ?: throw XtreamException.InvalidResponse
+                val reader = BoundedJsonArrayItemReader(
+                    source = body.source(),
+                    maxBytes = limit.maxResponseBytes,
+                    declaredLength = body.contentLength(),
+                )
+                try {
+                    val checkCancelled = { context.ensureActive() }
+                    val scan = reader.scanPrefix(checkCancelled = checkCancelled)
+                    if (scan == PrefixScanResult.LimitReached) {
+                        // A pathological whitespace prefix exceeded the bounded peek window.
+                        // Fall back to the legacy bounded text parser for this response only.
+                        val text = reader.readAllText(checkCancelled)
+                        text.challengeCategory()?.let {
+                            throw XtreamException.ServiceBlocked(response.code, it)
+                        }
+                        val parseText = if (text.startsWith('\uFEFF')) text.substring(1) else text
+                        val items = parseItems(
+                            XtreamJsonParser.parseArray(parseText),
+                            type,
+                            portal.baseUrl,
+                        )
+                        hulkPerfLog {
+                            "xtreamItemsFallback action=$action items=${items.size} " +
+                                "chars=${text.length} ms=${(System.nanoTime() - startedNs) / 1_000_000}"
+                        }
+                        return@executeCancellable items
+                    }
+
+                    val first = (scan as? PrefixScanResult.Found)?.value
+                    val catalogCandidate = first == null || first == '['.code ||
+                        first == 0xEF || first == '/'.code || first == '#'.code
+                    if (!catalogCandidate) {
+                        val prefix = reader.readChallengePrefix(checkCancelled)
+                        prefix.challengeCategory()?.let {
+                            throw XtreamException.ServiceBlocked(response.code, it)
+                        }
+                        throw XtreamException.InvalidResponse
+                    }
+
+                    val items = reader.readCatalogItems(
+                        type = type,
+                        portalBaseUrl = portal.baseUrl,
+                        maxUniqueItems = XtreamJsonLimits.CATALOG.maxUniqueItems!!,
+                        scope = scope,
+                        checkCancelled = checkCancelled,
+                    )
+                    hulkPerfLog {
+                        "xtreamItems action=$action items=${items.size} bytes=${reader.bytesRead} " +
+                            "ms=${(System.nanoTime() - startedNs) / 1_000_000}"
+                    }
+                    items
+                } finally {
+                    reader.close()
+                }
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: XtreamJsonGuardException) {
+            throw error.asXtreamException()
+        } catch (error: XtreamException) {
+            throw error
+        } catch (error: IOException) {
+            throw XtreamException.Network(error)
+        } catch (error: Exception) {
+            throw XtreamException.InvalidResponse
+        }
+    }
+
     private suspend fun request(
         portal: PortalConfig,
         credentials: Credentials,
         action: String?,
         extra: Map<String, String> = emptyMap(),
     ): String = withContext(Dispatchers.IO) {
-        val url = (portal.baseUrl.trimEnd('/') + "/player_api.php").toHttpUrl().newBuilder()
-            .addQueryParameter("username", credentials.username)
-            .addQueryParameter("password", credentials.password)
-            .apply {
-                if (action != null) addQueryParameter("action", action)
-                extra.forEach { (key, value) -> addQueryParameter(key, value) }
-            }
-            .build()
-
-        val request = Request.Builder()
-            .url(url)
-            .get()
-            .header("Accept", JSON.toString())
-            .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} Android")
-            .build()
+        val request = apiRequest(portal, credentials, action, extra)
         val limit = XtreamJsonLimits.forAction(action)
         val authenticationRequest = action == null && extra.isEmpty()
 
@@ -420,6 +505,28 @@ open class XtreamClient(
         }
     }
 
+    private fun apiRequest(
+        portal: PortalConfig,
+        credentials: Credentials,
+        action: String?,
+        extra: Map<String, String> = emptyMap(),
+    ): Request {
+        val url = (portal.baseUrl.trimEnd('/') + "/player_api.php").toHttpUrl().newBuilder()
+            .addQueryParameter("username", credentials.username)
+            .addQueryParameter("password", credentials.password)
+            .apply {
+                if (action != null) addQueryParameter("action", action)
+                extra.forEach { (key, value) -> addQueryParameter(key, value) }
+            }
+            .build()
+        return Request.Builder()
+            .url(url)
+            .get()
+            .header("Accept", JSON.toString())
+            .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} Android")
+            .build()
+    }
+
     private fun parseCategories(array: JSONArray, type: ContentType): List<Category> = try {
         buildList {
             array.forEachUniqueObject(
@@ -435,7 +542,7 @@ open class XtreamClient(
         throw error.asXtreamException()
     }
 
-    private fun parseItems(
+    internal fun parseItems(
         array: JSONArray,
         type: ContentType,
         portalBaseUrl: String,
@@ -449,35 +556,61 @@ open class XtreamClient(
                 scope = "${type.name.lowercase()} catalog",
                 keyOf = { item -> item.optString(idKey).toIntOrNull()?.toString() },
             ) { item ->
-                val id = item.optString(idKey).toIntOrNull() ?: return@forEachUniqueObject
-                add(
-                    ContentItem(
-                        id = id,
-                        name = item.optString("name", "بدون اسم"),
-                        categoryId = item.optString("category_id", "0"),
-                        type = type,
-                        posterUrl = normalizeArtworkUrl(
-                            item.optNullableString(if (type == ContentType.SERIES) "cover" else "stream_icon"),
-                            artworkBase,
-                        ),
-                        rating = item.optNullableString("rating") ?: item.optNullableString("rating_5based"),
-                        year = item.optNullableString("year"),
-                        containerExtension = item.optNullableString("container_extension"),
-                        nowPlaying = item.optNullableString("epg_channel_id"),
-                        addedAtEpochSeconds = when (type) {
-                            ContentType.SERIES -> item.optNullableString("last_modified")
-                                ?: item.optNullableString("added")
-                            else -> item.optNullableString("added")
-                        }?.toLongOrNull(),
-                        plot = item.optNullableString("plot"),
-                        genre = item.optNullableString("genre"),
-                        backdropUrl = normalizeArtworkUrl(item.firstImageUrl("backdrop_path"), artworkBase),
-                    ),
-                )
+                parseItem(item, type, idKey, artworkBase)?.let(::add)
             }
         }
     } catch (error: XtreamJsonGuardException) {
         throw error.asXtreamException()
+    }
+
+    internal fun parseCatalogItemsStreaming(
+        source: BufferedSource,
+        type: ContentType,
+        portalBaseUrl: String,
+        maxBytes: Long = XtreamJsonLimits.CATALOG.maxResponseBytes,
+        declaredLength: Long = -1L,
+        checkCancelled: () -> Unit = {},
+    ): List<ContentItem> {
+        return BoundedJsonArrayItemReader(source, maxBytes, declaredLength).use { reader ->
+            reader.readCatalogItems(
+                type = type,
+                portalBaseUrl = portalBaseUrl,
+                maxUniqueItems = XtreamJsonLimits.CATALOG.maxUniqueItems!!,
+                scope = "${type.name.lowercase()} catalog",
+                checkCancelled = checkCancelled,
+            )
+        }
+    }
+
+    private fun parseItem(
+        item: JSONObject,
+        type: ContentType,
+        idKey: String,
+        artworkBase: HttpUrl?,
+    ): ContentItem? {
+        val id = item.optString(idKey).toIntOrNull() ?: return null
+        return ContentItem(
+            id = id,
+            name = item.optString("name", "بدون اسم"),
+            categoryId = item.optString("category_id", "0"),
+            type = type,
+            posterUrl = normalizeArtworkUrl(
+                item.optNullableString(if (type == ContentType.SERIES) "cover" else "stream_icon"),
+                artworkBase,
+            ),
+            rating = item.optNullableString("rating") ?: item.optNullableString("rating_5based"),
+            year = item.optNullableString("year"),
+            containerExtension = item.optNullableString("container_extension"),
+            nowPlaying = item.optNullableString("epg_channel_id"),
+            addedAtEpochSeconds = when (type) {
+                ContentType.SERIES -> item.optNullableString("last_modified")
+                    ?: item.optNullableString("added")
+                else -> item.optNullableString("added")
+            }?.toLongOrNull(),
+            plot = item.optNullableString("plot"),
+            genre = item.optNullableString("genre"),
+            backdropUrl = normalizeArtworkUrl(item.firstImageUrl("backdrop_path"), artworkBase),
+        )
     }
 
     private fun parseDetails(info: JSONObject, portalBaseUrl: String): ContentDetails = ContentDetails(
@@ -608,7 +741,7 @@ internal fun normalizeArtworkUrl(raw: String?, portalBaseUrl: String): String? {
     return normalizeArtworkUrl(clean, (portalBaseUrl.trimEnd('/') + "/").toHttpUrlOrNull())
 }
 
-private fun normalizeArtworkUrl(raw: String?, base: HttpUrl?): String? {
+internal fun normalizeArtworkUrl(raw: String?, base: HttpUrl?): String? {
     val clean = cleanArtworkUrl(raw) ?: return null
     if (clean.isAbsoluteHttpUrl()) return clean
     return when {

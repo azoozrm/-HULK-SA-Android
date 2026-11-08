@@ -136,14 +136,27 @@ class VodPlayerControlsPolicyTest {
 
     @Test
     fun moviePanelVerticalFocusCycleWrapsAndStaysClosed() {
-        // Node 0 is the header; nodes 1..5 are the five More rows.
-        assertEquals(1, vodPanelVerticalNeighbor(0, 6, 1))
-        assertEquals(5, vodPanelVerticalNeighbor(0, 6, -1))
-        assertEquals(0, vodPanelVerticalNeighbor(5, 6, 1))
-        assertEquals(0, vodPanelVerticalNeighbor(1, 6, -1))
-        assertEquals(4, vodPanelVerticalNeighbor(5, 6, -1))
-        assertEquals(3, vodPanelVerticalNeighbor(3, 6, 0))
+        // Node 0 is the header; nodes 1..7 are the seven More rows.
+        assertEquals(1, vodPanelVerticalNeighbor(0, 8, 1))
+        assertEquals(7, vodPanelVerticalNeighbor(0, 8, -1))
+        assertEquals(0, vodPanelVerticalNeighbor(7, 8, 1))
+        assertEquals(0, vodPanelVerticalNeighbor(1, 8, -1))
+        assertEquals(6, vodPanelVerticalNeighbor(7, 8, -1))
+        assertEquals(3, vodPanelVerticalNeighbor(3, 8, 0))
         assertEquals(0, vodPanelVerticalNeighbor(99, 0, 1))
+    }
+
+    @Test
+    fun episodeEndClosesMoreBeforePresentingTheNextDecision() {
+        val source = java.io.File(
+            "src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt",
+        ).readText()
+        val ended = source
+            .substringAfter("playbackState == Player.STATE_ENDED")
+            .substringBefore("override fun onIsPlayingChanged")
+        assertTrue(ended.contains("vodMorePanel = null"))
+        assertTrue(ended.contains("vodGoToTimeVisible = false"))
+        assertTrue(ended.contains("nextCountdown = NEXT_EPISODE_SECONDS"))
     }
 
     @Test

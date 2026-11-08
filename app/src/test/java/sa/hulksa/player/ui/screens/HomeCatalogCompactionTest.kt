@@ -1,5 +1,9 @@
 package sa.hulksa.player.ui.screens
 
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -104,6 +108,99 @@ class HomeCatalogCompactionTest {
         val expected = referenceCompact(catalog, favorites, history)
         assertEquals(expected.map(ContentItem::id), actual.items.map(ContentItem::id))
         assertEquals(expected.map(ContentItem::rating), actual.items.map(ContentItem::rating))
+    }
+
+    @Test
+    fun `compaction cache reuses unchanged catalog favorites and history`() {
+        val catalog = Catalog(
+            categories = emptyList(),
+            items = (1..HOME_CATALOG_LIMIT + 20).map { id -> movie(id, addedAt = id.toLong()) },
+        )
+        val favorites = setOf("MOVIE:4")
+        val history = listOf(movieHistory(streamId = 7))
+        val cache = HomeCompactionCache()
+
+        val first = cache.compact(ContentType.MOVIE, catalog, favorites, history)
+        val same = cache.compact(ContentType.MOVIE, catalog, favorites, history)
+        val changedFavorites = cache.compact(ContentType.MOVIE, catalog, favorites + "MOVIE:9", history)
+
+        assertSame(first, same)
+        assertTrue(changedFavorites !== first)
+        assertEquals(
+            referenceCompact(catalog, favorites + "MOVIE:9", history).map(ContentItem::id),
+            changedFavorites.items.map(ContentItem::id),
+        )
+    }
+
+    @Test
+    fun `movie and series keep independent compaction entries across alternation`() {
+        val movieCatalog = Catalog(
+            emptyList(),
+            (1..HOME_CATALOG_LIMIT + 10).map { id -> movie(id, addedAt = id.toLong()) },
+        )
+        val seriesCatalog = Catalog(
+            emptyList(),
+            (1..HOME_CATALOG_LIMIT + 10).map { id ->
+                movie(id, addedAt = id.toLong()).copy(type = ContentType.SERIES)
+            },
+        )
+        val calls = AtomicInteger()
+        val cache = HomeCompactionCache(
+            builder = { catalog, favorites, history ->
+                calls.incrementAndGet()
+                compactHomeCatalogForHome(catalog, favorites, history)
+            },
+        )
+
+        val movieFirst = cache.compact(ContentType.MOVIE, movieCatalog, emptySet(), emptyList())
+        val seriesFirst = cache.compact(ContentType.SERIES, seriesCatalog, emptySet(), emptyList())
+        val movieSecond = cache.compact(ContentType.MOVIE, movieCatalog, emptySet(), emptyList())
+        val seriesSecond = cache.compact(ContentType.SERIES, seriesCatalog, emptySet(), emptyList())
+        val changed = cache.compact(
+            ContentType.MOVIE,
+            movieCatalog,
+            setOf("MOVIE:1"),
+            emptyList(),
+        )
+
+        assertSame(movieFirst, movieSecond)
+        assertSame(seriesFirst, seriesSecond)
+        assertTrue(changed !== movieFirst)
+        assertEquals(3, calls.get())
+    }
+
+    @Test
+    fun `clear returns while old compaction is held and late result cannot repopulate`() {
+        val catalog = Catalog(
+            emptyList(),
+            (1..HOME_CATALOG_LIMIT + 10).map { id -> movie(id, addedAt = id.toLong()) },
+        )
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val calls = AtomicInteger()
+        val cache = HomeCompactionCache(
+            builder = { source, favorites, history ->
+                calls.incrementAndGet()
+                started.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+                compactHomeCatalogForHome(source, favorites, history)
+            },
+        )
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val old = executor.submit<Catalog> {
+                cache.compact(ContentType.MOVIE, catalog, emptySet(), emptyList())
+            }
+            assertTrue(started.await(5, TimeUnit.SECONDS))
+            executor.submit { cache.clear() }.get(2, TimeUnit.SECONDS)
+            release.countDown()
+            val late = old.get(5, TimeUnit.SECONDS)
+            val fresh = cache.compact(ContentType.MOVIE, catalog, emptySet(), emptyList())
+            assertTrue(fresh !== late)
+            assertEquals(2, calls.get())
+        } finally {
+            executor.shutdownNow()
+        }
     }
 
     private fun referenceCompact(
