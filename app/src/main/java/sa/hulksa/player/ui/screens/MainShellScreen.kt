@@ -2964,14 +2964,7 @@ private fun CinemaHero(
     val statusBarInsetDp = with(density) {
         WindowInsets.statusBars.getTop(this).toDp()
     }
-    val heroTitleSlotDp = with(density) {
-        (if (isTv) 42.sp else 34.sp).toDp() * 2f
-    }
-    val heroFactsRowHeightDp = maxOf(
-        24.dp,
-        with(density) { (if (isTv) 20.sp else 18.sp).toDp() },
-    )
-    val heroFactsRowGapDp = if (isTv) 8.dp else 6.dp
+    val heroCopyMetrics = homeHeroCopyMetrics(isTv = isTv, fontScale = density.fontScale)
     val heroActionsRowHeightDp = maxOf(
         46.dp,
         with(density) { 13.sp.toDp() + 18.dp },
@@ -2999,11 +2992,8 @@ private fun CinemaHero(
     val heroHeight = effectiveHeroHeightDp(
         policyHeightDp = heroPolicyHeightDp,
         headerMinHeightDp = heroHeaderMinHeightDp,
-        titleSlotDp = heroTitleSlotDp,
-        factsRowHeightDp = heroFactsRowHeightDp,
-        factsRowGapDp = heroFactsRowGapDp,
-        maxFactsRows = if (isTv) 4 else 5,
         actionsHeightDp = heroActionsHeightDp,
+        metrics = heroCopyMetrics,
     )
     // One selected-hero load: technical facts plus the bounded presentation backfill, shared with
     // the facts row so artwork and copy never start competing requests.
@@ -3048,6 +3038,7 @@ private fun CinemaHero(
                 }
             },
     ) {
+        val heroOuterWidthDp = maxWidth
         // One-row fit resolved from the real title/subtitle at the current font scale and the
         // natural-width action group, minus the header's own horizontal padding.
         val compactHeaderSingleRow = if (!compactHeaderActions) {
@@ -3207,13 +3198,25 @@ private fun CinemaHero(
                 isTv = isTv,
                 heroMetadata = heroMetadata,
                 heroPlot = heroPlot,
+                heroGenre = if (item.type == ContentType.LIVE) {
+                    null
+                } else {
+                    heroMetadata.genre?.takeIf(String::isNotBlank) ?: item.genre
+                },
+                metrics = heroCopyMetrics,
+                copyContentWidthPx = with(density) {
+                    (heroOuterWidthDp * (if (isTv) HERO_WIDE_COPY_WIDTH_FRACTION else 1f) -
+                        (if (isTv) 27.dp else 18.dp) * 2f)
+                        .coerceAtLeast(0.dp)
+                        .roundToPx()
+                },
                 isFavorite = isFavorite,
                 onOpen = onOpen,
                 onToggleFavorite = onToggleFavorite,
                 watchModifier = watchModifier,
                 onFocused = onFocused,
                 modifier = Modifier
-                    .fillMaxWidth(if (isTv) HERO_WIDE_COPY_WIDTH_FRACTION else 1f)
+                    .fillMaxWidth()
                     .weight(1f)
                     .padding(horizontal = if (isTv) 27.dp else 18.dp),
             )
@@ -3239,52 +3242,13 @@ internal fun heroHeaderMinimumHeightDp(
     maxOf(titleHeightDp + subtitleHeightDp, topActionsMinHeightDp)
 
 /**
- * Hard hero height floor for the worst valid metadata wrap: every HomeHeroFacts entry can occupy
- * one row, so a five-entry row can need five rows. The floor uses the real typography row height
- * and the minimal non-overlapping gaps, independent of the current title length or metadata.
+ * Gap profile used by one copy-placement attempt. The title and genre have separate values so
+ * the genre line always owns its own measured slot instead of flowing with technical facts.
  */
-internal fun heroRequiredHeightDp(
-    headerMinHeightDp: Dp,
-    titleSlotDp: Dp,
-    factsRowHeightDp: Dp,
-    factsRowGapDp: Dp,
-    maxFactsRows: Int,
-    actionsHeightDp: Dp,
-    minTitleFactsGapDp: Dp = 2.dp,
-    minFactsActionsGapDp: Dp = 4.dp,
-): Dp {
-    val rows = maxFactsRows.coerceAtLeast(1)
-    val factsHeight = factsRowHeightDp * rows.toFloat() +
-        factsRowGapDp * (rows - 1).toFloat()
-    return headerMinHeightDp + titleSlotDp + factsHeight +
-        minTitleFactsGapDp + minFactsActionsGapDp + actionsHeightDp
-}
-
-/** Preserve the accepted policy height whenever it can carry the real worst-case copy band. */
-internal fun effectiveHeroHeightDp(
-    policyHeightDp: Dp,
-    headerMinHeightDp: Dp,
-    titleSlotDp: Dp,
-    factsRowHeightDp: Dp,
-    factsRowGapDp: Dp,
-    maxFactsRows: Int,
-    actionsHeightDp: Dp,
-): Dp = maxOf(
-    policyHeightDp,
-    heroRequiredHeightDp(
-        headerMinHeightDp = headerMinHeightDp,
-        titleSlotDp = titleSlotDp,
-        factsRowHeightDp = factsRowHeightDp,
-        factsRowGapDp = factsRowGapDp,
-        maxFactsRows = maxFactsRows,
-        actionsHeightDp = actionsHeightDp,
-    ),
-)
-
-/** Gap profile used by one copy-placement attempt. */
 internal data class HeroCopySpacing(
     val topGapPx: Int,
-    val titleFactsGapPx: Int,
+    val titleGenreGapPx: Int,
+    val genreFactsGapPx: Int,
     val factsActionsGapPx: Int,
     val bottomPaddingPx: Int,
 )
@@ -3302,10 +3266,12 @@ internal enum class HeroCopyFallback {
  */
 internal data class HeroCopyPlacement(
     val titleTopPx: Int,
+    val genreTopPx: Int,
     val factsTopPx: Int,
     val plotTopPx: Int,
     val actionsTopPx: Int,
     val titleSlotPx: Int,
+    val genreSlotPx: Int,
     val factsHeightPx: Int,
     val actionsHeightPx: Int,
     val plotLines: Int,
@@ -3315,6 +3281,7 @@ internal data class HeroCopyPlacement(
     val fitsContent: Boolean,
 ) {
     val titleBottomPx: Int get() = titleTopPx + titleSlotPx
+    val genreBottomPx: Int get() = genreTopPx + genreSlotPx
     val factsBottomPx: Int get() = factsTopPx + factsHeightPx
     val actionsBottomPx: Int get() = actionsTopPx + actionsHeightPx
 }
@@ -3322,6 +3289,7 @@ internal data class HeroCopyPlacement(
 internal fun resolveHeroCopyPlacement(
     availableHeightPx: Int,
     titleSlotPx: Int,
+    genreSlotPx: Int,
     reservedFactsSlotPx: Int,
     measuredFactsHeightPx: Int,
     actionsHeightPx: Int,
@@ -3336,21 +3304,24 @@ internal fun resolveHeroCopyPlacement(
     val actionsHeight = actionsHeightPx.coerceAtLeast(0)
     val safeLineHeight = plotLineHeightPx.coerceAtLeast(1)
 
+    fun fixedBand(spacing: HeroCopySpacing, factsBandHeight: Int): Int =
+        titleSlotPx + spacing.titleGenreGapPx + genreSlotPx + spacing.genreFactsGapPx +
+            factsBandHeight + spacing.factsActionsGapPx + spacing.bottomPaddingPx + actionsHeight
+
     fun normalPlacement(): HeroCopyPlacement? {
         val usableHeight = (height - normalSpacing.topGapPx).coerceAtLeast(0)
-        val fixedBand = titleSlotPx + normalSpacing.titleFactsGapPx +
-            reservedFactsSlotPx + normalSpacing.factsActionsGapPx +
-            normalSpacing.bottomPaddingPx + actionsHeight
-        val reservedPlotLines = if (usableHeight <= fixedBand) {
+        val band = fixedBand(normalSpacing, reservedFactsSlotPx)
+        val reservedPlotLines = if (usableHeight <= band) {
             0
         } else {
-            ((usableHeight - fixedBand) / safeLineHeight)
+            ((usableHeight - band) / safeLineHeight)
                 .coerceIn(0, maxPlotLines.coerceAtLeast(0))
         }
-        val bandHeight = fixedBand + reservedPlotLines * safeLineHeight
+        val bandHeight = band + reservedPlotLines * safeLineHeight
         val titleTop = height - bandHeight
         if (titleTop < normalSpacing.topGapPx) return null
-        val factsTop = titleTop + titleSlotPx + normalSpacing.titleFactsGapPx
+        val genreTop = titleTop + titleSlotPx + normalSpacing.titleGenreGapPx
+        val factsTop = genreTop + genreSlotPx + normalSpacing.genreFactsGapPx
         val actionsTop = height - normalSpacing.bottomPaddingPx - actionsHeight
         if (actionsTop < 0) return null
         val factsBottom = factsTop + factsHeight
@@ -3369,10 +3340,12 @@ internal fun resolveHeroCopyPlacement(
         }
         return HeroCopyPlacement(
             titleTopPx = titleTop,
+            genreTopPx = genreTop,
             factsTopPx = factsTop,
             plotTopPx = plotTop,
             actionsTopPx = actionsTop,
             titleSlotPx = titleSlotPx,
+            genreSlotPx = genreSlotPx,
             factsHeightPx = factsHeight,
             actionsHeightPx = actionsHeight,
             plotLines = visiblePlotLines,
@@ -3387,20 +3360,22 @@ internal fun resolveHeroCopyPlacement(
         spacing: HeroCopySpacing,
         fallback: HeroCopyFallback,
     ): HeroCopyPlacement? {
-        val fixedBand = titleSlotPx + spacing.titleFactsGapPx + factsHeight +
-            spacing.factsActionsGapPx + spacing.bottomPaddingPx + actionsHeight
-        val titleTop = height - fixedBand
+        val band = fixedBand(spacing, factsHeight)
+        val titleTop = height - band
         if (titleTop < spacing.topGapPx) return null
-        val factsTop = titleTop + titleSlotPx + spacing.titleFactsGapPx
+        val genreTop = titleTop + titleSlotPx + spacing.titleGenreGapPx
+        val factsTop = genreTop + genreSlotPx + spacing.genreFactsGapPx
         val actionsTop = height - spacing.bottomPaddingPx - actionsHeight
         val factsBottom = factsTop + factsHeight
         if (factsBottom + spacing.factsActionsGapPx > actionsTop) return null
         return HeroCopyPlacement(
             titleTopPx = titleTop,
+            genreTopPx = genreTop,
             factsTopPx = factsTop,
             plotTopPx = actionsTop,
             actionsTopPx = actionsTop,
             titleSlotPx = titleSlotPx,
+            genreSlotPx = genreSlotPx,
             factsHeightPx = factsHeight,
             actionsHeightPx = actionsHeight,
             plotLines = 0,
@@ -3416,11 +3391,14 @@ internal fun resolveHeroCopyPlacement(
         ?: fallbackPlacement(minimalSpacing, HeroCopyFallback.MINIMAL)
         ?: HeroCopyPlacement(
             titleTopPx = 0,
-            factsTopPx = titleSlotPx + minimalSpacing.titleFactsGapPx,
+            genreTopPx = titleSlotPx + minimalSpacing.titleGenreGapPx,
+            factsTopPx = titleSlotPx + minimalSpacing.titleGenreGapPx +
+                genreSlotPx + minimalSpacing.genreFactsGapPx,
             plotTopPx = height,
             actionsTopPx = (height - minimalSpacing.bottomPaddingPx - actionsHeight)
                 .coerceAtLeast(0),
             titleSlotPx = titleSlotPx,
+            genreSlotPx = genreSlotPx,
             factsHeightPx = factsHeight,
             actionsHeightPx = actionsHeight,
             plotLines = 0,
@@ -3444,13 +3422,12 @@ internal enum class HeroArtworkLayoutMode {
  * Home hero copy region. The full header/copy split is owned by the caller's Column, so this
  * layout only receives the space that is genuinely left below the measured header.
  *
- * Title: fixed two-line slot, bottom-aligned inside the slot, so one-line and two-line titles
- * start the facts at the same y. Facts: wrapped at the real width inside a reserved three-row
- * (non-TV) or two-row (TV) budget; the plot yields first, then a compact and finally a minimal
- * gap profile consume the measured facts height. Actions: measured and anchored from the bottom.
- * Plot: only when the real facts leave room. Every anchor depends on the viewport/font scale and
- * the measured content, and the hero height floor is derived from the real typography and the
- * worst valid five-entry wrap, never from an individual carousel item.
+ * Title: 28sp semibold in a fixed two-line slot, bottom-aligned inside the slot. Genre: one
+ * dedicated 12sp regular line with complete labels and a measured `+N` remainder. Facts: a
+ * separate technical-facts block, normally one row on TV and at most two measured whole-group
+ * rows. The plot yields first, then a compact and finally a minimal gap profile consume the
+ * measured facts height. Actions: measured and anchored from the bottom. Every slot and the
+ * hero height floor come from the same [HomeHeroCopyMetrics], never from an individual item.
  */
 @Composable
 private fun HeroCopy(
@@ -3460,6 +3437,9 @@ private fun HeroCopy(
     isTv: Boolean,
     heroMetadata: HomeHeroTechnicalMetadata,
     heroPlot: String?,
+    heroGenre: String?,
+    metrics: HomeHeroCopyMetrics,
+    copyContentWidthPx: Int,
     isFavorite: Boolean,
     onOpen: () -> Unit,
     onToggleFavorite: () -> Unit,
@@ -3469,36 +3449,33 @@ private fun HeroCopy(
 ) {
     val heroActionsPlacedLogged = remember(heroIdentity) { booleanArrayOf(false) }
     val density = LocalDensity.current
-    val titleFontSize = if (isTv) 36.sp else 28.sp
-    val titleLineHeight = if (isTv) 42.sp else 34.sp
-    val titleSlotPx = with(density) { (titleLineHeight.toDp() * 2f).roundToPx() }
-    val factsRowHeightPx = with(density) {
-        maxOf(24.dp, (if (isTv) 20.sp else 18.sp).toDp()).roundToPx()
-    }
-    val factsRowGapPx = with(density) { (if (isTv) 8.dp else 6.dp).roundToPx() }
-    val reservedFactsRows = if (isTv) 2 else 3
-    val factsSlotPx = factsRowHeightPx * reservedFactsRows +
-        factsRowGapPx * (reservedFactsRows - 1)
+    val titleSlotPx = with(density) { metrics.titleSlotDp.roundToPx() }
+    val genreSlotPx = with(density) { metrics.genreSlotDp.roundToPx() }
+    val factsSlotPx = with(density) { metrics.factsSlotDp.roundToPx() }
     val plotLineHeightPx = with(density) { (if (isTv) 17.sp else 18.sp).toDp().roundToPx() }
-    val titleFactsGapPx = with(density) { (if (isTv) 8.dp else 9.dp).roundToPx() }
-    val factsActionsGapPx = with(density) { (if (isTv) 8.dp else 10.dp).roundToPx() }
-    val bottomPaddingPx = with(density) { (if (isTv) 40.dp else 24.dp).roundToPx() }
-    val topGapPx = with(density) { (if (isTv) 16.dp else 12.dp).roundToPx() }
+    val titleGenreGapPx = with(density) { metrics.titleGenreGapDp.roundToPx() }
+    val genreFactsGapPx = with(density) { metrics.genreFactsGapDp.roundToPx() }
+    val factsActionsGapPx = with(density) { metrics.factsActionsGapDp.roundToPx() }
+    val bottomPaddingPx = with(density) { metrics.bottomPaddingDp.roundToPx() }
+    val topGapPx = with(density) { metrics.topGapDp.roundToPx() }
     val normalSpacing = HeroCopySpacing(
         topGapPx = topGapPx,
-        titleFactsGapPx = titleFactsGapPx,
+        titleGenreGapPx = titleGenreGapPx,
+        genreFactsGapPx = genreFactsGapPx,
         factsActionsGapPx = factsActionsGapPx,
         bottomPaddingPx = bottomPaddingPx,
     )
     val compactSpacing = HeroCopySpacing(
         topGapPx = with(density) { 4.dp.roundToPx() },
-        titleFactsGapPx = with(density) { 4.dp.roundToPx() },
+        titleGenreGapPx = with(density) { 4.dp.roundToPx() },
+        genreFactsGapPx = with(density) { 4.dp.roundToPx() },
         factsActionsGapPx = with(density) { 4.dp.roundToPx() },
         bottomPaddingPx = with(density) { 8.dp.roundToPx() },
     )
     val minimalSpacing = HeroCopySpacing(
         topGapPx = 0,
-        titleFactsGapPx = with(density) { 2.dp.roundToPx() },
+        titleGenreGapPx = with(density) { 2.dp.roundToPx() },
+        genreFactsGapPx = with(density) { 2.dp.roundToPx() },
         factsActionsGapPx = with(density) { 4.dp.roundToPx() },
         bottomPaddingPx = 0,
     )
@@ -3506,6 +3483,7 @@ private fun HeroCopy(
     SubcomposeLayout(modifier = modifier) { constraints ->
         val width = constraints.maxWidth
         val height = constraints.maxHeight
+        val copyWidth = copyContentWidthPx.coerceIn(0, width)
 
         val actionsPlaceable = subcompose("hero-actions") {
             HomeHeroActions(
@@ -3523,21 +3501,35 @@ private fun HeroCopy(
                     }
                 },
             )
-        }.first().measure(Constraints(maxWidth = width))
+        }.first().measure(Constraints(maxWidth = copyWidth))
 
         val factsPlaceable = subcompose("hero-facts") {
             HomeHeroFacts(
                 item = item,
                 isTv = isTv,
                 metadata = heroMetadata,
-                modifier = Modifier.fillMaxWidth(),
+                metrics = metrics,
+                heroIdentity = heroIdentity,
+                preferredWidthPx = copyWidth,
+                maxWidthPx = width,
             )
         }.firstOrNull()?.measure(Constraints(maxWidth = width))
         val factsHeight = factsPlaceable?.height ?: 0
 
+        val genrePlaceable = subcompose("hero-genre") {
+            HomeHeroGenreLine(
+                genre = heroGenre,
+                metrics = metrics,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }.firstOrNull()?.measure(
+            Constraints(maxWidth = copyWidth, maxHeight = genreSlotPx),
+        )
+
         val placement = resolveHeroCopyPlacement(
             availableHeightPx = height,
             titleSlotPx = titleSlotPx,
+            genreSlotPx = genreSlotPx,
             reservedFactsSlotPx = factsSlotPx,
             measuredFactsHeightPx = factsHeight,
             actionsHeightPx = actionsPlaceable.height,
@@ -3551,13 +3543,14 @@ private fun HeroCopy(
             Text(
                 text = title,
                 color = Color.White,
-                fontSize = titleFontSize,
-                lineHeight = titleLineHeight,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
+                fontSize = metrics.titleFontSize,
+                lineHeight = metrics.titleLineHeight,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = HOME_HERO_TITLE_MAX_LINES,
                 overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Right,
             )
-        }.first().measure(Constraints(maxWidth = width, maxHeight = titleSlotPx))
+        }.first().measure(Constraints(maxWidth = copyWidth, maxHeight = titleSlotPx))
 
         val plotPlaceable = if (heroPlot != null && placement.plotLines > 0) {
             subcompose("hero-plot") {
@@ -3568,10 +3561,11 @@ private fun HeroCopy(
                     lineHeight = if (isTv) 17.sp else 18.sp,
                     maxLines = placement.plotLines,
                     overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Right,
                 )
             }.first().measure(
                 Constraints(
-                    maxWidth = width,
+                    maxWidth = copyWidth,
                     maxHeight = placement.plotLines * placement.plotLineHeightPx,
                 ),
             )
@@ -3580,13 +3574,26 @@ private fun HeroCopy(
         }
 
         layout(width, height) {
-            titlePlaceable.placeRelative(
-                x = 0,
+            titlePlaceable.place(
+                x = width - titlePlaceable.width,
                 y = placement.titleTopPx + titleSlotPx - titlePlaceable.height,
             )
-            factsPlaceable?.placeRelative(x = 0, y = placement.factsTopPx)
-            plotPlaceable?.placeRelative(x = 0, y = placement.plotTopPx)
-            actionsPlaceable.placeRelative(x = 0, y = placement.actionsTopPx)
+            genrePlaceable?.place(
+                x = width - genrePlaceable.width,
+                y = placement.genreTopPx,
+            )
+            factsPlaceable?.place(
+                x = width - factsPlaceable.width,
+                y = placement.factsTopPx,
+            )
+            plotPlaceable?.place(
+                x = width - plotPlaceable.width,
+                y = placement.plotTopPx,
+            )
+            actionsPlaceable.place(
+                x = width - actionsPlaceable.width,
+                y = placement.actionsTopPx,
+            )
         }
     }
 }
@@ -3859,6 +3866,7 @@ private fun HomeHeroActions(
         Modifier
             .fillMaxWidth()
             .onPlaced { onPlaced?.invoke() },
+        contentAlignment = AbsoluteAlignment.TopRight,
     ) {
         val availableWidthPx = with(density) { maxWidth.roundToPx() }
         val fitsRow = primaryRequiredPx + favoriteRequiredPx + rowGapPx <= availableWidthPx

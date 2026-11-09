@@ -719,6 +719,41 @@ high-bit-depth, non-AVC and no-colorInfo content are not rewritten. CAVLC 4:4:4 
 input. The assumption does not claim visual color correctness; it removes the evidenced vendor
 HDR promotion.
 
+### 12.10 Owner Home hero typography and metadata layout correction (2026-11-09)
+
+This bounded correction supersedes only the Home-hero title size/weight, the Home-only genre flow,
+the Home technical-facts typography/row flow and the obsolete five-entry Home height reservation
+recorded above. The accepted artwork window/crop/gradient, measured header, compact action atoms,
+physical-right composition, navigation, focus ownership and all Details renderers remain unchanged.
+
+- Title: existing title data and font family, now 28sp SemiBold with 34sp line height on TV and
+  phone, maximum two lines inside the same accurate two-line slot. The existing final ellipsis
+  remains only for a title longer than two lines; provider wording is not stripped or renamed.
+- Genres: one dedicated 12sp Regular/18sp line. At most two complete provider-order labels are
+  shown with a centered dot; omitted unique labels are represented by an LTR `+N`. If no complete
+  label fits, only the count is shown. Verified delimiters are comma, Arabic comma, slash, pipe and
+  semicolon; ampersands are never split, so compounds such as `Action & Adventure` stay whole.
+  Labels are never translated, abbreviated or truncated. Full genres remain on Details.
+- Technical facts: a separate line at TV 13sp Medium/20sp and non-TV 12sp Medium/18sp, retaining
+  the truthful formatters, quality chip, gold semantic icons and available-field order
+  (Movie year/duration/quality/rating; Series quality/seasons/episodes/rating; unavailable fields
+  omitted). Normal TV facts fit one row; actual width/font scale may use at most two measured rows
+  with whole groups. Separators appear only between groups on the same row. Facts prefer the
+  normal copy width; when truthful whole-group widths cannot fit there, the existing Home caller
+  may expand only the facts line, right-aligned, up to the hero's existing content bounds and only
+  as far as the measured requirement. If even those bounds cannot carry the whole groups at the
+  approved typography, the measured conflict is surfaced and no out-of-bounds row is placed; fonts,
+  fields and row limits are not silently changed to claim a fit.
+- The new typography/slot metrics are shared by rendering, slot budgets and minimum-height
+  calculations; the former five-entry Home flow and 36/42sp TV title reservation are removed.
+  Title, genre and two-row facts reservations keep the bottom-anchored actions stable across hero
+  rotation/metadata arrival. Plot continues to yield before required facts and actions, and the
+  measured insufficient-height fallback remains.
+
+Status: LOCAL_ROUND source candidate for independent review. Captures remain OFF; automated visual
+validation is NOT RUN and owner visual acceptance of the new candidate is PENDING. This record does
+not close the section or grant merge/signing/release authority.
+
 ## 13. Login / Who's Watching / entry-subflows adoption record (2026-10-11)
 
 The owner accepted the R03 Login model (`HULK-SA-LOGIN-PROFILES-DESIGN-R03.zip`, SHA-256
