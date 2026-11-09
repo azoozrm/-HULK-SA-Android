@@ -168,9 +168,11 @@ Every substantive task should produce a durable result packet outside the reposi
 
 with a `MANIFEST.sha256`. Related local rounds retain immutable per-round subdirectories and
 candidate/source/dirty-state identity. The specific evidence/delivery contract is
-`docs/android-engineering-lab/DEEPSEEK-EVIDENCE-CONTRACT.md`: retain originals, prepare a complete
-review ZIP with external SHA-256, verify archive/manifest integrity and bounded hulkapp read/traverse
-access, and report exact filename/path/byte count/hash. Evidence must be reviewable without a PR.
+`docs/android-engineering-lab/DEEPSEEK-EVIDENCE-CONTRACT.md`: retain originals and deliver one complete
+self-contained reviewer ZIP with original check reports and essential referenced evidence. Verify
+content completeness, CRC/hash/exact manifest coverage and bounded hulkapp read/traverse. Report
+exact filename/path/bytes/full archive SHA-256 in the response, without sidecar or second ZIP.
+Evidence must be reviewable without a PR.
 
 A result packet records, as applicable:
 

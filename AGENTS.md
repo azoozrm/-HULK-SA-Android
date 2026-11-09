@@ -297,27 +297,32 @@ At completion, report verified facts as applicable:
 
 For Audit / Review / Diagnosis, report findings and evidence only, with no mutation.
 
-## 15. Persistent owner refresh (standing rule)
+## 15. Persistent owner signed-app refresh (standing rule)
 
-`sa.hulksa.player.preview` and `sa.hulksa.player.benchmark` are the owner's persistent physical engineering packages. `sa.hulksa.player.preview` is the owner's live daily viewing copy of the latest **successful in-progress** implementation state, including unmerged PR heads; do not wait for merge.
+Owner decision 2026-11-09 supersedes the former Preview/Benchmark and mandatory dual-refresh rules.
+The routine physical target is the owner's existing final signed official app, `sa.hulksa.player`.
+When current task authority includes device refresh, update that installed app in place with a
+verified matching signed release APK, same application ID/signer, using `adb install -r` only.
 
-The specific authoritative contract for persistent package identity, approved physical surfaces, refresh procedure and data preservation is:
+Read `AGENTS.override.md` and `docs/android-engineering-lab/PHYSICAL-ENGINEERING-INSTANCES.md`
+before physical actions. Verify live package/version/signer, exact source/artifact provenance and
+required checks; preserve login, profiles, favorites, history, downloads and all existing data.
+Never uninstall, clear/wipe, downgrade, change signer or force an update after failed validation.
 
-- `AGENTS.override.md`;
-- `docs/android-engineering-lab/PHYSICAL-ENGINEERING-INSTANCES.md`.
+Do not install or refresh Preview, Benchmark, debug/dev, test/instrumentation or other packages
+on owner devices. Leave existing secondary packages untouched. Clean-state testing needs separate
+owner authority on a separate approved surface; it is not an automatic fallback.
 
-At the end of any Android implementation round that reaches a valid, testable state, unless the task explicitly forbids touching the device, refresh **both** persistent packages from the exact frozen current task-worktree candidate with the owner-approved qualification overrides `-PHULK_QUALIFICATION_VERSION_CODE=<n>` and `-PHULK_QUALIFICATION_VERSION_NAME=<name>`:
+A frozen dirty candidate is valid source when fully attributed; it does not make an unsigned/debug
+APK eligible for installation. If a suitable signed artifact or authorized route is unavailable,
+retain the installed copy and report required refresh BLOCKED. This rule grants no new signing,
+CI, commit/push/PR, merge, version, release or capture authority. Source-only/read-only/documentation
+tasks remain within their declared scope and do not automatically build/install/launch the app.
 
-- `./gradlew -PHULK_QUALIFICATION_VERSION_CODE=<n> -PHULK_QUALIFICATION_VERSION_NAME=<name> :app:assemblePreview`;
-- `./gradlew -PHULK_QUALIFICATION_VERSION_CODE=<n> -PHULK_QUALIFICATION_VERSION_NAME=<name> :app:assembleBenchmark`.
-
-An uncommitted local candidate is a valid refresh input when its base HEAD, dirty state, diff/source hashes and artifact provenance are recorded under the execution/evidence contracts. A commit/PR is not a prerequisite for local installation; never claim a dirty build is a clean-HEAD build.
-
-The Preview build currently fails closed when either override property is missing; the Benchmark variant has no equivalent build-level guard yet, so its built APK version must always be verified explicitly before installation. Using the overrides keeps each installed versionCode/versionName aligned with the live Operations latest and avoids a stale Optional Update overlay.
-
-For each package: verify package identity, qualification version, release-like properties and signer continuity before installation; install only with `adb install -r`; launch once and verify no immediate crash and no stale Optional Update overlay. Never uninstall, never `pm clear`, never wipe owner login/data, never downgrade, never change the signer, and never install a stale source-baseline version. If a build or required validation fails, do not replace the last known-good installed copy. Any test that needs clean state must use a separate isolated disposable package/surface. Audit/Review/Diagnosis rounds do not automatically rebuild or reinstall these packages.
-
-This section grants no merge, signing, tag or release authority; sections 1 and 12 still govern those actions.
+All substantive executor handoffs follow `DEEPSEEK-EVIDENCE-CONTRACT.md`: one complete
+self-contained reviewer ZIP, including original required reports/evidence, validated for content
+completeness as well as CRC/hash/exact manifest coverage and bounded hulkapp access. Report the
+full ZIP SHA-256 in the response with filename/absolute path/bytes; no sidecar or second ZIP.
 
 ## Final principle
 

@@ -1,6 +1,6 @@
 # HULK SA Android — Permanent Task Execution Contract
 
-Revised 2026-10-06 · local iteration and accepted-section publication.
+Revised 2026-11-09 · local iteration, signed official-app refresh and one-ZIP evidence delivery.
 
 This is the model-neutral execution contract for substantive authorized Implementation/Correction
 work. It owns execution phases and completion boundaries; it grants no authority. Read root
@@ -110,7 +110,10 @@ every reversible visual detail or run the entire suite after each unchanged smal
 
 A local Android round must still establish that its actual source can build safely and that relevant
 changed behavior is verified before installing. Use the applicable focused test/compile/static checks
-for the task, then required Preview/Benchmark assembly. Record what ran and what was deferred.
+for the task, then applicable assembly/artifact validation. Physical refresh targets only the
+owner's existing signed official app under the physical contract; no Preview/Benchmark or other
+package installation. An unsigned local build proves compilation, not install eligibility.
+Record what ran and what was deferred.
 
 Reuse valid unchanged evidence; broaden/repeat checks only for new changes, failures or unresolved
 concerns. Full applicable unit/lint/Compatibility/static gates belong at section publication unless
@@ -139,9 +142,13 @@ Never present lab/Preview/Benchmark artifacts as signed production-release quali
 
 ## 10. Physical refresh and bounded runtime
 
-Follow `AGENTS.override.md` and `PHYSICAL-ENGINEERING-INSTANCES.md` for package identity, current
-qualification overrides, approved surfaces, dual refresh and state preservation. Local candidates
-are valid refresh inputs when frozen/proven; a commit or PR is not a prerequisite.
+Follow `AGENTS.override.md` and `PHYSICAL-ENGINEERING-INSTANCES.md`: refresh only the owner's
+existing signed official `sa.hulksa.player`, same package/same signer, with `adb install -r` and
+preserved data. No Preview/Benchmark/debug/test or other package installation on owner devices.
+Verify live version, signer, artifact and device identity; do not reuse fixed historical overrides.
+Frozen/proven local candidates are valid inputs, but only a matching authorized signed release
+artifact is installable. A commit/PR is not itself a prerequisite; signing/CI/publication authority
+is not implied by a local round or missing artifact. Retain the installed copy when refresh is blocked.
 
 Do not install after required validation/build failure or replace the last known-good copy.
 Verify package/version/signer and record hashes before state-preserving install; launch and verify
@@ -172,9 +179,11 @@ Changing network/display/font settings or unlocking devices requires applicable 
 
 ## 12. Evidence after every local round
 
-Follow `DEEPSEEK-EVIDENCE-CONTRACT.md` for canonical originals, minimum records, candidate/APK/state
-binding, complete downloadable ZIP, external SHA-256, archive/manifest verification, bounded hulkapp
-read/traverse access and final filename/path/size/hash handoff.
+Follow `DEEPSEEK-EVIDENCE-CONTRACT.md`: one complete self-contained reviewer ZIP from the first
+handoff, including required source/input/diff, original check reports/logs and essential referenced
+evidence. Validate completeness as well as CRC/hash/manifest coverage and actual bounded hulkapp
+read/traverse. Report filename/path/bytes/full ZIP SHA-256 in the response; no sidecar or second ZIP.
+Missing essential evidence blocks complete-delivery/PASS claims, not independent authorized work.
 
 Retain focused round records and append owner decisions; do not overwrite earlier results.
 Missing/inaccessible evidence remains explicit. No actor may claim another actor's unexecuted work.

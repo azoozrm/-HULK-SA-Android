@@ -1,5 +1,13 @@
 # HULK SA Android — Release-like Performance Measurement (Gate 2)
 
+**Historical infrastructure reference — owner-device refresh superseded 2026-11-09.**
+The commands, fixed qualification values and persistent Benchmark/dual-refresh descriptions below
+record the earlier Gate setup; they are not current owner-device installation instructions.
+Routine physical work uses only the existing signed official `sa.hulksa.player` under
+`PHYSICAL-ENGINEERING-INSTANCES.md`. Do not install/refresh Benchmark, Preview, debug or test
+packages on owner devices from this document. A separate future measurement task requires its own
+explicit owner-approved surface/package authority; retained infrastructure grants none.
+
 This document owns the Release-like performance measurement infrastructure required to
 measure HULK SA with production-like characteristics on physical devices. It does not
 change application source, behavior, the shipping Release identity, endpoints, ABI or

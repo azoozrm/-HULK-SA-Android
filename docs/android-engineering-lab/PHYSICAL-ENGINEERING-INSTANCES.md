@@ -1,183 +1,111 @@
-# HULK SA Android — Persistent Physical Engineering Instances
+# HULK SA Android — Persistent Physical Application Contract
 
-This file is a repository contract for owner-approved physical development/testing instances.
-It applies to Android implementation rounds that refresh physical engineering copies and to any
-runtime/diagnostic task that could alter their installed state.
+Revised by owner decision 2026-11-09, Asia/Riyadh.
+This governs owner-device application identity, authorized in-place updates and data preservation.
+It supersedes the former Preview/Benchmark persistent-instance and dual-refresh requirements.
+It grants no Git, signing, version, release, capture or deployment authority.
 
-It remains in force until the owner explicitly changes it.
+## 1. One official signed application
 
-## 1. Authoritative persistent instances
+The routine physical update/runtime target is the owner's existing final signed official app:
 
-Two installed packages are persistent owner engineering state and must be preserved across rounds:
+- Application ID: `sa.hulksa.player`.
+- Build: release application, non-debuggable, with the installed owner's signing identity.
+- Update: same package/same signer, in place, using `adb install -r` only.
+- State: login/session, profiles, favorites, Continue Watching/history, preferences, downloads
+  and all other existing persisted data must survive.
 
-### A. Benchmark engineering instance
+Do not install or refresh Preview, Benchmark, debug/dev, companion test/instrumentation or any
+other package on owner devices as part of routine implementation/qualification. Another variant
+or application ID is not a substitute for the official signed app. Do not install a second copy
+to avoid signing, version, data or validation constraints. Leave existing secondary packages
+untouched; this policy does not authorize uninstalling/clearing them.
 
-- Package: `sa.hulksa.player.benchmark`
-- Role: primary semi-release physical development/testing instance.
-- Build family: release-derived benchmark variant, non-debuggable, R8/resource-shrunk, profileable.
-- Current owner-approved qualification identity: versionCode `67`, qualification versionName base
-  `0.9.3.23` (the Gradle benchmark suffix remains part of the installed variant name where applicable).
-- State: persistent. Owner authentication/session/data may already exist and must survive future rounds.
+Do not require a Benchmark/profileable variant for ordinary runtime checks. Measure only what
+the authorized signed app and approved methods support, recording limits. Historical variant
+infrastructure/examples do not authorize installation on owner devices.
 
-This is the default physical instance for authenticated engineering/runtime journeys unless a task
-explicitly requires a separate isolated clean fixture.
+## 2. Approved persistent surfaces
 
-`sa.hulksa.player.dev` is NOT the default persistent physical engineering instance.
+- TV: Xiaomi Mi Box 4 / `MIBOX4`.
+- Phone: Samsung Galaxy A06 / `SM-A065F` / device `a06`.
 
-### B. Preview engineering instance
+Use only surfaces required and authorized by the active task, not every device on every round.
+Verify device identity and the official installed package live. OS, transport address/port,
+package version, signer and APK hashes are changing facts, not fixed historical values.
+Do not copy old qualification versions into a new install decision.
 
-- Package: `sa.hulksa.player.preview`
-- Role: owner's persistent daily Preview copy of the latest successful in-progress implementation.
-- Build family: release-derived Preview variant, non-debuggable, R8/resource-shrunk.
-- Current owner-approved qualification identity: versionCode `67`, qualification versionName base
-  `0.9.3.23`.
-- State: persistent. Existing owner login/session/data must be preserved.
+If a required surface is unreachable or the expected official package is absent, report that
+refresh/verification BLOCKED or NOT RUN with its reason. Do not substitute a device, install
+a new package, reset authentication/pairing or manufacture clean state for convenience.
 
-### C. Persistent approved physical surfaces
+## 3. Authorized update procedure
 
-The package contract above applies independently on every owner-approved persistent physical
-qualification surface.
+Perform this only within current device-refresh authority, with an appropriate signed artifact
+from the existing owner-authorized signing/artifact route:
 
-#### TV surface — Xiaomi Mi Box 4
+1. Record the installed official package/version/signing certificate digest, APK identity where
+   available, data directory/first-install time and bounded non-secret existing-state evidence.
+   Do not extract credentials.
+2. Freeze exact source: base/local HEAD, clean/dirty candidate, reviewed diff, complete source/
+   material-input manifest, build options and artifact provenance. A proven frozen local
+   candidate is valid; a commit/PR is not itself an install prerequisite.
+3. Complete required checks. Select a verified signed release APK tied to that candidate; retain
+   actual run/checkout/source provenance when CI supplied it. An unsigned release, debug signer
+   or unrelated old APK cannot substitute.
+4. Verify application ID `sa.hulksa.player`, non-debuggable release properties, compatible ABI,
+   actual version, APK SHA-256 and exact signer continuity with the installed app. The authorized
+   version must permit a normal non-downgrade update and respect the product/runtime version
+   contract. No silent version changes or stale-update-overlay workarounds.
+5. Use `adb install -r` only; retain the command/result. No uninstall, clear, downgrade/test-only
+   acceptance flags or package/signer change to force success.
+6. Verify installed APK bytes equal the selected signed artifact; recheck package/version/signer,
+   preserved data directory/first-install time where available and expected update time. Launch
+   once, check immediate crash/stale-update behavior and verify existing owner state survives.
+7. Perform bounded task-specific runtime checks with source/APK/device/time binding. Owner visual/
+   behavior acceptance remains PENDING until an actual decision for that exact candidate.
 
-- Model identity: Xiaomi `MIBOX4`.
-- Role: primary persistent TV runtime/qualification surface.
-- Persistent package state: the installed `sa.hulksa.player.benchmark` authenticated owner state is
-  engineering state and must be preserved across rounds.
-- Do not substitute another package or manufacture clean state on this surface for convenience.
+On build/validation/identity/signature/version failure, retain the last known-good installed copy.
+If no suitable signed artifact or authorized signing route is available, report required physical
+refresh BLOCKED and continue independent authorized source/check/evidence work. Do not initiate
+CI/signing/commit/push/PR/release to bypass a LOCAL_ROUND/source-only boundary. Existing session
+authority persists; do not ask again for already-authorized steps.
 
-#### Mobile surface — Samsung Galaxy A06
+## 4. Data, credentials and device settings
 
-- Model: Samsung Galaxy A06 / `SM-A065F` / device `a06`.
-- Role: persistent mobile/compact-phone qualification surface for future mobile runtime,
-  navigation, IME, inset, touch and legibility qualification when the active task requires it.
-- Persistent package: `sa.hulksa.player.benchmark`.
-- Current installed qualification identity: versionCode `67`, versionName
-  `0.9.3.23.benchmark`.
-- State: owner-authenticated persistent engineering state established during Gate 4E1 and must be
-  preserved for future mobile testing.
-- The ADB/Tailscale transport address and port are dynamic runtime state and are deliberately not
-  part of this repository contract.
-- Future mobile qualification should reuse this Benchmark instance when appropriate rather than
-  replacing it with `sa.hulksa.player.dev` or another disposable package.
-- If a later implementation needs to refresh this Galaxy Benchmark for mobile validation, first
-  verify exact package/version/signer continuity and use only same-package/same-signer
-  state-preserving `adb install -r`. Never uninstall, clear, downgrade or reset authentication.
-- If the Galaxy is temporarily unreachable, report that physical refresh/qualification as NOT RUN
-  or BLOCKED as appropriate; do not silently substitute a different phone and do not destroy the
-  persistent state to recover reachability.
+Never uninstall, `pm clear`, wipe storage/SharedPreferences/databases/downloads, reset login/profile
+state, downgrade, change signer or extract/print/persist credentials. Do not run instrumentation/
+orchestrator that can clear target data or install a test companion under routine owner-device
+authority. Clean-state testing requires separate owner authority on a separate approved surface;
+it never makes the owner's official application disposable.
 
-## 2. Mandatory dual refresh after implementation
+Device network/display/font changes or unlocking need applicable authority. Captures, recordings,
+frame extraction and image comparisons remain OFF without current-task authorization. Missing
+unauthorized captures do not block routine technical work; report automated visual validation as
+`NOT RUN — CAPTURE NOT AUTHORIZED`.
 
-At the end of every Android IMPLEMENTATION round that reaches a valid, testable state, and unless
-the task explicitly forbids physical-device refresh, refresh BOTH persistent packages from the exact
-same frozen task-worktree candidate. An uncommitted LOCAL_ROUND candidate is valid when its
-base HEAD, dirty state, complete relevant source/diff hashes and APK provenance are recorded under
-TASK-EXECUTION-CONTRACT and DEEPSEEK-EVIDENCE-CONTRACT. Do not force a commit/push/PR before
-local refresh or describe a dirty build as clean-HEAD. The package/version/signer/state rules below
-remain unchanged:
+## 5. Source-only, review and documentation rounds
 
-1. Build Preview:
+Audit/Review/Diagnosis/documentation do not automatically build/sign/install/launch the app.
+A source-only task remains source-only. Record unperformed runtime checks honestly and preserve
+valid local changes/evidence. This contract changes the permitted physical target, not the task
+phase or owner-controlled signing/publication/merge/release boundary.
 
-   `./gradlew -PHULK_QUALIFICATION_VERSION_CODE=67 -PHULK_QUALIFICATION_VERSION_NAME=0.9.3.23 :app:assemblePreview`
+## 6. Packet and evidence requirements
 
-2. Build Benchmark:
+Tasks that may refresh devices must explicitly direct the executor to read this contract and
+specify the official signed app, approved surfaces, in-place update/data preservation and current
+action authority. Do not carry forward Preview/Benchmark refresh commands or fixed old versions.
 
-   `./gradlew -PHULK_QUALIFICATION_VERSION_CODE=67 -PHULK_QUALIFICATION_VERSION_NAME=0.9.3.23 :app:assembleBenchmark`
+When refresh actually runs, include sanitized before/after package/state records, source/candidate/
+input identity, signed artifact provenance/hash/inspection, signer continuity, actual install result,
+installed-byte comparison and launch/runtime/preserved-state observations in the single complete
+reviewer ZIP required by DEEPSEEK-EVIDENCE-CONTRACT. Report unreachable/not-run scope separately.
+JVM/build/source/artifact identity is not hardware or visual PASS.
 
-3. Verify each APK before installation:
-   - exact expected package;
-   - exact qualification versionCode/versionName contract;
-   - non-debuggable where required by the variant;
-   - R8/resource shrinking where required;
-   - signer continuity with the already-installed package;
-   - APK SHA-256 recorded in task evidence when physical refresh is part of completion evidence.
+## 7. Precedence
 
-4. Install each package only with `adb install -r`.
-
-5. Never uninstall, `pm clear`, wipe app data, downgrade, change signer, or replace a persistent
-   package with a different application ID merely to make a test pass.
-
-6. Launch each refreshed package once and verify:
-   - package starts without immediate crash;
-   - no stale Optional Update overlay appears because of an old qualification version;
-   - existing authenticated/session state remains present where previously established.
-
-7. If either new build or required validation fails, do not destroy or force-replace the last
-   known-good installed copy. Stop that refresh path and report the exact failure.
-
-The two refreshes are one standing completion obligation, not two independent product changes.
-The persistent-surface section does not make every device mandatory for every task: use the physical
-surface named by the active task, preserve all other persistent surfaces, and explicitly report any
-required-but-unreachable surface rather than silently substituting or clearing it.
-
-## 3. Data preservation is mandatory
-
-The persistent Benchmark and Preview packages are not disposable fixtures.
-
-For both packages, NEVER:
-
-- uninstall;
-- run `pm clear`;
-- clear storage, SharedPreferences, databases or account/session state;
-- run instrumentation/orchestrator configuration that clears the target package data;
-- reset authentication to manufacture a clean test state;
-- expose, extract, print or persist credentials from stored state.
-
-A task that needs clean state must use an explicitly isolated disposable package/surface that is not
-one of these persistent packages.
-
-Before any instrumentation against either persistent package, prove that the exact invocation will
-not clear target data. If that cannot be proven, do not run that instrumentation path.
-
-## 4. Diagnosis / audit rounds
-
-Audit, Review and Diagnosis rounds do not automatically rebuild or reinstall either package.
-
-They may use an existing persistent package for read-only physical evidence only when the active
-packet authorizes physical interaction and the evidence method preserves installed data.
-
-Do not refresh packages merely because a diagnosis ran.
-
-## 5. Version changes
-
-The current fixed qualification identity is:
-
-- versionCode `67`
-- qualification versionName base `0.9.3.23`
-
-Do not silently fall back to the Gradle source baseline version.
-Do not change this physical qualification identity unless the owner explicitly authorizes a new one.
-When the owner authorizes a new qualification identity, update this contract in the same governance
-round so future chats/tasks inherit the new value.
-
-## 6. Prompt / executor contract
-
-Every future DeepSeek/OpenCode Android IMPLEMENTATION task packet that can reach physical refresh
-must explicitly carry this contract or direct the executor to read it before device actions.
-
-The executor must report, when refresh is performed:
-
-- exact source candidate/base HEAD and clean/dirty state, source/diff hashes and PR HEAD when present;
-- Preview APK package/version/hash and install result;
-- Benchmark APK package/version/hash and install result;
-- signer-continuity verification;
-- confirmation that `adb install -r` was used;
-- confirmation that no uninstall / `pm clear` / data wipe occurred;
-- launch-smoke result for both packages;
-- whether prior authenticated/session state remained available.
-
-When a task names the persistent Galaxy mobile surface, also report whether the existing
-`sa.hulksa.player.benchmark` state was reused/preserved and whether the exact original mobile
-settings modified for the task (if any) were restored.
-
-No raw credential values belong in prompts, logs, reports, fixtures or PR text.
-
-## 7. Conflict rule
-
-For physical engineering-instance ownership and refresh behavior, this contract is the specific
-Android Engineering Lab authority and supersedes older Preview-only wording or historical chat
-instructions that conflict with the dual-refresh requirement or persistent-surface ownership.
-
-Repository Git/write protections, protected product contracts, signing/release authority and all
-other root `AGENTS.md` rules remain unchanged.
+This owner decision controls routine physical target/refresh over historical Preview/Benchmark,
+dual-refresh, qualification-override and disposable-fixture instructions in older docs/prompts/aids.
+Preserve historical evidence; do not rewrite old results. Root governance and all unrelated protected
+fields, authority and STOP rules remain in force.
