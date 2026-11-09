@@ -239,6 +239,96 @@ internal fun homeFocusOwnershipLost(
     currentRailFocusRevision: Long,
 ): Boolean = current != expected || currentRailFocusRevision != railFocusBaseline
 
+/**
+ * One Home entry/return focus intent plus the real focus-region events that can cancel it.
+ *
+ * Only a fresh Home composition with a remembered non-blank row arms the entry intent. Catalog
+ * or model publication, metadata arrival, loading changes and hero rotation are not entry events
+ * and therefore never re-arm it. A successful handoff consumes it. A real header/rail focus
+ * cancels it. A real content focus retires it once actual focus has landed on a concrete control,
+ * even when that control shares the remembered hero/item position (for example Favorite versus a
+ * pending primary action). While the user is on chrome, row restoration is also blocked even if
+ * the entry intent was already consumed, so a later model publication cannot pull focus back into
+ * the page.
+ */
+internal class HomeFocusRestoreOwner(remembered: NavigationPosition) {
+    private val expected = remembered
+    private var entryIntent = remembered.rowKey.isNotBlank()
+    private var chromeFocused = false
+    private var contentFocusOutsideNavigation = false
+
+    fun onHeaderFocused() {
+        chromeFocused = true
+        entryIntent = false
+    }
+
+    fun onRailFocused() {
+        chromeFocused = true
+        entryIntent = false
+    }
+
+    fun onContentFocused(position: NavigationPosition?) {
+        chromeFocused = false
+        contentFocusOutsideNavigation = position == null
+        // Actual focus has landed on a concrete content control. Retire the pending entry intent
+        // even when the position equals the remembered target: primary and Favorite share the
+        // same hero position, so position equality alone cannot distinguish the sibling control.
+        entryIntent = false
+    }
+
+    /** Entry/return restoration: hero fallback and the first row handoff. */
+    fun canRestoreEntry(
+        current: NavigationPosition,
+        railFocusBaseline: Long,
+        currentRailFocusRevision: Long,
+    ): Boolean = entryIntent &&
+        !chromeFocused &&
+        !contentFocusOutsideNavigation &&
+        !homeFocusOwnershipLost(
+            expected = expected,
+            current = current,
+            railFocusBaseline = railFocusBaseline,
+            currentRailFocusRevision = currentRailFocusRevision,
+        )
+
+    /**
+     * Row-level restoration/reveal. A consumed entry intent does not block ordinary in-page
+     * content updates, but chrome or a non-navigation content control does.
+     */
+    fun canRestoreRow(
+        remembered: NavigationPosition,
+        current: NavigationPosition,
+        railFocusBaseline: Long,
+        currentRailFocusRevision: Long,
+    ): Boolean = remembered.rowKey.isNotBlank() &&
+        !chromeFocused &&
+        !contentFocusOutsideNavigation &&
+        !homeFocusOwnershipLost(
+            expected = remembered,
+            current = current,
+            railFocusBaseline = railFocusBaseline,
+            currentRailFocusRevision = currentRailFocusRevision,
+        )
+
+    fun onRestored() {
+        entryIntent = false
+    }
+}
+
+/**
+ * One Home restoration focus request. Only an actual true result consumes the owner's entry
+ * intent. A non-throwing false or a thrown request is not a successful handoff and must leave the
+ * intent available for a later legitimate attempt.
+ */
+internal fun requestHomeRestoreFocus(
+    requestFocus: () -> Boolean,
+    onRestored: () -> Unit,
+): Boolean {
+    val focused = runCatching { requestFocus() }.getOrDefault(false)
+    if (focused) onRestored()
+    return focused
+}
+
 /** True when a row's first logical card is outside the row's current composed viewport. */
 internal fun homeRowFirstCardNeedsReveal(visibleIndices: Iterable<Int>): Boolean =
     0 !in visibleIndices

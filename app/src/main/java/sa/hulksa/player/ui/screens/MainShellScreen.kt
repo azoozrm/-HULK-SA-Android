@@ -203,6 +203,9 @@ import sa.hulksa.player.data.FavoriteMutationStatus
 import sa.hulksa.player.data.GrowthAction
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.hulkPerfLog
+import sa.hulksa.player.homePlaceholderMode
+import sa.hulksa.player.homePresentationTransitionPending
+import sa.hulksa.player.HomePlaceholderMode
 import sa.hulksa.player.data.HomeHeroTechnicalMetadata
 import sa.hulksa.player.data.OperationsAnnouncement
 import sa.hulksa.player.data.OperationsAnnouncementSeverity
@@ -694,7 +697,7 @@ private val HOME_CONTENT_ROW_ORDER = listOf(
 
 internal fun homeHeroIdentity(item: ContentItem): String = "${item.type}:${item.id}"
 
-private fun HomeContentSnapshot.hasHomeHeroSource(): Boolean =
+internal fun HomeContentSnapshot.hasHomeHeroSource(): Boolean =
     featuredCandidates.isNotEmpty() || movies.isNotEmpty() || series.isNotEmpty()
 
 internal fun resolvePresentedHomeHero(
@@ -1950,7 +1953,24 @@ private fun CinemaHomeScreen(
             .take(28)
             .toList()
     }
-    val loading = ContentType.MOVIE in state.loadingTypes || ContentType.SERIES in state.loadingTypes
+    val homeHeroSourceAvailable =
+        state.catalogs[ContentType.MOVIE]?.items?.isNotEmpty() == true ||
+            state.catalogs[ContentType.SERIES]?.items?.isNotEmpty() == true
+    val presentationTransitionPending = homePresentationTransitionPending(
+        hasUsableHomeHeroSource = homeHeroSourceAvailable,
+        presentedHasHero = homeContent.hasHomeHeroSource(),
+        homeModelSettled = homeModelSettled,
+    )
+    val loading = state.isHomePreparationPending ||
+        presentationTransitionPending ||
+        ContentType.MOVIE in state.loadingTypes ||
+        ContentType.SERIES in state.loadingTypes
+    // One Home entry/return intent for this composition. It is armed only from the remembered
+    // position, never from catalog/model publication or hero rotation.
+    val remembered = navigationMemory.position(MainDestination.HOME)
+    val homeRestoreOwner = remember(navigationMemory) {
+        HomeFocusRestoreOwner(remembered)
+    }
     // R02: ONE compact five-action group in the original Home header slot for both the hero and
     // the placeholder/loading/empty/error paths; the existing callbacks and owners are reused.
     val requestProfileSwitch = LocalProfileSwitchRequester.current
@@ -1964,6 +1984,7 @@ private fun CinemaHomeScreen(
             onSwitchProfile = requestProfileSwitch,
             onOpenNotifications = onOpenNotifications,
             onRefresh = onRefresh,
+            onActionFocused = homeRestoreOwner::onHeaderFocused,
         )
     }
     // Truthful Home error classification reuses the accepted Movies connectivity owner: only a
@@ -1986,7 +2007,6 @@ private fun CinemaHomeScreen(
         state.errorRetryable
     }
 
-    val remembered = navigationMemory.position(MainDestination.HOME)
     // One Home message zone owns the non-blocking renewal, announcement and optional-update
     // presentation. GrowthPolicy, the eligible Operations announcement and the current OPTIONAL
     // update decision remain the only policy owners; the zone only renders their real output.
@@ -2075,6 +2095,7 @@ private fun CinemaHomeScreen(
     // Shared by both hero-absent retry surfaces so a refresh start cannot drop focus to the rail.
     val homeRefreshFocusState = remember { HomeRefreshFocusState() }
     val requestHomeRefresh = {
+        homeRestoreOwner.onHeaderFocused()
         if (featured == null) homeRefreshFocusState.requested = true
         onRefresh()
     }
@@ -2086,23 +2107,30 @@ private fun CinemaHomeScreen(
     // One Home restoration owner for the remembered row. It waits for the exact model when Home
     // is still staging, brings the remembered row into the vertical viewport, and uses the hero
     // only as the deterministic fallback when the entire row has disappeared. Card-level effects
-    // own the stable item key inside a surviving row.
+    // own the stable item key inside a surviving row. The entry intent is consumed by the actual
+    // focus handoff, so later model publication cannot re-run it.
     var homeReturnRestoreHandled by remember(navigationMemory) { mutableStateOf(false) }
     val currentRailFocusRevision by rememberUpdatedState(railFocusRevision)
     val homeReturnRailBaseline = remember(navigationMemory) { railFocusRevision }
+    LaunchedEffect(railFocusRevision) {
+        if (railFocusRevision != homeReturnRailBaseline) {
+            homeRestoreOwner.onRailFocused()
+        }
+    }
     LaunchedEffect(homeModelIsCurrent, homeModelSettled, remembered.rowKey, remembered.itemKey, homeContent) {
         if (homeReturnRestoreHandled) return@LaunchedEffect
         if (remembered.rowKey.isBlank()) {
             // First entry: leave the normal shell entry focus untouched, and never let a later
             // in-place row change (for example Continue Watching removal) re-arm restoration.
             homeReturnRestoreHandled = true
+            homeRestoreOwner.onRestored()
             return@LaunchedEffect
         }
         if (!homeModelIsCurrent || !homeModelSettled) return@LaunchedEffect
 
-        fun userMovedFocus(): Boolean =
-            homeFocusOwnershipLost(
-                expected = remembered,
+        fun restoreNoLongerOwned(): Boolean =
+            !homeRestoreOwner.canRestoreRow(
+                remembered = remembered,
                 current = navigationMemory.position(MainDestination.HOME),
                 railFocusBaseline = homeReturnRailBaseline,
                 currentRailFocusRevision = currentRailFocusRevision,
@@ -2110,8 +2138,9 @@ private fun CinemaHomeScreen(
 
         val row = rowIndexByKey[remembered.rowKey]
         if (row != null && row >= 0) {
-            if (userMovedFocus()) {
+            if (restoreNoLongerOwned()) {
                 homeReturnRestoreHandled = true
+                homeRestoreOwner.onRestored()
                 return@LaunchedEffect
             }
             if (listState.layoutInfo.visibleItemsInfo.none { it.key == remembered.rowKey }) {
@@ -2120,21 +2149,41 @@ private fun CinemaHomeScreen(
             snapshotFlow {
                 listState.layoutInfo.visibleItemsInfo.any { it.key == remembered.rowKey }
             }.first { it }
-            if (userMovedFocus()) {
+            if (restoreNoLongerOwned()) {
                 homeReturnRestoreHandled = true
+                homeRestoreOwner.onRestored()
                 return@LaunchedEffect
             }
             homeReturnRestoreHandled = true
+            // This row has no card-level restoration owner of its own.
+            if (remembered.rowKey == "downloads") {
+                homeRestoreOwner.onRestored()
+            }
         } else {
             // A vanished row falls back to the hero. Reveal and place the hero first; requesting
             // focus on an offscreen/unattached fallback is not a valid restoration.
+            fun restoreEntryNoLongerOwned(): Boolean =
+                !homeRestoreOwner.canRestoreEntry(
+                    current = navigationMemory.position(MainDestination.HOME),
+                    railFocusBaseline = homeReturnRailBaseline,
+                    currentRailFocusRevision = currentRailFocusRevision,
+                )
+            if (restoreEntryNoLongerOwned()) {
+                homeReturnRestoreHandled = true
+                homeRestoreOwner.onRestored()
+                return@LaunchedEffect
+            }
             val focused = revealAndFocusHomeHero(
                 listState = listState,
-                isFocusOwnershipLost = ::userMovedFocus,
+                isFocusOwnershipLost = ::restoreEntryNoLongerOwned,
                 requestFocus = { runCatching { homeHeroFocusRequester.requestFocus() }.getOrDefault(false) },
             )
-            if (focused || userMovedFocus()) {
+            if (focused) {
                 homeReturnRestoreHandled = true
+                homeRestoreOwner.onRestored()
+            } else if (restoreEntryNoLongerOwned()) {
+                homeReturnRestoreHandled = true
+                homeRestoreOwner.onRestored()
             }
         }
     }
@@ -2150,18 +2199,25 @@ private fun CinemaHomeScreen(
                 if (featured != null) {
                     LaunchedEffect(homeModelIsCurrent, remembered.rowKey) {
                         if (!homeModelIsCurrent || remembered.rowKey != "hero") return@LaunchedEffect
-                        withFrameNanos { }
-                        if (
-                            homeFocusOwnershipLost(
-                                expected = remembered,
+                        fun restoreNoLongerOwned(): Boolean =
+                            !homeRestoreOwner.canRestoreEntry(
                                 current = navigationMemory.position(MainDestination.HOME),
                                 railFocusBaseline = homeReturnRailBaseline,
                                 currentRailFocusRevision = currentRailFocusRevision,
                             )
-                        ) {
+                        if (restoreNoLongerOwned()) {
+                            homeRestoreOwner.onRestored()
                             return@LaunchedEffect
                         }
-                        runCatching { homeHeroFocusRequester.requestFocus() }
+                        withFrameNanos { }
+                        if (restoreNoLongerOwned()) {
+                            homeRestoreOwner.onRestored()
+                            return@LaunchedEffect
+                        }
+                        requestHomeRestoreFocus(
+                            requestFocus = { homeHeroFocusRequester.requestFocus() },
+                            onRestored = homeRestoreOwner::onRestored,
+                        )
                     }
                     CinemaHero(
                         featured, isTv, favorites.contains(featured), { onOpen(featured) },
@@ -2170,7 +2226,19 @@ private fun CinemaHomeScreen(
                         onOpenNotifications = onOpenNotifications,
                         topActions = homeTopActions,
                         watchModifier = Modifier.focusRequester(homeHeroFocusRequester),
-                        onFocused = { navigationMemory.save(MainDestination.HOME, "${featured.type}:${featured.id}", 0, "hero", 0) },
+                        onHeaderFocused = homeRestoreOwner::onHeaderFocused,
+                        onFocused = {
+                            navigationMemory.save(
+                                MainDestination.HOME,
+                                "${featured.type}:${featured.id}",
+                                0,
+                                "hero",
+                                0,
+                            )
+                            homeRestoreOwner.onContentFocused(
+                                navigationMemory.position(MainDestination.HOME),
+                            )
+                        },
                     )
                 } else {
                     HomePlaceholder(
@@ -2179,6 +2247,7 @@ private fun CinemaHomeScreen(
                         isTv = isTv,
                         unreadNotificationCount = state.unreadNotificationCount,
                         onOpenNotifications = onOpenNotifications,
+                        onHeaderFocused = homeRestoreOwner::onHeaderFocused,
                         errorTitle = homeErrorCopy?.title,
                         errorBody = homeErrorCopy?.body,
                         networkFailure = !homeNetworkUsable,
@@ -2211,6 +2280,7 @@ private fun CinemaHomeScreen(
                         homeModelIsCurrent = homeModelIsCurrent,
                         railFocusRevision = railFocusRevision,
                         homeReturnRailBaseline = homeReturnRailBaseline,
+                        homeRestoreOwner = homeRestoreOwner,
                         onRenewal = { onGrowthAction(GrowthDestination.RENEWAL) },
                         onOpenAnnouncementDetail = onOpenAnnouncementDetail,
                         onOpenUpdateDetail = onOpenUpdateDetail,
@@ -2250,36 +2320,37 @@ private fun CinemaHomeScreen(
                         homeModelIsCurrent = homeModelIsCurrent,
                         railFocusRevision = railFocusRevision,
                         homeReturnRailBaseline = homeReturnRailBaseline,
+                        homeRestoreOwner = homeRestoreOwner,
                         removalController = removalController,
                         onRemoteRemovalStarted = { homeRemovalInputGuard?.begin() },
                     )
                 }
             }
         }
-        if (activeDownloads.isNotEmpty()) item(key = "downloads") { HomeSectionPadding(isTv) { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads, rowFocusRequester("downloads"), rowFocusTarget("downloads")) } }
+        if (activeDownloads.isNotEmpty()) item(key = "downloads") { HomeSectionPadding(isTv) { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads, rowFocusRequester("downloads"), rowFocusTarget("downloads"), onContentFocused = { homeRestoreOwner.onContentFocused(null) }) } }
         if (becauseYouWatched.isNotEmpty()) {
-            item(key = "because-watched") { HomeSectionPadding(isTv) { HomeBoxedSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, rowFocusRequester("because-watched"), rowFocusTarget("because-watched")) } }
+            item(key = "because-watched") { HomeSectionPadding(isTv) { HomeBoxedSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("because-watched"), rowFocusTarget("because-watched")) } }
         }
         if (suggested.isNotEmpty()) {
-            item(key = "recommended") { HomeSectionPadding(isTv) { HomeBoxedSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, rowFocusRequester("recommended"), rowFocusTarget("recommended")) } }
+            item(key = "recommended") { HomeSectionPadding(isTv) { HomeBoxedSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("recommended"), rowFocusTarget("recommended")) } }
         }
         if (homeMovies.isNotEmpty()) {
-            item(key = "recent-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, rowFocusRequester("recent-movies"), rowFocusTarget("recent-movies")) } }
+            item(key = "recent-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("recent-movies"), rowFocusTarget("recent-movies")) } }
         }
         if (homeSeries.isNotEmpty()) {
-            item(key = "recent-series") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, rowFocusRequester("recent-series"), rowFocusTarget("recent-series")) } }
+            item(key = "recent-series") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("recent-series"), rowFocusTarget("recent-series")) } }
         }
         if (popularMovies.isNotEmpty()) {
-            item(key = "top-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, rowFocusRequester("top-movies"), rowFocusTarget("top-movies")) } }
+            item(key = "top-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("top-movies"), rowFocusTarget("top-movies")) } }
         }
         if (popularSeries.isNotEmpty()) {
-            item(key = "top-series") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, rowFocusRequester("top-series"), rowFocusTarget("top-series")) } }
+            item(key = "top-series") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("top-series"), rowFocusTarget("top-series")) } }
         }
         if (lastLive != null) {
-            item(key = "last-live") { HomeSectionPadding(isTv) { HomeLastChannelSection("last-live", lastLiveRow, lastLive, isTv, navigationMemory, onOpenHistory, homeModelIsCurrent, railFocusRevision, homeReturnRailBaseline, rowFocusRequester("last-live"), rowFocusTarget("last-live")) } }
+            item(key = "last-live") { HomeSectionPadding(isTv) { HomeLastChannelSection("last-live", lastLiveRow, lastLive, isTv, navigationMemory, onOpenHistory, homeModelIsCurrent, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("last-live"), rowFocusTarget("last-live")) } }
         }
         if (suggestedLive.isNotEmpty()) {
-            item(key = "popular-live") { HomeSectionPadding(isTv) { HomeBoxedSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, rowFocusRequester("popular-live"), rowFocusTarget("popular-live")) } }
+            item(key = "popular-live") { HomeSectionPadding(isTv) { HomeBoxedSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("popular-live"), rowFocusTarget("popular-live")) } }
         }
     }
 }
@@ -2340,6 +2411,7 @@ internal fun HomeMessagesZone(
     homeModelIsCurrent: Boolean,
     railFocusRevision: Long,
     homeReturnRailBaseline: Long,
+    homeRestoreOwner: HomeFocusRestoreOwner = HomeFocusRestoreOwner(remembered),
     onRenewal: () -> Unit,
     onOpenAnnouncementDetail: (OperationsAnnouncement) -> Unit,
     onOpenUpdateDetail: () -> Unit,
@@ -2401,18 +2473,20 @@ internal fun HomeMessagesZone(
     }
     LaunchedEffect(remembered.rowKey, targetItemKey, items.size, homeModelIsCurrent) {
         if (!homeModelIsCurrent || restoreIndex < 0) return@LaunchedEffect
-        withFrameNanos { }
-        if (
-            homeFocusOwnershipLost(
-                expected = remembered,
+        fun restoreNoLongerOwned(): Boolean =
+            !homeRestoreOwner.canRestoreRow(
+                remembered = remembered,
                 current = navigationMemory.position(MainDestination.HOME),
                 railFocusBaseline = homeReturnRailBaseline,
                 currentRailFocusRevision = currentRailFocusRevision,
             )
-        ) {
-            return@LaunchedEffect
-        }
-        runCatching { targetRequester.requestFocus() }
+        if (restoreNoLongerOwned()) return@LaunchedEffect
+        withFrameNanos { }
+        if (restoreNoLongerOwned()) return@LaunchedEffect
+        requestHomeRestoreFocus(
+            requestFocus = { targetRequester.requestFocus() },
+            onRestored = homeRestoreOwner::onRestored,
+        )
     }
     val cardModifier: (Int) -> Modifier = { index ->
         Modifier.restoreFocus(index == restoreIndex, targetRequester)
@@ -2425,6 +2499,9 @@ internal fun HomeMessagesZone(
                 index,
                 "home-messages",
                 rowIndex,
+            )
+            homeRestoreOwner.onContentFocused(
+                navigationMemory.position(MainDestination.HOME),
             )
         }
     }
@@ -2588,6 +2665,7 @@ private fun ActiveDownloadsSection(
     onOpenDownloads: () -> Unit,
     firstItemFocusRequester: FocusRequester? = null,
     rowFocusTarget: HomeRowFocusTarget? = null,
+    onContentFocused: () -> Unit = {},
 ) {
     val colors = LocalHulkColors.current
     val rowState = rememberLazyListState()
@@ -2649,7 +2727,10 @@ private fun ActiveDownloadsSection(
                         )
                         .onFocusChanged {
                             focused = it.isFocused
-                            if (it.isFocused) firstCardFocused = index == 0
+                            if (it.isFocused) {
+                                firstCardFocused = index == 0
+                                onContentFocused()
+                            }
                         }
                         .clickable(role = Role.Button, onClick = onOpenDownloads)
                         .padding(13.dp),
@@ -2838,6 +2919,7 @@ private fun CinemaHero(
     onOpenNotifications: () -> Unit,
     topActions: @Composable () -> Unit,
     watchModifier: Modifier = Modifier,
+    onHeaderFocused: () -> Unit = {},
     onFocused: () -> Unit = {},
 ) {
     val colors = LocalHulkColors.current
@@ -3107,9 +3189,15 @@ private fun CinemaHero(
                         unreadCount = unreadNotificationCount,
                         isTv = isTv,
                         onClick = onOpenNotifications,
+                        onFocused = onHeaderFocused,
                     )
                     Spacer(Modifier.width(8.dp))
-                    RoundAction(Icons.Rounded.Refresh, "تحديث المحتوى", onRefresh)
+                    RoundAction(
+                        Icons.Rounded.Refresh,
+                        "تحديث المحتوى",
+                        onRefresh,
+                        onFocused = onHeaderFocused,
+                    )
                 }
             }
             HeroCopy(
@@ -3793,6 +3881,7 @@ private fun HomeHeroActions(
                     minHeightDp = actionMinHeightDp,
                     minWidthDp = with(density) { favoriteRequiredPx.toDp() },
                     onClick = onToggleFavorite,
+                    onFocused = onFocused,
                     trailingIconTint = colors.gold,
                     modifier = Modifier.fillMaxHeight(),
                 )
@@ -3815,6 +3904,7 @@ private fun HomeHeroActions(
                     minHeightDp = actionMinHeightDp,
                     minWidthDp = 0.dp,
                     onClick = onToggleFavorite,
+                    onFocused = onFocused,
                     trailingIconTint = colors.gold,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -3850,6 +3940,7 @@ private fun HomeHeroFavoriteAction(
     minHeightDp: Int,
     minWidthDp: Dp,
     onClick: () -> Unit,
+    onFocused: () -> Unit,
     trailingIconTint: Color,
     modifier: Modifier = Modifier,
 ) {
@@ -3864,6 +3955,7 @@ private fun HomeHeroFavoriteAction(
         trailingIcon = if (isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
         trailingIconTint = trailingIconTint,
         textMaxLines = 1,
+        onFocused = onFocused,
     )
 }
 
@@ -3969,6 +4061,7 @@ private fun HomePlaceholder(
     isTv: Boolean,
     unreadNotificationCount: Int,
     onOpenNotifications: () -> Unit,
+    onHeaderFocused: () -> Unit = {},
     errorTitle: String? = null,
     errorBody: String? = null,
     networkFailure: Boolean = true,
@@ -4007,6 +4100,7 @@ private fun HomePlaceholder(
                 unreadCount = unreadNotificationCount,
                 isTv = isTv,
                 onClick = onOpenNotifications,
+                onFocused = onHeaderFocused,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .then(if (isTv) Modifier else Modifier.statusBarsPadding())
@@ -4016,22 +4110,27 @@ private fun HomePlaceholder(
                     ),
             )
         }
-        when {
+        when (
+            homePlaceholderMode(
+                hasError = errorTitle != null && errorBody != null,
+                loading = loading,
+            )
+        ) {
             // One honest error/empty presentation without content; the artwork fallback above the
             // hero owns its own safe logo, never a fake movie or endless spinner.
-            errorTitle != null && errorBody != null -> MoviesOfflineEmptyState(
+            HomePlaceholderMode.ERROR -> MoviesOfflineEmptyState(
                 onRetry = onRefresh,
-                title = errorTitle,
-                body = errorBody,
+                title = errorTitle.orEmpty(),
+                body = errorBody.orEmpty(),
                 networkFailure = networkFailure,
                 showRetry = showRetry,
                 retryRequester = refreshFocusRequester.takeIf { showRetry },
                 modifier = Modifier.padding(horizontal = if (isTv) 16.dp else 14.dp),
             )
 
-            loading -> LoadingRing(label = "نجهز احدث الاضافات…")
+            HomePlaceholderMode.LOADING -> LoadingRing(label = "نجهز احدث الاضافات…")
 
-            else -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            HomePlaceholderMode.EMPTY -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("سيظهر احدث المحتوى هنا", color = colors.textMuted)
                 Spacer(Modifier.height(12.dp))
                 FocusButton("تحديث", onRefresh, modifier = refreshModifier, compact = true)
@@ -4060,6 +4159,7 @@ private fun HomeBoxedSection(
     homeModelSettled: Boolean,
     railFocusRevision: Long,
     homeReturnRailBaseline: Long,
+    homeRestoreOwner: HomeFocusRestoreOwner,
     firstItemFocusRequester: FocusRequester? = null,
     rowFocusTarget: HomeRowFocusTarget? = null,
 ) {
@@ -4123,6 +4223,14 @@ private fun HomeBoxedSection(
         homeModelSettled,
     ) {
         if (!homeModelIsCurrent) return@LaunchedEffect
+        fun restoreNoLongerOwned(): Boolean =
+            !homeRestoreOwner.canRestoreRow(
+                remembered = remembered,
+                current = navigationMemory.position(MainDestination.HOME),
+                railFocusBaseline = homeReturnRailBaseline,
+                currentRailFocusRevision = currentRailFocusRevision,
+            )
+        if (restoreNoLongerOwned()) return@LaunchedEffect
         val restoreIndex = resolveHomeRowRestoreIndex(
             remembered = remembered,
             rowKey = rowKey,
@@ -4136,14 +4244,7 @@ private fun HomeBoxedSection(
             listState = rowState,
             targetIndex = restoreIndex,
             targetKey = itemKey,
-            isFocusOwnershipLost = {
-                homeFocusOwnershipLost(
-                expected = remembered,
-                current = navigationMemory.position(MainDestination.HOME),
-                railFocusBaseline = homeReturnRailBaseline,
-                currentRailFocusRevision = currentRailFocusRevision,
-            )
-            },
+            isFocusOwnershipLost = ::restoreNoLongerOwned,
             requestFocus = {
                 val restoreRequester = if (restoreIndex == 0) {
                     firstItemFocusRequester ?: targetRequester
@@ -4156,6 +4257,7 @@ private fun HomeBoxedSection(
         if (focused) {
             restoredTargetKey = itemKey
             navigationMemory.save(MainDestination.HOME, itemKey, restoreIndex, rowKey, rowIndex)
+            homeRestoreOwner.onRestored()
         }
     }
     Column {
@@ -4178,6 +4280,9 @@ private fun HomeBoxedSection(
                 val saveFocus = {
                     firstCardFocused = index == 0
                     navigationMemory.save(MainDestination.HOME, itemKey, index, rowKey, rowIndex)
+                    homeRestoreOwner.onContentFocused(
+                        navigationMemory.position(MainDestination.HOME),
+                    )
                 }
                 when (item.type) {
                     ContentType.MOVIE -> MoviesCatalogBoxedCard(
@@ -4235,6 +4340,7 @@ private fun HomeContinueWatchingSection(
     homeModelIsCurrent: Boolean,
     railFocusRevision: Long,
     homeReturnRailBaseline: Long,
+    homeRestoreOwner: HomeFocusRestoreOwner,
     removalController: HomeHistoryRemovalController,
     onRemoteRemovalStarted: () -> Unit,
 ) {
@@ -4275,6 +4381,14 @@ private fun HomeContinueWatchingSection(
         if (removalController.pendingKey != null || removalController.succeeded) {
             return@LaunchedEffect
         }
+        fun restoreNoLongerOwned(): Boolean =
+            !homeRestoreOwner.canRestoreRow(
+                remembered = remembered,
+                current = navigationMemory.position(MainDestination.HOME),
+                railFocusBaseline = homeReturnRailBaseline,
+                currentRailFocusRevision = currentRailFocusRevision,
+            )
+        if (restoreNoLongerOwned()) return@LaunchedEffect
         val restoreIndex = resolveHomeRowRestoreIndex(
             remembered = remembered,
             rowKey = rowKey,
@@ -4287,14 +4401,7 @@ private fun HomeContinueWatchingSection(
             listState = rowState,
             targetIndex = restoreIndex,
             targetKey = entry.key,
-            isFocusOwnershipLost = {
-                homeFocusOwnershipLost(
-                expected = remembered,
-                current = navigationMemory.position(MainDestination.HOME),
-                railFocusBaseline = homeReturnRailBaseline,
-                currentRailFocusRevision = currentRailFocusRevision,
-            )
-            },
+            isFocusOwnershipLost = ::restoreNoLongerOwned,
             requestFocus = {
                 runCatching {
                     focusRequesters[entry.key]?.requestFocus() ?: false
@@ -4304,6 +4411,7 @@ private fun HomeContinueWatchingSection(
         if (focused) {
             restoredTargetKey = entry.key
             navigationMemory.save(MainDestination.HOME, entry.key, restoreIndex, rowKey, rowIndex)
+            homeRestoreOwner.onRestored()
         }
     }
     LaunchedEffect(removalController.succeeded, removalController.pendingKey, entries) {
@@ -4360,6 +4468,9 @@ private fun HomeContinueWatchingSection(
                     reserveIdentitySlot = true,
                     onFocused = {
                         navigationMemory.save(MainDestination.HOME, entry.key, index, rowKey, rowIndex)
+                        homeRestoreOwner.onContentFocused(
+                            navigationMemory.position(MainDestination.HOME),
+                        )
                     },
                     onRemoveRequested = { _, remote ->
                         if (removalController.pendingKey == null) {
@@ -4389,6 +4500,7 @@ private fun HomeLastChannelSection(
     homeModelIsCurrent: Boolean,
     railFocusRevision: Long,
     homeReturnRailBaseline: Long,
+    homeRestoreOwner: HomeFocusRestoreOwner,
     firstItemFocusRequester: FocusRequester? = null,
     rowFocusTarget: HomeRowFocusTarget? = null,
 ) {
@@ -4419,16 +4531,20 @@ private fun HomeLastChannelSection(
     }
     LaunchedEffect(remembered.rowKey, remembered.itemKey, entry.key, homeModelIsCurrent) {
         if (!homeModelIsCurrent || remembered.rowKey != rowKey) return@LaunchedEffect
+        fun restoreNoLongerOwned(): Boolean =
+            !homeRestoreOwner.canRestoreRow(
+                remembered = remembered,
+                current = navigationMemory.position(MainDestination.HOME),
+                railFocusBaseline = homeReturnRailBaseline,
+                currentRailFocusRevision = currentRailFocusRevision,
+            )
+        if (restoreNoLongerOwned()) return@LaunchedEffect
         withFrameNanos { }
-        if (
-            navigationMemory.position(MainDestination.HOME) != remembered ||
-            railFocusRevision != homeReturnRailBaseline
-        ) {
-            return@LaunchedEffect
-        }
+        if (restoreNoLongerOwned()) return@LaunchedEffect
         if (runCatching { rowRequester.requestFocus() }.getOrDefault(false)) {
             firstCardFocused = true
             navigationMemory.save(MainDestination.HOME, entry.key, 0, rowKey, rowIndex)
+            homeRestoreOwner.onRestored()
         }
     }
     Column {
@@ -4446,6 +4562,9 @@ private fun HomeLastChannelSection(
                 onFocused = {
                     firstCardFocused = true
                     navigationMemory.save(MainDestination.HOME, entry.key, 0, rowKey, rowIndex)
+                    homeRestoreOwner.onContentFocused(
+                        navigationMemory.position(MainDestination.HOME),
+                    )
                 },
             )
         }

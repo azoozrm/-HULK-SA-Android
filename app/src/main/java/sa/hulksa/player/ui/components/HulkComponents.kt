@@ -99,6 +99,7 @@ import androidx.lifecycle.ViewModelStoreOwner
 import coil3.compose.AsyncImage
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.R
+import sa.hulksa.player.data.AuthenticatedSessionOwner
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.data.SeriesCardMetadataStore
 import sa.hulksa.player.data.decodeHomeHeroMetadataToken
@@ -112,7 +113,51 @@ import java.util.Locale
 private data class VerifiedMovieCardMetadata(
     val quality: String? = null,
     val durationMs: Long? = null,
+    val artworkUrl: String? = null,
 )
+
+/**
+ * Ordered real artwork candidates for one boxed card. The catalog poster stays preferred while it
+ * is usable; the current-owner provider presentation artwork is only a fallback. Duplicate URLs
+ * are collapsed so a failed candidate is never retried under a second role.
+ */
+internal fun boxedCardArtworkCandidates(
+    posterUrl: String?,
+    metadataArtworkUrl: String?,
+): List<String> = listOfNotNull(
+    posterUrl?.trim()?.takeIf(String::isNotBlank),
+    metadataArtworkUrl?.trim()?.takeIf(String::isNotBlank),
+).distinct()
+
+/** The first real candidate that has not already failed in this composition. */
+internal fun activeBoxedCardArtwork(
+    candidates: List<String>,
+    failedUrls: Set<String>,
+): String? = candidates.firstOrNull { it !in failedUrls }
+
+/**
+ * Keeps failure state only for candidates that are still offered. A newly supplied usable
+ * candidate is therefore eligible immediately, while a still-present failed URL is not retried
+ * in a loop.
+ */
+internal fun retainedBoxedCardArtworkFailures(
+    candidates: List<String>,
+    failedUrls: Set<String>,
+): Set<String> = failedUrls.intersect(candidates.toSet())
+
+/**
+ * A late card-metadata result is accepted only for the current composition generation and the
+ * current authenticated owner. The request key already scopes the item; the generation rejects a
+ * callback that outlives an item/owner change in the same card slot.
+ */
+internal fun movieCardMetadataResultIsCurrent(
+    requestGeneration: Long,
+    currentGeneration: Long,
+    requestedOwner: AuthenticatedSessionOwner?,
+    currentOwner: AuthenticatedSessionOwner?,
+): Boolean = requestGeneration == currentGeneration &&
+    requestedOwner != null &&
+    requestedOwner === currentOwner
 
 enum class HulkArtworkSurface {
     SQUARE,
@@ -615,7 +660,7 @@ fun CompactPosterCard(
     }
     LaunchedEffect(polishMovieCard, item.id, metadataOwner, viewModel) {
         if (polishMovieCard && viewModel != null) {
-            viewModel.prefetchMovieCardMetadata(item) { quality, durationMs ->
+            viewModel.prefetchMovieCardMetadata(item) { quality, durationMs, _ ->
                 verifiedMovieMetadata = VerifiedMovieCardMetadata(
                     quality = quality,
                     durationMs = durationMs,
@@ -946,11 +991,24 @@ internal fun BoxedCatalogCard(
     footerSecondaryIcon: ImageVector,
     footerSeasonCount: Int? = null,
     footerAction: (@Composable () -> Unit)? = null,
+    artworkFallbackUrl: String? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     var focused by remember { mutableStateOf(false) }
-    var artworkFailed by remember(item.posterUrl) { mutableStateOf(false) }
+    val artworkCandidates = remember(item.posterUrl, artworkFallbackUrl) {
+        boxedCardArtworkCandidates(item.posterUrl, artworkFallbackUrl)
+    }
+    var failedArtworkUrls by remember(item.type, item.id) {
+        mutableStateOf<Set<String>>(emptySet())
+    }
+    LaunchedEffect(artworkCandidates) {
+        failedArtworkUrls = retainedBoxedCardArtworkFailures(
+            candidates = artworkCandidates,
+            failedUrls = failedArtworkUrls,
+        )
+    }
+    val activeArtworkUrl = activeBoxedCardArtwork(artworkCandidates, failedArtworkUrls)
     var remoteLongPressHandled by remember { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
     val scale = if (adaptiveUi.isTelevision) {
@@ -1026,14 +1084,16 @@ internal fun BoxedCatalogCard(
                     },
                 ),
         ) {
-            if (!item.posterUrl.isNullOrBlank() && !artworkFailed) {
+            if (activeArtworkUrl != null) {
                 AsyncImage(
-                    model = item.posterUrl,
+                    model = activeArtworkUrl,
                     contentDescription = item.name,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
                     placeholder = rememberHulkPlaceholderPainter(),
-                    onError = { artworkFailed = true },
+                    onError = {
+                        failedArtworkUrls = failedArtworkUrls + activeArtworkUrl
+                    },
                 )
             } else {
                 HulkFallbackArtwork(Modifier.fillMaxSize(), HulkArtworkSurface.POSTER)
@@ -1193,16 +1253,30 @@ fun MoviesCatalogBoxedCard(
             VerifiedMovieCardMetadata(
                 quality = cached.quality,
                 durationMs = cached.durationMs,
+                artworkUrl = cached.artworkUrl,
             ),
         )
     }
+    val metadataGeneration = remember { longArrayOf(0L) }
     LaunchedEffect(item.id, metadataOwner, viewModel) {
         if (viewModel != null) {
-            viewModel.prefetchMovieCardMetadata(item) { quality, durationMs ->
-                verifiedMovieMetadata = VerifiedMovieCardMetadata(
-                    quality = quality,
-                    durationMs = durationMs,
-                )
+            val owner = metadataOwner ?: return@LaunchedEffect
+            val generation = ++metadataGeneration[0]
+            viewModel.prefetchMovieCardMetadata(item) { quality, durationMs, artworkUrl ->
+                if (
+                    movieCardMetadataResultIsCurrent(
+                        requestGeneration = generation,
+                        currentGeneration = metadataGeneration[0],
+                        requestedOwner = owner,
+                        currentOwner = metadataStore.currentOwner(),
+                    )
+                ) {
+                    verifiedMovieMetadata = VerifiedMovieCardMetadata(
+                        quality = quality,
+                        durationMs = durationMs,
+                        artworkUrl = artworkUrl,
+                    )
+                }
             }
         }
     }
@@ -1216,6 +1290,7 @@ fun MoviesCatalogBoxedCard(
         onFocused = onFocused,
         artworkHeightDp = artworkHeightDp,
         onFooterHeightMeasured = onFooterHeightMeasured,
+        artworkFallbackUrl = verifiedMovieMetadata.artworkUrl,
         footerPrimary = compactMovieRating(item.rating),
         footerSecondary = compactMovieDuration(verifiedMovieMetadata.durationMs),
         footerSecondaryIcon = Icons.Rounded.Schedule,

@@ -52,6 +52,7 @@ internal fun MobileInlineTopActions(
     onOpenNotifications: () -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
+    onActionFocused: (() -> Unit)? = null,
 ) {
     Row(
         modifier = modifier,
@@ -63,6 +64,7 @@ internal fun MobileInlineTopActions(
             onClick = onOpenSearch,
             selected = selected == MainDestination.SEARCH,
             compact = true,
+            onFocused = onActionFocused,
         )
         RoundAction(
             icon = Icons.Rounded.Favorite,
@@ -70,18 +72,21 @@ internal fun MobileInlineTopActions(
             onClick = onOpenFavorites,
             selected = selected == MainDestination.FAVORITES,
             compact = true,
+            onFocused = onActionFocused,
         )
         RoundAction(
             icon = Icons.Rounded.Person,
             description = "تغيير المستخدم",
             onClick = onSwitchProfile,
             compact = true,
+            onFocused = onActionFocused,
         )
         NotificationBellButton(
             unreadCount = unreadNotificationCount,
             isTv = false,
             onClick = onOpenNotifications,
             compact = true,
+            onFocused = onActionFocused,
         )
         RoundAction(
             icon = Icons.Rounded.Refresh,
@@ -89,6 +94,7 @@ internal fun MobileInlineTopActions(
             onClick = onRefresh,
             loading = refreshing,
             compact = true,
+            onFocused = onActionFocused,
         )
     }
 }

@@ -426,6 +426,7 @@ internal fun RoundAction(
     selected: Boolean = false,
     compact: Boolean = false,
     requester: FocusRequester? = null,
+    onFocused: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -439,7 +440,10 @@ internal fun RoundAction(
         modifier = Modifier
             .size(homeHeaderActionTouchSizeDp().dp)
             .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused?.invoke()
+            }
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -495,6 +499,7 @@ fun NotificationBellButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    onFocused: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -508,7 +513,10 @@ fun NotificationBellButton(
     Box(
         modifier = modifier
             .size(homeHeaderActionTouchSizeDp().dp)
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused?.invoke()
+            }
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {

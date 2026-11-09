@@ -228,6 +228,11 @@ data class HulkUiState(
     val favorites: Set<String> = emptySet(),
     val history: List<HistoryEntry> = emptyList(),
     val isProfileLibraryReady: Boolean = false,
+    /**
+     * Home has no usable hero and no authoritative settled outcome yet. This covers cache restore
+     * and the first disk publication, which happen before network loadingTypes is populated.
+     */
+    val isHomePreparationPending: Boolean = false,
     val downloads: List<OfflineDownload> = emptyList(),
     val downloadSettings: DownloadSettings = DownloadSettings(),
     val selectedItem: ContentItem? = null,
@@ -724,6 +729,7 @@ class HulkViewModel internal constructor(
         isSessionCurrent = { activeSession -> session === activeSession },
         onLoadingChanged = { loadingTypes ->
             mutableState.update { it.copy(loadingTypes = loadingTypes) }
+            refreshHomePreparationState()
         },
         onLoaded = { type, result, remaining ->
             hulkPerfLog {
@@ -764,6 +770,7 @@ class HulkViewModel internal constructor(
                     },
                 )
             }
+            refreshHomePreparationState()
             resolvePendingTvDeepLink()
             scheduleTvPlatformSync(immediate = false)
             session?.let { activeSession ->
@@ -789,6 +796,7 @@ class HulkViewModel internal constructor(
                     )
                 }
             }
+            refreshHomePreparationState()
         },
     )
     private val selectedCategoryByType = mutableMapOf<ContentType, String?>()
@@ -835,7 +843,7 @@ class HulkViewModel internal constructor(
     private val movieCardProbeSemaphore = Semaphore(MOVIE_CARD_PROBE_CONCURRENCY)
     private val episodeNotificationScanSemaphore = Semaphore(EPISODE_NOTIFICATION_SCAN_CONCURRENCY)
     private val movieCardProbeCallbacks =
-        mutableMapOf<ContentMetadataRequestKey, MutableList<(String?, Long?) -> Unit>>()
+        mutableMapOf<ContentMetadataRequestKey, MutableList<(String?, Long?, String?) -> Unit>>()
     private val movieCardProbeInFlight = mutableSetOf<ContentMetadataRequestKey>()
     private val movieCardProbeAttempted = mutableSetOf<ContentMetadataRequestKey>()
     private val movieCardProbeJobs = mutableMapOf<ContentMetadataRequestKey, Job>()
@@ -984,6 +992,7 @@ class HulkViewModel internal constructor(
             current.errorMessage == null
         ) {
             ensureDestinationCatalogs(destination, foreground = true)
+            refreshHomePreparationState()
             return
         }
 
@@ -1000,6 +1009,7 @@ class HulkViewModel internal constructor(
             )
         }
         ensureDestinationCatalogs(destination, foreground = true)
+        refreshHomePreparationState()
     }
 
     fun refreshProfileLibrary(
@@ -1033,9 +1043,11 @@ class HulkViewModel internal constructor(
                 favorites = emptySet(),
                 history = emptyList(),
                 isProfileLibraryReady = false,
+                isHomePreparationPending = true,
                 errorMessage = null,
             )
         }
+        refreshHomePreparationState()
         profileLibraryRefreshJob = viewModelScope.launch {
             val snapshot = try {
                 userLibrary.initializeForProfile(
@@ -1054,6 +1066,7 @@ class HulkViewModel internal constructor(
                             errorMessage = "تعذر تهيئة مكتبة هذا الملف الشخصي بأمان",
                         )
                     }
+                    refreshHomePreparationState()
                     ensureDestinationCatalogs(mutableState.value.destination, foreground = true)
                     if (profileChanged && profile.kind != ProfileKind.KIDS &&
                         profileStore.activeProfileId() == profile.id
@@ -1077,6 +1090,7 @@ class HulkViewModel internal constructor(
                     errorMessage = null,
                 )
             }
+            refreshHomePreparationState()
             refreshNotificationState(clearPopup = false)
             scanSubscribedSeries(NotificationScanTrigger.LIBRARY_REFRESH)
             // Profile/library readiness is the cache/Kids gate. Queue the destination now; the
@@ -1144,6 +1158,7 @@ class HulkViewModel internal constructor(
         }
         hulkPerfLog { "catalogEnsure destination=$destination types=$types foreground=$foreground" }
         types.forEach(::ensureCatalog)
+        refreshHomePreparationState()
     }
 
     fun selectType(type: ContentType) {
@@ -1215,7 +1230,7 @@ class HulkViewModel internal constructor(
 
     fun prefetchMovieCardMetadata(
         item: ContentItem,
-        onResult: (quality: String?, durationMs: Long?) -> Unit,
+        onResult: (quality: String?, durationMs: Long?, artworkUrl: String?) -> Unit,
     ) {
         if (item.type != ContentType.MOVIE) return
 
@@ -1227,11 +1242,11 @@ class HulkViewModel internal constructor(
             cached.quality != null &&
             cached.durationMs != null
         ) {
-            onResult(cached.quality, cached.durationMs)
+            onResult(cached.quality, cached.durationMs, cached.artworkUrl)
             return
         }
         if (owner == null) {
-            onResult(cached.quality, cached.durationMs)
+            onResult(cached.quality, cached.durationMs, cached.artworkUrl)
             return
         }
 
@@ -1291,7 +1306,7 @@ class HulkViewModel internal constructor(
             .remove(requestKey)
             .orEmpty()
             .forEach { callback ->
-                callback(metadata.quality, metadata.durationMs)
+                callback(metadata.quality, metadata.durationMs, metadata.artworkUrl)
             }
     }
 
@@ -3622,6 +3637,7 @@ class HulkViewModel internal constructor(
 
     private fun clearCatalogMemory() {
         profileLibraryStartupGate.invalidate()
+        mutableState.update { it.copy(isHomePreparationPending = true) }
         cacheRestoreGeneration += 1L
         cacheRestoreJob?.cancel()
         cacheRestoreJob = null
@@ -3907,6 +3923,7 @@ class HulkViewModel internal constructor(
                     favorites = emptySet(),
                     history = emptyList(),
                     isProfileLibraryReady = false,
+                    isHomePreparationPending = true,
                     downloads = downloads,
                     downloadSettings = downloadSettings,
                     errorMessage = null,
@@ -4006,6 +4023,42 @@ class HulkViewModel internal constructor(
         }
     }
 
+    private fun hasUsableHomeHeroContent(): Boolean =
+        homeBootstrapCatalogs[ContentType.MOVIE]?.items?.isNotEmpty() == true ||
+            homeBootstrapCatalogs[ContentType.SERIES]?.items?.isNotEmpty() == true ||
+            homeCatalogs[ContentType.MOVIE]?.items?.isNotEmpty() == true ||
+            homeCatalogs[ContentType.SERIES]?.items?.isNotEmpty() == true ||
+            loadedCatalogs[ContentType.MOVIE]?.items?.isNotEmpty() == true ||
+            loadedCatalogs[ContentType.SERIES]?.items?.isNotEmpty() == true
+
+    /**
+     * Home's first frame is prepared by profile readiness, disk restore and only then network.
+     * loadingTypes alone cannot represent the disk phase, so this flag is updated at every
+     * ownership/readiness/content/failure boundary.
+     */
+    private fun refreshHomePreparationState() {
+        val state = mutableState.value
+        val pending = homePreparationPending(
+            destination = state.destination,
+            isProfileLibraryReady = state.isProfileLibraryReady,
+            hasUsableHomeHero = hasUsableHomeHeroContent(),
+            cacheRestoreActive = cacheRestoreJob?.isActive == true,
+            pendingCacheTypes = pendingCatalogRequests.isNotEmpty(),
+            networkLoading = state.loadingTypes.isNotEmpty() ||
+                catalogRequestOwner.loadingTypes().isNotEmpty(),
+            hasSettledFailure = state.errorMessage != null || state.catalogFailures.isNotEmpty(),
+            hasSettledHomeHeroAbsence = settledHomeHeroAbsence(
+                loaded = loadedCatalogs,
+                freshTypes = freshCatalogTypes,
+                failedTypes = state.catalogFailures.keys,
+                cacheAttemptedTypes = cacheRestoreAttempted,
+            ),
+        )
+        if (state.isHomePreparationPending != pending) {
+            mutableState.update { it.copy(isHomePreparationPending = pending) }
+        }
+    }
+
     private fun ensureCatalog(type: ContentType, force: Boolean = false) {
         val activeSession = session ?: return
         if (force) {
@@ -4085,10 +4138,13 @@ class HulkViewModel internal constructor(
                         AuthenticatedSessionRegistry.currentOwner()?.session === activeSession
                     ) {
                         startCacheRestore(activeSession)
+                    } else {
+                        refreshHomePreparationState()
                     }
                 }
             }
         }
+        refreshHomePreparationState()
     }
 
     /**
@@ -4269,6 +4325,7 @@ class HulkViewModel internal constructor(
         mutableState.update { state ->
             state.copy(catalogs = catalogsForDestination(state.destination, state.catalogs))
         }
+        refreshHomePreparationState()
         hulkPerfLog {
             "homeBootstrapPublished types=${bootstrap.catalogs.keys.joinToString(",")} " +
                 "sourceGenerations=${bootstrap.sourceGenerations}"
@@ -4309,6 +4366,7 @@ class HulkViewModel internal constructor(
         mutableState.update { state ->
             state.copy(catalogs = catalogsForDestination(state.destination, state.catalogs))
         }
+        refreshHomePreparationState()
         hulkPerfLog {
             "catalogCachePublished type=$type items=${catalog.items.size} " +
                 "homeItems=${home.items.size}"
