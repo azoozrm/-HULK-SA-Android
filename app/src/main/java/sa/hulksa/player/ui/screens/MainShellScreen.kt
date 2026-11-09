@@ -112,6 +112,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -151,6 +152,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -191,6 +193,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import sa.hulksa.player.BuildConfig
+import sa.hulksa.player.CatalogFailure
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.MainDestination
 import sa.hulksa.player.data.AccountProfileStateScope
@@ -199,6 +202,10 @@ import sa.hulksa.player.data.FavoriteMutationOutcome
 import sa.hulksa.player.data.FavoriteMutationStatus
 import sa.hulksa.player.data.GrowthAction
 import sa.hulksa.player.data.HomeHeroMetadataStore
+import sa.hulksa.player.hulkPerfLog
+import sa.hulksa.player.homePlaceholderMode
+import sa.hulksa.player.homePresentationTransitionPending
+import sa.hulksa.player.HomePlaceholderMode
 import sa.hulksa.player.data.HomeHeroTechnicalMetadata
 import sa.hulksa.player.data.OperationsAnnouncement
 import sa.hulksa.player.data.OperationsAnnouncementSeverity
@@ -339,7 +346,7 @@ internal fun Modifier.extendCategoryViewportTowardStart(extraWidth: Dp): Modifie
     }
 }
 
-private data class CategoryContentFocusRequest(
+internal data class CategoryContentFocusRequest(
     val categoryId: String?,
     val requestId: Long,
     val focusFirstItem: Boolean,
@@ -690,7 +697,7 @@ private val HOME_CONTENT_ROW_ORDER = listOf(
 
 internal fun homeHeroIdentity(item: ContentItem): String = "${item.type}:${item.id}"
 
-private fun HomeContentSnapshot.hasHomeHeroSource(): Boolean =
+internal fun HomeContentSnapshot.hasHomeHeroSource(): Boolean =
     featuredCandidates.isNotEmpty() || movies.isNotEmpty() || series.isNotEmpty()
 
 internal fun resolvePresentedHomeHero(
@@ -724,7 +731,9 @@ internal fun nextHomeHeroIdentity(
 
 class NavigationMemoryStore {
     private val positions = mutableMapOf<MainDestination, NavigationPosition>()
-    private val screenEntryModels = CatalogScreenEntryModelStore()
+    private val screenEntryModels = CatalogScreenEntryModelStore(
+        indexedCatalogBuilder = ::deriveCatalogScreenModel,
+    )
 
     fun position(destination: MainDestination): NavigationPosition =
         positions[destination] ?: NavigationPosition()
@@ -756,6 +765,33 @@ class NavigationMemoryStore {
 
     internal suspend fun homeModel(input: HomeContentModelInput): KeyedHomeContentModel =
         screenEntryModels.home(input)
+
+    internal fun cachedFavoriteProjection(input: FavoriteCatalogProjectionInput): List<ContentItem>? =
+        screenEntryModels.cachedFavoriteProjection(input)
+
+    internal fun lastGoodFavoriteProjection(
+        catalogs: Map<ContentType, Catalog>,
+    ): List<ContentItem>? = screenEntryModels.lastGoodFavoriteProjection(catalogs)
+
+    internal suspend fun favoriteProjection(
+        input: FavoriteCatalogProjectionInput,
+    ): List<ContentItem> = screenEntryModels.favoriteProjection(input)
+
+    internal fun cachedLiveProjection(
+        input: LiveCatalogProjectionInput,
+    ): LiveCatalogProjectionResult? = screenEntryModels.cachedLiveProjection(input)
+
+    internal fun lastGoodLiveProjection(catalog: Catalog?): List<ContentItem>? =
+        screenEntryModels.lastGoodLiveProjection(catalog)
+
+    internal suspend fun liveProjection(
+        input: LiveCatalogProjectionInput,
+    ): LiveCatalogProjectionResult = screenEntryModels.liveProjection(input)
+
+    /** Drops derived catalog payloads for an inactive profile; navigation positions remain. */
+    internal fun releaseDerivedModels() {
+        screenEntryModels.clear()
+    }
 }
 
 @Composable
@@ -1094,6 +1130,7 @@ fun MainShellScreen(
     onRemoveHistoryEntry: (String, (Boolean) -> Unit) -> Unit,
     onToggleFavoriteWithResult: (ContentItem, (FavoriteMutationOutcome) -> Unit) -> Unit,
     onRefresh: () -> Unit,
+    onRetryCatalog: (ContentType) -> Unit = {},
     onOpenNotifications: () -> Unit,
     onClearHistory: () -> Unit,
     onPlayDownload: (OfflineDownload) -> Unit,
@@ -1327,6 +1364,7 @@ fun MainShellScreen(
                         onFavoritesRemovalStarted = favoritesRemovalInputGuard::begin,
                         onRecentRemovalStarted = recentRemovalInputGuard::begin,
                         onRefresh = onRefresh,
+                        onRetryCatalog = onRetryCatalog,
                         onOpenNotifications = onOpenNotifications,
                         onGrowthAction = openGrowthDestination,
                         onSelectDestination = onSelectDestination,
@@ -1388,6 +1426,7 @@ fun MainShellScreen(
                         onFavoritesRemovalStarted = favoritesRemovalInputGuard::begin,
                         onRecentRemovalStarted = recentRemovalInputGuard::begin,
                         onRefresh = onRefresh,
+                        onRetryCatalog = onRetryCatalog,
                         onOpenNotifications = onOpenNotifications,
                         onGrowthAction = openGrowthDestination,
                         onSelectDestination = onSelectDestination,
@@ -1623,6 +1662,7 @@ private fun DestinationContent(
     onFavoritesRemovalStarted: () -> Unit,
     onRecentRemovalStarted: () -> Unit,
     onRefresh: () -> Unit,
+    onRetryCatalog: (ContentType) -> Unit,
     onOpenNotifications: () -> Unit,
     onGrowthAction: (GrowthDestination) -> Unit,
     onSelectDestination: (MainDestination) -> Unit,
@@ -1667,6 +1707,7 @@ private fun DestinationContent(
             onRemoveHistoryEntry = onRemoveHistoryEntry,
             onToggleFavorite = onToggleFavorite,
             onRefresh = onRefresh,
+            onRetryCatalog = onRetryCatalog,
             onOpenNotifications = onOpenNotifications,
             onGrowthAction = onGrowthAction,
             onOpenDownloads = { onSelectDestination(MainDestination.DOWNLOADS) },
@@ -1744,6 +1785,7 @@ private fun DestinationContent(
             onToggleFavorite = onToggleFavorite,
             onFavoritesRemovalStarted = onFavoritesRemovalStarted,
             onRefresh = onRefresh,
+            onRetryCatalog = onRetryCatalog,
         )
         MainDestination.SEARCH -> UnifiedSearchScreen(state, isTv, navigationMemory, isFavorite, onSearch, onOpen, onToggleFavorite)
         MainDestination.DOWNLOADS -> DownloadsScreen(
@@ -1800,6 +1842,7 @@ private fun CinemaHomeScreen(
     onRemoveHistoryEntry: (String, (Boolean) -> Unit) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
+    onRetryCatalog: (ContentType) -> Unit,
     onOpenNotifications: () -> Unit,
     onGrowthAction: (GrowthDestination) -> Unit,
     onOpenDownloads: () -> Unit,
@@ -1910,7 +1953,24 @@ private fun CinemaHomeScreen(
             .take(28)
             .toList()
     }
-    val loading = ContentType.MOVIE in state.loadingTypes || ContentType.SERIES in state.loadingTypes
+    val homeHeroSourceAvailable =
+        state.catalogs[ContentType.MOVIE]?.items?.isNotEmpty() == true ||
+            state.catalogs[ContentType.SERIES]?.items?.isNotEmpty() == true
+    val presentationTransitionPending = homePresentationTransitionPending(
+        hasUsableHomeHeroSource = homeHeroSourceAvailable,
+        presentedHasHero = homeContent.hasHomeHeroSource(),
+        homeModelSettled = homeModelSettled,
+    )
+    val loading = state.isHomePreparationPending ||
+        presentationTransitionPending ||
+        ContentType.MOVIE in state.loadingTypes ||
+        ContentType.SERIES in state.loadingTypes
+    // One Home entry/return intent for this composition. It is armed only from the remembered
+    // position, never from catalog/model publication or hero rotation.
+    val remembered = navigationMemory.position(MainDestination.HOME)
+    val homeRestoreOwner = remember(navigationMemory) {
+        HomeFocusRestoreOwner(remembered)
+    }
     // R02: ONE compact five-action group in the original Home header slot for both the hero and
     // the placeholder/loading/empty/error paths; the existing callbacks and owners are reused.
     val requestProfileSwitch = LocalProfileSwitchRequester.current
@@ -1924,6 +1984,7 @@ private fun CinemaHomeScreen(
             onSwitchProfile = requestProfileSwitch,
             onOpenNotifications = onOpenNotifications,
             onRefresh = onRefresh,
+            onActionFocused = homeRestoreOwner::onHeaderFocused,
         )
     }
     // Truthful Home error classification reuses the accepted Movies connectivity owner: only a
@@ -1932,7 +1993,20 @@ private fun CinemaHomeScreen(
     val homeErrorCopy = state.errorMessage?.let { message ->
         moviesCatalogErrorCopy(offline = !homeNetworkUsable, serverMessage = message)
     }
-    val remembered = navigationMemory.position(MainDestination.HOME)
+    val homeScopedFailureCopy = scopedCatalogFailureCopy(state.catalogFailures)
+    val homeNoticeCopy = when {
+        homeErrorCopy != null && homeScopedFailureCopy != null ->
+            homeErrorCopy.copy(body = homeScopedFailureCopy.body)
+        homeErrorCopy != null -> homeErrorCopy
+        else -> homeScopedFailureCopy
+    }
+    val retryableHomeFailures = retryableCatalogFailureTypes(state.catalogFailures)
+    val homeNoticeRetryable = if (state.catalogFailures.isNotEmpty()) {
+        retryableHomeFailures.isNotEmpty()
+    } else {
+        state.errorRetryable
+    }
+
     // One Home message zone owns the non-blocking renewal, announcement and optional-update
     // presentation. GrowthPolicy, the eligible Operations announcement and the current OPTIONAL
     // update decision remain the only policy owners; the zone only renders their real output.
@@ -1956,7 +2030,7 @@ private fun CinemaHomeScreen(
 
     var rowCursor = homeRowCursorStart(isTv)
     val messageRow = if (hasHomeMessages) rowCursor++ else -1
-    if (state.errorMessage != null) rowCursor++
+    if (homeNoticeCopy != null) rowCursor++
     val continueRow = if (continueWatching.isNotEmpty()) rowCursor++ else -1
     val downloadsRow = if (activeDownloads.isNotEmpty()) rowCursor++ else -1
     val becauseRow = if (becauseYouWatched.isNotEmpty()) rowCursor++ else -1
@@ -2018,26 +2092,45 @@ private fun CinemaHomeScreen(
         }
     }
     val homeHeroFocusRequester = remember { FocusRequester() }
+    // Shared by both hero-absent retry surfaces so a refresh start cannot drop focus to the rail.
+    val homeRefreshFocusState = remember { HomeRefreshFocusState() }
+    val requestHomeRefresh = {
+        homeRestoreOwner.onHeaderFocused()
+        if (featured == null) homeRefreshFocusState.requested = true
+        onRefresh()
+    }
+    val homeRetryAction: () -> Unit = if (state.catalogFailures.isNotEmpty()) {
+        { retryableHomeFailures.forEach(onRetryCatalog) }
+    } else {
+        requestHomeRefresh
+    }
     // One Home restoration owner for the remembered row. It waits for the exact model when Home
     // is still staging, brings the remembered row into the vertical viewport, and uses the hero
     // only as the deterministic fallback when the entire row has disappeared. Card-level effects
-    // own the stable item key inside a surviving row.
+    // own the stable item key inside a surviving row. The entry intent is consumed by the actual
+    // focus handoff, so later model publication cannot re-run it.
     var homeReturnRestoreHandled by remember(navigationMemory) { mutableStateOf(false) }
     val currentRailFocusRevision by rememberUpdatedState(railFocusRevision)
     val homeReturnRailBaseline = remember(navigationMemory) { railFocusRevision }
+    LaunchedEffect(railFocusRevision) {
+        if (railFocusRevision != homeReturnRailBaseline) {
+            homeRestoreOwner.onRailFocused()
+        }
+    }
     LaunchedEffect(homeModelIsCurrent, homeModelSettled, remembered.rowKey, remembered.itemKey, homeContent) {
         if (homeReturnRestoreHandled) return@LaunchedEffect
         if (remembered.rowKey.isBlank()) {
             // First entry: leave the normal shell entry focus untouched, and never let a later
             // in-place row change (for example Continue Watching removal) re-arm restoration.
             homeReturnRestoreHandled = true
+            homeRestoreOwner.onRestored()
             return@LaunchedEffect
         }
         if (!homeModelIsCurrent || !homeModelSettled) return@LaunchedEffect
 
-        fun userMovedFocus(): Boolean =
-            homeFocusOwnershipLost(
-                expected = remembered,
+        fun restoreNoLongerOwned(): Boolean =
+            !homeRestoreOwner.canRestoreRow(
+                remembered = remembered,
                 current = navigationMemory.position(MainDestination.HOME),
                 railFocusBaseline = homeReturnRailBaseline,
                 currentRailFocusRevision = currentRailFocusRevision,
@@ -2045,8 +2138,9 @@ private fun CinemaHomeScreen(
 
         val row = rowIndexByKey[remembered.rowKey]
         if (row != null && row >= 0) {
-            if (userMovedFocus()) {
+            if (restoreNoLongerOwned()) {
                 homeReturnRestoreHandled = true
+                homeRestoreOwner.onRestored()
                 return@LaunchedEffect
             }
             if (listState.layoutInfo.visibleItemsInfo.none { it.key == remembered.rowKey }) {
@@ -2055,21 +2149,41 @@ private fun CinemaHomeScreen(
             snapshotFlow {
                 listState.layoutInfo.visibleItemsInfo.any { it.key == remembered.rowKey }
             }.first { it }
-            if (userMovedFocus()) {
+            if (restoreNoLongerOwned()) {
                 homeReturnRestoreHandled = true
+                homeRestoreOwner.onRestored()
                 return@LaunchedEffect
             }
             homeReturnRestoreHandled = true
+            // This row has no card-level restoration owner of its own.
+            if (remembered.rowKey == "downloads") {
+                homeRestoreOwner.onRestored()
+            }
         } else {
             // A vanished row falls back to the hero. Reveal and place the hero first; requesting
             // focus on an offscreen/unattached fallback is not a valid restoration.
+            fun restoreEntryNoLongerOwned(): Boolean =
+                !homeRestoreOwner.canRestoreEntry(
+                    current = navigationMemory.position(MainDestination.HOME),
+                    railFocusBaseline = homeReturnRailBaseline,
+                    currentRailFocusRevision = currentRailFocusRevision,
+                )
+            if (restoreEntryNoLongerOwned()) {
+                homeReturnRestoreHandled = true
+                homeRestoreOwner.onRestored()
+                return@LaunchedEffect
+            }
             val focused = revealAndFocusHomeHero(
                 listState = listState,
-                isFocusOwnershipLost = ::userMovedFocus,
+                isFocusOwnershipLost = ::restoreEntryNoLongerOwned,
                 requestFocus = { runCatching { homeHeroFocusRequester.requestFocus() }.getOrDefault(false) },
             )
-            if (focused || userMovedFocus()) {
+            if (focused) {
                 homeReturnRestoreHandled = true
+                homeRestoreOwner.onRestored()
+            } else if (restoreEntryNoLongerOwned()) {
+                homeReturnRestoreHandled = true
+                homeRestoreOwner.onRestored()
             }
         }
     }
@@ -2081,44 +2195,74 @@ private fun CinemaHomeScreen(
         verticalArrangement = Arrangement.spacedBy(if (isTv) 24.dp else 17.dp),
     ) {
         item(key = "hero") {
-            if (featured != null) {
-                LaunchedEffect(homeModelIsCurrent, remembered.rowKey) {
-                    if (!homeModelIsCurrent || remembered.rowKey != "hero") return@LaunchedEffect
-                    withFrameNanos { }
-                    if (
-                        homeFocusOwnershipLost(
-                            expected = remembered,
-                            current = navigationMemory.position(MainDestination.HOME),
-                            railFocusBaseline = homeReturnRailBaseline,
-                            currentRailFocusRevision = currentRailFocusRevision,
+            Box(Modifier.fillMaxWidth()) {
+                if (featured != null) {
+                    LaunchedEffect(homeModelIsCurrent, remembered.rowKey) {
+                        if (!homeModelIsCurrent || remembered.rowKey != "hero") return@LaunchedEffect
+                        fun restoreNoLongerOwned(): Boolean =
+                            !homeRestoreOwner.canRestoreEntry(
+                                current = navigationMemory.position(MainDestination.HOME),
+                                railFocusBaseline = homeReturnRailBaseline,
+                                currentRailFocusRevision = currentRailFocusRevision,
+                            )
+                        if (restoreNoLongerOwned()) {
+                            homeRestoreOwner.onRestored()
+                            return@LaunchedEffect
+                        }
+                        withFrameNanos { }
+                        if (restoreNoLongerOwned()) {
+                            homeRestoreOwner.onRestored()
+                            return@LaunchedEffect
+                        }
+                        requestHomeRestoreFocus(
+                            requestFocus = { homeHeroFocusRequester.requestFocus() },
+                            onRestored = homeRestoreOwner::onRestored,
                         )
-                    ) {
-                        return@LaunchedEffect
                     }
-                    runCatching { homeHeroFocusRequester.requestFocus() }
+                    CinemaHero(
+                        featured, isTv, favorites.contains(featured), { onOpen(featured) },
+                        { onToggleFavorite(featured) }, onRefresh, loading,
+                        unreadNotificationCount = state.unreadNotificationCount,
+                        onOpenNotifications = onOpenNotifications,
+                        topActions = homeTopActions,
+                        watchModifier = Modifier.focusRequester(homeHeroFocusRequester),
+                        onHeaderFocused = homeRestoreOwner::onHeaderFocused,
+                        onFocused = {
+                            navigationMemory.save(
+                                MainDestination.HOME,
+                                "${featured.type}:${featured.id}",
+                                0,
+                                "hero",
+                                0,
+                            )
+                            homeRestoreOwner.onContentFocused(
+                                navigationMemory.position(MainDestination.HOME),
+                            )
+                        },
+                    )
+                } else {
+                    HomePlaceholder(
+                        loading = loading,
+                        onRefresh = homeRetryAction,
+                        isTv = isTv,
+                        unreadNotificationCount = state.unreadNotificationCount,
+                        onOpenNotifications = onOpenNotifications,
+                        onHeaderFocused = homeRestoreOwner::onHeaderFocused,
+                        errorTitle = homeErrorCopy?.title,
+                        errorBody = homeErrorCopy?.body,
+                        networkFailure = !homeNetworkUsable,
+                        showRetry = homeNoticeRetryable,
+                        refreshModifier = Modifier.focusRequester(homeHeroFocusRequester),
+                        refreshFocusRequester = homeHeroFocusRequester,
+                        topActions = homeTopActions,
+                    )
+                    HomeRefreshFocusAnchor(
+                        state = homeRefreshFocusState,
+                        isTv = isTv,
+                        loading = loading,
+                        restoreRequester = homeHeroFocusRequester,
+                    )
                 }
-                CinemaHero(
-                    featured, isTv, favorites.contains(featured), { onOpen(featured) },
-                    { onToggleFavorite(featured) }, onRefresh, loading,
-                    unreadNotificationCount = state.unreadNotificationCount,
-                    onOpenNotifications = onOpenNotifications,
-                    topActions = homeTopActions,
-                    watchModifier = Modifier.focusRequester(homeHeroFocusRequester),
-                    onFocused = { navigationMemory.save(MainDestination.HOME, "${featured.type}:${featured.id}", 0, "hero", 0) },
-                )
-            } else {
-                HomePlaceholder(
-                    loading = loading,
-                    onRefresh = onRefresh,
-                    isTv = isTv,
-                    unreadNotificationCount = state.unreadNotificationCount,
-                    onOpenNotifications = onOpenNotifications,
-                    errorTitle = homeErrorCopy?.title,
-                    errorBody = homeErrorCopy?.body,
-                    networkFailure = !homeNetworkUsable,
-                    refreshModifier = Modifier.focusRequester(homeHeroFocusRequester),
-                    topActions = homeTopActions,
-                )
             }
         }
         if (hasHomeMessages) {
@@ -2136,6 +2280,7 @@ private fun CinemaHomeScreen(
                         homeModelIsCurrent = homeModelIsCurrent,
                         railFocusRevision = railFocusRevision,
                         homeReturnRailBaseline = homeReturnRailBaseline,
+                        homeRestoreOwner = homeRestoreOwner,
                         onRenewal = { onGrowthAction(GrowthDestination.RENEWAL) },
                         onOpenAnnouncementDetail = onOpenAnnouncementDetail,
                         onOpenUpdateDetail = onOpenUpdateDetail,
@@ -2143,15 +2288,16 @@ private fun CinemaHomeScreen(
                 }
             }
         }
-        if (homeErrorCopy != null) {
+        if (homeNoticeCopy != null) {
             item(key = "error-notice") {
                 HomeSectionPadding(isTv) {
                     MoviesErrorNotice(
-                        title = homeErrorCopy.title,
-                        body = homeErrorCopy.body,
-                        onRetry = onRefresh,
+                        title = homeNoticeCopy.title,
+                        body = homeNoticeCopy.body,
+                        onRetry = homeRetryAction,
                         isTv = isTv,
                         networkFailure = !homeNetworkUsable,
+                        showRetry = homeNoticeRetryable,
                         modifier = Modifier.padding(
                             horizontal = if (isTv) 0.dp else 14.dp,
                             vertical = if (isTv) 4.dp else 6.dp,
@@ -2174,36 +2320,37 @@ private fun CinemaHomeScreen(
                         homeModelIsCurrent = homeModelIsCurrent,
                         railFocusRevision = railFocusRevision,
                         homeReturnRailBaseline = homeReturnRailBaseline,
+                        homeRestoreOwner = homeRestoreOwner,
                         removalController = removalController,
                         onRemoteRemovalStarted = { homeRemovalInputGuard?.begin() },
                     )
                 }
             }
         }
-        if (activeDownloads.isNotEmpty()) item(key = "downloads") { HomeSectionPadding(isTv) { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads, rowFocusRequester("downloads"), rowFocusTarget("downloads")) } }
+        if (activeDownloads.isNotEmpty()) item(key = "downloads") { HomeSectionPadding(isTv) { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads, rowFocusRequester("downloads"), rowFocusTarget("downloads"), onContentFocused = { homeRestoreOwner.onContentFocused(null) }) } }
         if (becauseYouWatched.isNotEmpty()) {
-            item(key = "because-watched") { HomeSectionPadding(isTv) { HomeBoxedSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, rowFocusRequester("because-watched"), rowFocusTarget("because-watched")) } }
+            item(key = "because-watched") { HomeSectionPadding(isTv) { HomeBoxedSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("because-watched"), rowFocusTarget("because-watched")) } }
         }
         if (suggested.isNotEmpty()) {
-            item(key = "recommended") { HomeSectionPadding(isTv) { HomeBoxedSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, rowFocusRequester("recommended"), rowFocusTarget("recommended")) } }
+            item(key = "recommended") { HomeSectionPadding(isTv) { HomeBoxedSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("recommended"), rowFocusTarget("recommended")) } }
         }
         if (homeMovies.isNotEmpty()) {
-            item(key = "recent-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, rowFocusRequester("recent-movies"), rowFocusTarget("recent-movies")) } }
+            item(key = "recent-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("recent-movies"), rowFocusTarget("recent-movies")) } }
         }
         if (homeSeries.isNotEmpty()) {
-            item(key = "recent-series") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, rowFocusRequester("recent-series"), rowFocusTarget("recent-series")) } }
+            item(key = "recent-series") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("recent-series"), rowFocusTarget("recent-series")) } }
         }
         if (popularMovies.isNotEmpty()) {
-            item(key = "top-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, rowFocusRequester("top-movies"), rowFocusTarget("top-movies")) } }
+            item(key = "top-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("top-movies"), rowFocusTarget("top-movies")) } }
         }
         if (popularSeries.isNotEmpty()) {
-            item(key = "top-series") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, rowFocusRequester("top-series"), rowFocusTarget("top-series")) } }
+            item(key = "top-series") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("top-series"), rowFocusTarget("top-series")) } }
         }
         if (lastLive != null) {
-            item(key = "last-live") { HomeSectionPadding(isTv) { HomeLastChannelSection("last-live", lastLiveRow, lastLive, isTv, navigationMemory, onOpenHistory, homeModelIsCurrent, railFocusRevision, homeReturnRailBaseline, rowFocusRequester("last-live"), rowFocusTarget("last-live")) } }
+            item(key = "last-live") { HomeSectionPadding(isTv) { HomeLastChannelSection("last-live", lastLiveRow, lastLive, isTv, navigationMemory, onOpenHistory, homeModelIsCurrent, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("last-live"), rowFocusTarget("last-live")) } }
         }
         if (suggestedLive.isNotEmpty()) {
-            item(key = "popular-live") { HomeSectionPadding(isTv) { HomeBoxedSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, rowFocusRequester("popular-live"), rowFocusTarget("popular-live")) } }
+            item(key = "popular-live") { HomeSectionPadding(isTv) { HomeBoxedSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("popular-live"), rowFocusTarget("popular-live")) } }
         }
     }
 }
@@ -2264,6 +2411,7 @@ internal fun HomeMessagesZone(
     homeModelIsCurrent: Boolean,
     railFocusRevision: Long,
     homeReturnRailBaseline: Long,
+    homeRestoreOwner: HomeFocusRestoreOwner = HomeFocusRestoreOwner(remembered),
     onRenewal: () -> Unit,
     onOpenAnnouncementDetail: (OperationsAnnouncement) -> Unit,
     onOpenUpdateDetail: () -> Unit,
@@ -2325,18 +2473,20 @@ internal fun HomeMessagesZone(
     }
     LaunchedEffect(remembered.rowKey, targetItemKey, items.size, homeModelIsCurrent) {
         if (!homeModelIsCurrent || restoreIndex < 0) return@LaunchedEffect
-        withFrameNanos { }
-        if (
-            homeFocusOwnershipLost(
-                expected = remembered,
+        fun restoreNoLongerOwned(): Boolean =
+            !homeRestoreOwner.canRestoreRow(
+                remembered = remembered,
                 current = navigationMemory.position(MainDestination.HOME),
                 railFocusBaseline = homeReturnRailBaseline,
                 currentRailFocusRevision = currentRailFocusRevision,
             )
-        ) {
-            return@LaunchedEffect
-        }
-        runCatching { targetRequester.requestFocus() }
+        if (restoreNoLongerOwned()) return@LaunchedEffect
+        withFrameNanos { }
+        if (restoreNoLongerOwned()) return@LaunchedEffect
+        requestHomeRestoreFocus(
+            requestFocus = { targetRequester.requestFocus() },
+            onRestored = homeRestoreOwner::onRestored,
+        )
     }
     val cardModifier: (Int) -> Modifier = { index ->
         Modifier.restoreFocus(index == restoreIndex, targetRequester)
@@ -2349,6 +2499,9 @@ internal fun HomeMessagesZone(
                 index,
                 "home-messages",
                 rowIndex,
+            )
+            homeRestoreOwner.onContentFocused(
+                navigationMemory.position(MainDestination.HOME),
             )
         }
     }
@@ -2512,6 +2665,7 @@ private fun ActiveDownloadsSection(
     onOpenDownloads: () -> Unit,
     firstItemFocusRequester: FocusRequester? = null,
     rowFocusTarget: HomeRowFocusTarget? = null,
+    onContentFocused: () -> Unit = {},
 ) {
     val colors = LocalHulkColors.current
     val rowState = rememberLazyListState()
@@ -2573,7 +2727,10 @@ private fun ActiveDownloadsSection(
                         )
                         .onFocusChanged {
                             focused = it.isFocused
-                            if (it.isFocused) firstCardFocused = index == 0
+                            if (it.isFocused) {
+                                firstCardFocused = index == 0
+                                onContentFocused()
+                            }
                         }
                         .clickable(role = Role.Button, onClick = onOpenDownloads)
                         .padding(13.dp),
@@ -2762,6 +2919,7 @@ private fun CinemaHero(
     onOpenNotifications: () -> Unit,
     topActions: @Composable () -> Unit,
     watchModifier: Modifier = Modifier,
+    onHeaderFocused: () -> Unit = {},
     onFocused: () -> Unit = {},
 ) {
     val colors = LocalHulkColors.current
@@ -2849,6 +3007,7 @@ private fun CinemaHero(
     )
     // One selected-hero load: technical facts plus the bounded presentation backfill, shared with
     // the facts row so artwork and copy never start competing requests.
+    val heroIdentity = "${item.type}:${item.id}"
     val metadataStore = remember(context) { HomeHeroMetadataStore.get(context) }
     val metadataOwner = metadataStore.currentOwner()
     var heroMetadata by remember(item.type, item.id, metadataOwner) {
@@ -2856,7 +3015,14 @@ private fun CinemaHero(
     }
     LaunchedEffect(item.type, item.id, metadataOwner) {
         val owner = metadataOwner ?: return@LaunchedEffect
+        val startedNs = System.nanoTime()
+        hulkPerfLog { "homeHeroMetadataStart identity=$heroIdentity cached=${heroMetadata.quality != null}" }
         val loaded = metadataStore.metadata(owner, item, requirePresentation = true)
+        hulkPerfLog {
+            "homeHeroMetadata identity=$heroIdentity " +
+                "ms=${(System.nanoTime() - startedNs) / 1_000_000} " +
+                "artwork=${loaded.artworkUrl != null}"
+        }
         metadataStore.publishIfCurrent(owner) { heroMetadata = loaded }
     }
     val artworkCandidates = remember(heroMetadata.artworkUrl, item.backdropUrl, item.posterUrl) {
@@ -2869,11 +3035,18 @@ private fun CinemaHero(
     val heroPlot = (heroMetadata.plot ?: item.plot)
         ?.trim()
         ?.takeIf(String::isNotBlank)
+    val heroPlacementLogged = remember(heroIdentity) { booleanArrayOf(false) }
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
             .height(heroHeight)
-            .background(Color(0xFF0A0B08)),
+            .background(Color(0xFF0A0B08))
+            .onPlaced {
+                if (!heroPlacementLogged[0]) {
+                    heroPlacementLogged[0] = true
+                    hulkPerfLog { "homeHeroPlaced identity=$heroIdentity" }
+                }
+            },
     ) {
         // One-row fit resolved from the real title/subtitle at the current font scale and the
         // natural-width action group, minus the header's own horizontal padding.
@@ -2910,6 +3083,7 @@ private fun CinemaHero(
         }
         HeroArtwork(
             candidates = artworkCandidates,
+            identity = heroIdentity,
             contentDescription = item.name,
             phonePortrait = isPortraitPhone,
             phoneWindowHeightDp = (configuration.screenWidthDp * 9f / 16f).dp,
@@ -3015,14 +3189,21 @@ private fun CinemaHero(
                         unreadCount = unreadNotificationCount,
                         isTv = isTv,
                         onClick = onOpenNotifications,
+                        onFocused = onHeaderFocused,
                     )
                     Spacer(Modifier.width(8.dp))
-                    RoundAction(Icons.Rounded.Refresh, "تحديث المحتوى", onRefresh)
+                    RoundAction(
+                        Icons.Rounded.Refresh,
+                        "تحديث المحتوى",
+                        onRefresh,
+                        onFocused = onHeaderFocused,
+                    )
                 }
             }
             HeroCopy(
                 title = item.name,
                 item = item,
+                heroIdentity = heroIdentity,
                 isTv = isTv,
                 heroMetadata = heroMetadata,
                 heroPlot = heroPlot,
@@ -3275,6 +3456,7 @@ internal enum class HeroArtworkLayoutMode {
 private fun HeroCopy(
     title: String,
     item: ContentItem,
+    heroIdentity: String,
     isTv: Boolean,
     heroMetadata: HomeHeroTechnicalMetadata,
     heroPlot: String?,
@@ -3285,6 +3467,7 @@ private fun HeroCopy(
     onFocused: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val heroActionsPlacedLogged = remember(heroIdentity) { booleanArrayOf(false) }
     val density = LocalDensity.current
     val titleFontSize = if (isTv) 36.sp else 28.sp
     val titleLineHeight = if (isTv) 42.sp else 34.sp
@@ -3333,6 +3516,12 @@ private fun HeroCopy(
                 onToggleFavorite = onToggleFavorite,
                 watchModifier = watchModifier,
                 onFocused = onFocused,
+                onPlaced = {
+                    if (!heroActionsPlacedLogged[0]) {
+                        heroActionsPlacedLogged[0] = true
+                        hulkPerfLog { "homeHeroActionsPlaced identity=$heroIdentity" }
+                    }
+                },
             )
         }.first().measure(Constraints(maxWidth = width))
 
@@ -3495,6 +3684,7 @@ internal fun heroArtworkOnFailed(
 @Composable
 private fun BoxScope.HeroArtwork(
     candidates: List<String>,
+    identity: String,
     contentDescription: String,
     phonePortrait: Boolean,
     phoneWindowHeightDp: Dp,
@@ -3502,6 +3692,15 @@ private fun BoxScope.HeroArtwork(
 ) {
     var selection by remember(candidates) { mutableStateOf(HeroArtworkSelectionState()) }
     val painters = remember(candidates) { mutableStateMapOf<Int, Painter>() }
+    val artworkStartLogged = remember(identity, candidates) { booleanArrayOf(false) }
+    val artworkDecoded = remember(identity, candidates) { mutableSetOf<Int>() }
+    val artworkDisplayed = remember(identity, candidates) { booleanArrayOf(false) }
+    LaunchedEffect(identity, candidates) {
+        if (!artworkStartLogged[0]) {
+            artworkStartLogged[0] = true
+            hulkPerfLog { "homeHeroArtworkStart identity=$identity candidates=${candidates.size}" }
+        }
+    }
 
     val currentIndex = selection.candidateIndex
     val currentUrl = if (selection.settled) null else candidates.getOrNull(currentIndex)
@@ -3514,11 +3713,18 @@ private fun BoxScope.HeroArtwork(
             contentScale = ContentScale.Fit,
             onSuccess = { state ->
                 val size = state.painter.intrinsicSize
+                val landscape = homeHeroArtworkIsLandscape(size.width, size.height)
                 painters[currentIndex] = state.painter
+                if (artworkDecoded.add(currentIndex)) {
+                    hulkPerfLog {
+                        "homeHeroArtworkDecoded identity=$identity index=$currentIndex " +
+                            "landscape=$landscape width=${size.width} height=${size.height}"
+                    }
+                }
                 selection = heroArtworkOnLoaded(
                     state = selection,
                     index = currentIndex,
-                    isLandscape = homeHeroArtworkIsLandscape(size.width, size.height),
+                    isLandscape = landscape,
                     candidateCount = candidates.size,
                 )
             },
@@ -3534,6 +3740,13 @@ private fun BoxScope.HeroArtwork(
     }
 
     val painter = selection.displayIndex?.let(painters::get)
+    val displayedIndex = selection.displayIndex
+    LaunchedEffect(identity, displayedIndex, painter != null) {
+        if (displayedIndex != null && painter != null && !artworkDisplayed[0]) {
+            artworkDisplayed[0] = true
+            hulkPerfLog { "homeHeroArtworkDisplayed identity=$identity index=$displayedIndex" }
+        }
+    }
     if (painter == null) {
         if (phonePortrait) {
             // Phone: the brand fallback stays inside the same reserved 16:9 window.
@@ -3606,6 +3819,7 @@ private fun HomeHeroActions(
     onToggleFavorite: () -> Unit,
     watchModifier: Modifier,
     onFocused: () -> Unit,
+    onPlaced: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -3641,7 +3855,11 @@ private fun HomeHeroActions(
     val favoriteCaption = "المفضلة"
     val favoriteRequiredPx = maxOf(requiredWidthPx("المفضلة"), requiredWidthPx("في المفضلة"))
     val rowGapPx = with(density) { 9.dp.roundToPx() }
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    BoxWithConstraints(
+        Modifier
+            .fillMaxWidth()
+            .onPlaced { onPlaced?.invoke() },
+    ) {
         val availableWidthPx = with(density) { maxWidth.roundToPx() }
         val fitsRow = primaryRequiredPx + favoriteRequiredPx + rowGapPx <= availableWidthPx
         if (fitsRow) {
@@ -3663,6 +3881,7 @@ private fun HomeHeroActions(
                     minHeightDp = actionMinHeightDp,
                     minWidthDp = with(density) { favoriteRequiredPx.toDp() },
                     onClick = onToggleFavorite,
+                    onFocused = onFocused,
                     trailingIconTint = colors.gold,
                     modifier = Modifier.fillMaxHeight(),
                 )
@@ -3685,6 +3904,7 @@ private fun HomeHeroActions(
                     minHeightDp = actionMinHeightDp,
                     minWidthDp = 0.dp,
                     onClick = onToggleFavorite,
+                    onFocused = onFocused,
                     trailingIconTint = colors.gold,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -3720,6 +3940,7 @@ private fun HomeHeroFavoriteAction(
     minHeightDp: Int,
     minWidthDp: Dp,
     onClick: () -> Unit,
+    onFocused: () -> Unit,
     trailingIconTint: Color,
     modifier: Modifier = Modifier,
 ) {
@@ -3734,6 +3955,102 @@ private fun HomeHeroFavoriteAction(
         trailingIcon = if (isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
         trailingIconTint = trailingIconTint,
         textMaxLines = 1,
+        onFocused = onFocused,
+    )
+}
+
+internal enum class HomeRefreshFocusAction { NONE, HOLD_PLACEHOLDER, RESTORE_HOME }
+
+/**
+ * Refresh keeps focus inside Home across the loading transition instead of letting focus fall to
+ * the TV rail. A user who intentionally moves focus elsewhere while loading is never pulled back.
+ */
+internal fun homeRefreshFocusAction(
+    isTv: Boolean,
+    loading: Boolean,
+    refreshRequested: Boolean,
+    refreshFocusHeld: Boolean,
+    placeholderFocused: Boolean,
+): HomeRefreshFocusAction = when {
+    !isTv -> HomeRefreshFocusAction.NONE
+    refreshRequested -> HomeRefreshFocusAction.HOLD_PLACEHOLDER
+    refreshFocusHeld && !loading && placeholderFocused -> HomeRefreshFocusAction.RESTORE_HOME
+    else -> HomeRefreshFocusAction.NONE
+}
+
+private class HomeRefreshFocusState {
+    var requested by mutableStateOf(false)
+    var held by mutableStateOf(false)
+    var focused by mutableStateOf(false)
+    val requester = FocusRequester()
+
+    fun reset() {
+        requested = false
+        held = false
+        focused = false
+    }
+}
+
+/**
+ * A real attached Home focus owner for the hero-absent refresh transition. It exists for the whole
+ * placeholder item, so both the placeholder and the separate error-notice Retry can hand focus here
+ * before their control disappears, and it is removed with the item once a hero returns.
+ */
+@Composable
+private fun HomeRefreshFocusAnchor(
+    state: HomeRefreshFocusState,
+    isTv: Boolean,
+    loading: Boolean,
+    restoreRequester: FocusRequester?,
+) {
+    LaunchedEffect(isTv, loading, state.requested, state.held, state.focused) {
+        when (
+            homeRefreshFocusAction(
+                isTv = isTv,
+                loading = loading,
+                refreshRequested = state.requested,
+                refreshFocusHeld = state.held,
+                placeholderFocused = state.focused,
+            )
+        ) {
+            HomeRefreshFocusAction.HOLD_PLACEHOLDER -> {
+                state.held = true
+                state.requested = false
+                withFrameNanos { }
+                runCatching { state.requester.requestFocus() }
+            }
+            HomeRefreshFocusAction.RESTORE_HOME -> {
+                withFrameNanos { }
+                val restored = runCatching {
+                    restoreRequester?.requestFocus() ?: false
+                }.getOrDefault(false)
+                if (restored || !state.focused) {
+                    state.held = false
+                    state.requested = false
+                }
+            }
+            HomeRefreshFocusAction.NONE -> {
+                if (!loading) {
+                    state.held = false
+                    state.requested = false
+                }
+            }
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose { state.reset() }
+    }
+    Box(
+        Modifier
+            .size(1.dp)
+            .then(
+                if (state.requested || state.held) {
+                    Modifier.focusRequester(state.requester).focusable()
+                } else {
+                    Modifier
+                },
+            )
+            .onFocusChanged { state.focused = it.isFocused },
     )
 }
 
@@ -3744,10 +4061,13 @@ private fun HomePlaceholder(
     isTv: Boolean,
     unreadNotificationCount: Int,
     onOpenNotifications: () -> Unit,
+    onHeaderFocused: () -> Unit = {},
     errorTitle: String? = null,
     errorBody: String? = null,
     networkFailure: Boolean = true,
+    showRetry: Boolean = true,
     refreshModifier: Modifier = Modifier,
+    refreshFocusRequester: FocusRequester? = null,
     topActions: @Composable () -> Unit,
 ) {
     val colors = LocalHulkColors.current
@@ -3755,7 +4075,10 @@ private fun HomePlaceholder(
     // Same compact boundary as the bottom navigation: TV and expanded/rail keep the original bell.
     val compactHeaderActions = !isTv && adaptiveUi.navigationType != HulkNavigationType.RAIL
     Box(
-        Modifier.fillMaxWidth().height(if (isTv) 360.dp else 270.dp).background(colors.surface),
+        Modifier
+            .fillMaxWidth()
+            .height(if (isTv) 360.dp else 270.dp)
+            .background(colors.surface),
         contentAlignment = Alignment.Center,
     ) {
         if (compactHeaderActions) {
@@ -3777,6 +4100,7 @@ private fun HomePlaceholder(
                 unreadCount = unreadNotificationCount,
                 isTv = isTv,
                 onClick = onOpenNotifications,
+                onFocused = onHeaderFocused,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .then(if (isTv) Modifier else Modifier.statusBarsPadding())
@@ -3786,20 +4110,27 @@ private fun HomePlaceholder(
                     ),
             )
         }
-        when {
+        when (
+            homePlaceholderMode(
+                hasError = errorTitle != null && errorBody != null,
+                loading = loading,
+            )
+        ) {
             // One honest error/empty presentation without content; the artwork fallback above the
             // hero owns its own safe logo, never a fake movie or endless spinner.
-            errorTitle != null && errorBody != null -> MoviesOfflineEmptyState(
+            HomePlaceholderMode.ERROR -> MoviesOfflineEmptyState(
                 onRetry = onRefresh,
-                title = errorTitle,
-                body = errorBody,
+                title = errorTitle.orEmpty(),
+                body = errorBody.orEmpty(),
                 networkFailure = networkFailure,
+                showRetry = showRetry,
+                retryRequester = refreshFocusRequester.takeIf { showRetry },
                 modifier = Modifier.padding(horizontal = if (isTv) 16.dp else 14.dp),
             )
 
-            loading -> LoadingRing(label = "نجهز احدث الاضافات…")
+            HomePlaceholderMode.LOADING -> LoadingRing(label = "نجهز احدث الاضافات…")
 
-            else -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            HomePlaceholderMode.EMPTY -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("سيظهر احدث المحتوى هنا", color = colors.textMuted)
                 Spacer(Modifier.height(12.dp))
                 FocusButton("تحديث", onRefresh, modifier = refreshModifier, compact = true)
@@ -3828,6 +4159,7 @@ private fun HomeBoxedSection(
     homeModelSettled: Boolean,
     railFocusRevision: Long,
     homeReturnRailBaseline: Long,
+    homeRestoreOwner: HomeFocusRestoreOwner,
     firstItemFocusRequester: FocusRequester? = null,
     rowFocusTarget: HomeRowFocusTarget? = null,
 ) {
@@ -3891,6 +4223,14 @@ private fun HomeBoxedSection(
         homeModelSettled,
     ) {
         if (!homeModelIsCurrent) return@LaunchedEffect
+        fun restoreNoLongerOwned(): Boolean =
+            !homeRestoreOwner.canRestoreRow(
+                remembered = remembered,
+                current = navigationMemory.position(MainDestination.HOME),
+                railFocusBaseline = homeReturnRailBaseline,
+                currentRailFocusRevision = currentRailFocusRevision,
+            )
+        if (restoreNoLongerOwned()) return@LaunchedEffect
         val restoreIndex = resolveHomeRowRestoreIndex(
             remembered = remembered,
             rowKey = rowKey,
@@ -3904,14 +4244,7 @@ private fun HomeBoxedSection(
             listState = rowState,
             targetIndex = restoreIndex,
             targetKey = itemKey,
-            isFocusOwnershipLost = {
-                homeFocusOwnershipLost(
-                expected = remembered,
-                current = navigationMemory.position(MainDestination.HOME),
-                railFocusBaseline = homeReturnRailBaseline,
-                currentRailFocusRevision = currentRailFocusRevision,
-            )
-            },
+            isFocusOwnershipLost = ::restoreNoLongerOwned,
             requestFocus = {
                 val restoreRequester = if (restoreIndex == 0) {
                     firstItemFocusRequester ?: targetRequester
@@ -3924,6 +4257,7 @@ private fun HomeBoxedSection(
         if (focused) {
             restoredTargetKey = itemKey
             navigationMemory.save(MainDestination.HOME, itemKey, restoreIndex, rowKey, rowIndex)
+            homeRestoreOwner.onRestored()
         }
     }
     Column {
@@ -3946,6 +4280,9 @@ private fun HomeBoxedSection(
                 val saveFocus = {
                     firstCardFocused = index == 0
                     navigationMemory.save(MainDestination.HOME, itemKey, index, rowKey, rowIndex)
+                    homeRestoreOwner.onContentFocused(
+                        navigationMemory.position(MainDestination.HOME),
+                    )
                 }
                 when (item.type) {
                     ContentType.MOVIE -> MoviesCatalogBoxedCard(
@@ -4003,6 +4340,7 @@ private fun HomeContinueWatchingSection(
     homeModelIsCurrent: Boolean,
     railFocusRevision: Long,
     homeReturnRailBaseline: Long,
+    homeRestoreOwner: HomeFocusRestoreOwner,
     removalController: HomeHistoryRemovalController,
     onRemoteRemovalStarted: () -> Unit,
 ) {
@@ -4043,6 +4381,14 @@ private fun HomeContinueWatchingSection(
         if (removalController.pendingKey != null || removalController.succeeded) {
             return@LaunchedEffect
         }
+        fun restoreNoLongerOwned(): Boolean =
+            !homeRestoreOwner.canRestoreRow(
+                remembered = remembered,
+                current = navigationMemory.position(MainDestination.HOME),
+                railFocusBaseline = homeReturnRailBaseline,
+                currentRailFocusRevision = currentRailFocusRevision,
+            )
+        if (restoreNoLongerOwned()) return@LaunchedEffect
         val restoreIndex = resolveHomeRowRestoreIndex(
             remembered = remembered,
             rowKey = rowKey,
@@ -4055,14 +4401,7 @@ private fun HomeContinueWatchingSection(
             listState = rowState,
             targetIndex = restoreIndex,
             targetKey = entry.key,
-            isFocusOwnershipLost = {
-                homeFocusOwnershipLost(
-                expected = remembered,
-                current = navigationMemory.position(MainDestination.HOME),
-                railFocusBaseline = homeReturnRailBaseline,
-                currentRailFocusRevision = currentRailFocusRevision,
-            )
-            },
+            isFocusOwnershipLost = ::restoreNoLongerOwned,
             requestFocus = {
                 runCatching {
                     focusRequesters[entry.key]?.requestFocus() ?: false
@@ -4072,6 +4411,7 @@ private fun HomeContinueWatchingSection(
         if (focused) {
             restoredTargetKey = entry.key
             navigationMemory.save(MainDestination.HOME, entry.key, restoreIndex, rowKey, rowIndex)
+            homeRestoreOwner.onRestored()
         }
     }
     LaunchedEffect(removalController.succeeded, removalController.pendingKey, entries) {
@@ -4128,6 +4468,9 @@ private fun HomeContinueWatchingSection(
                     reserveIdentitySlot = true,
                     onFocused = {
                         navigationMemory.save(MainDestination.HOME, entry.key, index, rowKey, rowIndex)
+                        homeRestoreOwner.onContentFocused(
+                            navigationMemory.position(MainDestination.HOME),
+                        )
                     },
                     onRemoveRequested = { _, remote ->
                         if (removalController.pendingKey == null) {
@@ -4157,6 +4500,7 @@ private fun HomeLastChannelSection(
     homeModelIsCurrent: Boolean,
     railFocusRevision: Long,
     homeReturnRailBaseline: Long,
+    homeRestoreOwner: HomeFocusRestoreOwner,
     firstItemFocusRequester: FocusRequester? = null,
     rowFocusTarget: HomeRowFocusTarget? = null,
 ) {
@@ -4187,16 +4531,20 @@ private fun HomeLastChannelSection(
     }
     LaunchedEffect(remembered.rowKey, remembered.itemKey, entry.key, homeModelIsCurrent) {
         if (!homeModelIsCurrent || remembered.rowKey != rowKey) return@LaunchedEffect
+        fun restoreNoLongerOwned(): Boolean =
+            !homeRestoreOwner.canRestoreRow(
+                remembered = remembered,
+                current = navigationMemory.position(MainDestination.HOME),
+                railFocusBaseline = homeReturnRailBaseline,
+                currentRailFocusRevision = currentRailFocusRevision,
+            )
+        if (restoreNoLongerOwned()) return@LaunchedEffect
         withFrameNanos { }
-        if (
-            navigationMemory.position(MainDestination.HOME) != remembered ||
-            railFocusRevision != homeReturnRailBaseline
-        ) {
-            return@LaunchedEffect
-        }
+        if (restoreNoLongerOwned()) return@LaunchedEffect
         if (runCatching { rowRequester.requestFocus() }.getOrDefault(false)) {
             firstCardFocused = true
             navigationMemory.save(MainDestination.HOME, entry.key, 0, rowKey, rowIndex)
+            homeRestoreOwner.onRestored()
         }
     }
     Column {
@@ -4214,6 +4562,9 @@ private fun HomeLastChannelSection(
                 onFocused = {
                     firstCardFocused = true
                     navigationMemory.save(MainDestination.HOME, entry.key, 0, rowKey, rowIndex)
+                    homeRestoreOwner.onContentFocused(
+                        navigationMemory.position(MainDestination.HOME),
+                    )
                 },
             )
         }
@@ -4359,7 +4710,7 @@ internal fun PosterCatalogScreen(
     val continueWatching = model?.continueWatching.orEmpty()
     val showingContinue = state.selectedCategoryId == CONTINUE_CATEGORY_ID
     val resultCount = if (showingContinue) continueWatching.size else visible.size
-    val catalogErrorMessage = state.errorMessage
+    val catalogErrorMessage = state.catalogFailures[type]?.message ?: state.errorMessage
     val moviesNetworkUsable by rememberUsableNetworkState()
     val moviesError = categoryManagement && catalogErrorMessage != null
     val moviesOfflineError = moviesError && !moviesNetworkUsable
@@ -4603,6 +4954,7 @@ internal fun PosterCatalogScreen(
                     onRetry = onRefresh,
                     isTv = isTv,
                     networkFailure = moviesOfflineError,
+                    showRetry = state.catalogFailures[type]?.retryable ?: state.errorRetryable,
                     retryRequester = noticeRetryRequester,
                     onRetryFocusChanged = { noticeRetryFocused = it },
                     onRetryUp = { runCatching { refreshRequester.requestFocus() }.getOrDefault(false) },
@@ -4630,6 +4982,7 @@ internal fun PosterCatalogScreen(
                     title = moviesErrorCopy.title,
                     body = moviesErrorCopy.body,
                     networkFailure = moviesOfflineError,
+                    showRetry = state.catalogFailures[type]?.retryable ?: state.errorRetryable,
                 )
             } else if (model == null) {
                 LoadingRing(label = "جاري تجهيز $title…", modifier = Modifier.align(Alignment.Center))
@@ -4668,6 +5021,7 @@ internal fun PosterCatalogScreen(
                     title = moviesErrorCopy.title,
                     body = moviesErrorCopy.body,
                     networkFailure = moviesOfflineError,
+                    showRetry = state.catalogFailures[type]?.retryable ?: state.errorRetryable,
                 )
                 } else {
                     EmptyState("لا توجد مشاهدة غير مكتملة في $title")
@@ -4682,6 +5036,7 @@ internal fun PosterCatalogScreen(
                     title = moviesErrorCopy.title,
                     body = moviesErrorCopy.body,
                     networkFailure = moviesOfflineError,
+                    showRetry = state.catalogFailures[type]?.retryable ?: state.errorRetryable,
                 )
                 } else {
                     EmptyState("لا توجد نتائج مطابقة")
@@ -4854,6 +5209,33 @@ internal fun liveRemovalRevealDelta(
 
 internal data class LiveCatalogErrorCopy(val title: String, val body: String)
 
+internal fun retryableCatalogFailureTypes(
+    failures: Map<ContentType, CatalogFailure>,
+): Set<ContentType> = failures.filterValues(CatalogFailure::retryable).keys
+
+internal fun catalogFailureLabel(type: ContentType): String = when (type) {
+    ContentType.MOVIE -> "الافلام"
+    ContentType.SERIES -> "المسلسلات"
+    ContentType.LIVE -> "البث المباشر"
+}
+
+/**
+ * One scoped Home notice for failed background catalogs while healthy content stays visible.
+ * Genuine per-type messages are retained; no failure is silently converted to success.
+ */
+internal fun scopedCatalogFailureCopy(
+    failures: Map<ContentType, CatalogFailure>,
+): MoviesErrorCopy? {
+    if (failures.isEmpty()) return null
+    val body = failures.entries.joinToString(separator = "\n") { (type, failure) ->
+        "${catalogFailureLabel(type)}: ${failure.message}"
+    }
+    return MoviesErrorCopy(
+        title = "تعذر تحديث بعض المحتوى",
+        body = body,
+    )
+}
+
 /**
  * Live catalog error copy: validated connectivity selects the offline wording, otherwise a truthful
  * Live load failure keeps the real server message in the same accepted dark/gold/ivory notice.
@@ -4892,12 +5274,33 @@ private fun LiveCatalogScreen(
     val catalog = state.catalogs[ContentType.LIVE]
     // The explicit snapshot is the observed favorite revision for both membership and hearts;
     // the opaque view-model callback is not a Compose state read in this subtree.
-    val visible = remember(catalog, state.selectedCategoryId, state.searchQuery, favorites.persisted) {
-        catalog?.items.orEmpty().filter { item ->
-            categoryMatches(item, state.selectedCategoryId, favorites::contains) &&
-                item.matchesSearch(state.searchQuery)
-        }
+    val projectionInput = remember(
+        catalog,
+        state.selectedCategoryId,
+        state.searchQuery,
+        favorites.persisted,
+        favorites.optimistic,
+    ) {
+        LiveCatalogProjectionInput(
+            catalog = catalog,
+            categoryId = state.selectedCategoryId,
+            query = state.searchQuery,
+            favorites = favorites,
+        )
     }
+    val cachedProjection = remember(projectionInput) {
+        navigationMemory.cachedLiveProjection(projectionInput)
+    }
+    val exactProjection by produceState<LiveCatalogProjectionResult?>(
+        initialValue = cachedProjection,
+        key1 = projectionInput,
+    ) {
+        value = navigationMemory.liveProjection(projectionInput)
+    }
+    val exactVisible = exactProjection?.exactItemsFor(projectionInput)
+    // Display continuity may retain the previous same-catalog list, but focus/preview/request
+    // completion below requires exactVisible for the current category/query/favorite input.
+    val visible = exactVisible ?: navigationMemory.lastGoodLiveProjection(catalog).orEmpty()
     var showCategoryManager by remember { mutableStateOf(false) }
     var restoreManagerEntryFocus by remember { mutableStateOf(false) }
     // One shared committed order + hidden owner for the strip, the manager and the browser. The
@@ -4968,9 +5371,11 @@ private fun LiveCatalogScreen(
     // server error, rendered by the shared MoviesErrorNotice family with the actual Live refresh
     // callback. Cached channels, category, item and scroll identity stay intact.
     val liveNetworkUsable by rememberUsableNetworkState()
-    val liveError = state.errorMessage != null
+    val liveFailure = state.catalogFailures[ContentType.LIVE]
+    val liveErrorMessage = liveFailure?.message ?: state.errorMessage
+    val liveError = liveErrorMessage != null
     val liveOfflineError = liveError && !liveNetworkUsable
-    val liveErrorCopy = liveCatalogErrorCopy(offline = liveOfflineError, serverMessage = state.errorMessage)
+    val liveErrorCopy = liveCatalogErrorCopy(offline = liveOfflineError, serverMessage = liveErrorMessage)
     val noticeRetryRequester = remember { FocusRequester() }
     val refreshRequester = remember { FocusRequester() }
     var noticeRetryFocused by remember { mutableStateOf(false) }
@@ -4986,16 +5391,14 @@ private fun LiveCatalogScreen(
     }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
     val focusedChannelIndex = remember(visible) { intArrayOf(rememberedIndex) }
-    var nextCategoryContentFocusRequestId by remember { mutableLongStateOf(0L) }
-    var categoryContentFocusRequest by remember { mutableStateOf<CategoryContentFocusRequest?>(null) }
+    val liveFocusOwner = remember { LiveFocusRequestOwner() }
     val selectCategoryAndEnterContent: (String?) -> Unit = { categoryId ->
         if (isTv) {
-            nextCategoryContentFocusRequestId += 1L
             val categoryChanged = state.selectedCategoryId != categoryId
-            categoryContentFocusRequest = CategoryContentFocusRequest(
+            liveFocusOwner.requestCategory(
                 categoryId = categoryId,
-                requestId = nextCategoryContentFocusRequestId,
                 focusFirstItem = categoryChanged,
+                activatingChipFocused = categoryFocusRestoreController.focusedCategoryId == categoryId,
             )
             if (categoryChanged) {
                 navigationMemory.save(MainDestination.LIVE, itemKey = "", itemIndex = 0)
@@ -5004,6 +5407,9 @@ private fun LiveCatalogScreen(
         } else {
             onSelectCategory(categoryId)
         }
+    }
+    LaunchedEffect(categoryFocusRestoreController.focusedCategoryId, liveFocusOwner.categoryRequest) {
+        liveFocusOwner.onCategoryFocusChanged(categoryFocusRestoreController.focusedCategoryId)
     }
     val adaptiveUi = LocalAdaptiveUi.current
     val tvSafeInsets = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
@@ -5040,24 +5446,29 @@ private fun LiveCatalogScreen(
         remembered.itemKey
     }
     LaunchedEffect(
-        visible,
+        exactProjection,
         state.selectedCategoryId,
         state.searchQuery,
-        categoryContentFocusRequest,
+        liveFocusOwner.categoryRequest,
+        liveFocusOwner.focusRestorationPending,
     ) {
+        val exact = exactVisible ?: return@LaunchedEffect
+        val exactRememberedIndex = remembered.itemIndex.coerceIn(
+            0,
+            exact.lastIndex.coerceAtLeast(0),
+        )
         previewState.value = resolveLivePreview(
             current = previewState.value,
-            visible = visible,
+            visible = exact,
             rememberedItemKey = remembered.itemKey,
-            rememberedIndex = rememberedIndex,
+            rememberedIndex = exactRememberedIndex,
         )
-        val categoryRequest = categoryContentFocusRequest
-            ?.takeIf { it.categoryId == state.selectedCategoryId }
         val handoff = activeLiveFavoriteMutation
         val handoffApplied = handoff != null &&
-            visible.none { liveChannelKey(it) == handoff.removedKey }
+            exact.none { liveChannelKey(it) == handoff.removedKey }
         if (handoffApplied) {
-            if (visible.isEmpty()) {
+            liveFocusOwner.cancelForUserDeparture()
+            if (exact.isEmpty()) {
                 navigationMemory.save(MainDestination.LIVE, itemKey = "", itemIndex = 0)
                 liveFavoriteMutation = liveFavoriteMutation.clear()
                 withFrameNanos { }
@@ -5068,7 +5479,7 @@ private fun LiveCatalogScreen(
             // already claimed the shell gesture guard and is the only path that takes list focus.
             if (handoff?.origin == LiveFavoriteMutationOrigin.PREVIEW) {
                 previewState.value?.let { fallback ->
-                    val fallbackIndex = visible.indexOfFirst { it.id == fallback.id }
+                    val fallbackIndex = exact.indexOfFirst { it.id == fallback.id }
                     if (fallbackIndex >= 0) {
                         navigationMemory.save(
                             MainDestination.LIVE,
@@ -5081,9 +5492,9 @@ private fun LiveCatalogScreen(
                 return@LaunchedEffect
             }
             if (handoff?.origin == LiveFavoriteMutationOrigin.ROW) {
-                val targetIndex = removalFallbackIndex ?: rememberedIndex
-                if (targetIndex in visible.indices) {
-                    val targetKey = liveChannelKey(visible[targetIndex])
+                val targetIndex = removalFallbackIndex ?: exactRememberedIndex
+                if (targetIndex in exact.indices) {
+                    val targetKey = liveChannelKey(exact[targetIndex])
                     navigationMemory.save(MainDestination.LIVE, targetKey, targetIndex)
                     val layout = listState.layoutInfo
                     val targetInfo = layout.visibleItemsInfo.firstOrNull { it.index == targetIndex }
@@ -5117,7 +5528,8 @@ private fun LiveCatalogScreen(
         // A pending preview removal keeps the button focus. A row intent that has not yet been
         // observed must not replay a list restoration from the disappearing key.
         if (handoff != null && !handoffApplied) {
-            if (visible.isEmpty()) {
+            liveFocusOwner.cancelForUserDeparture()
+            if (exact.isEmpty()) {
                 navigationMemory.save(MainDestination.LIVE, itemKey = "", itemIndex = 0)
                 liveFavoriteMutation = liveFavoriteMutation.clear()
                 withFrameNanos { }
@@ -5125,33 +5537,59 @@ private fun LiveCatalogScreen(
             }
             return@LaunchedEffect
         }
-        if (visible.isEmpty()) {
-            return@LaunchedEffect
-        }
-        if (categoryRequest != null && visible.isEmpty()) {
-            if (
-                ContentType.LIVE !in state.loadingTypes &&
-                categoryContentFocusRequest?.requestId == categoryRequest.requestId
-            ) {
-                categoryContentFocusRequest = null
-            }
-            return@LaunchedEffect
-        }
-        val targetIndex = when {
-            categoryRequest?.focusFirstItem == true && visible.isNotEmpty() -> 0
-            categoryRequest != null && visible.isNotEmpty() -> rememberedIndex
-            state.searchQuery.isBlank() && remembered.itemKey.isNotBlank() && visible.isNotEmpty() -> rememberedIndex
-            else -> null
-        }
-        if (targetIndex != null) {
-            listState.scrollToItem(targetIndex)
-            snapshotFlow { listState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex } }
-                .first { it }
+        if (exact.isEmpty()) return@LaunchedEffect
+
+        val attemptToken = liveFocusOwner.attemptToken()
+        val decision = decideLiveFocusDecision(
+            exactAvailable = true,
+            exactItemCount = exact.size,
+            categoryRequest = liveFocusOwner.categoryRequest,
+            selectedCategoryId = state.selectedCategoryId,
+            searchQuery = state.searchQuery,
+            rememberedItemKey = remembered.itemKey,
+            rememberedIndex = remembered.itemIndex,
+            liveLoading = ContentType.LIVE in state.loadingTypes,
+            restorationPending = liveFocusOwner.focusRestorationPending,
+            categoryBarFocused = categoryFocusRestoreController.focusedCategoryId != null,
+        )
+        if (decision is LiveFocusDecision.Focus) {
+            listState.scrollToItem(decision.index)
+            snapshotFlow {
+                listState.layoutInfo.visibleItemsInfo.any { it.index == decision.index }
+            }.first { it }
+            if (!liveFocusOwner.isCurrent(attemptToken)) return@LaunchedEffect
             withFrameNanos { }
+            if (!liveFocusOwner.isCurrent(attemptToken)) return@LaunchedEffect
             val focused = runCatching { channelRequester.requestFocus() }.getOrDefault(false)
-            if (focused && categoryRequest != null && categoryContentFocusRequest?.requestId == categoryRequest.requestId) {
-                categoryContentFocusRequest = null
-            }
+            liveFocusOwner.completeFocus(attemptToken, decision.requestId, focused)
+        }
+    }
+    // Loading changes alone may complete an exact-empty category request, but this effect never
+    // scrolls or requests channel focus.
+    LaunchedEffect(
+        exactProjection,
+        state.selectedCategoryId,
+        state.searchQuery,
+        state.loadingTypes,
+        liveFocusOwner.categoryRequest,
+        liveFocusOwner.focusRestorationPending,
+    ) {
+        val exact = exactVisible ?: return@LaunchedEffect
+        if (exact.isNotEmpty()) return@LaunchedEffect
+        val decision = decideLiveFocusDecision(
+            exactAvailable = true,
+            exactItemCount = 0,
+            categoryRequest = liveFocusOwner.categoryRequest,
+            selectedCategoryId = state.selectedCategoryId,
+            searchQuery = state.searchQuery,
+            rememberedItemKey = remembered.itemKey,
+            rememberedIndex = remembered.itemIndex,
+            liveLoading = ContentType.LIVE in state.loadingTypes,
+            restorationPending = liveFocusOwner.focusRestorationPending,
+            categoryBarFocused = categoryFocusRestoreController.focusedCategoryId != null,
+        )
+        if (decision is LiveFocusDecision.CompleteRequest) {
+            liveFocusOwner.completeEmptyRequest(decision.requestId)
         }
     }
     LaunchedEffect(state.selectedCategoryId, hiddenCategoryIds) {
@@ -5162,6 +5600,7 @@ private fun LiveCatalogScreen(
             selected != LIVE_TV_PRO_MAIN_RECENT_CATEGORY &&
             selected in hiddenCategoryIds
         if (hiddenSelected) {
+            liveFocusOwner.cancelForUserDeparture()
             navigationMemory.save(MainDestination.LIVE, itemKey = "", itemIndex = 0)
             onSelectCategory(null)
         }
@@ -5174,7 +5613,23 @@ private fun LiveCatalogScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(colors.background)) {
+    // Any focus leaving the Live screen is a deliberate departure, including the navigation
+    // rail. The first focus gain is required so initial composition on another surface cannot
+    // consume entry restoration before it starts.
+    var liveContentHadFocus by remember { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .onFocusChanged { focusState ->
+                if (focusState.hasFocus) {
+                    liveContentHadFocus = true
+                } else if (liveContentHadFocus) {
+                    liveContentHadFocus = false
+                    liveFocusOwner.cancelForUserDeparture()
+                }
+            },
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -5198,6 +5653,7 @@ private fun LiveCatalogScreen(
                 isTv = isTv,
                 onMoveToCategories = categoryFocusRestoreController::requestFromSource,
                 onManageCategories = {
+                    liveFocusOwner.cancelForUserDeparture()
                     managerScope = context.liveCategoryStateScope()
                     restoreManagerEntryFocus = true
                     showCategoryManager = true
@@ -5208,6 +5664,7 @@ private fun LiveCatalogScreen(
                 countUnit = "قناة",
                 refreshRequester = refreshRequester,
                 downOverrideRequester = noticeRetryRequester.takeIf { liveError && catalog != null },
+                onUserFocus = liveFocusOwner::cancelForUserDeparture,
             )
             if (liveError && catalog != null) {
                 Spacer(Modifier.height(9.dp))
@@ -5217,8 +5674,12 @@ private fun LiveCatalogScreen(
                     onRetry = onRefresh,
                     isTv = isTv,
                     networkFailure = liveOfflineError,
+                    showRetry = liveFailure?.retryable ?: state.errorRetryable,
                     retryRequester = noticeRetryRequester,
-                    onRetryFocusChanged = { noticeRetryFocused = it },
+                    onRetryFocusChanged = {
+                        noticeRetryFocused = it
+                        if (it) liveFocusOwner.cancelForUserDeparture()
+                    },
                     onRetryUp = { runCatching { refreshRequester.requestFocus() }.getOrDefault(false) },
                     onRetryDown = { categoryFocusRestoreController.requestFromSource() },
                 )
@@ -5246,6 +5707,7 @@ private fun LiveCatalogScreen(
                 title = liveErrorCopy.title,
                 body = liveErrorCopy.body,
                 networkFailure = liveOfflineError,
+                showRetry = liveFailure?.retryable ?: state.errorRetryable,
             )
         } else if (visible.isEmpty()) {
             EmptyState("لا توجد قنوات مطابقة")
@@ -5294,6 +5756,7 @@ private fun LiveCatalogScreen(
                                     item = channel,
                                     selected = selected,
                                     onFocused = {
+                                        liveFocusOwner.cancelForUserDeparture()
                                         focusedChannelIndex[0] = index
                                         previewState.value = channel
                                         navigationMemory.save(MainDestination.LIVE, key, index)
@@ -5361,6 +5824,7 @@ private fun LiveCatalogScreen(
                                 onToggleFavorite(channel)
                             }
                         },
+                        onUserFocus = liveFocusOwner::cancelForUserDeparture,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -5371,7 +5835,10 @@ private fun LiveCatalogScreen(
                     ChannelListItem(
                         item = channel,
                         selected = false,
-                        onFocused = { navigationMemory.save(MainDestination.LIVE, "${channel.type}:${channel.id}", index) },
+                        onFocused = {
+                            liveFocusOwner.cancelForUserDeparture()
+                            navigationMemory.save(MainDestination.LIVE, "${channel.type}:${channel.id}", index)
+                        },
                         onClick = { onOpen(channel) },
                         isFavorite = favorites.contains(channel),
                         onLongClick = {
@@ -5413,6 +5880,7 @@ private fun LivePreviewStage(
     favoriteRequester: FocusRequester,
     onOpen: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
+    onUserFocus: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val preview = previewState.value
@@ -5424,6 +5892,7 @@ private fun LivePreviewStage(
         favoriteRequester = favoriteRequester,
         onWatch = { previewState.value?.let(onOpen) },
         onToggleFavorite = { previewState.value?.let(onToggleFavorite) },
+        onUserFocus = onUserFocus,
         modifier = modifier,
     )
 }
@@ -5437,10 +5906,14 @@ private fun LiveStage(
     favoriteRequester: FocusRequester,
     onWatch: () -> Unit,
     onToggleFavorite: () -> Unit,
+    onUserFocus: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(15.dp)) {
+    Column(
+        modifier = modifier.onFocusChanged { if (it.hasFocus) onUserFocus() },
+        verticalArrangement = Arrangement.spacedBy(15.dp),
+    ) {
         Box(
             modifier = Modifier.fillMaxWidth().weight(1f)
                 .padding(end = TV_PAGE_GUTTER)
@@ -5650,6 +6123,7 @@ private fun FavoritesScreen(
     onToggleFavorite: (ContentItem) -> Unit,
     onFavoritesRemovalStarted: () -> Unit,
     onRefresh: () -> Unit,
+    onRetryCatalog: (ContentType) -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -5665,11 +6139,22 @@ private fun FavoritesScreen(
     var activeFilter by remember(navigationMemory) {
         mutableStateOf(favoritesTypeFilterFromMemoryKey(remembered.rowKey))
     }
-    val allContent = remember(state.catalogs, state.favorites) {
-        favoriteCatalogProjection(state.catalogs.values, isFavorite)
+    val projectionInput = remember(state.catalogs, state.favorites) {
+        FavoriteCatalogProjectionInput(state.catalogs, state.favorites)
     }
+    val cachedProjection = remember(projectionInput) {
+        navigationMemory.cachedFavoriteProjection(projectionInput)
+    }
+    val allContentState by produceState<List<ContentItem>?>(
+        initialValue = cachedProjection ?: navigationMemory.lastGoodFavoriteProjection(state.catalogs),
+        key1 = projectionInput,
+    ) {
+        value = navigationMemory.favoriteProjection(projectionInput)
+    }
+    val allContent = allContentState
+    val favoritesReady = allContent != null
     val content = remember(allContent, activeFilter) {
-        filterFavoritesByType(allContent, activeFilter)
+        allContent?.let { filterFavoritesByType(it, activeFilter) }.orEmpty()
     }
     val contentKeys = remember(content) { content.map { "${it.type}:${it.id}" } }
     val contentKeyIndex = remember(contentKeys) { indexContentKeys(contentKeys) }
@@ -5677,8 +6162,19 @@ private fun FavoritesScreen(
         FavoritesTypeFilter.entries.associateWith { FocusRequester() }
     }
     val networkUsable by rememberUsableNetworkState()
-    val errorMessage = state.errorMessage
+    val errorMessage = state.catalogFailures.values.firstOrNull()?.message ?: state.errorMessage
     val offline = errorMessage != null && !networkUsable
+    val retryableFavoritesFailures = retryableCatalogFailureTypes(state.catalogFailures)
+    val favoritesRetryAction: () -> Unit = if (retryableFavoritesFailures.isNotEmpty()) {
+        { retryableFavoritesFailures.forEach(onRetryCatalog) }
+    } else {
+        onRefresh
+    }
+    val favoritesRetryable = if (state.catalogFailures.isNotEmpty()) {
+        retryableFavoritesFailures.isNotEmpty()
+    } else {
+        state.errorRetryable
+    }
     val resolving = state.loadingTypes.isNotEmpty()
     val errorCopy = if (offline) {
         MoviesErrorCopy(
@@ -5695,7 +6191,8 @@ private fun FavoritesScreen(
     // surviving card: focus returns to the always-attached type selector, which stays composed
     // through the content change (no readiness guess is needed for a control that never detaches).
     var previouslyHadContent by remember(navigationMemory) { mutableStateOf(content.isNotEmpty()) }
-    LaunchedEffect(content.isNotEmpty(), activeFilter) {
+    LaunchedEffect(favoritesReady, content.isNotEmpty(), activeFilter) {
+        if (!favoritesReady) return@LaunchedEffect
         val hasContent = content.isNotEmpty()
         if (previouslyHadContent && !hasContent) {
             withFrameNanos { }
@@ -5766,15 +6263,16 @@ private fun FavoritesScreen(
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
-                content.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
+                favoritesReady && content.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
                     // Cached cards stay usable on a recoverable failure; one bounded notice only.
                     if (errorMessage != null) {
                         MoviesErrorNotice(
                             title = errorCopy.title,
                             body = errorCopy.body,
-                            onRetry = onRefresh,
+                            onRetry = favoritesRetryAction,
                             isTv = isTv,
                             networkFailure = offline,
+                            showRetry = favoritesRetryable,
                         )
                     }
                     TvCatalogGrid(
@@ -5791,12 +6289,12 @@ private fun FavoritesScreen(
                         onFavoritesRemovalStarted = onFavoritesRemovalStarted,
                     )
                 }
-                resolving -> LoadingRing(
+                !favoritesReady || resolving -> LoadingRing(
                     label = "جاري تجهيز المفضلة",
                     modifier = Modifier.align(Alignment.Center),
                 )
                 errorMessage != null -> MoviesOfflineEmptyState(
-                    onRetry = onRefresh,
+                    onRetry = favoritesRetryAction,
                     modifier = Modifier.align(Alignment.Center),
                     title = if (offline) {
                         "لا يوجد اتصال بالانترنت ، تحقق من اتصالك وحاول مرة اخرى"
@@ -5805,8 +6303,9 @@ private fun FavoritesScreen(
                     },
                     body = null,
                     networkFailure = offline,
+                    showRetry = favoritesRetryable,
                 )
-                allContent.isEmpty() -> FavoritesEmptyState("لم تضف اي محتوى الى المفضلة بعد")
+                allContent?.isEmpty() == true -> FavoritesEmptyState("لم تضف اي محتوى الى المفضلة بعد")
                 else -> FavoritesFilteredEmptyState(favoritesTypeEmptyMessage(activeFilter))
             }
         }
@@ -8117,9 +8616,20 @@ private fun CatalogHeader(
     toolbarIconTint: Color? = null,
     refreshRequester: FocusRequester? = null,
     downOverrideRequester: FocusRequester? = null,
+    onUserFocus: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
-    Column(Modifier.fillMaxWidth()) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .then(
+                if (onUserFocus == null) {
+                    Modifier
+                } else {
+                    Modifier.onFocusChanged { if (it.hasFocus) onUserFocus() }
+                },
+            ),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -9389,12 +9899,17 @@ private fun EmptyState(message: String) {
 internal fun newest(content: List<ContentItem>): List<ContentItem> =
     content.sortedByDescending { it.addedAtEpochSeconds ?: 0L }
 
-internal fun ContentItem.matchesSearch(rawQuery: String): Boolean {
-    val query = rawQuery.trim()
-    if (query.isBlank()) return true
-    return sequenceOf(name, year, genre, plot, nowPlaying)
-        .filterNotNull()
-        .any { value -> value.contains(query, ignoreCase = true) }
+internal fun ContentItem.matchesSearch(rawQuery: String): Boolean =
+    matchesSearchNormalized(rawQuery.trim())
+
+/** Allocation-free matcher for callers that already trimmed the query. */
+internal fun ContentItem.matchesSearchNormalized(query: String): Boolean {
+    if (query.isEmpty()) return true
+    return name.contains(query, ignoreCase = true) ||
+        year?.contains(query, ignoreCase = true) == true ||
+        genre?.contains(query, ignoreCase = true) == true ||
+        plot?.contains(query, ignoreCase = true) == true ||
+        nowPlaying?.contains(query, ignoreCase = true) == true
 }
 
 internal fun HistoryEntry.isResumable(): Boolean =

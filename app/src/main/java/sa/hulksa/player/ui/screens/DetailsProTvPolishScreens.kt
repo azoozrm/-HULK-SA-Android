@@ -72,6 +72,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.data.SeriesCardMetadataStore
+import sa.hulksa.player.hulkPerfLog
 import sa.hulksa.player.model.ContentDetails
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
@@ -269,6 +270,11 @@ private fun MovieDetailsProTvPolished(
         serverMessage = errorMessage,
     )
     val playRequester = remember(item.id) { FocusRequester() }
+    var watchActionPlaced by remember(item.id) { mutableStateOf(false) }
+    var initialFocusPending by remember(item.id) { mutableStateOf(true) }
+    LaunchedEffect(item.id) {
+        hulkPerfLog { "detailsScreen type=MOVIE id=${item.id} composed" }
+    }
     val favoriteRequester = remember(item.id) { FocusRequester() }
     val downloadRequester = remember(item.id) { FocusRequester() }
     val backRequester = remember(item.id) { FocusRequester() }
@@ -283,6 +289,7 @@ private fun MovieDetailsProTvPolished(
     var tabRevealTarget by remember(item.id) { mutableStateOf<MovieDetailsTab?>(null) }
     var tabRevealRequestId by remember(item.id) { mutableIntStateOf(0) }
     val selectTab: (MovieDetailsTab) -> Unit = { tab ->
+        initialFocusPending = false
         selectedTab = tab
         if (tab == MovieDetailsTab.INFORMATION || tab == MovieDetailsTab.RELATED) {
             tabRevealTarget = tab
@@ -425,9 +432,33 @@ private fun MovieDetailsProTvPolished(
         }
     }
 
-    LaunchedEffect(item.id) {
-        delay(DETAILS_TV_POLISH_FOCUS_DELAY_MS)
-        runCatching { playRequester.requestFocus() }
+    LaunchedEffect(initialFocusPending, watchActionPlaced, item.id, errorMessage) {
+        val action = detailsInitialFocusAction(
+            isSeries = false,
+            targetEpisodePresent = false,
+            playActionAttached = watchActionPlaced,
+            currentEpisodePresent = true,
+            initialFocusPending = initialFocusPending,
+            errorPresent = errorMessage != null,
+        )
+        if (action != DetailsInitialFocusAction.REQUEST_PLAY) {
+            // A blocking error owns the screen. Once the owner moves to its Retry/other action,
+            // a later error clear must not re-grant the primary action over that deliberate focus.
+            if (errorMessage != null) initialFocusPending = false
+            return@LaunchedEffect
+        }
+        withFrameNanos { }
+        if (!initialFocusPending) return@LaunchedEffect
+        val granted = runCatching { playRequester.requestFocus() }.getOrDefault(false)
+        var finalGranted = granted
+        if (!granted) {
+            withFrameNanos { }
+            if (initialFocusPending) {
+                finalGranted = runCatching { playRequester.requestFocus() }.getOrDefault(false)
+            }
+        }
+        hulkPerfLog { "detailsInitialFocus type=MOVIE id=${item.id} granted=$finalGranted" }
+        initialFocusPending = false
     }
 
     LazyColumn(
@@ -472,6 +503,11 @@ private fun MovieDetailsProTvPolished(
                         primary = false,
                         outlined = true,
                         compact = true,
+                        onFocused = {
+                            // Deliberate Back focus cancels the pending primary-action grant;
+                            // late episode data must never pull focus away from Back.
+                            initialFocusPending = false
+                        },
                         modifier = Modifier
                             .focusRequester(backRequester)
                             .focusProperties {
@@ -550,7 +586,16 @@ private fun MovieDetailsProTvPolished(
                         } else {
                             tabRequesters.getValue(MovieDetailsTab.STORY)
                         },
-                        onActionFocused = { heroReturnRequester = it },
+                        onActionFocused = {
+                            heroReturnRequester = it
+                            if (initialFocusPending && it != playRequester) {
+                                initialFocusPending = false
+                            }
+                        },
+                        onWatchActionPlaced = {
+                            watchActionPlaced = true
+                            hulkPerfLog { "detailsWatchPlaced type=MOVIE id=${item.id}" }
+                        },
                         onPlay = onPlay,
                         onToggleFavorite = onToggleFavorite,
                         onDownload = onDownload,
@@ -687,6 +732,7 @@ fun SeriesDetailsProPolishedScreen(
     details: ContentDetails?,
     episodes: List<Episode>,
     isLoading: Boolean,
+    detailsFetchInFlight: Boolean,
     errorMessage: String?,
     isTv: Boolean,
     isFavorite: Boolean,
@@ -745,6 +791,7 @@ fun SeriesDetailsProPolishedScreen(
         details = details,
         episodes = episodes,
         isLoading = isLoading,
+        detailsFetchInFlight = detailsFetchInFlight,
         errorMessage = errorMessage,
         isFavorite = isFavorite,
         notificationsEnabled = notificationsEnabled,
@@ -775,6 +822,7 @@ private fun SeriesDetailsProTvPolished(
     details: ContentDetails?,
     episodes: List<Episode>,
     isLoading: Boolean,
+    detailsFetchInFlight: Boolean,
     errorMessage: String?,
     isFavorite: Boolean,
     notificationsEnabled: Boolean,
@@ -805,7 +853,17 @@ private fun SeriesDetailsProTvPolished(
     var technical by remember(series.id, metadataOwner) {
         mutableStateOf(metadataStore.cached(metadataOwner, series.id))
     }
-    LaunchedEffect(series.id, metadataOwner, metadataStore) {
+    LaunchedEffect(
+        series.id,
+        metadataOwner,
+        metadataStore,
+        detailsFetchInFlight,
+        errorMessage,
+    ) {
+        // Do not race seriesBundle with a second get_series_info request. The immediate shell sets
+        // isLoading=false, so defer on the raw remote-details flag; metadata may enrich the header
+        // afterwards from cache/network.
+        if (detailsFetchInFlight || errorMessage != null) return@LaunchedEffect
         val owner = metadataOwner ?: return@LaunchedEffect
         val loaded = metadataStore.metadata(owner, series.id)
         metadataStore.publishIfCurrent(owner) { technical = loaded }
@@ -863,6 +921,11 @@ private fun SeriesDetailsProTvPolished(
 
     val backRequester = remember(series.id) { FocusRequester() }
     val playRequester = remember(series.id) { FocusRequester() }
+    var watchActionPlaced by remember(series.id) { mutableStateOf(false) }
+    var initialFocusPending by remember(series.id) { mutableStateOf(true) }
+    LaunchedEffect(series.id) {
+        hulkPerfLog { "detailsScreen type=SERIES id=${series.id} composed" }
+    }
     val favoriteRequester = remember(series.id) { FocusRequester() }
     val notificationRequester = remember(series.id) { FocusRequester() }
     val detailsErrorRetryRequester = remember(series.id) { FocusRequester() }
@@ -904,6 +967,7 @@ private fun SeriesDetailsProTvPolished(
     var tabRevealTarget by remember(series.id) { mutableStateOf<SeriesDetailsTab?>(null) }
     var tabRevealRequestId by remember(series.id) { mutableIntStateOf(0) }
     val selectTab: (SeriesDetailsTab) -> Unit = { tab ->
+        initialFocusPending = false
         selectedTab = tab
         focusRestoration.invalidate()
         if (seriesDetailsTabSelectionNeedsReveal(tab)) {
@@ -1091,11 +1155,38 @@ private fun SeriesDetailsProTvPolished(
         }
     }
 
-    LaunchedEffect(series.id, targetEpisode?.id) {
-        if (targetEpisode == null) {
-            delay(DETAILS_TV_POLISH_FOCUS_DELAY_MS)
-            if (currentEpisode != null) runCatching { playRequester.requestFocus() }
+    LaunchedEffect(
+        initialFocusPending,
+        watchActionPlaced,
+        currentEpisode?.id,
+        targetEpisode?.id,
+        errorMessage,
+        series.id,
+    ) {
+        val action = detailsInitialFocusAction(
+            isSeries = true,
+            targetEpisodePresent = targetEpisode != null,
+            playActionAttached = watchActionPlaced,
+            currentEpisodePresent = currentEpisode != null,
+            initialFocusPending = initialFocusPending,
+            errorPresent = errorMessage != null,
+        )
+        if (action != DetailsInitialFocusAction.REQUEST_PLAY) {
+            if (targetEpisode != null || errorMessage != null) initialFocusPending = false
+            return@LaunchedEffect
         }
+        withFrameNanos { }
+        if (!initialFocusPending) return@LaunchedEffect
+        val granted = runCatching { playRequester.requestFocus() }.getOrDefault(false)
+        var finalGranted = granted
+        if (!granted) {
+            withFrameNanos { }
+            if (initialFocusPending) {
+                finalGranted = runCatching { playRequester.requestFocus() }.getOrDefault(false)
+            }
+        }
+        hulkPerfLog { "detailsInitialFocus type=SERIES id=${series.id} granted=$finalGranted" }
+        initialFocusPending = false
     }
     LaunchedEffect(targetEpisode?.id) {
         if (targetEpisode != null && selectedTab != SeriesDetailsTab.EPISODES) {
@@ -1320,6 +1411,11 @@ private fun SeriesDetailsProTvPolished(
                         primary = false,
                         outlined = true,
                         compact = true,
+                        onFocused = {
+                            // Deliberate Back focus cancels the pending primary-action grant;
+                            // late episode data must never pull focus away from Back.
+                            initialFocusPending = false
+                        },
                         modifier = Modifier
                             .focusRequester(backRequester)
                             .focusProperties {
@@ -1393,6 +1489,13 @@ private fun SeriesDetailsProTvPolished(
                         onActionFocused = {
                             heroReturnRequester = it
                             seriesDetailsNoteNewFocusOwner(focusRestoration)
+                            if (initialFocusPending && it != playRequester) {
+                                initialFocusPending = false
+                            }
+                        },
+                        onWatchActionPlaced = {
+                            watchActionPlaced = true
+                            hulkPerfLog { "detailsWatchPlaced type=SERIES id=${series.id}" }
                         },
                         onPlay = { currentEpisode?.let(onPlay) },
                         onToggleFavorite = onToggleFavorite,

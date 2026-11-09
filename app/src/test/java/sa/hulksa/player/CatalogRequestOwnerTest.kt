@@ -10,10 +10,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -43,6 +45,36 @@ class CatalogRequestOwnerTest {
         assertFalse(success.contains("clearCatalogMemory()"))
     }
 
+
+    @Test
+    fun `scoped catalog retry reloads only the failed type without touching healthy catalogs`() {
+        val source = File("src/main/java/sa/hulksa/player/HulkViewModel.kt").readText()
+        val retry = source
+            .substringAfter("fun retryCatalog(type: ContentType)")
+            .substringBefore("fun refresh()")
+        assertTrue(retry.contains("catalogRequestOwner.prioritize(type)"))
+        assertTrue(retry.contains("ensureCatalog(type, force = true)"))
+        assertFalse(retry.contains("types.forEach"))
+        assertFalse(retry.contains("ensureDestinationCatalogs"))
+    }
+
+    @Test
+    fun `destination selection and refresh mark the selected catalog foreground`() {
+        val source = File("src/main/java/sa/hulksa/player/HulkViewModel.kt").readText()
+        val selectDestination = source
+            .substringAfter("fun selectDestination(destination: MainDestination)")
+            .substringBefore("fun refreshProfileLibrary(")
+        assertTrue(selectDestination.contains("ensureDestinationCatalogs(destination, foreground = true)"))
+        val ensure = source
+            .substringAfter("private fun ensureDestinationCatalogs(")
+            .substringBefore("fun selectType(")
+        assertTrue(ensure.contains("catalogRequestOwner.prioritize(destination.catalogTypeOrNull())"))
+        val refresh = source
+            .substringAfter("fun refresh()")
+            .substringBefore("fun prefetchMovieCardMetadata(")
+        assertTrue(refresh.contains("catalogRequestOwner.prioritize(destination.catalogTypeOrNull())"))
+    }
+
     @Test
     fun `session replacement cancels old Home loads and publishes only the current session`() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -59,10 +91,10 @@ class CatalogRequestOwnerTest {
         val owner = CatalogRequestOwner(
             scope = scope,
             load = { session, type ->
-                calls += session to type
                 val gate = synchronized(gates) {
                     gates.getOrPut(sessionKey(session, type)) { CompletableDeferred() }
                 }
+                calls += session to type
                 try {
                     gate.await()
                 } catch (cancelled: CancellationException) {
@@ -82,29 +114,34 @@ class CatalogRequestOwnerTest {
         owner.request(session1, ContentType.MOVIE, force = false)
         owner.request(session1, ContentType.SERIES, force = false)
         owner.request(session1, ContentType.LIVE, force = false)
-        awaitUntil { calls.size == 3 && owner.loadingTypes() == HOME_TYPES }
+        awaitUntil { calls.size == 1 && owner.loadingTypes() == HOME_TYPES }
+        assertEquals(listOf(ContentType.MOVIE), calls.map { it.second })
         assertEquals(HOME_TYPES, owner.loadingTypes())
 
         currentSession = session2
         owner.replaceSession(session2, HOME_TYPES)
         awaitUntil {
-            calls.count { (session, _) -> session === session2 } == 3 &&
+            calls.count { (session, _) -> session === session2 } == 1 &&
                 owner.loadingTypes() == HOME_TYPES
         }
 
-        // Release the held cold-Home responses from the old session.
+        // The old active response arrives after ownership replacement; it must not publish.
         completeOldGate(gates, session1, ContentType.MOVIE, result(movie = 900))
-        completeOldGate(gates, session1, ContentType.SERIES, result(series = 901))
-        completeOldGate(gates, session1, ContentType.LIVE, result(live = 902))
-        awaitUntil { calls.count { (session, _) -> session === session1 } == 3 }
         delay(150L)
 
         assertTrue("obsolete results must not publish", loaded.isEmpty())
         assertEquals("new request loading must remain settled", HOME_TYPES, owner.loadingTypes())
         assertTrue("obsolete failures must stay silent", failures.isEmpty())
+        assertEquals(
+            "obsolete pending Series/Live must never start",
+            listOf(ContentType.MOVIE),
+            calls.filter { (session, _) -> session === session1 }.map { it.second },
+        )
 
         completeNewGate(gates, session2, ContentType.MOVIE, result(movie = 1))
+        awaitUntil { calls.count { (session, _) -> session === session2 } == 2 }
         completeNewGate(gates, session2, ContentType.SERIES, result(series = 2))
+        awaitUntil { calls.count { (session, _) -> session === session2 } == 3 }
         completeNewGate(gates, session2, ContentType.LIVE, result(live = 3))
 
         awaitUntil { loaded.size == 3 && owner.loadingTypes().isEmpty() }
@@ -112,7 +149,7 @@ class CatalogRequestOwnerTest {
         assertEquals(1, loaded.getValue(ContentType.MOVIE).full.items.single().id)
         assertEquals(2, loaded.getValue(ContentType.SERIES).full.items.single().id)
         assertTrue(owner.loadingTypes().isEmpty())
-        assertEquals(6, calls.size)
+        assertEquals(4, calls.size)
         scope.cancel()
     }
 
@@ -208,6 +245,107 @@ class CatalogRequestOwnerTest {
         awaitUntil { loadedLive === published && owner.loadingTypes().isEmpty() }
         assertTrue(failures.isEmpty())
         assertSame(published, loadedLive)
+        scope.cancel()
+    }
+
+    @Test
+    fun `next restore type follows the latest foreground selection`() {
+        val pending = linkedSetOf(ContentType.MOVIE, ContentType.SERIES, ContentType.LIVE)
+
+        assertEquals(ContentType.LIVE, nextCatalogRestoreType(ContentType.LIVE, pending))
+        assertEquals(ContentType.MOVIE, nextCatalogRestoreType(null, pending))
+        assertEquals(ContentType.MOVIE, nextCatalogRestoreType(ContentType.LIVE, setOf(ContentType.MOVIE)))
+        assertNull(nextCatalogRestoreType(ContentType.LIVE, emptySet()))
+    }
+
+    @Test
+    fun `heavy permit serializes restore and forced refresh and honors a later foreground type`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val session = session()
+        val calls = CopyOnWriteArrayList<ContentType>()
+        val loaded = Collections.synchronizedMap(mutableMapOf<ContentType, CatalogLoadResult>())
+        val permitHeld = CompletableDeferred<Unit>()
+        val releasePermit = CompletableDeferred<Unit>()
+
+        val owner = CatalogRequestOwner(
+            scope = scope,
+            load = { _, type ->
+                calls += type
+                result(
+                    movie = 1.takeIf { type == ContentType.MOVIE },
+                    series = 2.takeIf { type == ContentType.SERIES },
+                    live = 3.takeIf { type == ContentType.LIVE },
+                )
+            },
+            hasLoaded = { loaded[it] != null },
+            isSessionCurrent = { it === session },
+            onLoadingChanged = {},
+            onLoaded = { type, result, _ -> loaded[type] = result },
+            onFailure = { _, _, _ -> },
+        )
+
+        val restore = launch(Dispatchers.Default) {
+            owner.withHeavyPermit {
+                permitHeld.complete(Unit)
+                releasePermit.await()
+            }
+        }
+        permitHeld.await()
+
+        // Forced refresh and normal requests are admitted to the owner but must wait for the
+        // physical restore permit.
+        owner.request(session, ContentType.MOVIE, force = true)
+        owner.request(session, ContentType.SERIES, force = false)
+        delay(120L)
+        assertTrue("network load must not overlap the held restore", calls.isEmpty())
+
+        // A later Live selection must be the next physical load, not the earlier Series batch.
+        owner.prioritize(ContentType.LIVE)
+        owner.request(session, ContentType.LIVE, force = false)
+        releasePermit.complete(Unit)
+        awaitUntil { calls.isNotEmpty() }
+        assertEquals(ContentType.LIVE, calls.first())
+        awaitUntil { calls.size == 3 && loaded.size == 3 }
+        assertEquals(
+            setOf(ContentType.MOVIE, ContentType.SERIES, ContentType.LIVE),
+            loaded.keys,
+        )
+        restore.join()
+        scope.cancel()
+    }
+
+    @Test
+    fun `invalidation during a held restore admits no stale load`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val session = session()
+        val calls = CopyOnWriteArrayList<ContentType>()
+        val permitHeld = CompletableDeferred<Unit>()
+        val releasePermit = CompletableDeferred<Unit>()
+
+        val owner = CatalogRequestOwner(
+            scope = scope,
+            load = { _, type -> calls += type; result(live = 9) },
+            hasLoaded = { false },
+            isSessionCurrent = { it === session },
+            onLoadingChanged = {},
+            onLoaded = { _, _, _ -> },
+            onFailure = { _, _, _ -> },
+        )
+
+        val restore = launch(Dispatchers.Default) {
+            owner.withHeavyPermit {
+                permitHeld.complete(Unit)
+                releasePermit.await()
+            }
+        }
+        permitHeld.await()
+        owner.request(session, ContentType.LIVE, force = true)
+        owner.invalidate()
+        releasePermit.complete(Unit)
+        delay(180L)
+        assertTrue("invalidated request must not start after the permit is released", calls.isEmpty())
+        assertTrue(owner.loadingTypes().isEmpty())
+        restore.join()
         scope.cancel()
     }
 

@@ -14,8 +14,10 @@ import okhttp3.EventListener
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -24,6 +26,9 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import sa.hulksa.player.model.AccountInfo
+import sa.hulksa.player.model.AuthenticatedSession
+import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.Credentials
 import sa.hulksa.player.model.PortalConfig
 
@@ -137,6 +142,48 @@ class OkHttpCoroutineCancellationTest {
 
         val error = withTimeout(5_000L) { observedFailure.await() }
         assertTrue("Xtream cancellation was mapped as a domain/network failure", error is CancellationException)
+        withTimeout(5_000L) { job.join() }
+    }
+
+    @Test
+    fun xtreamCatalogCancellationDoesNotPublishPartialItems() = runBlocking {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                return when (request.requestUrl?.queryParameter("action")) {
+                    "get_vod_categories" -> MockResponse()
+                        .setResponseCode(200)
+                        .setBody("""[{"category_id":"1","category_name":"All"}]""")
+                    "get_vod_streams" -> MockResponse()
+                        .setResponseCode(200)
+                        .setBody("""[{"stream_id":1,"name":"one"},{"stream_id":2,"name":"two"}]""")
+                        .setBodyDelay(5, TimeUnit.SECONDS)
+                    else -> MockResponse().setResponseCode(404)
+                }
+            }
+        }
+        val client = XtreamClient()
+        val portal = PortalConfig(server.url("/").toString(), PortalConfig.Source.ACCESS_CODE)
+        val session = AuthenticatedSession(
+            portal = portal,
+            credentials = Credentials("CODE", "user", "pass"),
+            account = AccountInfo("user", "Active", null, 1, 1, false),
+        )
+        val observedFailure = CompletableDeferred<Throwable>()
+
+        val job = launch(Dispatchers.Default) {
+            try {
+                client.catalog(session, ContentType.MOVIE)
+            } catch (error: Throwable) {
+                observedFailure.complete(error)
+                throw error
+            }
+        }
+
+        repeat(2) { assertNotNull(server.takeRequest(5, TimeUnit.SECONDS)) }
+        job.cancel()
+
+        val error = withTimeout(5_000L) { observedFailure.await() }
+        assertTrue("Catalog cancellation was mapped as a domain/network failure", error is CancellationException)
         withTimeout(5_000L) { job.join() }
     }
 

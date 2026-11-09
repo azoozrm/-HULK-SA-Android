@@ -452,6 +452,175 @@ class CatalogScreenEntryModelsTest {
         }
     }
 
+    @Test
+    fun `favorite projection preserves catalog order and reuses an unchanged input`() = runBlocking {
+        val movieCatalog = Catalog(
+            emptyList(),
+            listOf(movie(2, "Favorite Movie", "all", 200L), movie(1, "Other", "all", 100L)),
+        )
+        val seriesCatalog = Catalog(
+            emptyList(),
+            listOf(movie(3, "Favorite Series", "all", 300L).copy(type = ContentType.SERIES)),
+        )
+        val catalogs = mapOf(
+            ContentType.MOVIE to movieCatalog,
+            ContentType.SERIES to seriesCatalog,
+        )
+        val store = CatalogScreenEntryModelStore()
+        val input = FavoriteCatalogProjectionInput(
+            catalogs = catalogs,
+            favorites = setOf("MOVIE:2", "SERIES:3"),
+        )
+
+        val first = store.favoriteProjection(input)
+        val same = store.favoriteProjection(
+            FavoriteCatalogProjectionInput(catalogs, setOf("SERIES:3", "MOVIE:2")),
+        )
+        val changed = store.favoriteProjection(
+            FavoriteCatalogProjectionInput(catalogs, setOf("MOVIE:2")),
+        )
+
+        assertSame(first, same)
+        assertEquals(listOf("MOVIE:2", "SERIES:3"), first.map { "${it.type}:${it.id}" })
+        assertEquals(listOf("MOVIE:2"), changed.map { "${it.type}:${it.id}" })
+    }
+
+    @Test
+    fun `live projection keeps category query and favorite semantics off the composition path`() = runBlocking {
+        val liveCatalog = Catalog(
+            emptyList(),
+            listOf(
+                live(1, "Alpha News", "news"),
+                live(2, "Alpha Sport", "sport"),
+                live(3, "Beta News", "news"),
+            ),
+        )
+        val favorites = CatalogFavoriteSnapshot(persisted = setOf("LIVE:3"))
+        val store = CatalogScreenEntryModelStore()
+
+        val all = store.liveProjection(
+            LiveCatalogProjectionInput(liveCatalog, categoryId = null, query = "", favorites = favorites),
+        )
+        val news = store.liveProjection(
+            LiveCatalogProjectionInput(liveCatalog, categoryId = "news", query = "", favorites = favorites),
+        )
+        val cached = store.liveProjection(
+            LiveCatalogProjectionInput(liveCatalog, categoryId = "news", query = "", favorites = favorites),
+        )
+        val searched = store.liveProjection(
+            LiveCatalogProjectionInput(liveCatalog, categoryId = null, query = " alpha ", favorites = favorites),
+        )
+        val favoriteCategory = store.liveProjection(
+            LiveCatalogProjectionInput(
+                liveCatalog,
+                categoryId = FAVORITES_CATEGORY_ID,
+                query = "",
+                favorites = favorites,
+            ),
+        )
+
+        assertSame(liveCatalog.items, all.items)
+        assertEquals(listOf(1, 3), news.items.map(ContentItem::id))
+        assertEquals(listOf(1, 2), searched.items.map(ContentItem::id))
+        assertEquals(listOf(3), favoriteCategory.items.map(ContentItem::id))
+        assertSame(news.items, cached.items)
+        assertSame(news.input, cached.input)
+    }
+
+    @Test
+    fun `delayed live projection cannot satisfy a newer category or query input`() = runBlocking {
+        val liveCatalog = Catalog(
+            emptyList(),
+            listOf(
+                live(1, "Alpha News", "news"),
+                live(2, "Alpha Sport", "sport"),
+                live(3, "Beta News", "news"),
+            ),
+        )
+        val favorites = CatalogFavoriteSnapshot(persisted = emptySet())
+        val oldInput = LiveCatalogProjectionInput(
+            liveCatalog,
+            categoryId = "news",
+            query = "",
+            favorites = favorites,
+        )
+        val newInput = LiveCatalogProjectionInput(
+            liveCatalog,
+            categoryId = null,
+            query = " alpha ",
+            favorites = favorites,
+        )
+        val oldStarted = CountDownLatch(1)
+        val releaseOld = CountDownLatch(1)
+        Executors.newFixedThreadPool(2).asCoroutineDispatcher().use { dispatcher ->
+            val store = CatalogScreenEntryModelStore(
+                dispatcher = dispatcher,
+                liveBuilder = { input ->
+                    if (input == oldInput) {
+                        oldStarted.countDown()
+                        check(releaseOld.await(5, TimeUnit.SECONDS))
+                    }
+                    deriveLiveCatalogProjection(input)
+                },
+            )
+
+            val oldResult = async(dispatcher) { store.liveProjection(oldInput) }
+            assertTrue(oldStarted.await(5, TimeUnit.SECONDS))
+            assertTrue(!oldResult.isCompleted)
+
+            val newResult = store.liveProjection(newInput)
+            assertEquals(listOf(1, 2), newResult.items.map(ContentItem::id))
+            assertSame(newResult.items, store.cachedLiveProjection(newInput)?.items)
+
+            releaseOld.countDown()
+            val stale = oldResult.await()
+            assertNull(stale.exactItemsFor(newInput))
+            assertSame(newInput, newResult.input)
+            assertSame(newResult.items, store.cachedLiveProjection(newInput)?.items)
+        }
+    }
+
+    @Test
+    fun `exact empty live projection is distinguishable from a stale non-empty input`() = runBlocking {
+        val liveCatalog = Catalog(
+            emptyList(),
+            listOf(live(1, "Alpha News", "news")),
+        )
+        val favorites = CatalogFavoriteSnapshot(persisted = emptySet())
+        val emptyInput = LiveCatalogProjectionInput(
+            liveCatalog,
+            categoryId = "missing",
+            query = "",
+            favorites = favorites,
+        )
+        val nonEmptyInput = LiveCatalogProjectionInput(
+            liveCatalog,
+            categoryId = "news",
+            query = "",
+            favorites = favorites,
+        )
+        val store = CatalogScreenEntryModelStore()
+
+        val empty = store.liveProjection(emptyInput)
+
+        assertTrue(empty.items.isEmpty())
+        assertSame(empty.items, empty.exactItemsFor(emptyInput))
+        assertNull(empty.exactItemsFor(nonEmptyInput))
+    }
+
+    private fun live(id: Int, name: String, category: String): ContentItem = ContentItem(
+        id = id,
+        name = name,
+        categoryId = category,
+        type = ContentType.LIVE,
+        posterUrl = null,
+        rating = "8.0",
+        year = null,
+        containerExtension = "m3u8",
+        addedAtEpochSeconds = 1_000L + id,
+        genre = category,
+    )
+
     private fun homeInput(catalog: Catalog?): HomeContentModelInput = HomeContentModelInput(
         movieCatalog = catalog,
         seriesCatalog = null,

@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import sa.hulksa.player.MainDestination
+import sa.hulksa.player.hulkPerfLog
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
@@ -76,6 +77,30 @@ internal data class KeyedCatalogScreenModel(
     val model: CatalogScreenModel,
 )
 
+/**
+ * Stable ordering and category/key indexes for one immutable catalog revision. The newest order is
+ * computed once per catalog identity; category/query/favorites/history changes only filter this
+ * reusable structure. The catalog reference is the revision boundary.
+ */
+internal class CatalogRevisionIndex(
+    val catalog: Catalog?,
+    val newestItems: List<ContentItem>,
+    val itemsByCategory: Map<String, List<ContentItem>>,
+    val itemByKey: Map<String, ContentItem>,
+) {
+    companion object {
+        fun build(catalog: Catalog?): CatalogRevisionIndex {
+            val ordered = newest(catalog?.items.orEmpty())
+            return CatalogRevisionIndex(
+                catalog = catalog,
+                newestItems = ordered,
+                itemsByCategory = ordered.groupBy(ContentItem::categoryId),
+                itemByKey = ordered.associateBy { item -> "${item.type}:${item.id}" },
+            )
+        }
+    }
+}
+
 internal class HomeContentModelInput(
     val movieCatalog: Catalog?,
     val seriesCatalog: Catalog?,
@@ -97,6 +122,50 @@ internal class HomeContentModelInput(
         result = 31 * result + System.identityHashCode(liveCatalog)
         result = 31 * result + System.identityHashCode(history)
         return 31 * result + System.identityHashCode(favorites)
+    }
+}
+
+/**
+ * O(1) composition key for the Favorites projection. Catalog map identity is the catalog
+ * revision; favorites content is small and compared structurally so an equal reload can reuse
+ * the projection.
+ */
+internal class FavoriteCatalogProjectionInput(
+    val catalogs: Map<ContentType, Catalog>,
+    val favorites: Set<String>,
+) {
+    override fun equals(other: Any?): Boolean =
+        other is FavoriteCatalogProjectionInput &&
+            catalogs === other.catalogs &&
+            favorites == other.favorites
+
+    override fun hashCode(): Int = 31 * System.identityHashCode(catalogs) + favorites.hashCode()
+}
+
+/**
+ * O(1) composition key for the Live category/search projection. The catalog identity is the
+ * revision; category, query and the observed favorite snapshot define the visible view.
+ */
+internal class LiveCatalogProjectionInput(
+    val catalog: Catalog?,
+    val categoryId: String?,
+    val query: String,
+    val favorites: CatalogFavoriteSnapshot,
+) {
+    override fun equals(other: Any?): Boolean =
+        other is LiveCatalogProjectionInput &&
+            catalog === other.catalog &&
+            categoryId == other.categoryId &&
+            query == other.query &&
+            favorites.persisted === other.favorites.persisted &&
+            favorites.optimistic == other.favorites.optimistic
+
+    override fun hashCode(): Int {
+        var result = System.identityHashCode(catalog)
+        result = 31 * result + (categoryId?.hashCode() ?: 0)
+        result = 31 * result + query.hashCode()
+        result = 31 * result + System.identityHashCode(favorites.persisted)
+        return 31 * result + favorites.optimistic.hashCode()
     }
 }
 
@@ -179,12 +248,25 @@ internal fun initialHomePresentation(
         featuredCandidates = emptyList(),
     )
 
-internal fun deriveCatalogScreenModel(input: CatalogScreenModelInput): CatalogScreenModel {
-    val ordered = newest(input.catalog?.items.orEmpty())
-    val visible = ordered.filter { item ->
-        categoryMatches(item, input.categoryId, input.favorites::contains) &&
-            item.matchesSearch(input.query)
+internal fun deriveCatalogScreenModel(
+    input: CatalogScreenModelInput,
+    revisionIndex: CatalogRevisionIndex? = null,
+): CatalogScreenModel {
+    val ordered = revisionIndex
+        ?.takeIf { it.catalog === input.catalog }
+        ?.newestItems
+        ?: newest(input.catalog?.items.orEmpty())
+    val categoryBase = when (input.categoryId) {
+        null -> ordered
+        FAVORITES_CATEGORY_ID -> ordered.filter { input.favorites.contains(it) }
+        CONTINUE_CATEGORY_ID -> emptyList()
+        else -> revisionIndex
+            ?.takeIf { it.catalog === input.catalog }
+            ?.itemsByCategory
+            ?.get(input.categoryId)
+            ?: ordered.filter { it.categoryId == input.categoryId }
     }
+    val visible = categoryBase.filter { item -> item.matchesSearch(input.query) }
     val kind = if (input.type == ContentType.MOVIE) "movie" else "series"
     val normalizedQuery = input.query.trim()
     val continueWatching = input.history.filter { entry ->
@@ -206,6 +288,26 @@ internal fun indexContentKeys(contentKeys: List<String>): Map<String, Int> {
         if (!indexByKey.containsKey(key)) indexByKey[key] = index
     }
     return indexByKey
+}
+
+internal fun deriveFavoriteCatalogProjection(
+    input: FavoriteCatalogProjectionInput,
+): List<ContentItem> = input.catalogs.values.asSequence()
+    .flatMap { it.items.asSequence() }
+    .filter { item -> "${item.type.name}:${item.id}" in input.favorites }
+    .distinctBy { item -> "${item.type.name}:${item.id}" }
+    .toList()
+
+internal fun deriveLiveCatalogProjection(
+    input: LiveCatalogProjectionInput,
+): List<ContentItem> {
+    val items = input.catalog?.items.orEmpty()
+    val query = input.query.trim()
+    if (input.categoryId == null && query.isEmpty()) return items
+    return items.filter { item ->
+        categoryMatches(item, input.categoryId, input.favorites::contains) &&
+            item.matchesSearchNormalized(query)
+    }
 }
 
 internal fun deriveHomeContentModel(input: HomeContentModelInput): HomeContentSnapshot {
@@ -234,18 +336,52 @@ internal fun deriveHomeContentModel(input: HomeContentModelInput): HomeContentSn
     )
 }
 
+private data class KeyedFavoriteProjection(
+    val input: FavoriteCatalogProjectionInput,
+    val items: List<ContentItem>,
+)
+
+/**
+ * Identity-keyed projection result. The items list is intentionally not part of equality; Compose
+ * must not deep-compare a full Live catalog merely to decide whether a projection completed.
+ */
+internal class LiveCatalogProjectionResult(
+    val input: LiveCatalogProjectionInput,
+    val items: List<ContentItem>,
+)
+
+internal fun LiveCatalogProjectionResult.exactItemsFor(
+    input: LiveCatalogProjectionInput,
+): List<ContentItem>? = takeIf { this.input == input }?.items
+
+private data class KeyedLiveProjection(
+    val input: LiveCatalogProjectionInput,
+    val items: List<ContentItem>,
+)
+
 /** Profile-owned, bounded derived-model cache. */
 internal class CatalogScreenEntryModelStore(
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val catalogBuilder: (CatalogScreenModelInput) -> CatalogScreenModel = ::deriveCatalogScreenModel,
+    private val indexedCatalogBuilder: ((CatalogScreenModelInput, CatalogRevisionIndex) -> CatalogScreenModel)? = null,
     private val homeBuilder: (HomeContentModelInput) -> HomeContentSnapshot = ::deriveHomeContentModel,
+    private val liveBuilder: (LiveCatalogProjectionInput) -> List<ContentItem> =
+        ::deriveLiveCatalogProjection,
+    private val revisionIndexBuilder: (Catalog?) -> CatalogRevisionIndex = CatalogRevisionIndex::build,
 ) {
     private val lock = Any()
     private val catalogModels = EnumMap<MainDestination, KeyedCatalogScreenModel>(MainDestination::class.java)
     private val latestCatalogInputs = EnumMap<MainDestination, CatalogScreenModelInput>(MainDestination::class.java)
+    private val catalogRevisionIndexes = EnumMap<MainDestination, CatalogRevisionIndex>(MainDestination::class.java)
+    private val latestRevisionCatalogs = EnumMap<MainDestination, Catalog?>(MainDestination::class.java)
+    private var catalogRevisionEpoch = 0L
     private var homeModel: KeyedHomeContentModel? = null
     private var homePresentationFallback: KeyedHomeContentModel? = null
     private var latestHomeInput: HomeContentModelInput? = null
+    private var favoriteProjection: KeyedFavoriteProjection? = null
+    private var latestFavoriteInput: FavoriteCatalogProjectionInput? = null
+    private var liveProjection: KeyedLiveProjection? = null
+    private var latestLiveInput: LiveCatalogProjectionInput? = null
 
     fun cachedCatalog(input: CatalogScreenModelInput): KeyedCatalogScreenModel? = synchronized(lock) {
         catalogModels[input.destination]?.takeIf { it.input == input }
@@ -258,9 +394,17 @@ internal class CatalogScreenEntryModelStore(
     suspend fun catalog(input: CatalogScreenModelInput): KeyedCatalogScreenModel {
         synchronized(lock) {
             latestCatalogInputs[input.destination] = input
+            latestRevisionCatalogs[input.destination] = input.catalog
             catalogModels[input.destination]?.takeIf { it.input == input }
         }?.let { return it }
-        val derived = withContext(dispatcher) { catalogBuilder(input) }
+        val revisionIndex = indexedCatalogBuilder?.let { revisionIndex(input) }
+        val derived = withContext(dispatcher) {
+            if (revisionIndex == null) {
+                catalogBuilder(input)
+            } else {
+                requireNotNull(indexedCatalogBuilder).invoke(input, revisionIndex)
+            }
+        }
         val keyed = KeyedCatalogScreenModel(input, derived)
         return synchronized(lock) {
             catalogModels[input.destination]
@@ -270,6 +414,92 @@ internal class CatalogScreenEntryModelStore(
                         catalogModels[input.destination] = it
                     }
                 }
+        }
+    }
+
+    private suspend fun revisionIndex(input: CatalogScreenModelInput): CatalogRevisionIndex {
+        val catalog = input.catalog
+        val startEpoch: Long
+        synchronized(lock) {
+            catalogRevisionIndexes[input.destination]
+                ?.takeIf { it.catalog === catalog }
+                ?.let { return it }
+            startEpoch = catalogRevisionEpoch
+        }
+        val built = withContext(dispatcher) { revisionIndexBuilder(catalog) }
+        return synchronized(lock) {
+            // A clear() or a newer catalog revision that completed while this build was suspended
+            // must not be repopulated or evicted by the late result.
+            if (
+                startEpoch == catalogRevisionEpoch &&
+                latestRevisionCatalogs[input.destination] === catalog
+            ) {
+                catalogRevisionIndexes[input.destination] = built
+            }
+            built
+        }
+    }
+
+    fun cachedFavoriteProjection(input: FavoriteCatalogProjectionInput): List<ContentItem>? =
+        synchronized(lock) {
+            latestFavoriteInput = input
+            favoriteProjection?.takeIf { it.input == input }?.items
+        }
+
+    fun lastGoodFavoriteProjection(
+        catalogs: Map<ContentType, Catalog>,
+    ): List<ContentItem>? = synchronized(lock) {
+        favoriteProjection?.takeIf { it.input.catalogs === catalogs }?.items
+    }
+
+    suspend fun favoriteProjection(input: FavoriteCatalogProjectionInput): List<ContentItem> {
+        synchronized(lock) {
+            latestFavoriteInput = input
+            favoriteProjection?.takeIf { it.input == input }
+        }?.let { return it.items }
+        val derived = withContext(dispatcher) { deriveFavoriteCatalogProjection(input) }
+        return synchronized(lock) {
+            favoriteProjection
+                ?.takeIf { it.input == input }
+                ?.items
+                ?: derived.also {
+                    if (latestFavoriteInput == input) {
+                        favoriteProjection = KeyedFavoriteProjection(input, it)
+                    }
+                }
+        }
+    }
+
+    fun cachedLiveProjection(
+        input: LiveCatalogProjectionInput,
+    ): LiveCatalogProjectionResult? = synchronized(lock) {
+        latestLiveInput = input
+        liveProjection?.takeIf { it.input == input }?.let {
+            LiveCatalogProjectionResult(it.input, it.items)
+        }
+    }
+
+    fun lastGoodLiveProjection(catalog: Catalog?): List<ContentItem>? = synchronized(lock) {
+        liveProjection?.takeIf { it.input.catalog === catalog }?.items
+    }
+
+    suspend fun liveProjection(
+        input: LiveCatalogProjectionInput,
+    ): LiveCatalogProjectionResult {
+        synchronized(lock) {
+            latestLiveInput = input
+            liveProjection?.takeIf { it.input == input }
+        }?.let { return LiveCatalogProjectionResult(it.input, it.items) }
+        val derived = withContext(dispatcher) { liveBuilder(input) }
+        return synchronized(lock) {
+            liveProjection
+                ?.takeIf { it.input == input }
+                ?.let { LiveCatalogProjectionResult(it.input, it.items) }
+                ?: derived.also {
+                    if (latestLiveInput == input) {
+                        liveProjection = KeyedLiveProjection(input, it)
+                    }
+                }.let { LiveCatalogProjectionResult(input, it) }
         }
     }
 
@@ -301,7 +531,14 @@ internal class CatalogScreenEntryModelStore(
             latestHomeInput = input
             homeModel?.takeIf { it.input == input }
         }?.let { return it }
+        val startedNs = System.nanoTime()
         val derived = withContext(dispatcher) { homeBuilder(input) }
+        hulkPerfLog {
+            "homeModel movies=${input.movieCatalog?.items?.size ?: 0} " +
+                "series=${input.seriesCatalog?.items?.size ?: 0} " +
+                "live=${input.liveCatalog?.items?.size ?: 0} ms=" +
+                "${(System.nanoTime() - startedNs) / 1_000_000}"
+        }
         val keyed = KeyedHomeContentModel(input, derived)
         return synchronized(lock) {
             homeModel
@@ -312,6 +549,24 @@ internal class CatalogScreenEntryModelStore(
                         homePresentationFallback = null
                     }
                 }
+        }
+    }
+
+    /** Releases heavy derived payloads while keeping the owning profile's navigation store alive. */
+    fun clear() {
+        synchronized(lock) {
+            catalogRevisionEpoch += 1L
+            catalogModels.clear()
+            latestCatalogInputs.clear()
+            catalogRevisionIndexes.clear()
+            latestRevisionCatalogs.clear()
+            homeModel = null
+            homePresentationFallback = null
+            latestHomeInput = null
+            favoriteProjection = null
+            latestFavoriteInput = null
+            liveProjection = null
+            latestLiveInput = null
         }
     }
 }

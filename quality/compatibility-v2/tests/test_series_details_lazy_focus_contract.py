@@ -34,7 +34,7 @@ class SeriesDetailsLazyFocusContractTest(unittest.TestCase):
             "@Composable\nprivate fun DetailsTvEpisodeUnit(",
         )
         effect_start = series.index("LaunchedEffect(pendingLazyFocus, listState)")
-        effect_end = series.index("LaunchedEffect(series.id, targetEpisode?.id)", effect_start)
+        effect_end = series.index("LaunchedEffect(targetEpisode?.id) {", effect_start)
         effect = series[effect_start:effect_end]
 
         scroll = effect.index("listState.scrollToItem(sourceIndex + 1)")

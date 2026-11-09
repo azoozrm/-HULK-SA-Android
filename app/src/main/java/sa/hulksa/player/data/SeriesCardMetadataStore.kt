@@ -19,6 +19,7 @@ class SeriesCardMetadataStore private constructor(context: Context) {
     private val inFlight =
         mutableMapOf<ContentMetadataRequestKey, Deferred<SeriesCardTechnicalMetadata>>()
     private val lastAttemptAtMs = mutableMapOf<ContentMetadataRequestKey, Long>()
+    private var retryOwnerKey: String? = null
 
     internal fun currentOwner(): AuthenticatedSessionOwner? =
         AuthenticatedSessionRegistry.currentOwner()
@@ -73,6 +74,7 @@ class SeriesCardMetadataStore private constructor(context: Context) {
         val deferred = synchronized(inFlight) {
             inFlight[requestKey] ?: run {
                 val now = System.currentTimeMillis()
+                pruneRetryOwnerLocked(owner)
                 val lastAttempt = lastAttemptAtMs[requestKey] ?: 0L
                 if (now - lastAttempt < RETRY_COOLDOWN_MS) {
                     return cached
@@ -80,6 +82,7 @@ class SeriesCardMetadataStore private constructor(context: Context) {
                         ?: SeriesCardTechnicalMetadata()
                 }
                 lastAttemptAtMs[requestKey] = now
+                trimRetryCacheLocked()
                 scope.async {
                     semaphore.withPermit { fetchAndCache(owner, seriesId, cached) }
                 }.also { inFlight[requestKey] = it }
@@ -161,6 +164,23 @@ class SeriesCardMetadataStore private constructor(context: Context) {
             ?: SeriesCardTechnicalMetadata()
     }
 
+    private fun pruneRetryOwnerLocked(owner: AuthenticatedSessionOwner) {
+        val key = "${owner.accountId}|${owner.providerId}|${owner.sessionId}"
+        if (retryOwnerKey != key) {
+            lastAttemptAtMs.clear()
+            retryOwnerKey = key
+        }
+    }
+
+    private fun trimRetryCacheLocked() {
+        if (lastAttemptAtMs.size <= MAX_RETRY_CACHE_ENTRIES) return
+        val eldest = lastAttemptAtMs.iterator()
+        if (eldest.hasNext()) {
+            eldest.next()
+            eldest.remove()
+        }
+    }
+
     private fun readCached(
         owner: AuthenticatedSessionOwner,
         seriesId: Int,
@@ -229,6 +249,7 @@ class SeriesCardMetadataStore private constructor(context: Context) {
         private const val PREFERENCES = "series_card_verified_metadata"
         private const val MAX_CONCURRENT_REQUESTS = 2
         private const val RETRY_COOLDOWN_MS = 1_000L
+        private const val MAX_RETRY_CACHE_ENTRIES = 1_024
 
         @Volatile
         private var instance: SeriesCardMetadataStore? = null

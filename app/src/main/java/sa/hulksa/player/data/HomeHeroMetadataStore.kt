@@ -67,6 +67,7 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
     private val movieClient = MovieCardMetadataClient()
     private val seriesStore = SeriesCardMetadataStore.get(appContext)
     private val lastMovieAttemptAtMs = mutableMapOf<ContentMetadataRequestKey, Long>()
+    private var retryOwnerKey: String? = null
 
     fun currentOwner(): AuthenticatedSessionOwner? = AuthenticatedSessionRegistry.currentOwner()
 
@@ -177,9 +178,11 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
         val requestKey = owner.contentMetadataKey(ContentType.MOVIE, movieId)
         val now = System.currentTimeMillis()
         val lastAttempt = synchronized(lastMovieAttemptAtMs) {
+            pruneRetryOwnerLocked(owner)
             val previous = lastMovieAttemptAtMs[requestKey] ?: 0L
             if (now - previous >= RETRY_COOLDOWN_MS) {
                 lastMovieAttemptAtMs[requestKey] = now
+                trimRetryCacheLocked()
             }
             previous
         }
@@ -301,6 +304,23 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
         )
     }
 
+    private fun pruneRetryOwnerLocked(owner: AuthenticatedSessionOwner) {
+        val key = "${owner.accountId}|${owner.providerId}|${owner.sessionId}"
+        if (retryOwnerKey != key) {
+            lastMovieAttemptAtMs.clear()
+            retryOwnerKey = key
+        }
+    }
+
+    private fun trimRetryCacheLocked() {
+        if (lastMovieAttemptAtMs.size <= MAX_RETRY_CACHE_ENTRIES) return
+        val eldest = lastMovieAttemptAtMs.iterator()
+        if (eldest.hasNext()) {
+            eldest.next()
+            eldest.remove()
+        }
+    }
+
     private fun moviePreferences(owner: AuthenticatedSessionOwner) = appContext.getSharedPreferences(
         authenticatedOwnerPreferencesName(MOVIE_PREFERENCES, owner),
         Context.MODE_PRIVATE,
@@ -318,6 +338,7 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
         private const val MOVIE_PREFERENCES = "movie_card_verified_metadata"
         private const val SERIES_PREFERENCES = "series_card_verified_metadata"
         private const val RETRY_COOLDOWN_MS = 30_000L
+        private const val MAX_RETRY_CACHE_ENTRIES = 1_024
 
         @Volatile
         private var instance: HomeHeroMetadataStore? = null

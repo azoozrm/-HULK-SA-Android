@@ -240,6 +240,60 @@ class LiveControlsLayoutPolicyTest {
     }
 
     @Test
+    fun morePanelBudgetReservesTopSafeSpacingInNormalAndFallback() {
+        val bounded = 1080
+        val top = 36
+        val strip = 300
+        val gap = 20
+        val maxPanel = liveBottomOverlayPanelMaxHeightPx(
+            boundedHeightPx = bounded,
+            topPaddingPx = top,
+            stripHeightPx = strip,
+            gapPx = gap,
+        )
+        assertEquals(bounded - top - strip - gap, maxPanel)
+        assertEquals(top, bounded - (maxPanel + gap + strip))
+        assertEquals(
+            LiveBottomOverlayMode.NORMAL,
+            liveBottomOverlayMode(maxPanel, minimumPanelHeightPx = 400),
+        )
+
+        val compact = 720
+        val compactTop = 26
+        val compactStrip = 220
+        val compactMax = liveBottomOverlayPanelMaxHeightPx(
+            boundedHeightPx = compact,
+            topPaddingPx = compactTop,
+            stripHeightPx = compactStrip,
+            gapPx = gap,
+        )
+        assertEquals(compact - compactTop - compactStrip - gap, compactMax)
+        assertEquals(compactTop, compact - (compactMax + gap + compactStrip))
+        assertEquals(
+            LiveBottomOverlayMode.FALLBACK,
+            liveBottomOverlayMode(compactMax, minimumPanelHeightPx = 500),
+        )
+        assertEquals(
+            compact - compactTop,
+            liveBottomOverlayPanelMaxHeightPx(
+                boundedHeightPx = compact,
+                topPaddingPx = compactTop,
+                stripHeightPx = 0,
+                gapPx = 0,
+            ),
+        )
+        assertEquals(
+            0,
+            liveBottomOverlayPanelMaxHeightPx(
+                boundedHeightPx = 100,
+                topPaddingPx = 120,
+                stripHeightPx = 20,
+                gapPx = 10,
+            ),
+        )
+    }
+
+    @Test
     fun morePanelMinimumHeightGrowsWithFontScaleAndStaysBounded() {
         val base = livePlayerMorePanelMinimumHeightDp(captionSizeSp = 11, fontScale = 1f)
         val medium = livePlayerMorePanelMinimumHeightDp(captionSizeSp = 11, fontScale = 1.3f)

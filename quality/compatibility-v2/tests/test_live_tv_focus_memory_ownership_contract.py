@@ -6,6 +6,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MAIN_SHELL = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
 TV_GRID = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/TvCatalogGrid.kt"
+SCREEN_MODELS = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/CatalogScreenEntryModels.kt"
 
 
 class LiveTvFocusMemoryOwnershipContractTest(unittest.TestCase):
@@ -48,10 +49,11 @@ class LiveTvFocusMemoryOwnershipContractTest(unittest.TestCase):
             live,
         )
         self.assertIn("liveFocusKey.isBlank() && index == rememberedIndex", live)
-        self.assertIn(
-            "state.searchQuery.isBlank() && remembered.itemKey.isNotBlank() && visible.isNotEmpty() -> rememberedIndex",
-            live,
-        )
+        self.assertIn("val exactRememberedIndex = remembered.itemIndex.coerceIn(", live)
+        self.assertIn("decideLiveFocusDecision(", live)
+        self.assertIn("searchQuery = state.searchQuery", live)
+        self.assertIn("rememberedItemKey = remembered.itemKey", live)
+        self.assertIn("restorationPending = liveFocusOwner.focusRestorationPending", live)
         self.assertIn("listState.scrollToItem(targetIndex)", live)
         self.assertIn("channelRequester.requestFocus()", live)
 
@@ -63,8 +65,10 @@ class LiveTvFocusMemoryOwnershipContractTest(unittest.TestCase):
             'navigationMemory.save(MainDestination.LIVE, itemKey = "", itemIndex = 0)',
             live,
         )
-        self.assertIn("categoryRequest?.focusFirstItem == true && visible.isNotEmpty() -> 0", live)
-        self.assertIn("categoryRequest != null && visible.isNotEmpty() -> rememberedIndex", live)
+        self.assertIn("decideLiveFocusDecision(", live)
+        self.assertIn("if (decision is LiveFocusDecision.Focus)", live)
+        self.assertIn("listState.scrollToItem(decision.index)", live)
+        self.assertIn("val exact = exactVisible ?: return@LaunchedEffect", live)
 
     def test_movies_and_series_grid_keep_their_single_focused_item_writer(self) -> None:
         grid = self.read(TV_GRID)
@@ -81,14 +85,36 @@ class LiveTvFocusMemoryOwnershipContractTest(unittest.TestCase):
 
     def test_favorite_recomposition_cannot_rekey_navigation_restore(self) -> None:
         live = self.live()
-        start = live.index("LaunchedEffect(\n        visible,")
+        start = live.index("LaunchedEffect(\n        exactProjection,")
         keys = live[start : live.index(") {", start)]
         # A focus save is navigation state, not a restoration trigger. A favorite/notice
         # recomposition must not replay entry restoration after focus saved a newer key.
         self.assertNotIn("remembered.itemKey", keys)
         self.assertIn("state.selectedCategoryId", keys)
         self.assertIn("state.searchQuery", keys)
-        self.assertIn("categoryContentFocusRequest", keys)
+        self.assertNotIn("state.loadingTypes", keys)
+        self.assertIn("liveFocusOwner.focusRestorationPending", keys)
+        self.assertIn("liveFocusOwner.categoryRequest", keys)
+        empty_effect = live.index("LaunchedEffect(\n        exactProjection,\n        state.selectedCategoryId,\n        state.searchQuery,\n        state.loadingTypes,")
+        self.assertGreater(empty_effect, start)
+
+    def test_live_departure_events_cancel_entry_and_category_focus_requests(self) -> None:
+        live = self.live()
+        self.assertIn("val liveFocusOwner = remember { LiveFocusRequestOwner() }", live)
+        self.assertIn("liveFocusOwner.requestCategory(", live)
+        self.assertIn(
+            "liveFocusOwner.onCategoryFocusChanged(categoryFocusRestoreController.focusedCategoryId)",
+            live,
+        )
+        self.assertIn("onUserFocus = liveFocusOwner::cancelForUserDeparture", live)
+        self.assertIn("onFocused = {\n                                        liveFocusOwner.cancelForUserDeparture()", live)
+        self.assertIn("onFocused = {\n                            liveFocusOwner.cancelForUserDeparture()", live)
+        self.assertIn("val attemptToken = liveFocusOwner.attemptToken()", live)
+        self.assertIn("if (!liveFocusOwner.isCurrent(attemptToken)) return@LaunchedEffect", live)
+        self.assertIn(
+            "liveFocusOwner.completeFocus(attemptToken, decision.requestId, focused)",
+            live,
+        )
 
     def test_live_favorites_row_removal_wires_shell_guard_and_handoff(self) -> None:
         live = self.live()
@@ -108,8 +134,11 @@ class LiveTvFocusMemoryOwnershipContractTest(unittest.TestCase):
         live = self.live()
         stage_start = source.index("private fun LivePreviewStage(")
         stage = source[stage_start : source.index("private fun LiveStage(", stage_start)]
+        models = self.read(SCREEN_MODELS)
         self.assertIn("favorites: CatalogFavoriteSnapshot", live)
-        self.assertIn("favorites::contains", live)
+        self.assertIn("LiveCatalogProjectionInput(", live)
+        self.assertIn("favorites = favorites", live)
+        self.assertIn("input.favorites::contains", models)
         self.assertIn("favorites.contains(channel)", live)
         self.assertIn("preview?.let(favorites::contains)", stage)
         self.assertNotIn("isFavorite(channel)", live)

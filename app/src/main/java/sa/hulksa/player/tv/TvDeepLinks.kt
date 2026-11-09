@@ -152,12 +152,17 @@ private fun String.positiveContentId(): Int? =
 sealed interface TvDeepLinkResolution {
     data object OpenHome : TvDeepLinkResolution
     data class AwaitCatalog(val type: ContentType) : TvDeepLinkResolution
-    data class OpenMovie(val item: ContentItem, val resumePlayback: Boolean) : TvDeepLinkResolution
+    data class OpenMovie(
+        val item: ContentItem,
+        val resumePlayback: Boolean,
+        val originalLanguage: String? = null,
+    ) : TvDeepLinkResolution
     data class OpenSeries(val item: ContentItem) : TvDeepLinkResolution
     data class OpenEpisode(
         val series: ContentItem,
         val episodeId: Int,
         val resumePlayback: Boolean,
+        val originalLanguage: String? = null,
     ) : TvDeepLinkResolution
     data object MissingContent : TvDeepLinkResolution
     data object BlockedForKids : TvDeepLinkResolution
@@ -214,15 +219,20 @@ internal fun resolveTvDeepLink(
             if (!isTvContentAllowed(profileKind, verifiedKidsContentKeys, movie)) {
                 return TvDeepLinkResolution.BlockedForKids
             }
-            if (
-                target.resumePlayback && history.none {
-                    it.streamKind.equals("movie", ignoreCase = true) &&
-                        it.key == "MOVIE:${movie.id}" &&
-                        it.streamId == movie.id &&
-                        isTvContinueWatchingEligible(it)
-                }
-            ) return TvDeepLinkResolution.MissingContent
-            TvDeepLinkResolution.OpenMovie(movie, target.resumePlayback)
+            val movieHistory = history.firstOrNull {
+                it.streamKind.equals("movie", ignoreCase = true) &&
+                    it.key == "MOVIE:${movie.id}" &&
+                    it.streamId == movie.id &&
+                    isTvContinueWatchingEligible(it)
+            }
+            if (target.resumePlayback && movieHistory == null) {
+                return TvDeepLinkResolution.MissingContent
+            }
+            TvDeepLinkResolution.OpenMovie(
+                item = movie,
+                resumePlayback = target.resumePlayback,
+                originalLanguage = movieHistory?.originalLanguage,
+            )
         }
         is TvDeepLinkTarget.Series -> {
             val catalog = seriesCatalog
@@ -244,19 +254,21 @@ internal fun resolveTvDeepLink(
             if (!isTvContentAllowed(profileKind, verifiedKidsContentKeys, series)) {
                 return TvDeepLinkResolution.BlockedForKids
             }
-            if (
-                target.resumePlayback && history.none {
-                    it.streamKind.equals("series", ignoreCase = true) &&
-                        it.key == "SERIES:${target.episodeId}" &&
-                        it.parentContentId == series.id &&
-                        it.streamId == target.episodeId &&
-                        isTvContinueWatchingEligible(it)
-                }
-            ) return TvDeepLinkResolution.MissingContent
+            val episodeHistory = history.firstOrNull {
+                it.streamKind.equals("series", ignoreCase = true) &&
+                    it.key == "SERIES:${target.episodeId}" &&
+                    it.parentContentId == series.id &&
+                    it.streamId == target.episodeId &&
+                    isTvContinueWatchingEligible(it)
+            }
+            if (target.resumePlayback && episodeHistory == null) {
+                return TvDeepLinkResolution.MissingContent
+            }
             TvDeepLinkResolution.OpenEpisode(
                 series = series,
                 episodeId = target.episodeId,
                 resumePlayback = target.resumePlayback,
+                originalLanguage = episodeHistory?.originalLanguage,
             )
         }
     }
