@@ -624,10 +624,10 @@ selection/rotation, favorite callbacks, focus and D-pad ownership.
   image or new provider request is introduced.
 - Hero copy: the header and copy are explicit vertical siblings, so the measured header reserves
   its own region before the copy receives the remaining height. The copy reserves one two-line
-  title slot and a two-row facts budget; actions are measured and bottom-anchored. Plot lines are
-  viewport-derived (two, one or zero) and yield before facts or actions. Dense facts may wrap and
-  consume the plot budget; they never move the title or actions into the header. Hero height
-  policy, phone header and phone artwork window are unchanged.
+  title slot and a two-row facts budget; actions are measured and bottom-anchored. No narrative
+  synopsis or plot band is rendered or reserved on Home; dense facts may wrap within their measured
+  rows and never move the title or actions into the header. Hero height policy, phone header and
+  phone artwork window are unchanged. The Details story remains unchanged.
 - Continue Watching: the shared `BoxedHistoryCard` gold fill starts at the physical LEFT with
   `AbsoluteAlignment.CenterLeft` and grows rightward. The track, colors, truthful
   `movieRecentPlayedFraction`, invalid/unknown-duration behavior, Arabic text, time row, artwork,
@@ -660,10 +660,10 @@ carry the full reserved band. This supersedes only the fixed-copy-height assumpt
 - The minimum hero height is derived from the real HomeHeroFacts row height (24dp floor,
   font-scale-aware), the worst valid five-entry metadata wrap, and the measured/guarded action
   height. It is a viewport/font-scale floor, not an individual item or metadata dependent height.
-- The final copy placement is executable: normal bottom-anchored band first, plot yields, then
-  compact gaps and finally minimal gaps when measured facts exceed the reservation. The placed
-  rectangles keep the title below the header, facts below the title and facts plus a gap before
-  the actions; actions stay inside the usable hero.
+- The final copy placement is executable: normal bottom-anchored band first, then compact gaps and
+  finally minimal gaps when measured facts exceed the reservation. The placed rectangles keep the
+  title below the header, facts below the title and facts plus a gap before the actions; actions
+  stay inside the usable hero. Home reserves no narrative plot band.
 - TV and portrait-phone heights are preserved when the band fits. A necessary fallback grows the
   hero item within the existing Home scrolling owner; no second scroll/focus owner, clipping,
   hidden buttons, universal font shrink or synthetic metadata is introduced.
@@ -747,12 +747,24 @@ physical-right composition, navigation, focus ownership and all Details renderer
 - The new typography/slot metrics are shared by rendering, slot budgets and minimum-height
   calculations; the former five-entry Home flow and 36/42sp TV title reservation are removed.
   Title, genre and two-row facts reservations keep the bottom-anchored actions stable across hero
-  rotation/metadata arrival. Plot continues to yield before required facts and actions, and the
-  measured insufficient-height fallback remains.
+  rotation/metadata arrival. Home renders no narrative synopsis and reserves no plot band; the
+  Details story remains unchanged. The measured insufficient-height fallback remains.
 
 Status: LOCAL_ROUND source candidate for independent review. Captures remain OFF; automated visual
 validation is NOT RUN and owner visual acceptance of the new candidate is PENDING. This record does
 not close the section or grant merge/signing/release authority.
+
+### 12.11 Owner Home synopsis removal (2026-11-10)
+
+The owner rejected the film/series synopsis appearing under the Home hero technical facts. The Home
+hero now presents only the original title, the genre line when present, available technical facts
+and the existing actions. No plot Text, semantics or reserved band is rendered even when metadata
+or the catalog item contains a plot; plot arrival/removal or hero rotation cannot introduce a story
+or a plot gap. The story on Details remains unchanged. This supersedes only the contradictory Home
+plot/plot-reservation wording in 12.5, 12.7 and 12.10; all other accepted layout, title direction,
+facts, actions, artwork, focus and navigation behavior remains. The unrelated 136px/152px
+two-line-capacity finding stays open. Visual acceptance of this candidate is PENDING; captures
+remain OFF.
 
 ## 13. Login / Who's Watching / entry-subflows adoption record (2026-10-11)
 

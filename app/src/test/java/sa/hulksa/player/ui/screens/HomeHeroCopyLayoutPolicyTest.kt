@@ -42,8 +42,6 @@ class HomeHeroCopyLayoutPolicyTest {
         genreSlotPx: Int = 18,
         titleSlotPx: Int = 68,
         actionsHeightPx: Int = 46,
-        plotLineHeightPx: Int = 18,
-        hasPlot: Boolean = false,
     ): HeroCopyPlacement = resolveHeroCopyPlacement(
         availableHeightPx = copyHeightPx,
         titleSlotPx = titleSlotPx,
@@ -53,8 +51,6 @@ class HomeHeroCopyLayoutPolicyTest {
         normalSpacing = normalNonTv,
         compactSpacing = compact,
         minimalSpacing = minimal,
-        plotLineHeightPx = plotLineHeightPx,
-        hasPlot = hasPlot,
     )
 
     private fun assertNonOverlapping(
@@ -70,13 +66,6 @@ class HomeHeroCopyLayoutPolicyTest {
                 placement.actionsTopPx,
         )
         assertTrue(placement.actionsBottomPx <= availableHeightPx)
-        if (placement.plotLines > 0) {
-            assertTrue(placement.plotTopPx >= placement.factsBottomPx)
-            assertTrue(
-                placement.plotTopPx + placement.plotLines * placement.plotLineHeightPx <=
-                    placement.actionsTopPx,
-            )
-        }
     }
 
     @Test
@@ -143,18 +132,16 @@ class HomeHeroCopyLayoutPolicyTest {
     }
 
     @Test
-    fun `missing genre facts and plot leave no phantom rows`() {
+    fun `missing genre and facts leave no phantom rows`() {
         val placement = nonTvPlacement(
             copyHeightPx = 234,
             factsHeightPx = 0,
             genreSlotPx = 0,
-            hasPlot = false,
         )
 
         assertEquals(HeroCopyFallback.NONE, placement.fallback)
         assertEquals(0, placement.genreSlotPx)
         assertEquals(0, placement.factsHeightPx)
-        assertEquals(0, placement.plotLines)
         assertEquals(
             placement.factsBottomPx + placement.spacing.factsActionsGapPx,
             placement.actionsTopPx,
@@ -163,19 +150,16 @@ class HomeHeroCopyLayoutPolicyTest {
     }
 
     @Test
-    fun `a real plot uses spare measured space without reserving a phantom band`() {
-        val withoutPlot = nonTvPlacement(copyHeightPx = 234, factsHeightPx = 20, hasPlot = false)
-        val withPlot = nonTvPlacement(copyHeightPx = 234, factsHeightPx = 20, hasPlot = true)
+    fun `retained copy leaves no narrative reservation between facts and actions`() {
+        val placement = nonTvPlacement(copyHeightPx = 234, factsHeightPx = 20)
 
-        assertEquals(0, withoutPlot.plotLines)
-        assertEquals(1, withPlot.plotLines)
-        assertEquals(withoutPlot.actionsTopPx, withPlot.actionsTopPx)
-        assertTrue(withPlot.titleTopPx < withoutPlot.titleTopPx)
+        assertEquals(HeroCopyFallback.NONE, placement.fallback)
         assertEquals(
-            withPlot.plotTopPx + withPlot.plotLines * withPlot.plotLineHeightPx,
-            withPlot.actionsTopPx,
+            placement.factsBottomPx + placement.spacing.factsActionsGapPx,
+            placement.actionsTopPx,
         )
-        assertNonOverlapping(withPlot, 234)
+        assertEquals(38, placement.titleTopPx)
+        assertNonOverlapping(placement, 234)
     }
 
     @Test
@@ -201,8 +185,6 @@ class HomeHeroCopyLayoutPolicyTest {
 
         assertEquals(HeroCopyFallback.COMPACT, compactPlacement.fallback)
         assertEquals(HeroCopyFallback.MINIMAL, minimalPlacement.fallback)
-        assertEquals(0, compactPlacement.plotLines)
-        assertEquals(0, minimalPlacement.plotLines)
         assertNonOverlapping(compactPlacement, 234)
         assertNonOverlapping(minimalPlacement, 234)
     }
@@ -225,8 +207,6 @@ class HomeHeroCopyLayoutPolicyTest {
             normalSpacing = normalTv,
             compactSpacing = compact,
             minimalSpacing = minimal,
-            plotLineHeightPx = 17,
-            hasPlot = false,
         )
 
         val oneRow = tvPlacement(24)

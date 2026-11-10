@@ -89,6 +89,24 @@ class HomeR05WiringContractTest(unittest.TestCase):
         self.assertIn("availableWidthPx = contentWidth", facts)
         self.assertIn("var x = width - genreRightInsetPx", facts)
 
+    def test_home_hero_has_no_synopsis_but_details_story_remains(self) -> None:
+        shell = MAIN_SHELL.read_text(encoding="utf-8")
+        for removed in (
+            "heroPlot",
+            "hero-plot",
+            "heroMetadata.plot",
+            "item.plot",
+            "plotLines",
+            "plotTopPx",
+            "hasPlot",
+        ):
+            self.assertNotIn(removed, shell)
+        details = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/DetailsProScreens.kt").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("plot = details?.plot ?: item.plot", details)
+        self.assertIn("plot = details?.plot ?: series.plot", details)
+
 
 if __name__ == "__main__":
     unittest.main()
