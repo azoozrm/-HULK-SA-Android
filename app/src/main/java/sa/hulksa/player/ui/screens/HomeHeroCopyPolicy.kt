@@ -1,7 +1,10 @@
 package sa.hulksa.player.ui.screens
 
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -86,6 +89,74 @@ internal fun homeHeroCopyMetrics(isTv: Boolean, fontScale: Float = 1f): HomeHero
         qualityChipMinHeightDp = if (isTv) 24.dp else 20.dp,
         genreSeparatorHorizontalPaddingDp = 5.dp,
     )
+}
+
+/**
+ * Home-only title style derived from the inherited application style. The explicit line height is
+ * the title's declared two-line budget; the measured native layout may still be constrained by the
+ * existing title slot. Font padding stays at the inherited/default `false` value and is not the
+ * cause of the leading clipping.
+ *
+ * Direction is narrowed only for an otherwise unspecified title: a title containing at least one
+ * Unicode L code point and no R/AL code point or explicit BiDi control selects
+ * [TextDirection.Content]; every other title retains the inherited direction exactly. This keeps
+ * mixed, RTL, neutral and explicitly directed titles on their existing paragraph direction.
+ */
+internal fun homeHeroTitleTextStyle(
+    base: TextStyle,
+    metrics: HomeHeroCopyMetrics,
+    title: String,
+): TextStyle {
+    val style = base.copy(
+        fontSize = metrics.titleFontSize,
+        lineHeight = metrics.titleLineHeight,
+        fontWeight = FontWeight.SemiBold,
+        textAlign = TextAlign.Right,
+        platformStyle = PlatformTextStyle(includeFontPadding = false),
+    )
+    val direction = homeHeroTitleDirection(title, base.textDirection)
+    return if (direction == null) style else style.copy(textDirection = direction)
+}
+
+/**
+ * Selects the Home hero title paragraph direction without changing any other style property.
+ * An explicit inherited direction always wins. For an unspecified/null inherited direction, only
+ * a pure strong-LTR title is promoted to [TextDirection.Content].
+ */
+internal fun homeHeroTitleDirection(
+    title: String,
+    inherited: TextDirection?,
+): TextDirection? {
+    if (inherited != null && inherited != TextDirection.Unspecified) return inherited
+    return if (homeHeroTitleIsPureStrongLtr(title)) TextDirection.Content else inherited
+}
+
+/**
+ * True only when [title] contains at least one Unicode L code point and no R/AL code point or
+ * explicit BiDi control. Code-point iteration handles supplementary-plane scripts; explicit
+ * controls are U+061C, U+200E/U+200F, U+202A..U+202E and U+2066..U+2069.
+ */
+internal fun homeHeroTitleIsPureStrongLtr(title: String): Boolean {
+    var hasStrongLtr = false
+    var index = 0
+    while (index < title.length) {
+        val codePoint = title.codePointAt(index)
+        if (isHomeHeroTitleBidiControl(codePoint)) return false
+        when (Character.getDirectionality(codePoint)) {
+            Character.DIRECTIONALITY_LEFT_TO_RIGHT -> hasStrongLtr = true
+            Character.DIRECTIONALITY_RIGHT_TO_LEFT,
+            Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC -> return false
+        }
+        index += Character.charCount(codePoint)
+    }
+    return hasStrongLtr
+}
+
+private fun isHomeHeroTitleBidiControl(codePoint: Int): Boolean = when (codePoint) {
+    0x061C, 0x200E, 0x200F -> true
+    in 0x202A..0x202E -> true
+    in 0x2066..0x2069 -> true
+    else -> false
 }
 
 /**

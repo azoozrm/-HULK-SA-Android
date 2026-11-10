@@ -63,6 +63,7 @@ import sa.hulksa.player.ui.adaptive.trackAdaptiveInput
 import sa.hulksa.player.ui.screens.DownloadFeedback
 import sa.hulksa.player.ui.screens.DownloadFeedbackGlyph
 import sa.hulksa.player.ui.screens.HomeActionNotice
+import sa.hulksa.player.ui.screens.HomeNotificationReturnOwner
 import sa.hulksa.player.ui.screens.LIVE_TV_PRO_CONTEXT_ALL
 import sa.hulksa.player.ui.screens.LIVE_TV_PRO_CONTEXT_FAVORITES
 import sa.hulksa.player.ui.screens.LocalNotificationCenterScreen
@@ -135,6 +136,11 @@ fun HulkApp(
     // Preserves the Series details composition state (selected tab, season and scroll position)
     // across the playback round-trip for the exact series the owner opened.
     val seriesDetailsStateHolder = rememberSaveableStateHolder()
+    // One logical Home bell return intent. It lives above Home composition so the exact bell
+    // origin survives notification-center disposal; it stores no FocusRequester.
+    val homeNotificationReturnOwner = remember(navigationMemory, state.account) {
+        HomeNotificationReturnOwner()
+    }
     // One-time TV Search entry focus per profile; hoisted above the destination layer so a
     // Details round-trip cannot re-grab the field over the restored card.
     var searchInitialFocusAcquired by remember(navigationMemory) { mutableStateOf(false) }
@@ -286,11 +292,19 @@ fun HulkApp(
         )
         viewModel.updateSearch(query)
     }
-    // ONE Notifications opener for every header host: records the logical Home hero anchor so
-    // returning from the center restores one deterministic target.
+    // ONE Notifications opener for every header host. The Home bell return is a logical intent
+    // above Home composition; opening notifications never overwrites the remembered content
+    // position with a hero target.
     val openNotificationCenter: () -> Unit = {
-        navigationMemory.save(MainDestination.HOME, "", 0, "hero", 0)
+        if (state.destination == MainDestination.HOME) {
+            homeNotificationReturnOwner.request()
+        } else {
+            homeNotificationReturnOwner.cancel()
+        }
         viewModel.openNotificationCenter()
+    }
+    LaunchedEffect(state.destination) {
+        if (state.destination != MainDestination.HOME) homeNotificationReturnOwner.cancel()
     }
 
     BackHandler(
@@ -457,6 +471,7 @@ fun HulkApp(
                                     onRefresh = viewModel::refresh,
                                     onRetryCatalog = viewModel::retryCatalog,
                                     onOpenNotifications = openNotificationCenter,
+                                    homeNotificationReturnOwner = homeNotificationReturnOwner,
                                     onClearHistory = viewModel::clearHistory,
                                     onPlayDownload = viewModel::playDownload,
                                     onDeleteDownload = { item ->
@@ -661,6 +676,7 @@ fun HulkApp(
                         },
                         onOpen = { notification ->
                             notificationOpenError = null
+                            homeNotificationReturnOwner.cancel()
                             viewModel.openNotification(notification.id) { message ->
                                 notificationOpenError = message
                             }

@@ -1117,7 +1117,7 @@ private fun Modifier.applyDownloadTvFocusNode(
 }
 
 @Composable
-fun MainShellScreen(
+internal fun MainShellScreen(
     state: HulkUiState,
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
@@ -1132,6 +1132,7 @@ fun MainShellScreen(
     onRefresh: () -> Unit,
     onRetryCatalog: (ContentType) -> Unit = {},
     onOpenNotifications: () -> Unit,
+    homeNotificationReturnOwner: HomeNotificationReturnOwner,
     onClearHistory: () -> Unit,
     onPlayDownload: (OfflineDownload) -> Unit,
     onDeleteDownload: (OfflineDownload) -> Unit,
@@ -1366,6 +1367,7 @@ fun MainShellScreen(
                         onRefresh = onRefresh,
                         onRetryCatalog = onRetryCatalog,
                         onOpenNotifications = onOpenNotifications,
+                        homeNotificationReturnOwner = homeNotificationReturnOwner,
                         onGrowthAction = openGrowthDestination,
                         onSelectDestination = onSelectDestination,
                         onClearHistory = onClearHistory,
@@ -1428,6 +1430,7 @@ fun MainShellScreen(
                         onRefresh = onRefresh,
                         onRetryCatalog = onRetryCatalog,
                         onOpenNotifications = onOpenNotifications,
+                        homeNotificationReturnOwner = homeNotificationReturnOwner,
                         onGrowthAction = openGrowthDestination,
                         onSelectDestination = onSelectDestination,
                         onClearHistory = onClearHistory,
@@ -1664,6 +1667,7 @@ private fun DestinationContent(
     onRefresh: () -> Unit,
     onRetryCatalog: (ContentType) -> Unit,
     onOpenNotifications: () -> Unit,
+    homeNotificationReturnOwner: HomeNotificationReturnOwner,
     onGrowthAction: (GrowthDestination) -> Unit,
     onSelectDestination: (MainDestination) -> Unit,
     onClearHistory: () -> Unit,
@@ -1709,6 +1713,7 @@ private fun DestinationContent(
             onRefresh = onRefresh,
             onRetryCatalog = onRetryCatalog,
             onOpenNotifications = onOpenNotifications,
+            homeNotificationReturnOwner = homeNotificationReturnOwner,
             onGrowthAction = onGrowthAction,
             onOpenDownloads = { onSelectDestination(MainDestination.DOWNLOADS) },
             onSelectDestination = onSelectDestination,
@@ -1844,6 +1849,7 @@ private fun CinemaHomeScreen(
     onRefresh: () -> Unit,
     onRetryCatalog: (ContentType) -> Unit,
     onOpenNotifications: () -> Unit,
+    homeNotificationReturnOwner: HomeNotificationReturnOwner,
     onGrowthAction: (GrowthDestination) -> Unit,
     onOpenDownloads: () -> Unit,
     onSelectDestination: (MainDestination) -> Unit,
@@ -1968,8 +1974,28 @@ private fun CinemaHomeScreen(
     // One Home entry/return intent for this composition. It is armed only from the remembered
     // position, never from catalog/model publication or hero rotation.
     val remembered = navigationMemory.position(MainDestination.HOME)
+    val notificationReturnPending = homeNotificationReturnOwner.isPending()
+    val homeNotificationBellRequester = remember { FocusRequester() }
+    var homeNotificationBellPlacementRevision by remember { mutableIntStateOf(0) }
+    val homeNotificationBellModifier = Modifier
+        .focusRequester(homeNotificationBellRequester)
+        .onPlaced { homeNotificationBellPlacementRevision += 1 }
     val homeRestoreOwner = remember(navigationMemory) {
-        HomeFocusRestoreOwner(remembered)
+        HomeFocusRestoreOwner(
+            remembered = remembered,
+            initialEntryIntent = remembered.rowKey.isNotBlank() && !notificationReturnPending,
+            onFocusEvent = homeNotificationReturnOwner::cancel,
+        )
+    }
+    LaunchedEffect(
+        notificationReturnPending,
+        homeNotificationBellPlacementRevision,
+        homeNotificationBellRequester,
+    ) {
+        if (!notificationReturnPending) return@LaunchedEffect
+        if (homeNotificationBellPlacementRevision <= 0) return@LaunchedEffect
+        if (!homeNotificationReturnOwner.isPending()) return@LaunchedEffect
+        runCatching { homeNotificationBellRequester.requestFocus() }
     }
     // R02: ONE compact five-action group in the original Home header slot for both the hero and
     // the placeholder/loading/empty/error paths; the existing callbacks and owners are reused.
@@ -1985,6 +2011,7 @@ private fun CinemaHomeScreen(
             onOpenNotifications = onOpenNotifications,
             onRefresh = onRefresh,
             onActionFocused = homeRestoreOwner::onHeaderFocused,
+            notificationBellModifier = homeNotificationBellModifier,
         )
     }
     // Truthful Home error classification reuses the accepted Movies connectivity owner: only a
@@ -2225,6 +2252,7 @@ private fun CinemaHomeScreen(
                         unreadNotificationCount = state.unreadNotificationCount,
                         onOpenNotifications = onOpenNotifications,
                         topActions = homeTopActions,
+                        notificationBellModifier = homeNotificationBellModifier,
                         watchModifier = Modifier.focusRequester(homeHeroFocusRequester),
                         onHeaderFocused = homeRestoreOwner::onHeaderFocused,
                         onFocused = {
@@ -2255,6 +2283,7 @@ private fun CinemaHomeScreen(
                         refreshModifier = Modifier.focusRequester(homeHeroFocusRequester),
                         refreshFocusRequester = homeHeroFocusRequester,
                         topActions = homeTopActions,
+                        notificationBellModifier = homeNotificationBellModifier,
                     )
                     HomeRefreshFocusAnchor(
                         state = homeRefreshFocusState,
@@ -2694,7 +2723,7 @@ private fun ActiveDownloadsSection(
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             // Caption physically RIGHT with its simple glyph physically LEFT in RTL.
-            Text("التنزيلات الجارية", color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
+            HomeSectionHeadingText("التنزيلات الجارية", isTv)
             Spacer(Modifier.width(8.dp))
             Icon(Icons.Rounded.Download, contentDescription = null, tint = colors.goldBright, modifier = Modifier.size(21.dp))
         }
@@ -2893,6 +2922,36 @@ internal fun HomeSectionPadding(isTv: Boolean, content: @Composable () -> Unit) 
     Box(Modifier.fillMaxWidth().padding(horizontal = if (isTv) TV_PAGE_GUTTER else 0.dp)) { content() }
 }
 
+/**
+ * Home section-heading text inset derived from the accepted reference header. Only the heading
+ * text moves; the shared section/row/card parent, gutters and LazyRow padding remain unchanged.
+ */
+internal fun homeSectionHeadingRightInsetDp(isTv: Boolean): Dp {
+    val headerInset = if (isTv) {
+        HOME_HEADER_TV_HORIZONTAL_PADDING_DP.dp
+    } else {
+        HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp
+    }
+    val sectionInset = if (isTv) TV_PAGE_GUTTER else 0.dp
+    return headerInset - sectionInset
+}
+
+@Composable
+private fun HomeSectionHeadingText(
+    text: String,
+    isTv: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    Text(
+        text = text,
+        color = colors.text,
+        fontSize = if (isTv) 20.sp else 17.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = modifier.absolutePadding(right = homeSectionHeadingRightInsetDp(isTv)),
+    )
+}
+
 /** First list index that holds a Home content row: only the Hero/placeholder occupies index 0. */
 internal fun homeRowCursorStart(isTv: Boolean): Int = 1
 
@@ -2918,6 +2977,7 @@ private fun CinemaHero(
     unreadNotificationCount: Int,
     onOpenNotifications: () -> Unit,
     topActions: @Composable () -> Unit,
+    notificationBellModifier: Modifier = Modifier,
     watchModifier: Modifier = Modifier,
     onHeaderFocused: () -> Unit = {},
     onFocused: () -> Unit = {},
@@ -3168,7 +3228,7 @@ private fun CinemaHero(
                         .fillMaxWidth()
                         .then(if (isTv) Modifier else Modifier.statusBarsPadding())
                         .padding(
-                            horizontal = if (isTv) 26.dp else HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp,
+                            horizontal = if (isTv) HOME_HEADER_TV_HORIZONTAL_PADDING_DP.dp else HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp,
                             vertical = if (isTv) 18.dp else 10.dp,
                         ),
                     verticalAlignment = Alignment.CenterVertically,
@@ -3180,6 +3240,7 @@ private fun CinemaHero(
                         unreadCount = unreadNotificationCount,
                         isTv = isTv,
                         onClick = onOpenNotifications,
+                        modifier = notificationBellModifier,
                         onFocused = onHeaderFocused,
                     )
                     Spacer(Modifier.width(8.dp))
@@ -3225,6 +3286,7 @@ private fun CinemaHero(
 }
 
 private const val HERO_WIDE_COPY_WIDTH_FRACTION = .46f
+private const val HOME_HEADER_TV_HORIZONTAL_PADDING_DP = 26
 private const val HERO_PHONE_HEADER_OFFSET_DP = 64
 private const val HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP = 18
 
@@ -3290,13 +3352,13 @@ internal fun resolveHeroCopyPlacement(
     availableHeightPx: Int,
     titleSlotPx: Int,
     genreSlotPx: Int,
-    reservedFactsSlotPx: Int,
     measuredFactsHeightPx: Int,
     actionsHeightPx: Int,
     normalSpacing: HeroCopySpacing,
     compactSpacing: HeroCopySpacing,
     minimalSpacing: HeroCopySpacing,
     plotLineHeightPx: Int,
+    hasPlot: Boolean,
     maxPlotLines: Int = 2,
 ): HeroCopyPlacement {
     val height = availableHeightPx.coerceAtLeast(0)
@@ -3310,8 +3372,8 @@ internal fun resolveHeroCopyPlacement(
 
     fun normalPlacement(): HeroCopyPlacement? {
         val usableHeight = (height - normalSpacing.topGapPx).coerceAtLeast(0)
-        val band = fixedBand(normalSpacing, reservedFactsSlotPx)
-        val reservedPlotLines = if (usableHeight <= band) {
+        val band = fixedBand(normalSpacing, factsHeight)
+        val reservedPlotLines = if (!hasPlot || usableHeight <= band) {
             0
         } else {
             ((usableHeight - band) / safeLineHeight)
@@ -3326,13 +3388,17 @@ internal fun resolveHeroCopyPlacement(
         if (actionsTop < 0) return null
         val factsBottom = factsTop + factsHeight
         if (factsBottom + normalSpacing.factsActionsGapPx > actionsTop) return null
-        // Keep the accepted plot reservation: unused facts space never invents an extra plot
-        // line, so a hero that previously showed no plot keeps the same composition.
-        val visiblePlotLines = minOf(
-            reservedPlotLines,
-            ((actionsTop - normalSpacing.factsActionsGapPx - factsBottom) / safeLineHeight)
-                .coerceIn(0, maxPlotLines.coerceAtLeast(0)),
-        )
+        // Plot is reserved only when a real plot exists. Missing plot never creates a phantom
+        // band, and missing/one-row facts use their measured height instead of a reserved row.
+        val visiblePlotLines = if (!hasPlot) {
+            0
+        } else {
+            minOf(
+                reservedPlotLines,
+                ((actionsTop - normalSpacing.factsActionsGapPx - factsBottom) / safeLineHeight)
+                    .coerceIn(0, maxPlotLines.coerceAtLeast(0)),
+            )
+        }
         val plotTop = if (visiblePlotLines > 0) {
             factsBottom + normalSpacing.factsActionsGapPx
         } else {
@@ -3451,7 +3517,9 @@ private fun HeroCopy(
     val density = LocalDensity.current
     val titleSlotPx = with(density) { metrics.titleSlotDp.roundToPx() }
     val genreSlotPx = with(density) { metrics.genreSlotDp.roundToPx() }
-    val factsSlotPx = with(density) { metrics.factsSlotDp.roundToPx() }
+    val hasGenre = homeHeroGenreLabels(heroGenre).isNotEmpty()
+    val effectiveGenreSlotPx = if (hasGenre) genreSlotPx else 0
+    val hasPlot = heroPlot != null
     val plotLineHeightPx = with(density) { (if (isTv) 17.sp else 18.sp).toDp().roundToPx() }
     val titleGenreGapPx = with(density) { metrics.titleGenreGapDp.roundToPx() }
     val genreFactsGapPx = with(density) { metrics.genreFactsGapDp.roundToPx() }
@@ -3479,6 +3547,7 @@ private fun HeroCopy(
         factsActionsGapPx = with(density) { 4.dp.roundToPx() },
         bottomPaddingPx = 0,
     )
+    val titleStyle = homeHeroTitleTextStyle(LocalTextStyle.current, metrics, title)
 
     SubcomposeLayout(modifier = modifier) { constraints ->
         val width = constraints.maxWidth
@@ -3523,32 +3592,29 @@ private fun HeroCopy(
                 modifier = Modifier.fillMaxWidth(),
             )
         }.firstOrNull()?.measure(
-            Constraints(maxWidth = copyWidth, maxHeight = genreSlotPx),
+            Constraints(maxWidth = copyWidth, maxHeight = effectiveGenreSlotPx),
         )
 
         val placement = resolveHeroCopyPlacement(
             availableHeightPx = height,
             titleSlotPx = titleSlotPx,
-            genreSlotPx = genreSlotPx,
-            reservedFactsSlotPx = factsSlotPx,
+            genreSlotPx = effectiveGenreSlotPx,
             measuredFactsHeightPx = factsHeight,
             actionsHeightPx = actionsPlaceable.height,
             normalSpacing = normalSpacing,
             compactSpacing = compactSpacing,
             minimalSpacing = minimalSpacing,
             plotLineHeightPx = plotLineHeightPx,
+            hasPlot = hasPlot,
         )
 
         val titlePlaceable = subcompose("hero-title") {
             Text(
                 text = title,
                 color = Color.White,
-                fontSize = metrics.titleFontSize,
-                lineHeight = metrics.titleLineHeight,
-                fontWeight = FontWeight.SemiBold,
+                style = titleStyle,
                 maxLines = HOME_HERO_TITLE_MAX_LINES,
                 overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Right,
             )
         }.first().measure(Constraints(maxWidth = copyWidth, maxHeight = titleSlotPx))
 
@@ -4077,6 +4143,7 @@ private fun HomePlaceholder(
     refreshModifier: Modifier = Modifier,
     refreshFocusRequester: FocusRequester? = null,
     topActions: @Composable () -> Unit,
+    notificationBellModifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -4113,9 +4180,10 @@ private fun HomePlaceholder(
                     .align(Alignment.TopEnd)
                     .then(if (isTv) Modifier else Modifier.statusBarsPadding())
                     .padding(
-                        horizontal = if (isTv) 26.dp else HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp,
+                        horizontal = if (isTv) HOME_HEADER_TV_HORIZONTAL_PADDING_DP.dp else HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp,
                         vertical = if (isTv) 18.dp else 10.dp,
-                    ),
+                    )
+                    .then(notificationBellModifier),
             )
         }
         when (
@@ -4269,7 +4337,7 @@ private fun HomeBoxedSection(
         }
     }
     Column {
-        Text(title, color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
+        HomeSectionHeadingText(title, isTv)
         Spacer(Modifier.height(10.dp))
         LazyRow(
             state = rowState,
@@ -4457,7 +4525,7 @@ private fun HomeContinueWatchingSection(
         removalController.finish()
     }
     Column {
-        Text(title, color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
+        HomeSectionHeadingText(title, isTv)
         Spacer(Modifier.height(10.dp))
         LazyRow(
             state = rowState,
@@ -4556,7 +4624,7 @@ private fun HomeLastChannelSection(
         }
     }
     Column {
-        Text("اخر قناة شاهدتها", color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
+        HomeSectionHeadingText("اخر قناة شاهدتها", isTv)
         Spacer(Modifier.height(10.dp))
         Box(Modifier.padding(horizontal = 5.dp, vertical = 7.dp)) {
             LiveChannelHomeCard(

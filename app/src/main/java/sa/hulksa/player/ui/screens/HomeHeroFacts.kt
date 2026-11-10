@@ -86,10 +86,12 @@ internal fun HomeHeroGenreLine(
     val colors = LocalHulkColors.current
     val density = LocalDensity.current
     val genreSlotPx = with(density) { metrics.genreSlotDp.roundToPx() }
+    val genreRightInsetPx = with(density) { metrics.factsGroupHorizontalPaddingDp.roundToPx() }
     val labelStyle = homeHeroGenreTextStyle(LocalTextStyle.current, metrics)
     val labelColor = colors.text
     SubcomposeLayout(modifier = modifier) { constraints ->
         val width = constraints.maxWidth.coerceAtLeast(0)
+        val contentWidth = (width - genreRightInsetPx).coerceAtLeast(0)
         val labelPlaceables = labels.mapIndexed { index, label ->
             subcompose("hero-genre-label-$index") {
                 Text(
@@ -128,12 +130,12 @@ internal fun HomeHeroGenreLine(
         }
         val selection = homeHeroGenreLineSelection(
             labelWidthsPx = labelPlaceables.map { it.width },
-            availableWidthPx = width,
+            availableWidthPx = contentWidth,
             separatorWidthPx = dotPlaceables.first().width,
             countWidthPx = { count -> countPlaceables.getValue(count).width },
         )
         layout(width, genreSlotPx) {
-            var x = width
+            var x = width - genreRightInsetPx
             selection.labelIndices.forEachIndexed { order, labelIndex ->
                 val label = labelPlaceables[labelIndex]
                 x -= label.width

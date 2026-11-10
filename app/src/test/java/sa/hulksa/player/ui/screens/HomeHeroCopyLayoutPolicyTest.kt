@@ -1,6 +1,12 @@
 package sa.hulksa.player.ui.screens
 
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -33,22 +39,22 @@ class HomeHeroCopyLayoutPolicyTest {
     private fun nonTvPlacement(
         copyHeightPx: Int,
         factsHeightPx: Int,
-        reservedFactsSlotPx: Int = 46,
-        titleSlotPx: Int = 68,
         genreSlotPx: Int = 18,
+        titleSlotPx: Int = 68,
         actionsHeightPx: Int = 46,
         plotLineHeightPx: Int = 18,
+        hasPlot: Boolean = false,
     ): HeroCopyPlacement = resolveHeroCopyPlacement(
         availableHeightPx = copyHeightPx,
         titleSlotPx = titleSlotPx,
         genreSlotPx = genreSlotPx,
-        reservedFactsSlotPx = reservedFactsSlotPx,
         measuredFactsHeightPx = factsHeightPx,
         actionsHeightPx = actionsHeightPx,
         normalSpacing = normalNonTv,
         compactSpacing = compact,
         minimalSpacing = minimal,
         plotLineHeightPx = plotLineHeightPx,
+        hasPlot = hasPlot,
     )
 
     private fun assertNonOverlapping(
@@ -121,16 +127,55 @@ class HomeHeroCopyLayoutPolicyTest {
     }
 
     @Test
-    fun `one and two measured fact rows keep the same reserved title genre and action anchors`() {
+    fun `one and two measured fact rows keep the same action anchor without phantom rows`() {
         val oneRow = nonTvPlacement(copyHeightPx = 234, factsHeightPx = 20)
         val twoRows = nonTvPlacement(copyHeightPx = 234, factsHeightPx = 46)
 
-        assertEquals(oneRow.titleTopPx, twoRows.titleTopPx)
-        assertEquals(oneRow.genreTopPx, twoRows.genreTopPx)
-        assertEquals(oneRow.factsTopPx, twoRows.factsTopPx)
+        assertTrue(oneRow.titleTopPx > twoRows.titleTopPx)
+        assertTrue(oneRow.factsTopPx > twoRows.factsTopPx)
         assertEquals(oneRow.actionsTopPx, twoRows.actionsTopPx)
-        assertTrue(oneRow.factsBottomPx < twoRows.factsBottomPx)
+        assertEquals(
+            oneRow.factsBottomPx + oneRow.spacing.factsActionsGapPx,
+            oneRow.actionsTopPx,
+        )
+        assertNonOverlapping(oneRow, 234)
         assertNonOverlapping(twoRows, 234)
+    }
+
+    @Test
+    fun `missing genre facts and plot leave no phantom rows`() {
+        val placement = nonTvPlacement(
+            copyHeightPx = 234,
+            factsHeightPx = 0,
+            genreSlotPx = 0,
+            hasPlot = false,
+        )
+
+        assertEquals(HeroCopyFallback.NONE, placement.fallback)
+        assertEquals(0, placement.genreSlotPx)
+        assertEquals(0, placement.factsHeightPx)
+        assertEquals(0, placement.plotLines)
+        assertEquals(
+            placement.factsBottomPx + placement.spacing.factsActionsGapPx,
+            placement.actionsTopPx,
+        )
+        assertNonOverlapping(placement, 234)
+    }
+
+    @Test
+    fun `a real plot uses spare measured space without reserving a phantom band`() {
+        val withoutPlot = nonTvPlacement(copyHeightPx = 234, factsHeightPx = 20, hasPlot = false)
+        val withPlot = nonTvPlacement(copyHeightPx = 234, factsHeightPx = 20, hasPlot = true)
+
+        assertEquals(0, withoutPlot.plotLines)
+        assertEquals(1, withPlot.plotLines)
+        assertEquals(withoutPlot.actionsTopPx, withPlot.actionsTopPx)
+        assertTrue(withPlot.titleTopPx < withoutPlot.titleTopPx)
+        assertEquals(
+            withPlot.plotTopPx + withPlot.plotLines * withPlot.plotLineHeightPx,
+            withPlot.actionsTopPx,
+        )
+        assertNonOverlapping(withPlot, 234)
     }
 
     @Test
@@ -175,13 +220,13 @@ class HomeHeroCopyLayoutPolicyTest {
             availableHeightPx = 274,
             titleSlotPx = 68,
             genreSlotPx = 18,
-            reservedFactsSlotPx = 56,
             measuredFactsHeightPx = factsHeightPx,
             actionsHeightPx = 46,
             normalSpacing = normalTv,
             compactSpacing = compact,
             minimalSpacing = minimal,
             plotLineHeightPx = 17,
+            hasPlot = false,
         )
 
         val oneRow = tvPlacement(24)
@@ -195,10 +240,13 @@ class HomeHeroCopyLayoutPolicyTest {
         ).value, 0.01f)
         assertEquals(HeroCopyFallback.NONE, oneRow.fallback)
         assertEquals(HeroCopyFallback.NONE, twoRows.fallback)
-        assertEquals(oneRow.titleTopPx, twoRows.titleTopPx)
-        assertEquals(oneRow.genreTopPx, twoRows.genreTopPx)
-        assertEquals(oneRow.factsTopPx, twoRows.factsTopPx)
+        assertTrue(oneRow.titleTopPx > twoRows.titleTopPx)
+        assertTrue(oneRow.factsTopPx > twoRows.factsTopPx)
         assertEquals(oneRow.actionsTopPx, twoRows.actionsTopPx)
+        assertEquals(
+            oneRow.factsBottomPx + oneRow.spacing.factsActionsGapPx,
+            oneRow.actionsTopPx,
+        )
         assertNonOverlapping(oneRow, 274)
         assertNonOverlapping(twoRows, 274)
     }
@@ -213,5 +261,131 @@ class HomeHeroCopyLayoutPolicyTest {
         assertTrue(scaled.titleSlotDp > tvMetrics.titleSlotDp)
         assertTrue(scaled.genreSlotDp > tvMetrics.genreSlotDp)
         assertTrue(scaled.factsSlotDp > tvMetrics.factsSlotDp)
+    }
+
+    @Test
+    fun `home section heading text uses the reference header right edge`() {
+        assertEquals(18f, homeSectionHeadingRightInsetDp(isTv = true).value, 0.01f)
+        assertEquals(18f, homeSectionHeadingRightInsetDp(isTv = false).value, 0.01f)
+        assertEquals(
+            26f - TV_PAGE_GUTTER.value,
+            homeSectionHeadingRightInsetDp(isTv = true).value,
+            0.01f,
+        )
+        assertEquals(
+            18f,
+            homeSectionHeadingRightInsetDp(isTv = false).value,
+            0.01f,
+        )
+    }
+
+    @Test
+    fun `title style keeps inherited font and exact two-line slot metrics`() {
+        val base = TextStyle(
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Light,
+            letterSpacing = 0.5.sp,
+        )
+        val style = homeHeroTitleTextStyle(base, nonTvMetrics, "AR-SUBS: The Farm (2023)")
+
+        assertEquals(FontFamily.Monospace, style.fontFamily)
+        assertEquals(FontWeight.SemiBold, style.fontWeight)
+        assertEquals(28.sp, style.fontSize)
+        assertEquals(34.sp, style.lineHeight)
+        assertEquals(0.5.sp, style.letterSpacing)
+        assertEquals(TextAlign.Right, style.textAlign)
+        assertEquals(TextDirection.Content, style.textDirection)
+        assertTrue(style.platformStyle != null)
+        assertEquals(68f, nonTvMetrics.titleSlotDp.value, 0.01f)
+    }
+
+    @Test
+    fun `pure strong LTR titles select Content only under unspecified direction`() {
+        val base = TextStyle(fontFamily = FontFamily.Monospace)
+        val pureLtr = listOf(
+            "AR-ANM-S: Muchuu sa Kimi ni (2025) (JP)",
+            "AR-SUBS: The Farm (2023)",
+            "AR-DE: A Different World (2026) (US)",
+            "AR-007: The World Is Not Enough (1999)",
+            "2026 Movie",
+            "\uD801\uDC00 Example",
+        )
+        for (title in pureLtr) {
+            assertEquals(
+                "unexpected direction for $title",
+                TextDirection.Content,
+                homeHeroTitleTextStyle(base, nonTvMetrics, title).textDirection,
+            )
+        }
+    }
+
+    @Test
+    fun `mixed RTL Hebrew neutral and supplementary-RTL titles retain inherited direction`() {
+        val base = TextStyle(fontFamily = FontFamily.Monospace)
+        val preserved = listOf(
+            "AR-KH: سقف الوالد",
+            "سقف الوالد",
+            "AR: שלום",
+            "2026 — ★",
+            "\uD83A\uDD00 Example",
+        )
+        for (title in preserved) {
+            assertEquals(
+                "unexpected direction for $title",
+                base.textDirection,
+                homeHeroTitleTextStyle(base, nonTvMetrics, title).textDirection,
+            )
+        }
+    }
+
+    @Test
+    fun `explicit BiDi controls prevent the Content override`() {
+        val base = TextStyle(fontFamily = FontFamily.Monospace)
+        val controls = listOf(
+            "\u061C",
+            "\u200E",
+            "\u200F",
+            "\u202A",
+            "\u202B",
+            "\u202C",
+            "\u202D",
+            "\u202E",
+            "\u2066",
+            "\u2067",
+            "\u2068",
+            "\u2069",
+        )
+        for (control in controls) {
+            val title = "$control" + "AR-SUBS: The Farm (2023)"
+            assertEquals(
+                "control U+${control[0].code.toString(16)} changed direction",
+                base.textDirection,
+                homeHeroTitleTextStyle(base, nonTvMetrics, title).textDirection,
+            )
+        }
+    }
+
+    @Test
+    fun `explicitly directed inherited titles are preserved`() {
+        val ltr = "AR-ANM-S: Muchuu sa Kimi ni (2025) (JP)"
+        val mixed = "AR-KH: سقف الوالد"
+        for (direction in listOf(
+            TextDirection.Ltr,
+            TextDirection.Rtl,
+            TextDirection.Content,
+            TextDirection.ContentOrLtr,
+            TextDirection.ContentOrRtl,
+        )) {
+            val base = TextStyle(fontFamily = FontFamily.Monospace, textDirection = direction)
+            assertEquals(direction, homeHeroTitleTextStyle(base, nonTvMetrics, ltr).textDirection)
+            assertEquals(direction, homeHeroTitleTextStyle(base, nonTvMetrics, mixed).textDirection)
+        }
+    }
+
+    @Test
+    fun `title direction policy returns the inherited value for null and non-pure titles`() {
+        assertEquals(null, homeHeroTitleDirection("", null))
+        assertEquals(TextDirection.Rtl, homeHeroTitleDirection("AR-SUBS: The Farm (2023)", TextDirection.Rtl))
+        assertEquals(TextDirection.Content, homeHeroTitleDirection("AR-SUBS: The Farm (2023)", null))
     }
 }
