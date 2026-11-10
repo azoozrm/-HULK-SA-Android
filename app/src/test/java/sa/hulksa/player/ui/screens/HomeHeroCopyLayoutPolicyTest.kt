@@ -5,6 +5,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.junit.Assert.assertEquals
@@ -35,6 +36,55 @@ class HomeHeroCopyLayoutPolicyTest {
         factsActionsGapPx = 4,
         bottomPaddingPx = 0,
     )
+    private val testDensity = Density(2f, 1f)
+
+    private fun px(dp: Float): Int = with(testDensity) { dp.dp.roundToPx() }
+
+    private fun tvPlacement(
+        factsHeightPx: Int,
+        factsActionsGapDp: Float,
+        bottomPaddingDp: Float,
+        fontScale: Float = 1f,
+    ): Pair<HeroCopyPlacement, Int> {
+        val metrics = homeHeroCopyMetrics(isTv = true, fontScale = fontScale)
+        val heightDp = metrics.topGapDp.value + metrics.titleSlotDp.value +
+            metrics.titleGenreGapDp.value + metrics.genreSlotDp.value +
+            metrics.genreFactsGapDp.value + metrics.factsSlotDp.value +
+            factsActionsGapDp + bottomPaddingDp + 46f
+        val heightPx = px(heightDp)
+        val normal = HeroCopySpacing(
+            topGapPx = px(metrics.topGapDp.value),
+            titleGenreGapPx = px(metrics.titleGenreGapDp.value),
+            genreFactsGapPx = px(metrics.genreFactsGapDp.value),
+            factsActionsGapPx = px(factsActionsGapDp),
+            bottomPaddingPx = px(bottomPaddingDp),
+        )
+        val compactTv = HeroCopySpacing(
+            topGapPx = px(4f),
+            titleGenreGapPx = px(4f),
+            genreFactsGapPx = px(4f),
+            factsActionsGapPx = px(4f),
+            bottomPaddingPx = px(8f),
+        )
+        val minimalTv = HeroCopySpacing(
+            topGapPx = 0,
+            titleGenreGapPx = px(2f),
+            genreFactsGapPx = px(2f),
+            factsActionsGapPx = px(4f),
+            bottomPaddingPx = 0,
+        )
+        val placement = resolveHeroCopyPlacement(
+            availableHeightPx = heightPx,
+            titleSlotPx = px(metrics.titleSlotDp.value),
+            genreSlotPx = px(metrics.genreSlotDp.value),
+            measuredFactsHeightPx = factsHeightPx,
+            actionsHeightPx = px(46f),
+            normalSpacing = normal,
+            compactSpacing = compactTv,
+            minimalSpacing = minimalTv,
+        )
+        return placement to heightPx
+    }
 
     private fun nonTvPlacement(
         copyHeightPx: Int,
@@ -190,45 +240,52 @@ class HomeHeroCopyLayoutPolicyTest {
     }
 
     @Test
-    fun `ordinary tv hero keeps its policy height with one or two whole fact rows`() {
-        val normalTv = HeroCopySpacing(
-            topGapPx = 16,
-            titleGenreGapPx = 6,
-            genreFactsGapPx = 4,
-            factsActionsGapPx = 8,
-            bottomPaddingPx = 40,
-        )
-        fun tvPlacement(factsHeightPx: Int) = resolveHeroCopyPlacement(
-            availableHeightPx = 274,
-            titleSlotPx = 68,
-            genreSlotPx = 18,
-            measuredFactsHeightPx = factsHeightPx,
-            actionsHeightPx = 46,
-            normalSpacing = normalTv,
-            compactSpacing = compact,
-            minimalSpacing = minimal,
-        )
-
-        val oneRow = tvPlacement(24)
-        val twoRows = tvPlacement(56)
-
-        assertEquals(350f, effectiveHeroHeightDp(
-            policyHeightDp = 350.dp,
-            headerMinHeightDp = 76.dp,
-            actionsHeightDp = 46.dp,
-            metrics = tvMetrics,
-        ).value, 0.01f)
-        assertEquals(HeroCopyFallback.NONE, oneRow.fallback)
-        assertEquals(HeroCopyFallback.NONE, twoRows.fallback)
-        assertTrue(oneRow.titleTopPx > twoRows.titleTopPx)
-        assertTrue(oneRow.factsTopPx > twoRows.factsTopPx)
-        assertEquals(oneRow.actionsTopPx, twoRows.actionsTopPx)
+    fun `normal tv spacing is paired and preserves the 48dp action band`() {
+        assertEquals(16f, tvMetrics.factsActionsGapDp.value, 0.01f)
+        assertEquals(32f, tvMetrics.bottomPaddingDp.value, 0.01f)
         assertEquals(
-            oneRow.factsBottomPx + oneRow.spacing.factsActionsGapPx,
-            oneRow.actionsTopPx,
+            48f,
+            tvMetrics.factsActionsGapDp.value + tvMetrics.bottomPaddingDp.value,
+            0.01f,
         )
-        assertNonOverlapping(oneRow, 274)
-        assertNonOverlapping(twoRows, 274)
+        assertEquals(10f, nonTvMetrics.factsActionsGapDp.value, 0.01f)
+        assertEquals(24f, nonTvMetrics.bottomPaddingDp.value, 0.01f)
+        assertEquals(
+            350f,
+            effectiveHeroHeightDp(
+                policyHeightDp = 350.dp,
+                headerMinHeightDp = 76.dp,
+                actionsHeightDp = 46.dp,
+                metrics = tvMetrics,
+            ).value,
+            0.01f,
+        )
+    }
+
+    @Test
+    fun `normal tv action row moves down 8dp while upper copy and hero band stay fixed`() {
+        for (scale in listOf(1f, 1.5f)) {
+            val metrics = homeHeroCopyMetrics(isTv = true, fontScale = scale)
+            val oneRow = px(metrics.factsRowHeightDp.value)
+            val twoRows = px(metrics.factsSlotDp.value)
+            for (factsHeightPx in listOf(0, oneRow, twoRows)) {
+                val (old, heightPx) = tvPlacement(factsHeightPx, 8f, 40f, scale)
+                val (new, _) = tvPlacement(factsHeightPx, 16f, 32f, scale)
+
+                assertEquals(HeroCopyFallback.NONE, old.fallback)
+                assertEquals(HeroCopyFallback.NONE, new.fallback)
+                assertEquals(old.titleTopPx, new.titleTopPx)
+                assertEquals(old.genreTopPx, new.genreTopPx)
+                assertEquals(old.factsTopPx, new.factsTopPx)
+                assertEquals(old.factsHeightPx, new.factsHeightPx)
+                assertEquals(px(8f), new.actionsTopPx - old.actionsTopPx)
+                assertEquals(old.factsBottomPx + px(8f), old.actionsTopPx)
+                assertEquals(new.factsBottomPx + px(16f), new.actionsTopPx)
+                assertEquals(old.actionsBottomPx + px(8f), new.actionsBottomPx)
+                assertTrue(new.actionsBottomPx <= heightPx)
+                assertNonOverlapping(new, heightPx)
+            }
+        }
     }
 
     @Test

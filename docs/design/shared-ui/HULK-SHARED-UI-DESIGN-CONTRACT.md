@@ -766,6 +766,16 @@ facts, actions, artwork, focus and navigation behavior remains. The unrelated 13
 two-line-capacity finding stays open. Visual acceptance of this candidate is PENDING; captures
 remain OFF.
 
+### 12.12 Owner Home TV action-row spacing (2026-11-10)
+
+For normal TV only, the Home hero facts-to-actions gap is 16dp and the hero bottom padding is 32dp
+(previously 8dp/40dp). The paired sum remains 48dp, so the title, genre and facts upper coordinates,
+hero minimum height and following sections stay unchanged while the measured action row and its
+focus/hit bounds move down by 8dp. Non-TV spacing remains 10dp/24dp; compact and minimal
+insufficient-height fallbacks are unchanged. This supersedes only the old normal-TV action-bottom
+spacing; all other accepted Home, Details, focus and navigation behavior remains. Owner visual
+acceptance is PENDING; captures remain OFF.
+
 ## 13. Login / Who's Watching / entry-subflows adoption record (2026-10-11)
 
 The owner accepted the R03 Login model (`HULK-SA-LOGIN-PROFILES-DESIGN-R03.zip`, SHA-256
