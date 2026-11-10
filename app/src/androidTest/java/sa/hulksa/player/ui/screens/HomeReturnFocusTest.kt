@@ -13,6 +13,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
@@ -431,6 +432,7 @@ class HomeReturnFocusTest {
                         onToggleFavoriteWithResult = { _, _ -> },
                         onRefresh = {},
                         onOpenNotifications = {},
+                        homeNotificationReturnOwner = remember { HomeNotificationReturnOwner() },
                         onClearHistory = {},
                         onPlayDownload = {},
                         onDeleteDownload = {},
@@ -487,6 +489,7 @@ class HomeReturnFocusTest {
                         onToggleFavoriteWithResult = { _, _ -> },
                         onRefresh = {},
                         onOpenNotifications = {},
+                        homeNotificationReturnOwner = remember { HomeNotificationReturnOwner() },
                         onClearHistory = {},
                         onPlayDownload = {},
                         onDeleteDownload = {},
