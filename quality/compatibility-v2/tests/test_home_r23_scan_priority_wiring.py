@@ -62,11 +62,18 @@ class HomeR23StartupScanPriorityWiringTest(unittest.TestCase):
         profile_block = self.vm.split("resetCatalogRestoreForProfileChange()")[1][:120]
         self.assertIn("beginStartupScanPriority(activeSession)", profile_block)
 
-    def test_session_logout_and_profile_change_invalidate(self) -> None:
+    def test_session_logout_and_catalog_reset_invalidate(self) -> None:
         self.assertGreaterEqual(
             self.vm.count("startupScanPriorityGate.invalidate()"),
-            3,
-            "logout, profile change and catalog reset must all drop the round",
+            2,
+            "logout and catalog reset must drop the round",
+        )
+        on_profile = self.vm[self.vm.index("fun onProfileChanged()"):]
+        on_profile = on_profile[: on_profile.index("fun ")]
+        self.assertNotIn(
+            "startupScanPriorityGate.invalidate()",
+            on_profile,
+            "the profile callback must not race a just-started catalog round",
         )
 
     def test_no_sleeps_or_new_waits_in_the_gate_path(self) -> None:

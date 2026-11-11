@@ -2588,7 +2588,9 @@ class HulkViewModel internal constructor(
         invalidatePlayerProgressPersistence()
         notificationScanJob?.cancel()
         pendingNotificationScanTrigger = null
-        startupScanPriorityGate.invalidate()
+        // The catalog round is invalidated/re-begun by resetCatalogRestoreForProfileChange() when
+        // the profile actually changes. Dropping it here would race the just-started round and
+        // would let the APP_START scan bypass the gate.
         invalidateDetailsRequest()
         invalidateVoiceSearchContext()
         mutableState.update { state ->
