@@ -103,16 +103,18 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
         owner: AuthenticatedSessionOwner,
         item: ContentItem,
         requirePresentation: Boolean = false,
-    ): HomeHeroTechnicalMetadata = metadata(owner, item.type, item.id, requirePresentation)
+        surface: ProviderSurface = ProviderSurface.HERO,
+    ): HomeHeroTechnicalMetadata = metadata(owner, item.type, item.id, requirePresentation, surface)
 
     suspend fun metadata(
         owner: AuthenticatedSessionOwner,
         type: ContentType,
         contentId: Int,
         requirePresentation: Boolean = false,
+        surface: ProviderSurface = ProviderSurface.HERO,
     ): HomeHeroTechnicalMetadata = when (type) {
-        ContentType.MOVIE -> movieMetadata(owner, contentId, requirePresentation)
-        ContentType.SERIES -> seriesMetadata(owner, contentId, requirePresentation)
+        ContentType.MOVIE -> movieMetadata(owner, contentId, requirePresentation, surface)
+        ContentType.SERIES -> seriesMetadata(owner, contentId, requirePresentation, surface)
         ContentType.LIVE -> HomeHeroTechnicalMetadata()
     }
 
@@ -161,6 +163,7 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
         owner: AuthenticatedSessionOwner,
         movieId: Int,
         requirePresentation: Boolean = false,
+        surface: ProviderSurface = ProviderSurface.HERO,
     ): HomeHeroTechnicalMetadata {
         if (!isCurrent(owner)) return HomeHeroTechnicalMetadata()
         val cached = readMovieCached(owner, movieId)
@@ -172,6 +175,7 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
             presentationSettled = cached.presentationChecked,
         )
         if (technicalComplete && !runPresentationBackfill) {
+            ProviderRequestTrace.cache(surface, ContentType.MOVIE, ProviderCacheDecision.COMPLETE)
             return cached.takeIf { isCurrent(owner) } ?: HomeHeroTechnicalMetadata()
         }
 
@@ -187,11 +191,14 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
             previous
         }
         if (now - lastAttempt < RETRY_COOLDOWN_MS) {
+            ProviderRequestTrace.cache(
+                surface, ContentType.MOVIE, ProviderCacheDecision.COOLDOWN_OR_SHARED,
+            )
             return cached.takeIf { isCurrent(owner) } ?: HomeHeroTechnicalMetadata()
         }
 
         val fetched = try {
-            movieClient.fetch(owner.session, movieId)
+            movieClient.fetch(owner.session, movieId, surface)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -227,9 +234,10 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
         owner: AuthenticatedSessionOwner,
         seriesId: Int,
         requirePresentation: Boolean = false,
+        surface: ProviderSurface = ProviderSurface.HERO,
     ): HomeHeroTechnicalMetadata {
         if (!isCurrent(owner)) return HomeHeroTechnicalMetadata()
-        val metadata = seriesStore.metadata(owner, seriesId, requirePresentation)
+        val metadata = seriesStore.metadata(owner, seriesId, requirePresentation, surface)
         if (!isCurrent(owner)) return HomeHeroTechnicalMetadata()
         return HomeHeroTechnicalMetadata(
             quality = metadata.quality,

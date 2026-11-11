@@ -486,26 +486,37 @@ class HulkRepository internal constructor(
         return snapshot
     }
 
-    suspend fun episodes(session: AuthenticatedSession, seriesId: Int): List<Episode> =
-        client.episodes(session, seriesId)
+    suspend fun episodes(
+        session: AuthenticatedSession,
+        seriesId: Int,
+        surface: ProviderSurface = ProviderSurface.DETAILS,
+    ): List<Episode> = client.episodes(session, seriesId, surface)
 
-    suspend fun contentDetails(session: AuthenticatedSession, movieId: Int): ContentDetails =
-        client.contentDetails(session, movieId)
+    suspend fun contentDetails(
+        session: AuthenticatedSession,
+        movieId: Int,
+        surface: ProviderSurface = ProviderSurface.DETAILS,
+    ): ContentDetails = client.contentDetails(session, movieId, surface)
 
     suspend fun movieCardMetadata(
         session: AuthenticatedSession,
         movieId: Int,
+        surface: ProviderSurface = ProviderSurface.DETAILS,
     ): MovieCardTechnicalMetadata =
-        movieCardMetadataClient.fetch(session, movieId)
+        movieCardMetadataClient.fetch(session, movieId, surface)
 
     suspend fun seriesCardMetadata(
         session: AuthenticatedSession,
         seriesId: Int,
+        surface: ProviderSurface = ProviderSurface.DETAILS,
     ): SeriesCardTechnicalMetadata =
-        seriesCardMetadataClient.fetch(session, seriesId)
+        seriesCardMetadataClient.fetch(session, seriesId, surface)
 
-    suspend fun seriesBundle(session: AuthenticatedSession, seriesId: Int): SeriesBundle =
-        client.seriesBundle(session, seriesId)
+    suspend fun seriesBundle(
+        session: AuthenticatedSession,
+        seriesId: Int,
+        surface: ProviderSurface = ProviderSurface.DETAILS,
+    ): SeriesBundle = client.seriesBundle(session, seriesId, surface)
 
     fun playback(session: AuthenticatedSession, item: ContentItem): PlaybackRequest =
         client.playback(session, item)

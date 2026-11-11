@@ -46,6 +46,9 @@ import sa.hulksa.player.data.EpisodeNotificationSubscription
 import sa.hulksa.player.data.SessionOwnershipCleanupGate
 import sa.hulksa.player.data.SessionOwnershipCleanupResult
 import sa.hulksa.player.data.SessionPublicationGate
+import sa.hulksa.player.data.ProviderRequestTrace
+import sa.hulksa.player.data.ProviderSurface
+import sa.hulksa.player.data.ProviderTrigger
 import sa.hulksa.player.data.SessionPublicationResult
 import sa.hulksa.player.data.TrackPreferenceIntent
 import sa.hulksa.player.data.EpisodeNotificationStoreResult
@@ -1213,11 +1216,13 @@ class HulkViewModel internal constructor(
     /** Manual retry for one failed background catalog; healthy catalogs are not reloaded. */
     fun retryCatalog(type: ContentType) {
         if (type !in catalogTypesForDestination(mutableState.value.destination)) return
+        ProviderRequestTrace.enterStage(ProviderTrigger.RETRY)
         catalogRequestOwner.prioritize(type)
         ensureCatalog(type, force = true)
     }
 
     fun refresh() {
+        ProviderRequestTrace.enterStage(ProviderTrigger.REFRESH)
         refreshOperations(force = true)
         val destination = mutableState.value.destination
         val types = catalogTypesForDestination(destination)
@@ -1273,7 +1278,9 @@ class HulkViewModel internal constructor(
             try {
                 val fetched = try {
                     movieCardProbeSemaphore.withPermit {
-                        contentMetadataStore.metadata(owner, item)
+                        contentMetadataStore.metadata(
+                            owner, item, surface = ProviderSurface.MOVIE_CARD,
+                        )
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -3265,6 +3272,7 @@ class HulkViewModel internal constructor(
                                     val bundle = repository.seriesBundle(
                                         activeSession,
                                         subscription.seriesId,
+                                        ProviderSurface.SCAN,
                                     )
                                     if (!canUseSeriesNotifications(
                                             profile.kind,
@@ -3944,6 +3952,7 @@ class HulkViewModel internal constructor(
             SessionPublicationResult.Stale -> return
         }
         publishPresenceOwnership(authenticated)
+        ProviderRequestTrace.bindSession()
         ensureDestinationCatalogs(MainDestination.HOME)
         refreshOperations(force = false)
         refreshNotificationState(clearPopup = true)

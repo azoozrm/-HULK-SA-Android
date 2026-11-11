@@ -11,6 +11,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.model.AuthenticatedSession
+import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.Credentials
 import sa.hulksa.player.model.PortalConfig
 import java.io.IOException
@@ -38,17 +39,21 @@ class SeriesCardMetadataClient {
     suspend fun fetch(
         session: AuthenticatedSession,
         seriesId: Int,
+        surface: ProviderSurface = ProviderSurface.OTHER,
     ): SeriesCardTechnicalMetadata = fetch(
         portal = session.portal,
         credentials = session.credentials,
         seriesId = seriesId,
+        surface = surface,
     )
 
     suspend fun fetch(
         portal: PortalConfig,
         credentials: Credentials,
         seriesId: Int,
+        surface: ProviderSurface = ProviderSurface.OTHER,
     ): SeriesCardTechnicalMetadata = withContext(Dispatchers.IO) {
+        val attempt = ProviderRequestTrace.queued(surface, ContentType.SERIES, "get_series_info")
         val url = (portal.baseUrl.trimEnd('/') + "/player_api.php")
             .toHttpUrl()
             .newBuilder()
@@ -65,23 +70,43 @@ class SeriesCardMetadataClient {
             .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} Android")
             .build()
 
+        ProviderRequestTrace.callIssued(attempt)
         val root = try {
             client.executeCancellable(request) { response ->
                 val body = try {
                     BoundedJsonResponseReader.readResponse(response, XtreamJsonLimits.SERIES_INFO)
                 } catch (_: XtreamJsonGuardException) {
+                    reportProviderTerminal(attempt, ProviderOutcome.GUARD, response.code)
                     return@executeCancellable null
                 }
+                val shape = providerResponseShape(body)
                 if (!response.isSuccessful || body.isBlank() || body.looksLikeChallenge()) {
+                    val category = providerChallengeCategory(body)
+                    reportProviderTerminal(
+                        attempt,
+                        if (category != null) ProviderOutcome.BLOCKED else ProviderOutcome.HTTP,
+                        response.code,
+                        category,
+                        shape,
+                    )
                     return@executeCancellable null
                 }
-                runCatching { XtreamJsonParser.parseObject(body) }.getOrNull()
+                val parsed = runCatching { XtreamJsonParser.parseObject(body) }.getOrNull()
+                if (parsed == null) {
+                    reportProviderTerminal(attempt, ProviderOutcome.OTHER, response.code, shape = shape)
+                    return@executeCancellable null
+                }
+                reportProviderTerminal(attempt, ProviderOutcome.SUCCESS, response.code, shape = shape)
+                parsed
             }
         } catch (error: CancellationException) {
+            reportProviderTerminal(attempt, ProviderOutcome.CANCELED)
             throw error
         } catch (_: IOException) {
+            reportProviderTerminal(attempt, ProviderOutcome.NETWORK)
             null
         } catch (_: Exception) {
+            reportProviderTerminal(attempt, ProviderOutcome.OTHER)
             null
         } ?: return@withContext SeriesCardTechnicalMetadata(succeeded = false)
 

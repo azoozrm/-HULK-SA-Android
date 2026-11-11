@@ -317,6 +317,59 @@ class HomeHeroCopyLayoutPolicyTest {
     }
 
     @Test
+    fun `tv hero copy shares the header heading axis while keeping the wider title budget`() {
+        assertEquals(26f, homeHeroCopyHorizontalPaddingDp(isTv = true).value, 0.01f)
+        assertEquals(
+            HOME_HEADER_TV_HORIZONTAL_PADDING_DP.toFloat(),
+            homeHeroCopyHorizontalPaddingDp(isTv = true).value,
+            0.01f,
+        )
+        assertEquals(27f, homeHeroCopyWidthBudgetDp(isTv = true).value, 0.01f)
+        assertTrue(
+            homeHeroCopyWidthBudgetDp(isTv = true) > homeHeroCopyHorizontalPaddingDp(isTv = true),
+        )
+        // Phone keeps the accepted compact anchor and its unchanged copy budget.
+        assertEquals(18f, homeHeroCopyHorizontalPaddingDp(isTv = false).value, 0.01f)
+        assertEquals(18f, homeHeroCopyWidthBudgetDp(isTv = false).value, 0.01f)
+    }
+
+    @Test
+    fun `tv title genre facts and primary action end on the same physical right edge`() {
+        val heroWidthDp = 888f
+        val anchorDp = homeHeroCopyHorizontalPaddingDp(isTv = true).value
+        val headerRightDp = heroWidthDp - anchorDp
+        val headingRightDp =
+            heroWidthDp - TV_PAGE_GUTTER.value - homeSectionHeadingRightInsetDp(isTv = true).value
+        val titleRightDp = heroWidthDp - anchorDp
+        val actionRightDp = heroWidthDp - anchorDp
+        val genreRightDp = heroWidthDp - anchorDp -
+            tvMetrics.factsGroupHorizontalPaddingDp.value +
+            homeHeroMetadataEdgeCompensationDp(tvMetrics).value
+        val factsChipBorderRightDp = heroWidthDp - anchorDp -
+            tvMetrics.factsGroupHorizontalPaddingDp.value +
+            homeHeroMetadataEdgeCompensationDp(tvMetrics).value
+
+        assertEquals(headerRightDp, headingRightDp, 0.01f)
+        assertEquals(headerRightDp, titleRightDp, 0.01f)
+        assertEquals(headerRightDp, actionRightDp, 0.01f)
+        assertEquals(headerRightDp, genreRightDp, 0.01f)
+        assertEquals(headerRightDp, factsChipBorderRightDp, 0.01f)
+        // The compensation is exactly the metadata gutter, never a guessed offset.
+        assertEquals(
+            tvMetrics.factsGroupHorizontalPaddingDp.value,
+            homeHeroMetadataEdgeCompensationDp(tvMetrics).value,
+            0.01f,
+        )
+        assertEquals(10f, homeHeroMetadataEdgeCompensationDp(tvMetrics).value, 0.01f)
+        assertEquals(0f, homeHeroMetadataEdgeCompensationDp(nonTvMetrics).value, 0.01f)
+        // Non-TV keeps the accepted metadata inset inside its copy host.
+        val phoneGenreRightDp = heroWidthDp - homeHeroCopyHorizontalPaddingDp(isTv = false).value -
+            nonTvMetrics.factsGroupHorizontalPaddingDp.value +
+            homeHeroMetadataEdgeCompensationDp(nonTvMetrics).value
+        assertEquals(heroWidthDp - 18f - 8f, phoneGenreRightDp, 0.01f)
+    }
+
+    @Test
     fun `title style keeps inherited font and exact two-line slot metrics`() {
         val base = TextStyle(
             fontFamily = FontFamily.Monospace,

@@ -9,6 +9,7 @@ MAIN_SHELL = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShel
 HOME_HISTORY = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/HomeHistoryRemoval.kt"
 MOBILE_ACTIONS = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/MobileMainTopActions.kt"
 HOME_FACTS = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/HomeHeroFacts.kt"
+HOME_HERO_POLICY = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/HomeHeroCopyPolicy.kt"
 
 
 class HomeR05WiringContractTest(unittest.TestCase):
@@ -79,15 +80,48 @@ class HomeR05WiringContractTest(unittest.TestCase):
         self.assertIn("lineHeight = metrics.titleLineHeight", policy)
         self.assertIn("fontWeight = FontWeight.SemiBold", policy)
 
-    def test_genre_and_facts_share_the_same_visible_right_edge(self) -> None:
+    def test_genre_and_facts_share_the_home_header_visible_right_edge(self) -> None:
+        # R19 supersedes only the old TV 27dp hero anchor and the genre/facts-only common inset:
+        # every hero presentation group is wired to the Home header axis, and the accepted title
+        # width budget stays separate so title wrapping cannot change with the alignment.
+        shell = MAIN_SHELL.read_text(encoding="utf-8")
         facts = HOME_FACTS.read_text(encoding="utf-8")
+        policy = HOME_HERO_POLICY.read_text(encoding="utf-8")
+
+        self.assertIn("internal fun homeHeroCopyHorizontalPaddingDp(isTv: Boolean): Dp", shell)
+        self.assertIn("if (isTv) {\n        HOME_HEADER_TV_HORIZONTAL_PADDING_DP.dp", shell)
+        self.assertIn(".padding(horizontal = homeHeroCopyHorizontalPaddingDp(isTv))", shell)
+        self.assertIn("internal fun homeHeroCopyWidthBudgetDp(isTv: Boolean): Dp", shell)
+        self.assertIn("private const val HOME_HERO_TV_COPY_WIDTH_BUDGET_DP = 27", shell)
+        self.assertIn("homeHeroCopyWidthBudgetDp(isTv) * 2f", shell)
+        self.assertNotIn("(if (isTv) 27.dp else 18.dp) * 2f", shell)
+        self.assertNotIn(".padding(horizontal = if (isTv) 27.dp else 18.dp)", shell)
+
+        self.assertIn("internal fun homeHeroMetadataEdgeCompensationDp(", policy)
         self.assertIn(
-            "val genreRightInsetPx = with(density) { metrics.factsGroupHorizontalPaddingDp.roundToPx() }",
+            "if (metrics.isTv) metrics.factsGroupHorizontalPaddingDp else 0.dp",
+            policy,
+        )
+        # Genre keeps the measured width budget but places its visible labels on the anchor.
+        self.assertIn(
+            "val contentWidth = (width - genreRightInsetPx).coerceAtLeast(0)",
             facts,
         )
-        self.assertIn("val contentWidth = (width - genreRightInsetPx).coerceAtLeast(0)", facts)
         self.assertIn("availableWidthPx = contentWidth", facts)
-        self.assertIn("var x = width - genreRightInsetPx", facts)
+        self.assertIn("val anchorShiftPx = with(density) { homeHeroMetadataEdgeCompensationDp(metrics).roundToPx() }", facts)
+        self.assertIn("var x = width - genreRightInsetPx + anchorShiftPx", facts)
+        # Facts keep their rows/gaps; R20 bounds the leading group instead of shifting it outside.
+        self.assertIn("homeHeroFactRowRects(", facts)
+        self.assertIn("parentWidthPx = presentation.widthPx", facts)
+        self.assertIn("omitLeadingEdgeGutter = true", facts)
+        self.assertIn("val compensatesLeadingEdge = homeHeroMetadataEdgeCompensationDp(metrics) > 0.dp", facts)
+        self.assertIn(
+            "left = metrics.factsGroupHorizontalPaddingDp,\n            right = 0.dp,",
+            facts,
+        )
+        self.assertNotIn("val groupLeft = if (order == 0)", facts)
+        self.assertIn("internal fun homeHeroFactRowRects(", policy)
+        self.assertIn("if (required > parent) return null", policy)
 
     def test_home_hero_has_no_synopsis_but_details_story_remains(self) -> None:
         shell = MAIN_SHELL.read_text(encoding="utf-8")

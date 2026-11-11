@@ -92,6 +92,75 @@ internal fun homeHeroCopyMetrics(isTv: Boolean, fontScale: Float = 1f): HomeHero
 }
 
 /**
+ * R19/R20: the Home-hero metadata groups keep their accepted internal group gutter, but that gutter
+ * is layout space, not visible content. On TV this value is compensated at placement time so the
+ * visible genre label and the rightmost fact/quality-chip border share the Home header axis instead
+ * of sitting one gutter further inward; non-TV keeps its existing composition unchanged.
+ *
+ * It is exactly the gutter applied by the Home hero fact entry content and by the genre line's
+ * internal inset, so the compensation cannot drift from the measured padding.
+ */
+internal fun homeHeroMetadataEdgeCompensationDp(metrics: HomeHeroCopyMetrics): Dp =
+    if (metrics.isTv) metrics.factsGroupHorizontalPaddingDp else 0.dp
+
+/**
+ * One physical box of a measured Home fact row, in the row parent's own coordinates.
+ * [groupIndex] is the row position (0 = the physical-right leading group); separators share the
+ * index of the group to their physical right and set [separator].
+ */
+internal data class HomeHeroFactRect(
+    val groupIndex: Int,
+    val leftPx: Int,
+    val rightPx: Int,
+    val separator: Boolean = false,
+)
+
+/**
+ * R20: physical placement of one measured fact row, shared by the renderer and the regressions.
+ *
+ * Groups are laid out right-to-left in provider order inside [parentWidthPx]. [renderWidthsPx] are
+ * the widths the renderer will actually place, so the row-leading group may omit its unused
+ * physical-right outer gutter while the logical widths used by [homeHeroFactPresentation] stay the
+ * accepted ones.
+ *
+ * Returns null when any group or separator box would fall outside the parent, so the caller can
+ * surface the conflict instead of drawing out of bounds. A row that fits can never return null.
+ */
+internal fun homeHeroFactRowRects(
+    parentWidthPx: Int,
+    renderWidthsPx: List<Int>,
+    separatorWidthPx: Int,
+): List<HomeHeroFactRect>? {
+    val parent = parentWidthPx.coerceAtLeast(0)
+    val separator = separatorWidthPx.coerceAtLeast(0)
+    if (renderWidthsPx.isEmpty()) return emptyList()
+    val required = renderWidthsPx.sumOf { it.coerceAtLeast(0) } +
+        separator * (renderWidthsPx.size - 1)
+    if (required > parent) return null
+    val rects = ArrayList<HomeHeroFactRect>(renderWidthsPx.size * 2 - 1)
+    var x = parent
+    renderWidthsPx.forEachIndexed { index, rawWidth ->
+        val width = rawWidth.coerceAtLeast(0)
+        val left = x - width
+        if (left < 0) return null
+        rects += HomeHeroFactRect(groupIndex = index, leftPx = left, rightPx = x)
+        x = left
+        if (index < renderWidthsPx.lastIndex) {
+            val separatorLeft = x - separator
+            if (separatorLeft < 0) return null
+            rects += HomeHeroFactRect(
+                groupIndex = index,
+                leftPx = separatorLeft,
+                rightPx = x,
+                separator = true,
+            )
+            x = separatorLeft
+        }
+    }
+    return rects
+}
+
+/**
  * Home-only title style derived from the inherited application style. The explicit line height is
  * the title's declared two-line budget; the measured native layout may still be constrained by the
  * existing title slot. Font padding stays at the inherited/default `false` value and is not the

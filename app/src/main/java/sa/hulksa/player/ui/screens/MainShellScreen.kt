@@ -3263,7 +3263,7 @@ private fun CinemaHero(
                 metrics = heroCopyMetrics,
                 copyContentWidthPx = with(density) {
                     (heroOuterWidthDp * (if (isTv) HERO_WIDE_COPY_WIDTH_FRACTION else 1f) -
-                        (if (isTv) 27.dp else 18.dp) * 2f)
+                        homeHeroCopyWidthBudgetDp(isTv) * 2f)
                         .coerceAtLeast(0.dp)
                         .roundToPx()
                 },
@@ -3275,16 +3275,46 @@ private fun CinemaHero(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .padding(horizontal = if (isTv) 27.dp else 18.dp),
+                    .padding(horizontal = homeHeroCopyHorizontalPaddingDp(isTv)),
             )
         }
     }
 }
 
 private const val HERO_WIDE_COPY_WIDTH_FRACTION = .46f
-private const val HOME_HEADER_TV_HORIZONTAL_PADDING_DP = 26
+internal const val HOME_HEADER_TV_HORIZONTAL_PADDING_DP = 26
 private const val HERO_PHONE_HEADER_OFFSET_DP = 64
-private const val HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP = 18
+internal const val HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP = 18
+
+/**
+ * R19: accepted title/copy measurement budget. It intentionally stays wider than the visible-right
+ * anchor below, so correcting the alignment never changes the title's wrapping capacity.
+ */
+private const val HOME_HERO_TV_COPY_WIDTH_BUDGET_DP = 27
+
+/**
+ * R19 physical-right content axis for the Home hero copy groups. On TV it is exactly the accepted
+ * Home header text edge (`HOME_HEADER_TV_HORIZONTAL_PADDING_DP`), which section-heading text already
+ * shares through [homeSectionHeadingRightInsetDp]; phone keeps its existing compact anchor.
+ */
+internal fun homeHeroCopyHorizontalPaddingDp(isTv: Boolean): Dp =
+    if (isTv) {
+        HOME_HEADER_TV_HORIZONTAL_PADDING_DP.dp
+    } else {
+        HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp
+    }
+
+/**
+ * Accepted title/copy measurement budget, deliberately separate from
+ * [homeHeroCopyHorizontalPaddingDp]: the title keeps its wider TV wrapping budget while the visible
+ * right edge moves onto the shared header axis.
+ */
+internal fun homeHeroCopyWidthBudgetDp(isTv: Boolean): Dp =
+    if (isTv) {
+        HOME_HERO_TV_COPY_WIDTH_BUDGET_DP.dp
+    } else {
+        HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp
+    }
 
 /**
  * Header height floor derived from the real header typography, the actual status-bar inset and

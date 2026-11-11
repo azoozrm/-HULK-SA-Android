@@ -10,6 +10,7 @@ import okhttp3.Request
 import org.json.JSONObject
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.model.AuthenticatedSession
+import sa.hulksa.player.model.ContentType
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -34,7 +35,9 @@ class MovieCardMetadataClient {
     suspend fun fetch(
         session: AuthenticatedSession,
         movieId: Int,
+        surface: ProviderSurface = ProviderSurface.OTHER,
     ): MovieCardTechnicalMetadata = withContext(Dispatchers.IO) {
+        val attempt = ProviderRequestTrace.queued(surface, ContentType.MOVIE, "get_vod_info")
         val url = (session.portal.baseUrl.trimEnd('/') + "/player_api.php")
             .toHttpUrl()
             .newBuilder()
@@ -51,27 +54,44 @@ class MovieCardMetadataClient {
             .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} Android")
             .build()
 
+        ProviderRequestTrace.callIssued(attempt)
         val root = try {
             client.executeCancellable(request) { response ->
                 val body = try {
                     BoundedJsonResponseReader.readResponse(response, XtreamJsonLimits.VOD_INFO)
                 } catch (_: XtreamJsonGuardException) {
+                    reportProviderTerminal(attempt, ProviderOutcome.GUARD, response.code)
                     return@executeCancellable null
                 }
+                val shape = providerResponseShape(body)
                 if (!response.isSuccessful || body.looksLikeChallenge()) {
+                    val category = providerChallengeCategory(body)
+                    reportProviderTerminal(
+                        attempt,
+                        if (category != null) ProviderOutcome.BLOCKED else ProviderOutcome.HTTP,
+                        response.code,
+                        category,
+                        shape,
+                    )
                     return@executeCancellable null
                 }
-                try {
+                val parsed = try {
                     XtreamJsonParser.parseObject(body)
                 } catch (_: XtreamJsonGuardException) {
-                    null
+                    reportProviderTerminal(attempt, ProviderOutcome.OTHER, response.code, shape = shape)
+                    return@executeCancellable null
                 }
+                reportProviderTerminal(attempt, ProviderOutcome.SUCCESS, response.code, shape = shape)
+                parsed
             }
         } catch (error: CancellationException) {
+            reportProviderTerminal(attempt, ProviderOutcome.CANCELED)
             throw error
         } catch (_: IOException) {
+            reportProviderTerminal(attempt, ProviderOutcome.NETWORK)
             null
         } catch (_: Exception) {
+            reportProviderTerminal(attempt, ProviderOutcome.OTHER)
             null
         } ?: return@withContext MovieCardTechnicalMetadata(succeeded = false)
 

@@ -101,6 +101,7 @@ import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.R
 import sa.hulksa.player.data.AuthenticatedSessionOwner
 import sa.hulksa.player.data.HomeHeroMetadataStore
+import sa.hulksa.player.data.ProviderSurface
 import sa.hulksa.player.data.SeriesCardMetadataStore
 import sa.hulksa.player.data.decodeHomeHeroMetadataToken
 import sa.hulksa.player.model.ContentItem
@@ -1323,7 +1324,7 @@ fun SeriesCatalogBoxedCard(
     }
     LaunchedEffect(item.id, metadataOwner, metadataStore) {
         val owner = metadataOwner ?: return@LaunchedEffect
-        val loaded = metadataStore.metadata(owner, item.id)
+        val loaded = metadataStore.metadata(owner, item.id, surface = ProviderSurface.SERIES_CARD)
         metadataStore.publishIfCurrent(owner) { metadata = loaded }
     }
     val seasonCount = metadata.seasonCount?.takeIf { it > 0 }

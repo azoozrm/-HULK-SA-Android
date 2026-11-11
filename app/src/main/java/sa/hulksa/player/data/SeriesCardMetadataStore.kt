@@ -54,6 +54,7 @@ class SeriesCardMetadataStore private constructor(context: Context) {
         owner: AuthenticatedSessionOwner,
         seriesId: Int,
         requirePresentation: Boolean = false,
+        surface: ProviderSurface = ProviderSurface.OTHER,
     ): SeriesCardTechnicalMetadata {
         if (!AuthenticatedSessionRegistry.isCurrent(owner)) {
             return SeriesCardTechnicalMetadata()
@@ -66,17 +67,26 @@ class SeriesCardMetadataStore private constructor(context: Context) {
             presentationSettled = cached != null && presentationSettled(owner, seriesId),
         )
         if (cached?.isComplete() == true && !runPresentationBackfill) {
+            ProviderRequestTrace.cache(surface, ContentType.SERIES, ProviderCacheDecision.COMPLETE)
             return cached.takeIf { AuthenticatedSessionRegistry.isCurrent(owner) }
                 ?: SeriesCardTechnicalMetadata()
         }
 
         val requestKey = owner.contentMetadataKey(ContentType.SERIES, seriesId)
+        var joinedInFlight = false
         val deferred = synchronized(inFlight) {
-            inFlight[requestKey] ?: run {
+            val existing = inFlight[requestKey]
+            if (existing != null) {
+                joinedInFlight = true
+                existing
+            } else run {
                 val now = System.currentTimeMillis()
                 pruneRetryOwnerLocked(owner)
                 val lastAttempt = lastAttemptAtMs[requestKey] ?: 0L
                 if (now - lastAttempt < RETRY_COOLDOWN_MS) {
+                    ProviderRequestTrace.cache(
+                        surface, ContentType.SERIES, ProviderCacheDecision.COOLDOWN_OR_SHARED,
+                    )
                     return cached
                         ?.takeIf { AuthenticatedSessionRegistry.isCurrent(owner) }
                         ?: SeriesCardTechnicalMetadata()
@@ -84,14 +94,20 @@ class SeriesCardMetadataStore private constructor(context: Context) {
                 lastAttemptAtMs[requestKey] = now
                 trimRetryCacheLocked()
                 scope.async {
-                    semaphore.withPermit { fetchAndCache(owner, seriesId, cached) }
+                    semaphore.withPermit { fetchAndCache(owner, seriesId, cached, surface) }
                 }.also { inFlight[requestKey] = it }
             }
+        }
+        if (joinedInFlight) {
+            ProviderRequestTrace.cache(
+                surface, ContentType.SERIES, ProviderCacheDecision.COOLDOWN_OR_SHARED,
+            )
         }
 
         val result = try {
             deferred.await()
         } finally {
+            // Waiters share the single in-flight call; they are never separate provider attempts.
             synchronized(inFlight) {
                 if (inFlight[requestKey] === deferred) {
                     inFlight.remove(requestKey)
@@ -106,12 +122,14 @@ class SeriesCardMetadataStore private constructor(context: Context) {
         owner: AuthenticatedSessionOwner,
         seriesId: Int,
         cached: SeriesCardTechnicalMetadata?,
+        surface: ProviderSurface = ProviderSurface.OTHER,
     ): SeriesCardTechnicalMetadata {
         val fetched = try {
             client.fetch(
                 portal = owner.session.portal,
                 credentials = owner.session.credentials,
                 seriesId = seriesId,
+                surface = surface,
             )
         } catch (cancelled: CancellationException) {
             throw cancelled

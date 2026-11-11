@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.absolutePadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -87,6 +88,9 @@ internal fun HomeHeroGenreLine(
     val density = LocalDensity.current
     val genreSlotPx = with(density) { metrics.genreSlotDp.roundToPx() }
     val genreRightInsetPx = with(density) { metrics.factsGroupHorizontalPaddingDp.roundToPx() }
+    // R19 TV alignment: the accepted width budget keeps the inset, while the visible content edge
+    // moves onto the shared Home header axis. Non-TV compensation is zero, so it is unchanged.
+    val anchorShiftPx = with(density) { homeHeroMetadataEdgeCompensationDp(metrics).roundToPx() }
     val labelStyle = homeHeroGenreTextStyle(LocalTextStyle.current, metrics)
     val labelColor = colors.text
     SubcomposeLayout(modifier = modifier) { constraints ->
@@ -135,7 +139,7 @@ internal fun HomeHeroGenreLine(
             countWidthPx = { count -> countPlaceables.getValue(count).width },
         )
         layout(width, genreSlotPx) {
-            var x = width - genreRightInsetPx
+            var x = width - genreRightInsetPx + anchorShiftPx
             selection.labelIndices.forEachIndexed { order, labelIndex ->
                 val label = labelPlaceables[labelIndex]
                 x -= label.width
@@ -206,6 +210,11 @@ private fun HomeHeroFactRows(
     val density = LocalDensity.current
     val factsRowGapPx = with(density) { metrics.factsRowGapDp.roundToPx() }
     val separatorWidthPx = with(density) { 1.dp.roundToPx() }
+    // R19/R20 TV alignment: the visible content edge of every row lands on the accepted Home header
+    // axis. R20 removes the leading group's unused physical-right outer gutter from its rendered
+    // measurement instead of placing that padded box outside the row's reported bounds; the logical
+    // widths used for the accepted fit/partition decision are unchanged. Non-TV compensation is 0.
+    val compensatesLeadingEdge = homeHeroMetadataEdgeCompensationDp(metrics) > 0.dp
     SubcomposeLayout(modifier = modifier) { constraints ->
         val fullWidth = constraints.maxWidth.coerceAtLeast(0)
         val groupPlaceables = entries.mapIndexed { index, entry ->
@@ -248,22 +257,72 @@ private fun HomeHeroFactRows(
                     }.first().measure(Constraints())
                 }
             }
-            layout(presentation.widthPx, totalHeight) {
-                var y = 0
-                rows.forEachIndexed { rowIndex, row ->
-                    val rowHeight = rowHeights[rowIndex]
-                    var x = presentation.widthPx
-                    row.groupIndices.forEachIndexed { order, groupIndex ->
-                        val group = groupPlaceables[groupIndex]
-                        x -= group.width
-                        group.place(x, y + (rowHeight - group.height) / 2)
-                        if (order < row.groupIndices.lastIndex) {
-                            val separator = separators[rowIndex][order]
-                            x -= separator.width
-                            separator.place(x, y + (rowHeight - separator.height) / 2)
-                        }
+            // The leading group of each row is measured again without its unused outer-right
+            // gutter, so its rendered box stays inside the row while its visible content still
+            // ends exactly on the shared axis.
+            val leadingPlaceables = if (compensatesLeadingEdge) {
+                rows.map { row -> row.groupIndices.first() }.distinct().associateWith { index ->
+                    subcompose("hero-fact-leading-$index") {
+                        HomeHeroFactEntryContent(
+                            entry = entries[index],
+                            metrics = metrics,
+                            omitLeadingEdgeGutter = true,
+                        )
+                    }.first().measure(Constraints())
+                }
+            } else {
+                emptyMap()
+            }
+            val rowRects = rows.map { row ->
+                val renderWidths = row.groupIndices.mapIndexed { order, index ->
+                    if (order == 0) {
+                        leadingPlaceables[index]?.width ?: groupPlaceables[index].width
+                    } else {
+                        groupPlaceables[index].width
                     }
-                    y += rowHeight + factsRowGapPx
+                }
+                homeHeroFactRowRects(
+                    parentWidthPx = presentation.widthPx,
+                    renderWidthsPx = renderWidths,
+                    separatorWidthPx = separatorWidthPx,
+                )
+            }
+            if (rowRects.any { it == null }) {
+                hulkPerfLog {
+                    "homeHeroFactsOutOfBounds identity=$heroIdentity " +
+                        "width=${presentation.widthPx} rows=${layoutResult.rows.size}"
+                }
+                layout(presentation.widthPx, 0) { }
+            } else {
+                layout(presentation.widthPx, totalHeight) {
+                    var y = 0
+                    rows.forEachIndexed { rowIndex, row ->
+                        val rowHeight = rowHeights[rowIndex]
+                        val rects = rowRects[rowIndex].orEmpty()
+                        var groupOrder = 0
+                        rects.forEach { rect ->
+                            if (rect.separator) {
+                                val separator = separators[rowIndex][groupOrder - 1]
+                                separator.place(
+                                    rect.leftPx,
+                                    y + (rowHeight - separator.height) / 2,
+                                )
+                            } else {
+                                val index = row.groupIndices[groupOrder]
+                                val placeable = if (groupOrder == 0) {
+                                    leadingPlaceables[index] ?: groupPlaceables[index]
+                                } else {
+                                    groupPlaceables[index]
+                                }
+                                placeable.place(
+                                    rect.leftPx,
+                                    y + (rowHeight - placeable.height) / 2,
+                                )
+                                groupOrder++
+                            }
+                        }
+                        y += rowHeight + factsRowGapPx
+                    }
                 }
             }
         }
@@ -274,10 +333,20 @@ private fun HomeHeroFactRows(
 private fun HomeHeroFactEntryContent(
     entry: HomeHeroFactEntry,
     metrics: HomeHeroCopyMetrics,
+    omitLeadingEdgeGutter: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     val textStyle = homeHeroFactTextStyle(LocalTextStyle.current, metrics)
-    val groupPadding = Modifier.padding(horizontal = metrics.factsGroupHorizontalPaddingDp)
+    // R20: the row-leading group drops only its unused physical-right outer gutter; every interior
+    // gutter, separator gap and the chip's own 7dp padding/border stay exactly as accepted.
+    val groupPadding = if (omitLeadingEdgeGutter) {
+        Modifier.absolutePadding(
+            left = metrics.factsGroupHorizontalPaddingDp,
+            right = 0.dp,
+        )
+    } else {
+        Modifier.padding(horizontal = metrics.factsGroupHorizontalPaddingDp)
+    }
     when {
         entry.seasonCount != null -> Box(
             modifier = groupPadding,

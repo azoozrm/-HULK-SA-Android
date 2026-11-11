@@ -776,6 +776,32 @@ insufficient-height fallbacks are unchanged. This supersedes only the old normal
 spacing; all other accepted Home, Details, focus and navigation behavior remains. Owner visual
 acceptance is PENDING; captures remain OFF.
 
+### 12.13 Owner Home hero right-edge alignment (2026-11-11)
+
+The owner observed that the hero item name, genre line, technical facts and action buttons did not
+share the alignment of `متابعة المشاهدة` and `الرئيسية`. The Home header text, the section-heading
+text and every Home hero presentation group now resolve to one physical-right content axis. On TV
+the hero copy host uses the same 26dp inset as the header text; the section-heading text already
+reaches that edge through its existing heading-only inset, and its parent, card and row geometry is
+unchanged. The hero title, the rightmost visible genre label/count, the rightmost visible fact or
+quality-chip outer border on each row, and the primary action's outer border all end on that axis.
+The favorite action remains physically left of the primary action.
+
+The accepted title/copy width budget stays independent of the anchor and remains 27dp on TV, so
+title measurement width, the two-line slot, ellipsis and the 0.46 TV copy policy do not change with
+this alignment. Only the metadata's extra 10dp outer group gutter is compensated, and only at
+placement time: the genre line keeps its unchanged selection width budget, and each fact row keeps
+its logical measured width, row partition, separators, interior group gaps and chip padding. The
+row-leading fact group is measured for rendering without its unused physical-right outer gutter, so
+its padded box stays inside the row it reports while its visible content ends on the shared axis; no
+child is placed outside the row. No graphics translation, absolute pixel offset, RTL change or
+global padding removal is used. All vertical coordinates, the normal-TV 16dp/32dp action spacing,
+header/hero heights, artwork, typography, colors, captions, callbacks, focus/hit bounds and the
+non-TV composition are unchanged; Details, headings, cards and scrolling are untouched. This
+supersedes only the old TV 27dp hero anchor and the genre/facts-only common inset. Captures remain
+OFF, automated visual validation is NOT RUN and owner visual acceptance of this candidate is
+PENDING.
+
 ## 13. Login / Who's Watching / entry-subflows adoption record (2026-10-11)
 
 The owner accepted the R03 Login model (`HULK-SA-LOGIN-PROFILES-DESIGN-R03.zip`, SHA-256
