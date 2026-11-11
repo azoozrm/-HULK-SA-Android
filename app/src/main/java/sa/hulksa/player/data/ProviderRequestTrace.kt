@@ -45,6 +45,12 @@ enum class ProviderShape {
     UNAVAILABLE,
 }
 
+/** Startup scheduling gate state, recorded to prove ownership and settlement. */
+enum class ProviderGateState {
+    HELD,
+    RELEASED,
+}
+
 /** Cache decision taken before any network attempt. */
 enum class ProviderCacheDecision {
     COMPLETE,
@@ -179,6 +185,19 @@ internal object ProviderRequestTrace {
     internal fun terminalIfOpen(attempt: ProviderAttempt?, outcome: ProviderOutcome) {
         if (attempt != null && !attempt.terminalReported.get()) {
             terminal(attempt, outcome)
+        }
+    }
+
+    /** Records a closed-field startup gate transition; no content ids or payload data. */
+    internal fun gate(
+        state: ProviderGateState,
+        reason: String,
+        pending: Int,
+    ) {
+        emit {
+            base("ev=gate") +
+                " state=$state reason=$reason pending=$pending" +
+                " owner=$ownerTag stage=$stage"
         }
     }
 

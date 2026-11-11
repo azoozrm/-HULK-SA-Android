@@ -46,6 +46,7 @@ import sa.hulksa.player.data.EpisodeNotificationSubscription
 import sa.hulksa.player.data.SessionOwnershipCleanupGate
 import sa.hulksa.player.data.SessionOwnershipCleanupResult
 import sa.hulksa.player.data.SessionPublicationGate
+import sa.hulksa.player.data.ProviderGateState
 import sa.hulksa.player.data.ProviderRequestTrace
 import sa.hulksa.player.data.ProviderSurface
 import sa.hulksa.player.data.ProviderTrigger
@@ -780,6 +781,7 @@ class HulkViewModel internal constructor(
                 persistCatalogSnapshot(activeSession, type, result.full)
                 scheduleHomeBootstrapPersist()
             }
+            settleStartupScanPriority(session, type)
         },
         onFailure = { type, error, remaining ->
             if (isInvalidSessionFailure(error)) {
@@ -800,6 +802,7 @@ class HulkViewModel internal constructor(
                 }
             }
             refreshHomePreparationState()
+            settleStartupScanPriority(session, type)
         },
     )
     private val selectedCategoryByType = mutableMapOf<ContentType, String?>()
@@ -811,6 +814,7 @@ class HulkViewModel internal constructor(
     private var playerProgressProfileOwner: String? = null
     private var notificationScanJob: Job? = null
     private var pendingNotificationScanTrigger: NotificationScanTrigger? = null
+    private val startupScanPriorityGate = StartupScanPriorityGate()
     private var foregroundNotificationScanJob: Job? = null
     private var foregroundNotificationScanWake = MutableStateFlow(0L)
     private var foregroundNotificationLastAttemptElapsedRealtimeMs = 0L
@@ -1026,6 +1030,7 @@ class HulkViewModel internal constructor(
         profileLibraryKind = profile.kind
         if (profileChanged) {
             resetCatalogRestoreForProfileChange()
+            beginStartupScanPriority(activeSession)
         }
         if (profile.kind == ProfileKind.KIDS) {
             // General Home bootstrap must never remain as a fallback for a Kids profile.
@@ -2583,6 +2588,7 @@ class HulkViewModel internal constructor(
         invalidatePlayerProgressPersistence()
         notificationScanJob?.cancel()
         pendingNotificationScanTrigger = null
+        startupScanPriorityGate.invalidate()
         invalidateDetailsRequest()
         invalidateVoiceSearchContext()
         mutableState.update { state ->
@@ -3210,6 +3216,12 @@ class HulkViewModel internal constructor(
             enqueueNotificationScanTrigger(trigger)
             return
         }
+        if (trigger.isAutomaticStartupScan && startupScanPriorityGate.isHeld(activeSession)) {
+            // Keep the automatic intent pending and coalesced; it drains after the initial
+            // current-owner catalog round settles, including failures.
+            enqueueNotificationScanTrigger(trigger)
+            return
+        }
         val profile = profileStore.activeProfile()
         val accountId = localEpisodeNotificationStore.activeAccountId()
         if (accountId == null) {
@@ -3318,6 +3330,32 @@ class HulkViewModel internal constructor(
         val pending = pendingNotificationScanTrigger ?: return
         pendingNotificationScanTrigger = null
         scanSubscribedSeries(pending)
+    }
+
+    /**
+     * R23: give the initial current-owner catalog revalidation round priority over automatic
+     * notification scans. The gate is released by the catalog owner's terminal callbacks
+     * (success, failure, or a valid no-fetch/fresh decision), never by a temporary loading set or
+     * by cache-restore completion.
+     */
+    private fun beginStartupScanPriority(owner: AuthenticatedSession) {
+        val types = catalogTypesForDestination(MainDestination.HOME)
+        if (types.isEmpty()) return
+        if (startupScanPriorityGate.begin(owner, types)) {
+            ProviderRequestTrace.gate(
+                ProviderGateState.HELD, "CATALOG_PENDING", types.size,
+            )
+        }
+    }
+
+    private fun settleStartupScanPriority(owner: AuthenticatedSession?, type: ContentType) {
+        if (owner == null) return
+        if (startupScanPriorityGate.settle(owner, type)) {
+            ProviderRequestTrace.gate(
+                ProviderGateState.RELEASED, "CATALOG_SETTLED", 0,
+            )
+            drainPendingNotificationScan()
+        }
     }
 
     private fun enqueueNotificationScanTrigger(trigger: NotificationScanTrigger) {
@@ -3651,6 +3689,7 @@ class HulkViewModel internal constructor(
         cacheRestoreJob = null
         homeBootstrapPersistJob?.cancel()
         homeBootstrapPersistJob = null
+        startupScanPriorityGate.invalidate()
         pendingCatalogRequests.clear()
         cacheRestoreAttempted.clear()
         freshCatalogTypes.clear()
@@ -3712,6 +3751,7 @@ class HulkViewModel internal constructor(
         notificationUiReady = false
         foregroundNotificationLastAttemptElapsedRealtimeMs = 0L
         wakeForegroundNotificationScheduler()
+        startupScanPriorityGate.invalidate()
         invalidateCatalogRequests()
         clearCatalogMemory()
         invalidateDiagnosticsForSessionChange()
@@ -3953,6 +3993,7 @@ class HulkViewModel internal constructor(
         }
         publishPresenceOwnership(authenticated)
         ProviderRequestTrace.bindSession()
+        beginStartupScanPriority(authenticated)
         ensureDestinationCatalogs(MainDestination.HOME)
         refreshOperations(force = false)
         refreshNotificationState(clearPopup = true)
@@ -4114,6 +4155,9 @@ class HulkViewModel internal constructor(
                 mutableState.update { state ->
                     val display = catalogsForDestination(state.destination, state.catalogs)
                     if (display == state.catalogs) state else state.copy(catalogs = display)
+                }
+                if (type !in catalogRequestOwner.loadingTypes()) {
+                    settleStartupScanPriority(activeSession, type)
                 }
             }
             return
