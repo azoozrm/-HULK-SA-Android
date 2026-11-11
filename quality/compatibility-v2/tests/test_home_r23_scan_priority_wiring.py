@@ -29,6 +29,11 @@ class HomeR23StartupScanPriorityWiringTest(unittest.TestCase):
             self.assertIn("NotificationScanTrigger." + manual + ",", self.gate)
         self.assertIn("-> false", self.gate)
 
+    def test_scan_scheduling_is_observable_and_intent_survives_profile_callback(self) -> None:
+        for state in ("HELD", "ADMITTED", "NO_ELIGIBLE", "DISABLED"):
+            self.assertIn('ProviderRequestTrace.scan("%s"' % state, self.vm)
+        self.assertIn("if (pendingNotificationScanTrigger?.isAutomaticStartupScan != true)", self.vm)
+
     def test_scan_admission_checks_the_gate_and_preserves_intent(self) -> None:
         scan_start = self.vm.index("private fun scanSubscribedSeries(")
         scan_body = self.vm[scan_start : self.vm.index("private fun drainPendingNotificationScan()")]
@@ -37,6 +42,7 @@ class HomeR23StartupScanPriorityWiringTest(unittest.TestCase):
             scan_body,
         )
         gate_branch = scan_body.split("startupScanPriorityGate.isHeld(activeSession)")[1][:400]
+        self.assertIn('ProviderRequestTrace.scan("HELD", trigger.name)', gate_branch)
         self.assertIn("enqueueNotificationScanTrigger(trigger)", gate_branch)
         self.assertIn("return", gate_branch)
 

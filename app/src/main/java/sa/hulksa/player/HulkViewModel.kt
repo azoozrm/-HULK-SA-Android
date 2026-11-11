@@ -2587,7 +2587,11 @@ class HulkViewModel internal constructor(
         downloadPriorityMutationQueues.clear()
         invalidatePlayerProgressPersistence()
         notificationScanJob?.cancel()
-        pendingNotificationScanTrigger = null
+        // A held automatic intent belongs to the new profile's pending startup round; keep it so
+        // the post-settlement drain is not lost. Manual intents for the old profile are dropped.
+        if (pendingNotificationScanTrigger?.isAutomaticStartupScan != true) {
+            pendingNotificationScanTrigger = null
+        }
         // The catalog round is invalidated/re-begun by resetCatalogRestoreForProfileChange() when
         // the profile actually changes. Dropping it here would race the just-started round and
         // would let the APP_START scan bypass the gate.
@@ -3206,6 +3210,7 @@ class HulkViewModel internal constructor(
 
     private fun scanSubscribedSeries(trigger: NotificationScanTrigger) {
         if (!mutableState.value.operations.features.episodeNotificationsEnabled) {
+            ProviderRequestTrace.scan("DISABLED", trigger.name)
             enqueueNotificationScanTrigger(trigger)
             return
         }
@@ -3221,6 +3226,7 @@ class HulkViewModel internal constructor(
         if (trigger.isAutomaticStartupScan && startupScanPriorityGate.isHeld(activeSession)) {
             // Keep the automatic intent pending and coalesced; it drains after the initial
             // current-owner catalog round settles, including failures.
+            ProviderRequestTrace.scan("HELD", trigger.name)
             enqueueNotificationScanTrigger(trigger)
             return
         }
@@ -3245,6 +3251,7 @@ class HulkViewModel internal constructor(
             trigger,
         )
         pendingNotificationScanTrigger = null
+        ProviderRequestTrace.scan("ADMITTED", effectiveTrigger.name)
 
         lateinit var job: Job
         job = viewModelScope.launch(start = CoroutineStart.LAZY) {
@@ -3268,6 +3275,7 @@ class HulkViewModel internal constructor(
                         )
                 }
                 if (eligible.isEmpty()) {
+                    ProviderRequestTrace.scan("NO_ELIGIBLE", effectiveTrigger.name)
                     if (profileStore.activeProfileId() == profile.id) {
                         maybeShowPendingNotificationPopup()
                     }

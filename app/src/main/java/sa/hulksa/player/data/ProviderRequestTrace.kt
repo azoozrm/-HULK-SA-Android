@@ -188,6 +188,16 @@ internal object ProviderRequestTrace {
         }
     }
 
+    /**
+     * Closed-field notification scan scheduling state. It records only whether the automatic
+     * intent was held, admitted, disabled or had no eligible subscription; never content ids.
+     */
+    internal fun scan(state: String, trigger: String) {
+        emit {
+            base("ev=scan") + " state=$state trigger=$trigger owner=$ownerTag stage=$stage"
+        }
+    }
+
     /** Records a closed-field startup gate transition; no content ids or payload data. */
     internal fun gate(
         state: ProviderGateState,
