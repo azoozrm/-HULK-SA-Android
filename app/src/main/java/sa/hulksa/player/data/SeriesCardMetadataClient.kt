@@ -28,12 +28,16 @@ data class SeriesCardTechnicalMetadata(
     val succeeded: Boolean = false,
 )
 
-class SeriesCardMetadataClient {
+class SeriesCardMetadataClient(
+    private val admission: ProviderAdmission = ProviderAdmission.shared,
+    private val dispatch: ProviderDispatchGate = ProviderDispatchGate.shared,
+) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
         .callTimeout(15, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        .addInterceptor(ProviderAdmissionInterceptor(admission))
         .eventListenerFactory(ProviderExchangeObserverFactory())
         .build()
 
@@ -46,6 +50,7 @@ class SeriesCardMetadataClient {
         credentials = session.credentials,
         seriesId = seriesId,
         surface = surface,
+        admissionSession = session,
     )
 
     suspend fun fetch(
@@ -53,7 +58,14 @@ class SeriesCardMetadataClient {
         credentials: Credentials,
         seriesId: Int,
         surface: ProviderSurface = ProviderSurface.OTHER,
+        admissionSession: AuthenticatedSession? = null,
     ): SeriesCardTechnicalMetadata = withContext(Dispatchers.IO) {
+        // The store path supplies portal/credentials only; bind admission to the current owner
+        // when those resolve to that exact authenticated session.
+        val session = admissionSession ?: AuthenticatedSessionRegistry.current()?.takeIf {
+            it.portal == portal && it.credentials == credentials
+        }
+        val admissionBinding = session?.let { providerAdmissionBinding(it) }
         val attempt = ProviderRequestTrace.queued(surface, ContentType.SERIES, "get_series_info")
         val url = (portal.baseUrl.trimEnd('/') + "/player_api.php")
             .toHttpUrl()
@@ -64,7 +76,7 @@ class SeriesCardMetadataClient {
             .addQueryParameter("series_id", seriesId.toString())
             .build()
 
-        val request = Request.Builder()
+        val builder = Request.Builder()
             .url(url)
             .get()
             .header("Accept", JSON.toString())
@@ -78,11 +90,25 @@ class SeriesCardMetadataClient {
                     action = "get_series_info",
                 ),
             )
-            .build()
+        val binding = admissionBinding
+        if (session != null && binding != null && !binding.stale) {
+            builder.tag(
+                ProviderAdmissionContext::class.java,
+                ProviderAdmissionContext(session, binding.owner),
+            )
+        }
+        val request = builder.build()
 
-        ProviderRequestTrace.callIssued(attempt)
-        val root = try {
-            client.executeCancellable(request) { response ->
+        val execute: suspend () -> JSONObject? = {
+            client.executeCancellable(
+                request = request,
+                beforeExecute = {
+                    if (session != null && binding != null && !binding.stale) {
+                        admission.awaitAdmission(session, binding.owner)
+                    }
+                    ProviderRequestTrace.callIssued(attempt)
+                },
+            ) { response ->
                 val body = try {
                     BoundedJsonResponseReader.readResponse(response, XtreamJsonLimits.SERIES_INFO)
                 } catch (_: XtreamJsonGuardException) {
@@ -90,8 +116,13 @@ class SeriesCardMetadataClient {
                     return@executeCancellable null
                 }
                 val shape = providerResponseShape(body)
-                if (!response.isSuccessful || body.isBlank() || body.looksLikeChallenge()) {
-                    val category = providerChallengeCategory(body)
+                val challengeCategory = if (response.isSuccessful) {
+                    providerSuccessfulBodyChallengeCategory(body)
+                } else {
+                    providerFailureChallengeCategory(body)
+                }
+                if (!response.isSuccessful || body.isBlank() || challengeCategory != null) {
+                    val category = challengeCategory
                     reportProviderTerminal(
                         attempt,
                         if (category != null) ProviderOutcome.BLOCKED else ProviderOutcome.HTTP,
@@ -108,6 +139,13 @@ class SeriesCardMetadataClient {
                 }
                 reportProviderTerminal(attempt, ProviderOutcome.SUCCESS, response.code, shape = shape)
                 parsed
+            }
+        }
+        val root = try {
+            if (session == null || binding == null || binding.stale) {
+                execute()
+            } else {
+                dispatch.withPermit(session, binding.owner, priority = false) { execute() }
             }
         } catch (error: CancellationException) {
             reportProviderTerminal(attempt, ProviderOutcome.CANCELED)
@@ -315,14 +353,6 @@ class SeriesCardMetadataClient {
                 ?.let { runCatching { XtreamJsonParser.parseArray(it) }.getOrNull() }
             else -> null
         }
-    }
-
-    private fun String.looksLikeChallenge(): Boolean {
-        val prefix = trimStart().take(512).lowercase()
-        return prefix.startsWith("<!doctype html") ||
-            prefix.startsWith("<html") ||
-            "cloudflare" in prefix ||
-            "sorry, you have been blocked" in prefix
     }
 
     private companion object {

@@ -46,6 +46,9 @@ import sa.hulksa.player.data.EpisodeNotificationSubscription
 import sa.hulksa.player.data.SessionOwnershipCleanupGate
 import sa.hulksa.player.data.SessionOwnershipCleanupResult
 import sa.hulksa.player.data.SessionPublicationGate
+import sa.hulksa.player.data.CatalogSnapshotFreshness
+import sa.hulksa.player.data.ProviderDispatchGate
+import sa.hulksa.player.data.catalogNetworkOrderAfterRestore
 import sa.hulksa.player.data.ProviderGateState
 import sa.hulksa.player.data.ProviderRequestTrace
 import sa.hulksa.player.data.ProviderSurface
@@ -64,6 +67,7 @@ import sa.hulksa.player.data.loginValidationFailure
 import sa.hulksa.player.data.HulkRepository
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.data.HomeHeroTechnicalMetadata
+import sa.hulksa.player.data.SeriesCardMetadataStore
 import sa.hulksa.player.data.historyPublicationAllowed
 import sa.hulksa.player.data.KidsContentFilterStore
 import sa.hulksa.player.data.LocalEpisodeNotification
@@ -706,7 +710,7 @@ class HulkViewModel internal constructor(
     // Catalog payloads can be large (the guard permits up to 32 MiB / 75k items). The request
     // owner admits exactly one full-catalog pipeline at a time; foreground priority only reorders
     // pending work, so the memory bound is retained without overlapping full catalogs.
-    private val catalogRequestOwner = CatalogRequestOwner(
+    private val catalogRequestOwner: CatalogRequestOwner = CatalogRequestOwner(
         scope = viewModelScope,
         load = { activeSession, type ->
             val startedNs = System.nanoTime()
@@ -802,7 +806,21 @@ class HulkViewModel internal constructor(
                 }
             }
             refreshHomePreparationState()
-            settleStartupScanPriority(session, type)
+            val activeSession = session
+            val recoveryScheduled = activeSession != null &&
+                catalogRequestOwner.scheduleRateLimitedRecovery(activeSession, type, error)
+            if (recoveryScheduled) {
+                // Keep automatic scans behind the bounded recovery of the rejected type. The
+                // recovery's real terminal reaches onLoaded/onFailure and settles this round.
+                startupScanPriorityGate.hold(activeSession, setOf(type))
+                ProviderRequestTrace.gate(
+                    ProviderGateState.HELD,
+                    "RATE_LIMIT_RECOVERY",
+                    1,
+                )
+            } else {
+                settleStartupScanPriority(session, type)
+            }
         },
     )
     private val selectedCategoryByType = mutableMapOf<ContentType, String?>()
@@ -815,6 +833,7 @@ class HulkViewModel internal constructor(
     private var notificationScanJob: Job? = null
     private var pendingNotificationScanTrigger: NotificationScanTrigger? = null
     private val startupScanPriorityGate = StartupScanPriorityGate()
+    private val providerDispatchGate = ProviderDispatchGate.shared
     private var foregroundNotificationScanJob: Job? = null
     private var foregroundNotificationScanWake = MutableStateFlow(0L)
     private var foregroundNotificationLastAttemptElapsedRealtimeMs = 0L
@@ -3351,6 +3370,8 @@ class HulkViewModel internal constructor(
     private fun beginStartupScanPriority(owner: AuthenticatedSession) {
         val types = catalogTypesForDestination(MainDestination.HOME)
         if (types.isEmpty()) return
+        providerDispatchGate.invalidate()
+        providerDispatchGate.beginRound(owner)
         if (startupScanPriorityGate.begin(owner, types)) {
             ProviderRequestTrace.gate(
                 ProviderGateState.HELD, "CATALOG_PENDING", types.size,
@@ -3361,6 +3382,7 @@ class HulkViewModel internal constructor(
     private fun settleStartupScanPriority(owner: AuthenticatedSession?, type: ContentType) {
         if (owner == null) return
         if (startupScanPriorityGate.settle(owner, type)) {
+            providerDispatchGate.endRound(owner)
             ProviderRequestTrace.gate(
                 ProviderGateState.RELEASED, "CATALOG_SETTLED", 0,
             )
@@ -3522,6 +3544,7 @@ class HulkViewModel internal constructor(
                     }
                     when (publication) {
                         is SessionPublicationResult.Published -> {
+                            beginStartupScanPriority(refreshed)
                             catalogRequestOwner.replaceSession(
                                 session = refreshed,
                                 requiredTypes = catalogTypesForDestination(mutableState.value.destination),
@@ -3692,6 +3715,7 @@ class HulkViewModel internal constructor(
     }
 
     private fun clearCatalogMemory() {
+        SeriesCardMetadataStore.get(getApplication()).invalidateSessionWork()
         profileLibraryStartupGate.invalidate()
         mutableState.update { it.copy(isHomePreparationPending = true) }
         cacheRestoreGeneration += 1L
@@ -3700,6 +3724,7 @@ class HulkViewModel internal constructor(
         homeBootstrapPersistJob?.cancel()
         homeBootstrapPersistJob = null
         startupScanPriorityGate.invalidate()
+        providerDispatchGate.invalidate()
         pendingCatalogRequests.clear()
         cacheRestoreAttempted.clear()
         freshCatalogTypes.clear()
@@ -3762,6 +3787,7 @@ class HulkViewModel internal constructor(
         foregroundNotificationLastAttemptElapsedRealtimeMs = 0L
         wakeForegroundNotificationScheduler()
         startupScanPriorityGate.invalidate()
+        providerDispatchGate.invalidate()
         invalidateCatalogRequests()
         clearCatalogMemory()
         invalidateDiagnosticsForSessionChange()
@@ -4173,17 +4199,6 @@ class HulkViewModel internal constructor(
             return
         }
         hulkPerfLog { "catalogRequest type=$type force=$force" }
-        if (force) {
-            mutableState.update { state ->
-                val failure = state.catalogFailures[type]
-                val clearGlobal = state.errorMessage == failure?.message
-                state.copy(
-                    catalogFailures = state.catalogFailures - type,
-                    errorMessage = if (clearGlobal) null else state.errorMessage,
-                    errorRetryable = if (clearGlobal) true else state.errorRetryable,
-                )
-            }
-        }
     }
 
     private fun startCacheRestore(activeSession: AuthenticatedSession) {
@@ -4302,6 +4317,7 @@ class HulkViewModel internal constructor(
         }
 
         val requested = linkedSetOf<ContentType>()
+        val freshTypes = linkedSetOf<ContentType>()
         while (true) {
             if (cacheRestoreGeneration != generation || session !== activeSession) return
             // Re-evaluate the latest foreground type before every next restore, never from a batch
@@ -4349,18 +4365,35 @@ class HulkViewModel internal constructor(
                         profileStore.activeProfileId() == profile.id
                     ) {
                         persistedCatalogBaselines.onRestored(next, snapshot.catalog)
+                        if (CatalogSnapshotFreshness.isFresh(
+                                snapshot = snapshot,
+                                nowEpochMs = System.currentTimeMillis(),
+                            )
+                        ) {
+                            freshCatalogTypes += next
+                            freshTypes += next
+                            hulkPerfLog { "catalogFreshReuse type=$next" }
+                        }
                     }
                 }
             }
         }
         val selected = mutableState.value.destination.catalogTypeOrNull()
-        val networkOrder = buildList {
-            if (selected != null && selected in requested) add(selected)
-            addAll(requested.filter { it != selected })
-        }
+        val networkOrder = catalogNetworkOrderAfterRestore(
+            requested = requested.toList(),
+            selected = selected,
+            freshTypes = freshTypes,
+        )
         networkOrder.forEach { type ->
             if (cacheRestoreGeneration == generation && session === activeSession) {
                 requestCatalogNetwork(activeSession, type, force = false)
+            }
+        }
+        freshTypes.forEach { type ->
+            if (cacheRestoreGeneration == generation && session === activeSession) {
+                // No network terminal will arrive for a reused snapshot: settle the startup scan
+                // gate for this genuine no-fetch completion so automatic scans are not held.
+                settleStartupScanPriority(activeSession, type)
             }
         }
         if (cacheRestoreGeneration == generation && session === activeSession) {

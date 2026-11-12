@@ -29,6 +29,19 @@ internal class StartupScanPriorityGate {
         held
     }
 
+    /**
+     * Extends the current owner round with [types] without releasing work, used while a bounded
+     * rate-limit catalog recovery is still pending. A different owner replaces the round.
+     */
+    fun hold(owner: Any, types: Set<ContentType>) = synchronized(lock) {
+        if (this.owner !== owner) {
+            this.owner = owner
+            pending = mutableSetOf()
+        }
+        pending += types
+        held = pending.isNotEmpty()
+    }
+
     /** True only for the exact bound owner while its round is still pending. */
     fun isHeld(owner: Any?): Boolean = synchronized(lock) {
         held && owner != null && this.owner === owner && pending.isNotEmpty()

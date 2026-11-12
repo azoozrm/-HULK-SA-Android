@@ -24,12 +24,16 @@ data class MovieCardTechnicalMetadata(
     val succeeded: Boolean = false,
 )
 
-class MovieCardMetadataClient {
+class MovieCardMetadataClient(
+    private val admission: ProviderAdmission = ProviderAdmission.shared,
+    private val dispatch: ProviderDispatchGate = ProviderDispatchGate.shared,
+) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
         .callTimeout(15, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        .addInterceptor(ProviderAdmissionInterceptor(admission))
         .eventListenerFactory(ProviderExchangeObserverFactory())
         .build()
 
@@ -48,6 +52,7 @@ class MovieCardMetadataClient {
             .addQueryParameter("vod_id", movieId.toString())
             .build()
 
+        val admissionBinding = providerAdmissionBinding(session)
         val request = Request.Builder()
             .url(url)
             .get()
@@ -62,11 +67,26 @@ class MovieCardMetadataClient {
                     action = "get_vod_info",
                 ),
             )
+            .apply {
+                if (!admissionBinding.stale) {
+                    tag(
+                        ProviderAdmissionContext::class.java,
+                        ProviderAdmissionContext(session, admissionBinding.owner),
+                    )
+                }
+            }
             .build()
 
-        ProviderRequestTrace.callIssued(attempt)
-        val root = try {
-            client.executeCancellable(request) { response ->
+        val execute: suspend () -> JSONObject? = {
+            client.executeCancellable(
+                request = request,
+                beforeExecute = {
+                    if (!admissionBinding.stale) {
+                        admission.awaitAdmission(session, admissionBinding.owner)
+                    }
+                    ProviderRequestTrace.callIssued(attempt)
+                },
+            ) { response ->
                 val body = try {
                     BoundedJsonResponseReader.readResponse(response, XtreamJsonLimits.VOD_INFO)
                 } catch (_: XtreamJsonGuardException) {
@@ -74,8 +94,13 @@ class MovieCardMetadataClient {
                     return@executeCancellable null
                 }
                 val shape = providerResponseShape(body)
-                if (!response.isSuccessful || body.looksLikeChallenge()) {
-                    val category = providerChallengeCategory(body)
+                val challengeCategory = if (response.isSuccessful) {
+                    providerSuccessfulBodyChallengeCategory(body)
+                } else {
+                    providerFailureChallengeCategory(body)
+                }
+                if (!response.isSuccessful || challengeCategory != null) {
+                    val category = challengeCategory
                     reportProviderTerminal(
                         attempt,
                         if (category != null) ProviderOutcome.BLOCKED else ProviderOutcome.HTTP,
@@ -93,6 +118,13 @@ class MovieCardMetadataClient {
                 }
                 reportProviderTerminal(attempt, ProviderOutcome.SUCCESS, response.code, shape = shape)
                 parsed
+            }
+        }
+        val root = try {
+            if (admissionBinding.stale) {
+                execute()
+            } else {
+                dispatch.withPermit(session, admissionBinding.owner, priority = false) { execute() }
             }
         } catch (error: CancellationException) {
             reportProviderTerminal(attempt, ProviderOutcome.CANCELED)
@@ -275,14 +307,6 @@ class MovieCardMetadataClient {
                 ?.let { runCatching { XtreamJsonParser.parseObject(it) }.getOrNull() }
             else -> null
         }
-    }
-
-    private fun String.looksLikeChallenge(): Boolean {
-        val prefix = trimStart().take(512).lowercase()
-        return prefix.startsWith("<!doctype html") ||
-            prefix.startsWith("<html") ||
-            "cloudflare" in prefix ||
-            "sorry, you have been blocked" in prefix
     }
 
     private companion object {

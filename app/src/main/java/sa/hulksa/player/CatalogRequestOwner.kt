@@ -7,6 +7,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import sa.hulksa.player.data.ProviderAdmission
+import sa.hulksa.player.data.isProviderRateLimited
+import sa.hulksa.player.data.providerAdmissionOwner
 import sa.hulksa.player.model.AuthenticatedSession
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentType
@@ -40,6 +43,7 @@ internal class CatalogRequestOwner(
     private val onLoadingChanged: (Set<ContentType>) -> Unit,
     private val onLoaded: (ContentType, CatalogLoadResult, Set<ContentType>) -> Unit,
     private val onFailure: (ContentType, Throwable, Set<ContentType>) -> Unit,
+    private val admission: ProviderAdmission = ProviderAdmission.shared,
 ) {
     private data class PendingRequest(
         val session: AuthenticatedSession,
@@ -59,6 +63,8 @@ internal class CatalogRequestOwner(
     private val pending = linkedMapOf<ContentType, PendingRequest>()
     private val loading = linkedSetOf<ContentType>()
     private var foregroundType: ContentType? = null
+    private val recoveryAttempted = linkedSetOf<ContentType>()
+    private val recoveryJobs = linkedMapOf<ContentType, Job>()
 
     fun request(
         session: AuthenticatedSession,
@@ -128,6 +134,7 @@ internal class CatalogRequestOwner(
 
     fun invalidate() {
         val cancelledRunner: Job?
+        val cancelledRecoveries: List<Job>
         synchronized(lock) {
             generation += 1L
             runnerToken += 1L
@@ -137,9 +144,59 @@ internal class CatalogRequestOwner(
             pending.clear()
             loading.clear()
             foregroundType = null
+            recoveryAttempted.clear()
+            cancelledRecoveries = recoveryJobs.values.toList()
+            recoveryJobs.clear()
         }
         cancelledRunner?.cancel()
+        cancelledRecoveries.forEach(Job::cancel)
         onLoadingChanged(emptySet())
+    }
+
+    /**
+     * Bounded post-deadline recovery of one rejected catalog type in the current owner round.
+     *
+     * The server deadline is read from the shared provider/account admission state. At most one
+     * automatic recovery is scheduled per type per session generation; a repeated 429 after that
+     * recovery does not schedule another one. The recovery reuses the normal pending/runner path,
+     * so only a real accepted catalog result reaches [onLoaded]; a failed recovery reports through
+     * [onFailure] like any other current-owner failure.
+     */
+    internal fun scheduleRateLimitedRecovery(
+        session: AuthenticatedSession,
+        type: ContentType,
+        error: Throwable,
+    ): Boolean {
+        if (!error.isProviderRateLimited()) return false
+        val deadlineNs = admission.cooldownDeadlineNs(session) ?: return false
+        val owner = providerAdmissionOwner(session)
+        val requestGeneration: Long
+        synchronized(lock) {
+            if (!isSessionCurrent(session)) return false
+            if (type in loading) return false
+            if (!recoveryAttempted.add(type)) return false
+            requestGeneration = generation
+        }
+
+        lateinit var job: Job
+        job = scope.launch(start = CoroutineStart.LAZY) {
+            try {
+                admission.awaitCooldown(session, owner, deadlineNs)
+                val mayRecover = synchronized(lock) {
+                    generation == requestGeneration && isSessionCurrent(session)
+                }
+                if (!mayRecover) return@launch
+                prioritize(type)
+                request(session, type, force = true)
+            } finally {
+                synchronized(lock) {
+                    if (recoveryJobs[type] === job) recoveryJobs.remove(type)
+                }
+            }
+        }
+        synchronized(lock) { recoveryJobs[type] = job }
+        job.start()
+        return true
     }
 
     internal fun loadingTypes(): Set<ContentType> = synchronized(lock) { loading.toSet() }

@@ -104,7 +104,7 @@ class ProviderRequestTraceNetworkTest {
     }
 
     @Test
-    fun `json carrying the marker keeps the marker category but records an array shape`() {
+    fun `successful json carrying the marker parses normally`() {
         catalogResponses(
             MockResponse().setResponseCode(200)
                 .setBody("""[{"category_id":"1","category_name":"Cloudflare"}]"""),
@@ -112,14 +112,13 @@ class ProviderRequestTraceNetworkTest {
                 .setBody("""[{"stream_id":3,"name":"A","category_id":"1"}]"""),
         )
 
-        val error = assertThrows(XtreamException.ServiceBlocked::class.java) {
-            runBlocking { XtreamClient().catalog(session(), ContentType.MOVIE) }
-        }
+        val catalog = runBlocking { XtreamClient().catalog(session(), ContentType.MOVIE) }
 
-        assertEquals("cloudflare", error.category)
-        val blocked = terminals().first { it.contains("action=get_vod_categories") }
-        assertTrue(blocked.contains("category=cloudflare"))
-        assertTrue(blocked.contains("shape=ARRAY_START"))
+        assertEquals(listOf("Cloudflare"), catalog.categories.map { it.name })
+        val categories = terminals().first { it.contains("action=get_vod_categories") }
+        assertTrue(categories.contains("outcome=SUCCESS"))
+        assertTrue(categories.contains("shape=ARRAY_START"))
+        assertFalse(categories.contains("category=cloudflare"))
     }
 
     @Test
