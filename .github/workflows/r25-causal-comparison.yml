@@ -2,6 +2,10 @@ name: R25 Causal Comparison Signed A/B
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    types: [synchronize]
 
 permissions:
   actions: read
@@ -27,11 +31,17 @@ jobs:
     name: Build and sign historical A and current B
     if: >
       github.repository == 'azoozrm/-HULK-SA-Android' &&
-      github.ref == 'refs/heads/fix/home-hero-copy-layout-r01'
+      ((github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/fix/home-hero-copy-layout-r01') ||
+       (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.head.ref == 'fix/home-hero-copy-layout-r01' &&
+        github.event.pull_request.base.ref == 'phase-3-v0.9.3.0-adaptive-foundation'))
     runs-on: ubuntu-latest
     environment: production-signing
     timeout-minutes: 90
     env:
+      CHECKOUT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       HULK_RELEASE_KEYSTORE_BASE64: ${{ secrets.HULK_RELEASE_KEYSTORE_BASE64 }}
       ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_ALIAS: ${{ secrets.HULK_RELEASE_KEY_ALIAS }}
       ORG_GRADLE_PROJECT_HULK_RELEASE_STORE_PASSWORD: ${{ secrets.HULK_RELEASE_STORE_PASSWORD }}
@@ -42,20 +52,20 @@ jobs:
       - name: Checkout exact comparison support commit
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Verify closed source allowlist and patch identity
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$CHECKOUT_SHA"
           test "$(git rev-parse "${A_SHA}^{commit}")" = "$A_SHA"
           test "$(git rev-parse "${B_SHA}^{commit}")" = "$B_SHA"
           test "$(git rev-parse "${BRIDGE_INDICATOR}^")" = "$A_SHA"
           test "$(git rev-parse "${OFFICIAL_HEAD}^{commit}")" = "$OFFICIAL_HEAD"
           git merge-base --is-ancestor "$A_SHA" "$B_SHA"
-          git merge-base --is-ancestor "$B_SHA" "$GITHUB_SHA"
+          git merge-base --is-ancestor "$B_SHA" "$CHECKOUT_SHA"
           test -f "$PATCH_PATH"
           cp "$PATCH_PATH" "$RUNNER_TEMP/a-http-trace.patch"
           sha256sum "$RUNNER_TEMP/a-http-trace.patch" > "$RUNNER_TEMP/a-http-trace.sha256"
@@ -63,7 +73,7 @@ jobs:
           {
             echo "repository=${GITHUB_REPOSITORY}"
             echo "workflow_ref=${GITHUB_REF}"
-            echo "workflow_sha=${GITHUB_SHA}"
+            echo "workflow_sha=${CHECKOUT_SHA}"
             echo "a_sha=${A_SHA}"
             echo "b_sha=${B_SHA}"
             echo "bridge_sha=${BRIDGE_INDICATOR}"
