@@ -42,6 +42,7 @@ open class XtreamClient(
         .readTimeout(30, TimeUnit.SECONDS)
         .callTimeout(45, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        .eventListenerFactory(ProviderExchangeObserverFactory())
         .build()
 
     open suspend fun authenticate(portal: PortalConfig, credentials: Credentials): AuthenticatedSession {
@@ -394,7 +395,7 @@ open class XtreamClient(
         attempt: ProviderAttempt? = null,
     ): List<ContentItem> = withContext(Dispatchers.IO) {
         val startedNs = System.nanoTime()
-        val request = apiRequest(portal, credentials, action)
+        val request = apiRequest(portal, credentials, action, attempt = attempt)
         val limit = XtreamJsonLimits.forAction(action)
         val scope = "${type.name.lowercase()} catalog"
         val context = currentCoroutineContext()
@@ -529,7 +530,7 @@ open class XtreamClient(
         extra: Map<String, String> = emptyMap(),
         attempt: ProviderAttempt? = null,
     ): String = withContext(Dispatchers.IO) {
-        val request = apiRequest(portal, credentials, action, extra)
+        val request = apiRequest(portal, credentials, action, extra, attempt)
         val limit = XtreamJsonLimits.forAction(action)
         val authenticationRequest = action == null && extra.isEmpty()
 
@@ -611,6 +612,7 @@ open class XtreamClient(
         credentials: Credentials,
         action: String?,
         extra: Map<String, String> = emptyMap(),
+        attempt: ProviderAttempt? = null,
     ): Request {
         val url = (portal.baseUrl.trimEnd('/') + "/player_api.php").toHttpUrl().newBuilder()
             .addQueryParameter("username", credentials.username)
@@ -625,6 +627,15 @@ open class XtreamClient(
             .get()
             .header("Accept", JSON.toString())
             .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} Android")
+            .tag(
+                ProviderExchangeContext::class.java,
+                ProviderExchangeContext(
+                    attempt = attempt,
+                    expectedPortal = portal,
+                    expectedCredentials = credentials,
+                    action = action ?: "auth",
+                ),
+            )
             .build()
     }
 

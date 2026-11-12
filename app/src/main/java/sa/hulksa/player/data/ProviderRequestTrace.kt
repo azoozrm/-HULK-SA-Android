@@ -223,6 +223,31 @@ internal object ProviderRequestTrace {
         }
     }
 
+    /**
+     * One passive OkHttp exchange event. [fields] contains only bounded booleans, numeric status,
+     * allowlisted sanitized headers and counters supplied by [ProviderExchangeObserver]; no URL,
+     * host, query, credential or body may enter this method.
+     */
+    internal fun exchange(
+        event: String,
+        context: ProviderExchangeContext,
+        index: Int,
+        fields: String,
+    ) {
+        val attempt = context.attempt
+        emit {
+            base("ev=exchange_$event") +
+                " id=${attempt?.id ?: "none"}" +
+                " surface=${attempt?.surface ?: ProviderSurface.OTHER}" +
+                " action=${attempt?.action ?: context.action}" +
+                " trigger=${attempt?.trigger ?: ProviderTrigger.OTHER}" +
+                " owner=${attempt?.ownerTag ?: "none"}" +
+                " x=$index" +
+                " $fields" +
+                " pending=${counts(pending)} calls=${counts(calls)}"
+        }
+    }
+
     internal fun outstanding(): String = synchronized(lock) {
         "pending=${counts(pending)} calls=${counts(calls)}"
     }

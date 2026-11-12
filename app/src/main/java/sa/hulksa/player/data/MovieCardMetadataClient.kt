@@ -30,6 +30,7 @@ class MovieCardMetadataClient {
         .readTimeout(12, TimeUnit.SECONDS)
         .callTimeout(15, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        .eventListenerFactory(ProviderExchangeObserverFactory())
         .build()
 
     suspend fun fetch(
@@ -52,6 +53,15 @@ class MovieCardMetadataClient {
             .get()
             .header("Accept", JSON.toString())
             .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} Android")
+            .tag(
+                ProviderExchangeContext::class.java,
+                ProviderExchangeContext(
+                    attempt = attempt,
+                    expectedPortal = session.portal,
+                    expectedCredentials = session.credentials,
+                    action = "get_vod_info",
+                ),
+            )
             .build()
 
         ProviderRequestTrace.callIssued(attempt)

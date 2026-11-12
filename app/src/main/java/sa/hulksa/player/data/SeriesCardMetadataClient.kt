@@ -34,6 +34,7 @@ class SeriesCardMetadataClient {
         .readTimeout(12, TimeUnit.SECONDS)
         .callTimeout(15, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        .eventListenerFactory(ProviderExchangeObserverFactory())
         .build()
 
     suspend fun fetch(
@@ -68,6 +69,15 @@ class SeriesCardMetadataClient {
             .get()
             .header("Accept", JSON.toString())
             .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} Android")
+            .tag(
+                ProviderExchangeContext::class.java,
+                ProviderExchangeContext(
+                    attempt = attempt,
+                    expectedPortal = portal,
+                    expectedCredentials = credentials,
+                    action = "get_series_info",
+                ),
+            )
             .build()
 
         ProviderRequestTrace.callIssued(attempt)
