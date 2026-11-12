@@ -1,0 +1,60 @@
+diff --git a/app/src/main/java/sa/hulksa/player/data/XtreamClient.kt b/app/src/main/java/sa/hulksa/player/data/XtreamClient.kt
+--- a/app/src/main/java/sa/hulksa/player/data/XtreamClient.kt
++++ b/app/src/main/java/sa/hulksa/player/data/XtreamClient.kt
+@@ -44,0 +45 @@
++        .eventListener(R25HttpTrace())
+diff --git a/app/src/main/java/sa/hulksa/player/data/MovieCardMetadataClient.kt b/app/src/main/java/sa/hulksa/player/data/MovieCardMetadataClient.kt
+--- a/app/src/main/java/sa/hulksa/player/data/MovieCardMetadataClient.kt
++++ b/app/src/main/java/sa/hulksa/player/data/MovieCardMetadataClient.kt
+@@ -31,0 +32 @@
++        .eventListener(R25HttpTrace())
+diff --git a/app/src/main/java/sa/hulksa/player/data/SeriesCardMetadataClient.kt b/app/src/main/java/sa/hulksa/player/data/SeriesCardMetadataClient.kt
+--- a/app/src/main/java/sa/hulksa/player/data/SeriesCardMetadataClient.kt
++++ b/app/src/main/java/sa/hulksa/player/data/SeriesCardMetadataClient.kt
+@@ -35,0 +36 @@
++        .eventListener(R25HttpTrace())
+diff --git a/app/src/main/java/sa/hulksa/player/data/R25HttpTrace.kt b/app/src/main/java/sa/hulksa/player/data/R25HttpTrace.kt
+new file mode 100644
+--- /dev/null
++++ b/app/src/main/java/sa/hulksa/player/data/R25HttpTrace.kt
+@@ -0,0 +1,40 @@
++package sa.hulksa.player.data
++
++import android.util.Log
++import okhttp3.Call
++import okhttp3.EventListener
++import okhttp3.Response
++import java.io.IOException
++
++/**
++ * R25 comparison-only observation. Logs one safe action label and the HTTP status/cancel event
++ * for every provider call. It never logs a URL, query, header, body, credential or account.
++ * Added only to the historical A comparison build by the closed comparison workflow.
++ */
++internal class R25HttpTrace : EventListener() {
++    private fun action(call: Call): String =
++        call.request().url.queryParameter("action")?.takeIf(String::isNotBlank) ?: "auth"
++
++    override fun callStart(call: Call) {
++        Log.i(TAG, "v=1 src=r25 ev=call action=${action(call)}")
++    }
++
++    override fun responseHeadersEnd(call: Call, response: Response) {
++        Log.i(
++            TAG,
++            "v=1 src=r25 ev=status action=${action(call)} code=${response.code}",
++        )
++    }
++
++    override fun canceled(call: Call) {
++        Log.i(TAG, "v=1 src=r25 ev=terminal action=${action(call)} outcome=CANCELED")
++    }
++
++    override fun callFailed(call: Call, ioe: IOException) {
++        Log.i(TAG, "v=1 src=r25 ev=terminal action=${action(call)} outcome=NETWORK")
++    }
++
++    private companion object {
++        const val TAG = "HulkTrace"
++    }
++}
