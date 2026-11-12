@@ -60,6 +60,7 @@ import sa.hulksa.player.data.loginValidationFailure
 import sa.hulksa.player.data.HulkRepository
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.data.HomeHeroTechnicalMetadata
+import sa.hulksa.player.data.SeriesCardMetadataStore
 import sa.hulksa.player.data.historyPublicationAllowed
 import sa.hulksa.player.data.KidsContentFilterStore
 import sa.hulksa.player.data.LocalEpisodeNotification
@@ -3636,6 +3637,7 @@ class HulkViewModel internal constructor(
     }
 
     private fun clearCatalogMemory() {
+        SeriesCardMetadataStore.get(getApplication()).invalidateSessionWork()
         profileLibraryStartupGate.invalidate()
         mutableState.update { it.copy(isHomePreparationPending = true) }
         cacheRestoreGeneration += 1L

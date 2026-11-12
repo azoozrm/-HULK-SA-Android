@@ -1117,7 +1117,7 @@ private fun Modifier.applyDownloadTvFocusNode(
 }
 
 @Composable
-fun MainShellScreen(
+internal fun MainShellScreen(
     state: HulkUiState,
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
@@ -1132,6 +1132,7 @@ fun MainShellScreen(
     onRefresh: () -> Unit,
     onRetryCatalog: (ContentType) -> Unit = {},
     onOpenNotifications: () -> Unit,
+    homeNotificationReturnOwner: HomeNotificationReturnOwner,
     onClearHistory: () -> Unit,
     onPlayDownload: (OfflineDownload) -> Unit,
     onDeleteDownload: (OfflineDownload) -> Unit,
@@ -1366,6 +1367,7 @@ fun MainShellScreen(
                         onRefresh = onRefresh,
                         onRetryCatalog = onRetryCatalog,
                         onOpenNotifications = onOpenNotifications,
+                        homeNotificationReturnOwner = homeNotificationReturnOwner,
                         onGrowthAction = openGrowthDestination,
                         onSelectDestination = onSelectDestination,
                         onClearHistory = onClearHistory,
@@ -1428,6 +1430,7 @@ fun MainShellScreen(
                         onRefresh = onRefresh,
                         onRetryCatalog = onRetryCatalog,
                         onOpenNotifications = onOpenNotifications,
+                        homeNotificationReturnOwner = homeNotificationReturnOwner,
                         onGrowthAction = openGrowthDestination,
                         onSelectDestination = onSelectDestination,
                         onClearHistory = onClearHistory,
@@ -1664,6 +1667,7 @@ private fun DestinationContent(
     onRefresh: () -> Unit,
     onRetryCatalog: (ContentType) -> Unit,
     onOpenNotifications: () -> Unit,
+    homeNotificationReturnOwner: HomeNotificationReturnOwner,
     onGrowthAction: (GrowthDestination) -> Unit,
     onSelectDestination: (MainDestination) -> Unit,
     onClearHistory: () -> Unit,
@@ -1709,6 +1713,7 @@ private fun DestinationContent(
             onRefresh = onRefresh,
             onRetryCatalog = onRetryCatalog,
             onOpenNotifications = onOpenNotifications,
+            homeNotificationReturnOwner = homeNotificationReturnOwner,
             onGrowthAction = onGrowthAction,
             onOpenDownloads = { onSelectDestination(MainDestination.DOWNLOADS) },
             onSelectDestination = onSelectDestination,
@@ -1844,6 +1849,7 @@ private fun CinemaHomeScreen(
     onRefresh: () -> Unit,
     onRetryCatalog: (ContentType) -> Unit,
     onOpenNotifications: () -> Unit,
+    homeNotificationReturnOwner: HomeNotificationReturnOwner,
     onGrowthAction: (GrowthDestination) -> Unit,
     onOpenDownloads: () -> Unit,
     onSelectDestination: (MainDestination) -> Unit,
@@ -1968,8 +1974,28 @@ private fun CinemaHomeScreen(
     // One Home entry/return intent for this composition. It is armed only from the remembered
     // position, never from catalog/model publication or hero rotation.
     val remembered = navigationMemory.position(MainDestination.HOME)
+    val notificationReturnPending = homeNotificationReturnOwner.isPending()
+    val homeNotificationBellRequester = remember { FocusRequester() }
+    var homeNotificationBellPlacementRevision by remember { mutableIntStateOf(0) }
+    val homeNotificationBellModifier = Modifier
+        .focusRequester(homeNotificationBellRequester)
+        .onPlaced { homeNotificationBellPlacementRevision += 1 }
     val homeRestoreOwner = remember(navigationMemory) {
-        HomeFocusRestoreOwner(remembered)
+        HomeFocusRestoreOwner(
+            remembered = remembered,
+            initialEntryIntent = remembered.rowKey.isNotBlank() && !notificationReturnPending,
+            onFocusEvent = homeNotificationReturnOwner::cancel,
+        )
+    }
+    LaunchedEffect(
+        notificationReturnPending,
+        homeNotificationBellPlacementRevision,
+        homeNotificationBellRequester,
+    ) {
+        if (!notificationReturnPending) return@LaunchedEffect
+        if (homeNotificationBellPlacementRevision <= 0) return@LaunchedEffect
+        if (!homeNotificationReturnOwner.isPending()) return@LaunchedEffect
+        runCatching { homeNotificationBellRequester.requestFocus() }
     }
     // R02: ONE compact five-action group in the original Home header slot for both the hero and
     // the placeholder/loading/empty/error paths; the existing callbacks and owners are reused.
@@ -1985,6 +2011,7 @@ private fun CinemaHomeScreen(
             onOpenNotifications = onOpenNotifications,
             onRefresh = onRefresh,
             onActionFocused = homeRestoreOwner::onHeaderFocused,
+            notificationBellModifier = homeNotificationBellModifier,
         )
     }
     // Truthful Home error classification reuses the accepted Movies connectivity owner: only a
@@ -2225,6 +2252,7 @@ private fun CinemaHomeScreen(
                         unreadNotificationCount = state.unreadNotificationCount,
                         onOpenNotifications = onOpenNotifications,
                         topActions = homeTopActions,
+                        notificationBellModifier = homeNotificationBellModifier,
                         watchModifier = Modifier.focusRequester(homeHeroFocusRequester),
                         onHeaderFocused = homeRestoreOwner::onHeaderFocused,
                         onFocused = {
@@ -2255,6 +2283,7 @@ private fun CinemaHomeScreen(
                         refreshModifier = Modifier.focusRequester(homeHeroFocusRequester),
                         refreshFocusRequester = homeHeroFocusRequester,
                         topActions = homeTopActions,
+                        notificationBellModifier = homeNotificationBellModifier,
                     )
                     HomeRefreshFocusAnchor(
                         state = homeRefreshFocusState,
@@ -2694,7 +2723,7 @@ private fun ActiveDownloadsSection(
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             // Caption physically RIGHT with its simple glyph physically LEFT in RTL.
-            Text("التنزيلات الجارية", color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
+            HomeSectionHeadingText("التنزيلات الجارية", isTv)
             Spacer(Modifier.width(8.dp))
             Icon(Icons.Rounded.Download, contentDescription = null, tint = colors.goldBright, modifier = Modifier.size(21.dp))
         }
@@ -2893,6 +2922,36 @@ internal fun HomeSectionPadding(isTv: Boolean, content: @Composable () -> Unit) 
     Box(Modifier.fillMaxWidth().padding(horizontal = if (isTv) TV_PAGE_GUTTER else 0.dp)) { content() }
 }
 
+/**
+ * Home section-heading text inset derived from the accepted reference header. Only the heading
+ * text moves; the shared section/row/card parent, gutters and LazyRow padding remain unchanged.
+ */
+internal fun homeSectionHeadingRightInsetDp(isTv: Boolean): Dp {
+    val headerInset = if (isTv) {
+        HOME_HEADER_TV_HORIZONTAL_PADDING_DP.dp
+    } else {
+        HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp
+    }
+    val sectionInset = if (isTv) TV_PAGE_GUTTER else 0.dp
+    return headerInset - sectionInset
+}
+
+@Composable
+private fun HomeSectionHeadingText(
+    text: String,
+    isTv: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    Text(
+        text = text,
+        color = colors.text,
+        fontSize = if (isTv) 20.sp else 17.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = modifier.absolutePadding(right = homeSectionHeadingRightInsetDp(isTv)),
+    )
+}
+
 /** First list index that holds a Home content row: only the Hero/placeholder occupies index 0. */
 internal fun homeRowCursorStart(isTv: Boolean): Int = 1
 
@@ -2918,6 +2977,7 @@ private fun CinemaHero(
     unreadNotificationCount: Int,
     onOpenNotifications: () -> Unit,
     topActions: @Composable () -> Unit,
+    notificationBellModifier: Modifier = Modifier,
     watchModifier: Modifier = Modifier,
     onHeaderFocused: () -> Unit = {},
     onFocused: () -> Unit = {},
@@ -2964,14 +3024,7 @@ private fun CinemaHero(
     val statusBarInsetDp = with(density) {
         WindowInsets.statusBars.getTop(this).toDp()
     }
-    val heroTitleSlotDp = with(density) {
-        (if (isTv) 42.sp else 34.sp).toDp() * 2f
-    }
-    val heroFactsRowHeightDp = maxOf(
-        24.dp,
-        with(density) { (if (isTv) 20.sp else 18.sp).toDp() },
-    )
-    val heroFactsRowGapDp = if (isTv) 8.dp else 6.dp
+    val heroCopyMetrics = homeHeroCopyMetrics(isTv = isTv, fontScale = density.fontScale)
     val heroActionsRowHeightDp = maxOf(
         46.dp,
         with(density) { 13.sp.toDp() + 18.dp },
@@ -2999,11 +3052,8 @@ private fun CinemaHero(
     val heroHeight = effectiveHeroHeightDp(
         policyHeightDp = heroPolicyHeightDp,
         headerMinHeightDp = heroHeaderMinHeightDp,
-        titleSlotDp = heroTitleSlotDp,
-        factsRowHeightDp = heroFactsRowHeightDp,
-        factsRowGapDp = heroFactsRowGapDp,
-        maxFactsRows = if (isTv) 4 else 5,
         actionsHeightDp = heroActionsHeightDp,
+        metrics = heroCopyMetrics,
     )
     // One selected-hero load: technical facts plus the bounded presentation backfill, shared with
     // the facts row so artwork and copy never start competing requests.
@@ -3032,9 +3082,6 @@ private fun CinemaHero(
             itemPoster = item.posterUrl,
         )
     }
-    val heroPlot = (heroMetadata.plot ?: item.plot)
-        ?.trim()
-        ?.takeIf(String::isNotBlank)
     val heroPlacementLogged = remember(heroIdentity) { booleanArrayOf(false) }
     BoxWithConstraints(
         modifier = Modifier
@@ -3048,6 +3095,7 @@ private fun CinemaHero(
                 }
             },
     ) {
+        val heroOuterWidthDp = maxWidth
         // One-row fit resolved from the real title/subtitle at the current font scale and the
         // natural-width action group, minus the header's own horizontal padding.
         val compactHeaderSingleRow = if (!compactHeaderActions) {
@@ -3177,7 +3225,7 @@ private fun CinemaHero(
                         .fillMaxWidth()
                         .then(if (isTv) Modifier else Modifier.statusBarsPadding())
                         .padding(
-                            horizontal = if (isTv) 26.dp else HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp,
+                            horizontal = if (isTv) HOME_HEADER_TV_HORIZONTAL_PADDING_DP.dp else HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp,
                             vertical = if (isTv) 18.dp else 10.dp,
                         ),
                     verticalAlignment = Alignment.CenterVertically,
@@ -3189,6 +3237,7 @@ private fun CinemaHero(
                         unreadCount = unreadNotificationCount,
                         isTv = isTv,
                         onClick = onOpenNotifications,
+                        modifier = notificationBellModifier,
                         onFocused = onHeaderFocused,
                     )
                     Spacer(Modifier.width(8.dp))
@@ -3206,24 +3255,66 @@ private fun CinemaHero(
                 heroIdentity = heroIdentity,
                 isTv = isTv,
                 heroMetadata = heroMetadata,
-                heroPlot = heroPlot,
+                heroGenre = if (item.type == ContentType.LIVE) {
+                    null
+                } else {
+                    heroMetadata.genre?.takeIf(String::isNotBlank) ?: item.genre
+                },
+                metrics = heroCopyMetrics,
+                copyContentWidthPx = with(density) {
+                    (heroOuterWidthDp * (if (isTv) HERO_WIDE_COPY_WIDTH_FRACTION else 1f) -
+                        homeHeroCopyWidthBudgetDp(isTv) * 2f)
+                        .coerceAtLeast(0.dp)
+                        .roundToPx()
+                },
                 isFavorite = isFavorite,
                 onOpen = onOpen,
                 onToggleFavorite = onToggleFavorite,
                 watchModifier = watchModifier,
                 onFocused = onFocused,
                 modifier = Modifier
-                    .fillMaxWidth(if (isTv) HERO_WIDE_COPY_WIDTH_FRACTION else 1f)
+                    .fillMaxWidth()
                     .weight(1f)
-                    .padding(horizontal = if (isTv) 27.dp else 18.dp),
+                    .padding(horizontal = homeHeroCopyHorizontalPaddingDp(isTv)),
             )
         }
     }
 }
 
 private const val HERO_WIDE_COPY_WIDTH_FRACTION = .46f
+internal const val HOME_HEADER_TV_HORIZONTAL_PADDING_DP = 26
 private const val HERO_PHONE_HEADER_OFFSET_DP = 64
-private const val HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP = 18
+internal const val HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP = 18
+
+/**
+ * R19: accepted title/copy measurement budget. It intentionally stays wider than the visible-right
+ * anchor below, so correcting the alignment never changes the title's wrapping capacity.
+ */
+private const val HOME_HERO_TV_COPY_WIDTH_BUDGET_DP = 27
+
+/**
+ * R19 physical-right content axis for the Home hero copy groups. On TV it is exactly the accepted
+ * Home header text edge (`HOME_HEADER_TV_HORIZONTAL_PADDING_DP`), which section-heading text already
+ * shares through [homeSectionHeadingRightInsetDp]; phone keeps its existing compact anchor.
+ */
+internal fun homeHeroCopyHorizontalPaddingDp(isTv: Boolean): Dp =
+    if (isTv) {
+        HOME_HEADER_TV_HORIZONTAL_PADDING_DP.dp
+    } else {
+        HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp
+    }
+
+/**
+ * Accepted title/copy measurement budget, deliberately separate from
+ * [homeHeroCopyHorizontalPaddingDp]: the title keeps its wider TV wrapping budget while the visible
+ * right edge moves onto the shared header axis.
+ */
+internal fun homeHeroCopyWidthBudgetDp(isTv: Boolean): Dp =
+    if (isTv) {
+        HOME_HERO_TV_COPY_WIDTH_BUDGET_DP.dp
+    } else {
+        HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp
+    }
 
 /**
  * Header height floor derived from the real header typography, the actual status-bar inset and
@@ -3239,52 +3330,13 @@ internal fun heroHeaderMinimumHeightDp(
     maxOf(titleHeightDp + subtitleHeightDp, topActionsMinHeightDp)
 
 /**
- * Hard hero height floor for the worst valid metadata wrap: every HomeHeroFacts entry can occupy
- * one row, so a five-entry row can need five rows. The floor uses the real typography row height
- * and the minimal non-overlapping gaps, independent of the current title length or metadata.
+ * Gap profile used by one copy-placement attempt. The title and genre have separate values so
+ * the genre line always owns its own measured slot instead of flowing with technical facts.
  */
-internal fun heroRequiredHeightDp(
-    headerMinHeightDp: Dp,
-    titleSlotDp: Dp,
-    factsRowHeightDp: Dp,
-    factsRowGapDp: Dp,
-    maxFactsRows: Int,
-    actionsHeightDp: Dp,
-    minTitleFactsGapDp: Dp = 2.dp,
-    minFactsActionsGapDp: Dp = 4.dp,
-): Dp {
-    val rows = maxFactsRows.coerceAtLeast(1)
-    val factsHeight = factsRowHeightDp * rows.toFloat() +
-        factsRowGapDp * (rows - 1).toFloat()
-    return headerMinHeightDp + titleSlotDp + factsHeight +
-        minTitleFactsGapDp + minFactsActionsGapDp + actionsHeightDp
-}
-
-/** Preserve the accepted policy height whenever it can carry the real worst-case copy band. */
-internal fun effectiveHeroHeightDp(
-    policyHeightDp: Dp,
-    headerMinHeightDp: Dp,
-    titleSlotDp: Dp,
-    factsRowHeightDp: Dp,
-    factsRowGapDp: Dp,
-    maxFactsRows: Int,
-    actionsHeightDp: Dp,
-): Dp = maxOf(
-    policyHeightDp,
-    heroRequiredHeightDp(
-        headerMinHeightDp = headerMinHeightDp,
-        titleSlotDp = titleSlotDp,
-        factsRowHeightDp = factsRowHeightDp,
-        factsRowGapDp = factsRowGapDp,
-        maxFactsRows = maxFactsRows,
-        actionsHeightDp = actionsHeightDp,
-    ),
-)
-
-/** Gap profile used by one copy-placement attempt. */
 internal data class HeroCopySpacing(
     val topGapPx: Int,
-    val titleFactsGapPx: Int,
+    val titleGenreGapPx: Int,
+    val genreFactsGapPx: Int,
     val factsActionsGapPx: Int,
     val bottomPaddingPx: Int,
 )
@@ -3296,25 +3348,26 @@ internal enum class HeroCopyFallback {
 }
 
 /**
- * Final, executable copy placement. The title/facts block is bottom-anchored from the reserved
- * band when it fits; when the measured facts exceed that band, the plot yields, then a compact and
- * finally a minimal gap profile are used. The returned rectangles are the ones production places.
+ * Final, executable copy placement. The title/genre/facts block is bottom-anchored from the
+ * reserved band when it fits; when the measured facts exceed that band, a compact and finally a
+ * minimal gap profile are used. Home renders no narrative synopsis and reserves no plot band; the
+ * returned rectangles are the ones production places.
  */
 internal data class HeroCopyPlacement(
     val titleTopPx: Int,
+    val genreTopPx: Int,
     val factsTopPx: Int,
-    val plotTopPx: Int,
     val actionsTopPx: Int,
     val titleSlotPx: Int,
+    val genreSlotPx: Int,
     val factsHeightPx: Int,
     val actionsHeightPx: Int,
-    val plotLines: Int,
-    val plotLineHeightPx: Int,
     val spacing: HeroCopySpacing,
     val fallback: HeroCopyFallback,
     val fitsContent: Boolean,
 ) {
     val titleBottomPx: Int get() = titleTopPx + titleSlotPx
+    val genreBottomPx: Int get() = genreTopPx + genreSlotPx
     val factsBottomPx: Int get() = factsTopPx + factsHeightPx
     val actionsBottomPx: Int get() = actionsTopPx + actionsHeightPx
 }
@@ -3322,61 +3375,40 @@ internal data class HeroCopyPlacement(
 internal fun resolveHeroCopyPlacement(
     availableHeightPx: Int,
     titleSlotPx: Int,
-    reservedFactsSlotPx: Int,
+    genreSlotPx: Int,
     measuredFactsHeightPx: Int,
     actionsHeightPx: Int,
     normalSpacing: HeroCopySpacing,
     compactSpacing: HeroCopySpacing,
     minimalSpacing: HeroCopySpacing,
-    plotLineHeightPx: Int,
-    maxPlotLines: Int = 2,
 ): HeroCopyPlacement {
     val height = availableHeightPx.coerceAtLeast(0)
     val factsHeight = measuredFactsHeightPx.coerceAtLeast(0)
     val actionsHeight = actionsHeightPx.coerceAtLeast(0)
-    val safeLineHeight = plotLineHeightPx.coerceAtLeast(1)
+
+    fun fixedBand(spacing: HeroCopySpacing, factsBandHeight: Int): Int =
+        titleSlotPx + spacing.titleGenreGapPx + genreSlotPx + spacing.genreFactsGapPx +
+            factsBandHeight + spacing.factsActionsGapPx + spacing.bottomPaddingPx + actionsHeight
 
     fun normalPlacement(): HeroCopyPlacement? {
-        val usableHeight = (height - normalSpacing.topGapPx).coerceAtLeast(0)
-        val fixedBand = titleSlotPx + normalSpacing.titleFactsGapPx +
-            reservedFactsSlotPx + normalSpacing.factsActionsGapPx +
-            normalSpacing.bottomPaddingPx + actionsHeight
-        val reservedPlotLines = if (usableHeight <= fixedBand) {
-            0
-        } else {
-            ((usableHeight - fixedBand) / safeLineHeight)
-                .coerceIn(0, maxPlotLines.coerceAtLeast(0))
-        }
-        val bandHeight = fixedBand + reservedPlotLines * safeLineHeight
-        val titleTop = height - bandHeight
+        val band = fixedBand(normalSpacing, factsHeight)
+        val titleTop = height - band
         if (titleTop < normalSpacing.topGapPx) return null
-        val factsTop = titleTop + titleSlotPx + normalSpacing.titleFactsGapPx
+        val genreTop = titleTop + titleSlotPx + normalSpacing.titleGenreGapPx
+        val factsTop = genreTop + genreSlotPx + normalSpacing.genreFactsGapPx
         val actionsTop = height - normalSpacing.bottomPaddingPx - actionsHeight
         if (actionsTop < 0) return null
         val factsBottom = factsTop + factsHeight
         if (factsBottom + normalSpacing.factsActionsGapPx > actionsTop) return null
-        // Keep the accepted plot reservation: unused facts space never invents an extra plot
-        // line, so a hero that previously showed no plot keeps the same composition.
-        val visiblePlotLines = minOf(
-            reservedPlotLines,
-            ((actionsTop - normalSpacing.factsActionsGapPx - factsBottom) / safeLineHeight)
-                .coerceIn(0, maxPlotLines.coerceAtLeast(0)),
-        )
-        val plotTop = if (visiblePlotLines > 0) {
-            factsBottom + normalSpacing.factsActionsGapPx
-        } else {
-            actionsTop
-        }
         return HeroCopyPlacement(
             titleTopPx = titleTop,
+            genreTopPx = genreTop,
             factsTopPx = factsTop,
-            plotTopPx = plotTop,
             actionsTopPx = actionsTop,
             titleSlotPx = titleSlotPx,
+            genreSlotPx = genreSlotPx,
             factsHeightPx = factsHeight,
             actionsHeightPx = actionsHeight,
-            plotLines = visiblePlotLines,
-            plotLineHeightPx = safeLineHeight,
             spacing = normalSpacing,
             fallback = HeroCopyFallback.NONE,
             fitsContent = true,
@@ -3387,24 +3419,23 @@ internal fun resolveHeroCopyPlacement(
         spacing: HeroCopySpacing,
         fallback: HeroCopyFallback,
     ): HeroCopyPlacement? {
-        val fixedBand = titleSlotPx + spacing.titleFactsGapPx + factsHeight +
-            spacing.factsActionsGapPx + spacing.bottomPaddingPx + actionsHeight
-        val titleTop = height - fixedBand
+        val band = fixedBand(spacing, factsHeight)
+        val titleTop = height - band
         if (titleTop < spacing.topGapPx) return null
-        val factsTop = titleTop + titleSlotPx + spacing.titleFactsGapPx
+        val genreTop = titleTop + titleSlotPx + spacing.titleGenreGapPx
+        val factsTop = genreTop + genreSlotPx + spacing.genreFactsGapPx
         val actionsTop = height - spacing.bottomPaddingPx - actionsHeight
         val factsBottom = factsTop + factsHeight
         if (factsBottom + spacing.factsActionsGapPx > actionsTop) return null
         return HeroCopyPlacement(
             titleTopPx = titleTop,
+            genreTopPx = genreTop,
             factsTopPx = factsTop,
-            plotTopPx = actionsTop,
             actionsTopPx = actionsTop,
             titleSlotPx = titleSlotPx,
+            genreSlotPx = genreSlotPx,
             factsHeightPx = factsHeight,
             actionsHeightPx = actionsHeight,
-            plotLines = 0,
-            plotLineHeightPx = safeLineHeight,
             spacing = spacing,
             fallback = fallback,
             fitsContent = true,
@@ -3416,15 +3447,15 @@ internal fun resolveHeroCopyPlacement(
         ?: fallbackPlacement(minimalSpacing, HeroCopyFallback.MINIMAL)
         ?: HeroCopyPlacement(
             titleTopPx = 0,
-            factsTopPx = titleSlotPx + minimalSpacing.titleFactsGapPx,
-            plotTopPx = height,
+            genreTopPx = titleSlotPx + minimalSpacing.titleGenreGapPx,
+            factsTopPx = titleSlotPx + minimalSpacing.titleGenreGapPx +
+                genreSlotPx + minimalSpacing.genreFactsGapPx,
             actionsTopPx = (height - minimalSpacing.bottomPaddingPx - actionsHeight)
                 .coerceAtLeast(0),
             titleSlotPx = titleSlotPx,
+            genreSlotPx = genreSlotPx,
             factsHeightPx = factsHeight,
             actionsHeightPx = actionsHeight,
-            plotLines = 0,
-            plotLineHeightPx = safeLineHeight,
             spacing = minimalSpacing,
             fallback = HeroCopyFallback.MINIMAL,
             fitsContent = false,
@@ -3444,13 +3475,13 @@ internal enum class HeroArtworkLayoutMode {
  * Home hero copy region. The full header/copy split is owned by the caller's Column, so this
  * layout only receives the space that is genuinely left below the measured header.
  *
- * Title: fixed two-line slot, bottom-aligned inside the slot, so one-line and two-line titles
- * start the facts at the same y. Facts: wrapped at the real width inside a reserved three-row
- * (non-TV) or two-row (TV) budget; the plot yields first, then a compact and finally a minimal
- * gap profile consume the measured facts height. Actions: measured and anchored from the bottom.
- * Plot: only when the real facts leave room. Every anchor depends on the viewport/font scale and
- * the measured content, and the hero height floor is derived from the real typography and the
- * worst valid five-entry wrap, never from an individual carousel item.
+ * Title: 28sp semibold in a fixed two-line slot, bottom-aligned inside the slot. Genre: one
+ * dedicated 12sp regular line with complete labels and a measured `+N` remainder. Facts: a
+ * separate technical-facts block, normally one row on TV and at most two measured whole-group
+ * rows. No narrative synopsis or plot band is rendered or reserved on Home; a compact and finally
+ * a minimal gap profile consume the measured facts height. Actions: measured and anchored from
+ * the bottom. Every slot and the hero height floor come from the same [HomeHeroCopyMetrics], never
+ * from an individual item.
  */
 @Composable
 private fun HeroCopy(
@@ -3459,7 +3490,9 @@ private fun HeroCopy(
     heroIdentity: String,
     isTv: Boolean,
     heroMetadata: HomeHeroTechnicalMetadata,
-    heroPlot: String?,
+    heroGenre: String?,
+    metrics: HomeHeroCopyMetrics,
+    copyContentWidthPx: Int,
     isFavorite: Boolean,
     onOpen: () -> Unit,
     onToggleFavorite: () -> Unit,
@@ -3469,43 +3502,42 @@ private fun HeroCopy(
 ) {
     val heroActionsPlacedLogged = remember(heroIdentity) { booleanArrayOf(false) }
     val density = LocalDensity.current
-    val titleFontSize = if (isTv) 36.sp else 28.sp
-    val titleLineHeight = if (isTv) 42.sp else 34.sp
-    val titleSlotPx = with(density) { (titleLineHeight.toDp() * 2f).roundToPx() }
-    val factsRowHeightPx = with(density) {
-        maxOf(24.dp, (if (isTv) 20.sp else 18.sp).toDp()).roundToPx()
-    }
-    val factsRowGapPx = with(density) { (if (isTv) 8.dp else 6.dp).roundToPx() }
-    val reservedFactsRows = if (isTv) 2 else 3
-    val factsSlotPx = factsRowHeightPx * reservedFactsRows +
-        factsRowGapPx * (reservedFactsRows - 1)
-    val plotLineHeightPx = with(density) { (if (isTv) 17.sp else 18.sp).toDp().roundToPx() }
-    val titleFactsGapPx = with(density) { (if (isTv) 8.dp else 9.dp).roundToPx() }
-    val factsActionsGapPx = with(density) { (if (isTv) 8.dp else 10.dp).roundToPx() }
-    val bottomPaddingPx = with(density) { (if (isTv) 40.dp else 24.dp).roundToPx() }
-    val topGapPx = with(density) { (if (isTv) 16.dp else 12.dp).roundToPx() }
+    val titleSlotPx = with(density) { metrics.titleSlotDp.roundToPx() }
+    val genreSlotPx = with(density) { metrics.genreSlotDp.roundToPx() }
+    val hasGenre = homeHeroGenreLabels(heroGenre).isNotEmpty()
+    val effectiveGenreSlotPx = if (hasGenre) genreSlotPx else 0
+    val titleGenreGapPx = with(density) { metrics.titleGenreGapDp.roundToPx() }
+    val genreFactsGapPx = with(density) { metrics.genreFactsGapDp.roundToPx() }
+    val factsActionsGapPx = with(density) { metrics.factsActionsGapDp.roundToPx() }
+    val bottomPaddingPx = with(density) { metrics.bottomPaddingDp.roundToPx() }
+    val topGapPx = with(density) { metrics.topGapDp.roundToPx() }
     val normalSpacing = HeroCopySpacing(
         topGapPx = topGapPx,
-        titleFactsGapPx = titleFactsGapPx,
+        titleGenreGapPx = titleGenreGapPx,
+        genreFactsGapPx = genreFactsGapPx,
         factsActionsGapPx = factsActionsGapPx,
         bottomPaddingPx = bottomPaddingPx,
     )
     val compactSpacing = HeroCopySpacing(
         topGapPx = with(density) { 4.dp.roundToPx() },
-        titleFactsGapPx = with(density) { 4.dp.roundToPx() },
+        titleGenreGapPx = with(density) { 4.dp.roundToPx() },
+        genreFactsGapPx = with(density) { 4.dp.roundToPx() },
         factsActionsGapPx = with(density) { 4.dp.roundToPx() },
         bottomPaddingPx = with(density) { 8.dp.roundToPx() },
     )
     val minimalSpacing = HeroCopySpacing(
         topGapPx = 0,
-        titleFactsGapPx = with(density) { 2.dp.roundToPx() },
+        titleGenreGapPx = with(density) { 2.dp.roundToPx() },
+        genreFactsGapPx = with(density) { 2.dp.roundToPx() },
         factsActionsGapPx = with(density) { 4.dp.roundToPx() },
         bottomPaddingPx = 0,
     )
+    val titleStyle = homeHeroTitleTextStyle(LocalTextStyle.current, metrics, title)
 
     SubcomposeLayout(modifier = modifier) { constraints ->
         val width = constraints.maxWidth
         val height = constraints.maxHeight
+        val copyWidth = copyContentWidthPx.coerceIn(0, width)
 
         val actionsPlaceable = subcompose("hero-actions") {
             HomeHeroActions(
@@ -3523,70 +3555,69 @@ private fun HeroCopy(
                     }
                 },
             )
-        }.first().measure(Constraints(maxWidth = width))
+        }.first().measure(Constraints(maxWidth = copyWidth))
 
         val factsPlaceable = subcompose("hero-facts") {
             HomeHeroFacts(
                 item = item,
                 isTv = isTv,
                 metadata = heroMetadata,
-                modifier = Modifier.fillMaxWidth(),
+                metrics = metrics,
+                heroIdentity = heroIdentity,
+                preferredWidthPx = copyWidth,
+                maxWidthPx = width,
             )
         }.firstOrNull()?.measure(Constraints(maxWidth = width))
         val factsHeight = factsPlaceable?.height ?: 0
 
+        val genrePlaceable = subcompose("hero-genre") {
+            HomeHeroGenreLine(
+                genre = heroGenre,
+                metrics = metrics,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }.firstOrNull()?.measure(
+            Constraints(maxWidth = copyWidth, maxHeight = effectiveGenreSlotPx),
+        )
+
         val placement = resolveHeroCopyPlacement(
             availableHeightPx = height,
             titleSlotPx = titleSlotPx,
-            reservedFactsSlotPx = factsSlotPx,
+            genreSlotPx = effectiveGenreSlotPx,
             measuredFactsHeightPx = factsHeight,
             actionsHeightPx = actionsPlaceable.height,
             normalSpacing = normalSpacing,
             compactSpacing = compactSpacing,
             minimalSpacing = minimalSpacing,
-            plotLineHeightPx = plotLineHeightPx,
         )
 
         val titlePlaceable = subcompose("hero-title") {
             Text(
                 text = title,
                 color = Color.White,
-                fontSize = titleFontSize,
-                lineHeight = titleLineHeight,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
+                style = titleStyle,
+                maxLines = HOME_HERO_TITLE_MAX_LINES,
                 overflow = TextOverflow.Ellipsis,
             )
-        }.first().measure(Constraints(maxWidth = width, maxHeight = titleSlotPx))
-
-        val plotPlaceable = if (heroPlot != null && placement.plotLines > 0) {
-            subcompose("hero-plot") {
-                Text(
-                    text = heroPlot,
-                    color = Color(0xFFD4D0C5),
-                    fontSize = 12.sp,
-                    lineHeight = if (isTv) 17.sp else 18.sp,
-                    maxLines = placement.plotLines,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }.first().measure(
-                Constraints(
-                    maxWidth = width,
-                    maxHeight = placement.plotLines * placement.plotLineHeightPx,
-                ),
-            )
-        } else {
-            null
-        }
+        }.first().measure(Constraints(maxWidth = copyWidth, maxHeight = titleSlotPx))
 
         layout(width, height) {
-            titlePlaceable.placeRelative(
-                x = 0,
+            titlePlaceable.place(
+                x = width - titlePlaceable.width,
                 y = placement.titleTopPx + titleSlotPx - titlePlaceable.height,
             )
-            factsPlaceable?.placeRelative(x = 0, y = placement.factsTopPx)
-            plotPlaceable?.placeRelative(x = 0, y = placement.plotTopPx)
-            actionsPlaceable.placeRelative(x = 0, y = placement.actionsTopPx)
+            genrePlaceable?.place(
+                x = width - genrePlaceable.width,
+                y = placement.genreTopPx,
+            )
+            factsPlaceable?.place(
+                x = width - factsPlaceable.width,
+                y = placement.factsTopPx,
+            )
+            actionsPlaceable.place(
+                x = width - actionsPlaceable.width,
+                y = placement.actionsTopPx,
+            )
         }
     }
 }
@@ -3859,6 +3890,7 @@ private fun HomeHeroActions(
         Modifier
             .fillMaxWidth()
             .onPlaced { onPlaced?.invoke() },
+        contentAlignment = AbsoluteAlignment.TopRight,
     ) {
         val availableWidthPx = with(density) { maxWidth.roundToPx() }
         val fitsRow = primaryRequiredPx + favoriteRequiredPx + rowGapPx <= availableWidthPx
@@ -4069,6 +4101,7 @@ private fun HomePlaceholder(
     refreshModifier: Modifier = Modifier,
     refreshFocusRequester: FocusRequester? = null,
     topActions: @Composable () -> Unit,
+    notificationBellModifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -4105,9 +4138,10 @@ private fun HomePlaceholder(
                     .align(Alignment.TopEnd)
                     .then(if (isTv) Modifier else Modifier.statusBarsPadding())
                     .padding(
-                        horizontal = if (isTv) 26.dp else HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp,
+                        horizontal = if (isTv) HOME_HEADER_TV_HORIZONTAL_PADDING_DP.dp else HERO_PHONE_HEADER_HORIZONTAL_PADDING_DP.dp,
                         vertical = if (isTv) 18.dp else 10.dp,
-                    ),
+                    )
+                    .then(notificationBellModifier),
             )
         }
         when (
@@ -4261,7 +4295,7 @@ private fun HomeBoxedSection(
         }
     }
     Column {
-        Text(title, color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
+        HomeSectionHeadingText(title, isTv)
         Spacer(Modifier.height(10.dp))
         LazyRow(
             state = rowState,
@@ -4449,7 +4483,7 @@ private fun HomeContinueWatchingSection(
         removalController.finish()
     }
     Column {
-        Text(title, color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
+        HomeSectionHeadingText(title, isTv)
         Spacer(Modifier.height(10.dp))
         LazyRow(
             state = rowState,
@@ -4548,7 +4582,7 @@ private fun HomeLastChannelSection(
         }
     }
     Column {
-        Text("اخر قناة شاهدتها", color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
+        HomeSectionHeadingText("اخر قناة شاهدتها", isTv)
         Spacer(Modifier.height(10.dp))
         Box(Modifier.padding(horizontal = 5.dp, vertical = 7.dp)) {
             LiveChannelHomeCard(

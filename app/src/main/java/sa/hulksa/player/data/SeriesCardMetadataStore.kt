@@ -2,11 +2,14 @@ package sa.hulksa.player.data
 
 import android.content.Context
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import sa.hulksa.player.model.ContentType
@@ -17,9 +20,14 @@ class SeriesCardMetadataStore private constructor(context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val semaphore = Semaphore(MAX_CONCURRENT_REQUESTS)
     private val inFlight =
-        mutableMapOf<ContentMetadataRequestKey, Deferred<SeriesCardTechnicalMetadata>>()
+        mutableMapOf<ContentMetadataRequestKey, SharedRequest>()
     private val lastAttemptAtMs = mutableMapOf<ContentMetadataRequestKey, Long>()
     private var retryOwnerKey: String? = null
+
+    private data class SharedRequest(
+        val job: Job,
+        val result: CompletableDeferred<SeriesCardTechnicalMetadata>,
+    )
 
     internal fun currentOwner(): AuthenticatedSessionOwner? =
         AuthenticatedSessionRegistry.currentOwner()
@@ -71,7 +79,7 @@ class SeriesCardMetadataStore private constructor(context: Context) {
         }
 
         val requestKey = owner.contentMetadataKey(ContentType.SERIES, seriesId)
-        val deferred = synchronized(inFlight) {
+        val shared = synchronized(inFlight) {
             inFlight[requestKey] ?: run {
                 val now = System.currentTimeMillis()
                 pruneRetryOwnerLocked(owner)
@@ -83,23 +91,63 @@ class SeriesCardMetadataStore private constructor(context: Context) {
                 }
                 lastAttemptAtMs[requestKey] = now
                 trimRetryCacheLocked()
-                scope.async {
-                    semaphore.withPermit { fetchAndCache(owner, seriesId, cached) }
-                }.also { inFlight[requestKey] = it }
-            }
-        }
-
-        val result = try {
-            deferred.await()
-        } finally {
-            synchronized(inFlight) {
-                if (inFlight[requestKey] === deferred) {
-                    inFlight.remove(requestKey)
+                val result = CompletableDeferred<SeriesCardTechnicalMetadata>()
+                val job = scope.launch(start = CoroutineStart.LAZY) {
+                    val self = currentCoroutineContext()[Job]
+                    try {
+                        val value = semaphore.withPermit {
+                            // The owning session may have been replaced while this request waited
+                            // behind the semaphore. Never issue an obsolete account's call.
+                            if (!AuthenticatedSessionRegistry.isCurrent(owner)) {
+                                SeriesCardTechnicalMetadata()
+                            } else {
+                                fetchAndCache(owner, seriesId, cached)
+                            }
+                        }
+                        result.complete(value)
+                    } catch (cancelled: CancellationException) {
+                        result.completeExceptionally(cancelled)
+                        throw cancelled
+                    } catch (error: Throwable) {
+                        result.completeExceptionally(error)
+                        throw error
+                    } finally {
+                        // A shared request is removed when that exact job completes, never when
+                        // one of its waiters stops awaiting it.
+                        synchronized(inFlight) {
+                            if (inFlight[requestKey]?.job === self) inFlight.remove(requestKey)
+                        }
+                    }
+                }
+                SharedRequest(job = job, result = result).also {
+                    inFlight[requestKey] = it
+                    job.start()
                 }
             }
         }
+
+        val result = shared.result.await()
         return result.takeIf { AuthenticatedSessionRegistry.isCurrent(owner) }
             ?: SeriesCardTechnicalMetadata()
+    }
+
+    /**
+     * Binds the process-lived shared request scope to the authenticated-session transition owner.
+     * Logout, account replacement and expiry invalidate their running/queued series-card work so a
+     * stale account cannot keep issuing provider calls after the new owner is published.
+     */
+    fun invalidateSessionWork() {
+        val requests = synchronized(inFlight) {
+            lastAttemptAtMs.clear()
+            retryOwnerKey = null
+            inFlight.values.toList().also { inFlight.clear() }
+        }
+        requests.forEach { request ->
+            request.result.completeExceptionally(
+                CancellationException("Authenticated session work replaced"),
+            )
+            request.job.cancel()
+        }
     }
 
     private suspend fun fetchAndCache(

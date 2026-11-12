@@ -27,6 +27,68 @@ class HomeFocusRestoreOwnerTest {
     ): HomeFocusRestoreOwner = HomeFocusRestoreOwner(remembered)
 
     @Test
+    fun `notification bell return intent survives until an actual focus event`() {
+        val owner = HomeNotificationReturnOwner()
+
+        assertFalse(owner.isPending())
+        owner.request()
+        assertTrue(owner.isPending())
+        owner.cancel()
+        assertFalse(owner.isPending())
+
+        owner.request()
+        owner.cancel()
+        assertFalse(owner.isPending())
+    }
+
+    @Test
+    fun `notification return suppresses ordinary entry restoration and cancels on a real focus`() {
+        var focusEvents = 0
+        val owner = HomeFocusRestoreOwner(
+            remembered = rememberedMovie,
+            initialEntryIntent = false,
+            onFocusEvent = { focusEvents += 1 },
+        )
+
+        assertFalse(owner.canRestoreEntry(rememberedMovie, 0L, 0L))
+        owner.onHeaderFocused()
+        assertEquals(1, focusEvents)
+        assertFalse(owner.canRestoreEntry(rememberedMovie, 0L, 0L))
+    }
+
+    @Test
+    fun `skipped hero restore does not consume a pending bell return`() {
+        val hero = NavigationPosition(rowKey = "hero", itemKey = "SERIES:example")
+        val bell = HomeNotificationReturnOwner().apply { request() }
+        val owner = HomeFocusRestoreOwner(
+            remembered = hero,
+            initialEntryIntent = false,
+            onFocusEvent = bell::cancel,
+        )
+
+        if (!owner.canRestoreEntry(hero, 0L, 0L)) owner.onRestored()
+
+        assertTrue(
+            "a skipped restore is not an actual focus event",
+            bell.isPending(),
+        )
+    }
+
+    @Test
+    fun `pending bell return excludes a remembered content row restore`() {
+        val row = NavigationPosition(rowKey = "continue", itemKey = "MOVIE:example")
+        val bell = HomeNotificationReturnOwner().apply { request() }
+        val owner = HomeFocusRestoreOwner(
+            remembered = row,
+            initialEntryIntent = !bell.isPending(),
+            onFocusEvent = bell::cancel,
+        )
+
+        assertFalse(owner.canRestoreRow(row, row, 0L, 0L))
+        assertTrue(bell.isPending())
+    }
+
+    @Test
     fun `first entry without a remembered row never arms restoration`() {
         val owner = owner(NavigationPosition())
 

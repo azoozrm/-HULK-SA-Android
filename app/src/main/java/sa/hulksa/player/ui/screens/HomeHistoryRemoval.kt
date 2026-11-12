@@ -240,6 +240,25 @@ internal fun homeFocusOwnershipLost(
 ): Boolean = current != expected || currentRailFocusRevision != railFocusBaseline
 
 /**
+ * One-shot logical return intent for Home's notification bell. It survives the notification
+ * center round-trip because it lives above Home composition, but it is consumed only by an actual
+ * Home focus event (the requested bell or a deliberate move elsewhere).
+ */
+internal class HomeNotificationReturnOwner {
+    private var pending = false
+
+    fun request() {
+        pending = true
+    }
+
+    fun cancel() {
+        pending = false
+    }
+
+    fun isPending(): Boolean = pending
+}
+
+/**
  * One Home entry/return focus intent plus the real focus-region events that can cancel it.
  *
  * Only a fresh Home composition with a remembered non-blank row arms the entry intent. Catalog
@@ -250,24 +269,39 @@ internal fun homeFocusOwnershipLost(
  * pending primary action). While the user is on chrome, row restoration is also blocked even if
  * the entry intent was already consumed, so a later model publication cannot pull focus back into
  * the page.
+ *
+ * [initialEntryIntent] lets the notification-return path keep ordinary content/hero restoration
+ * disarmed while the bell owns the return. [onFocusEvent] lets that scoped owner cancel its
+ * pending return when a real focus event lands anywhere else.
  */
-internal class HomeFocusRestoreOwner(remembered: NavigationPosition) {
+internal class HomeFocusRestoreOwner(
+    remembered: NavigationPosition,
+    initialEntryIntent: Boolean = remembered.rowKey.isNotBlank(),
+    private val onFocusEvent: (() -> Unit)? = null,
+) {
     private val expected = remembered
-    private var entryIntent = remembered.rowKey.isNotBlank()
+    private var entryIntent = initialEntryIntent
+    private var competingRestoreSuppressed = !initialEntryIntent
     private var chromeFocused = false
     private var contentFocusOutsideNavigation = false
 
     fun onHeaderFocused() {
+        onFocusEvent?.invoke()
+        competingRestoreSuppressed = false
         chromeFocused = true
         entryIntent = false
     }
 
     fun onRailFocused() {
+        onFocusEvent?.invoke()
+        competingRestoreSuppressed = false
         chromeFocused = true
         entryIntent = false
     }
 
     fun onContentFocused(position: NavigationPosition?) {
+        onFocusEvent?.invoke()
+        competingRestoreSuppressed = false
         chromeFocused = false
         contentFocusOutsideNavigation = position == null
         // Actual focus has landed on a concrete content control. Retire the pending entry intent
@@ -282,6 +316,7 @@ internal class HomeFocusRestoreOwner(remembered: NavigationPosition) {
         railFocusBaseline: Long,
         currentRailFocusRevision: Long,
     ): Boolean = entryIntent &&
+        !competingRestoreSuppressed &&
         !chromeFocused &&
         !contentFocusOutsideNavigation &&
         !homeFocusOwnershipLost(
@@ -301,6 +336,7 @@ internal class HomeFocusRestoreOwner(remembered: NavigationPosition) {
         railFocusBaseline: Long,
         currentRailFocusRevision: Long,
     ): Boolean = remembered.rowKey.isNotBlank() &&
+        !competingRestoreSuppressed &&
         !chromeFocused &&
         !contentFocusOutsideNavigation &&
         !homeFocusOwnershipLost(

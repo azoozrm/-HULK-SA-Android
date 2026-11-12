@@ -53,6 +53,7 @@ internal fun MobileInlineTopActions(
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
     onActionFocused: (() -> Unit)? = null,
+    notificationBellModifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier,
@@ -85,6 +86,7 @@ internal fun MobileInlineTopActions(
             unreadCount = unreadNotificationCount,
             isTv = false,
             onClick = onOpenNotifications,
+            modifier = notificationBellModifier,
             compact = true,
             onFocused = onActionFocused,
         )
