@@ -301,7 +301,6 @@ class ReleaseNotificationParityTest {
         override suspend fun seriesBundle(
             session: AuthenticatedSession,
             seriesId: Int,
-            surface: sa.hulksa.player.data.ProviderSurface,
         ): SeriesBundle {
             seriesCalls.incrementAndGet()
             return SeriesBundle(details = ContentDetails(), episodes = episodes)

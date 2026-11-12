@@ -66,7 +66,7 @@ class AccountSwitchIsolationTest {
         val ownerA = requireNotNull(AuthenticatedSessionRegistry.currentOwner())
         assertEquals(providerA.baseUrl, a.portal.baseUrl)
 
-        val first = metadataStore.metadata(ownerA, 9200, requirePresentation = true, surface = ProviderSurface.HERO)
+        val first = metadataStore.metadata(ownerA, 9200, requirePresentation = true)
         assertEquals("FHD", first.quality)
         assertEquals("PLOT-A", first.plot)
 
@@ -74,7 +74,7 @@ class AccountSwitchIsolationTest {
         val ownerB = requireNotNull(AuthenticatedSessionRegistry.currentOwner())
         assertEquals(providerB.baseUrl, b.portal.baseUrl)
 
-        val second = metadataStore.metadata(ownerB, 9200, requirePresentation = true, surface = ProviderSurface.HERO)
+        val second = metadataStore.metadata(ownerB, 9200, requirePresentation = true)
         assertEquals("SD", second.quality)
         assertEquals("PLOT-B", second.plot)
         assertNotNull(metadataStore.cached(ownerB, 9200).quality)

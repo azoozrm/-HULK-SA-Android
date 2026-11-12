@@ -46,7 +46,6 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import sa.hulksa.player.data.ProviderSurface
 import sa.hulksa.player.data.SeriesCardMetadataStore
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
@@ -76,7 +75,7 @@ fun SeriesPosterCard(
 
     LaunchedEffect(item.id, metadataOwner, metadataStore) {
         val owner = metadataOwner ?: return@LaunchedEffect
-        val loaded = metadataStore.metadata(owner, item.id, surface = ProviderSurface.SERIES_CARD)
+        val loaded = metadataStore.metadata(owner, item.id)
         metadataStore.publishIfCurrent(owner) { metadata = loaded }
     }
 

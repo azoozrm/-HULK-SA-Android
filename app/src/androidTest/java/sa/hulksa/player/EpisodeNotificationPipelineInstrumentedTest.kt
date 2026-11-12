@@ -816,7 +816,6 @@ class EpisodeNotificationPipelineInstrumentedTest {
         override suspend fun seriesBundle(
             session: AuthenticatedSession,
             seriesId: Int,
-            surface: sa.hulksa.player.data.ProviderSurface,
         ): SeriesBundle {
             calls.incrementAndGet()
             firstCallStarted.complete(Unit)
@@ -845,7 +844,6 @@ class EpisodeNotificationPipelineInstrumentedTest {
         override suspend fun seriesBundle(
             session: AuthenticatedSession,
             seriesId: Int,
-            surface: sa.hulksa.player.data.ProviderSurface,
         ): SeriesBundle {
             firstCallStarted.complete(Unit)
             return firstResult.await().getOrThrow()
@@ -871,7 +869,6 @@ class EpisodeNotificationPipelineInstrumentedTest {
         override suspend fun seriesBundle(
             session: AuthenticatedSession,
             seriesId: Int,
-            surface: sa.hulksa.player.data.ProviderSurface,
         ): SeriesBundle {
             val call = calls.incrementAndGet()
             if (call == 1) {

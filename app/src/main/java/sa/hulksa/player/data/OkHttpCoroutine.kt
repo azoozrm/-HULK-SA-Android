@@ -21,7 +21,6 @@ import okhttp3.Response
  */
 internal suspend fun <T> OkHttpClient.executeCancellable(
     request: Request,
-    beforeExecute: suspend () -> Unit = {},
     block: suspend (Response) -> T,
 ): T = coroutineScope {
     currentCoroutineContext().ensureActive()
@@ -38,9 +37,6 @@ internal suspend fun <T> OkHttpClient.executeCancellable(
     try {
         withContext(Dispatchers.IO) {
             currentCoroutineContext().ensureActive()
-            // Admission is the last suspension before dispatch, so a deadline extension or owner
-            // replacement is rechecked immediately before the call is issued.
-            beforeExecute()
             call.execute().use { response ->
                 currentCoroutineContext().ensureActive()
                 val value = block(response)

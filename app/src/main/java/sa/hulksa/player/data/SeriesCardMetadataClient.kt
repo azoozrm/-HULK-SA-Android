@@ -11,7 +11,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.model.AuthenticatedSession
-import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.Credentials
 import sa.hulksa.player.model.PortalConfig
 import java.io.IOException
@@ -28,45 +27,28 @@ data class SeriesCardTechnicalMetadata(
     val succeeded: Boolean = false,
 )
 
-class SeriesCardMetadataClient(
-    private val admission: ProviderAdmission = ProviderAdmission.shared,
-    private val dispatch: ProviderDispatchGate = ProviderDispatchGate.shared,
-) {
+class SeriesCardMetadataClient {
     private val client = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
         .callTimeout(15, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
-        .addInterceptor(ProviderAdmissionInterceptor(admission))
-        .eventListenerFactory(ProviderExchangeObserverFactory())
         .build()
 
     suspend fun fetch(
         session: AuthenticatedSession,
         seriesId: Int,
-        surface: ProviderSurface = ProviderSurface.OTHER,
     ): SeriesCardTechnicalMetadata = fetch(
         portal = session.portal,
         credentials = session.credentials,
         seriesId = seriesId,
-        surface = surface,
-        admissionSession = session,
     )
 
     suspend fun fetch(
         portal: PortalConfig,
         credentials: Credentials,
         seriesId: Int,
-        surface: ProviderSurface = ProviderSurface.OTHER,
-        admissionSession: AuthenticatedSession? = null,
     ): SeriesCardTechnicalMetadata = withContext(Dispatchers.IO) {
-        // The store path supplies portal/credentials only; bind admission to the current owner
-        // when those resolve to that exact authenticated session.
-        val session = admissionSession ?: AuthenticatedSessionRegistry.current()?.takeIf {
-            it.portal == portal && it.credentials == credentials
-        }
-        val admissionBinding = session?.let { providerAdmissionBinding(it) }
-        val attempt = ProviderRequestTrace.queued(surface, ContentType.SERIES, "get_series_info")
         val url = (portal.baseUrl.trimEnd('/') + "/player_api.php")
             .toHttpUrl()
             .newBuilder()
@@ -76,85 +58,30 @@ class SeriesCardMetadataClient(
             .addQueryParameter("series_id", seriesId.toString())
             .build()
 
-        val builder = Request.Builder()
+        val request = Request.Builder()
             .url(url)
             .get()
             .header("Accept", JSON.toString())
             .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} Android")
-            .tag(
-                ProviderExchangeContext::class.java,
-                ProviderExchangeContext(
-                    attempt = attempt,
-                    expectedPortal = portal,
-                    expectedCredentials = credentials,
-                    action = "get_series_info",
-                ),
-            )
-        val binding = admissionBinding
-        if (session != null && binding != null && !binding.stale) {
-            builder.tag(
-                ProviderAdmissionContext::class.java,
-                ProviderAdmissionContext(session, binding.owner),
-            )
-        }
-        val request = builder.build()
+            .build()
 
-        val execute: suspend () -> JSONObject? = {
-            client.executeCancellable(
-                request = request,
-                beforeExecute = {
-                    if (session != null && binding != null && !binding.stale) {
-                        admission.awaitAdmission(session, binding.owner)
-                    }
-                    ProviderRequestTrace.callIssued(attempt)
-                },
-            ) { response ->
+        val root = try {
+            client.executeCancellable(request) { response ->
                 val body = try {
                     BoundedJsonResponseReader.readResponse(response, XtreamJsonLimits.SERIES_INFO)
                 } catch (_: XtreamJsonGuardException) {
-                    reportProviderTerminal(attempt, ProviderOutcome.GUARD, response.code)
                     return@executeCancellable null
                 }
-                val shape = providerResponseShape(body)
-                val challengeCategory = if (response.isSuccessful) {
-                    providerSuccessfulBodyChallengeCategory(body)
-                } else {
-                    providerFailureChallengeCategory(body)
-                }
-                if (!response.isSuccessful || body.isBlank() || challengeCategory != null) {
-                    val category = challengeCategory
-                    reportProviderTerminal(
-                        attempt,
-                        if (category != null) ProviderOutcome.BLOCKED else ProviderOutcome.HTTP,
-                        response.code,
-                        category,
-                        shape,
-                    )
+                if (!response.isSuccessful || body.isBlank() || body.looksLikeChallenge()) {
                     return@executeCancellable null
                 }
-                val parsed = runCatching { XtreamJsonParser.parseObject(body) }.getOrNull()
-                if (parsed == null) {
-                    reportProviderTerminal(attempt, ProviderOutcome.OTHER, response.code, shape = shape)
-                    return@executeCancellable null
-                }
-                reportProviderTerminal(attempt, ProviderOutcome.SUCCESS, response.code, shape = shape)
-                parsed
-            }
-        }
-        val root = try {
-            if (session == null || binding == null || binding.stale) {
-                execute()
-            } else {
-                dispatch.withPermit(session, binding.owner, priority = false) { execute() }
+                runCatching { XtreamJsonParser.parseObject(body) }.getOrNull()
             }
         } catch (error: CancellationException) {
-            reportProviderTerminal(attempt, ProviderOutcome.CANCELED)
             throw error
         } catch (_: IOException) {
-            reportProviderTerminal(attempt, ProviderOutcome.NETWORK)
             null
         } catch (_: Exception) {
-            reportProviderTerminal(attempt, ProviderOutcome.OTHER)
             null
         } ?: return@withContext SeriesCardTechnicalMetadata(succeeded = false)
 
@@ -353,6 +280,14 @@ class SeriesCardMetadataClient(
                 ?.let { runCatching { XtreamJsonParser.parseArray(it) }.getOrNull() }
             else -> null
         }
+    }
+
+    private fun String.looksLikeChallenge(): Boolean {
+        val prefix = trimStart().take(512).lowercase()
+        return prefix.startsWith("<!doctype html") ||
+            prefix.startsWith("<html") ||
+            "cloudflare" in prefix ||
+            "sorry, you have been blocked" in prefix
     }
 
     private companion object {

@@ -2,6 +2,8 @@ package sa.hulksa.player.data
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -33,8 +35,6 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 open class XtreamClient(
-    private val admission: ProviderAdmission = ProviderAdmission.shared,
-    private val dispatch: ProviderDispatchGate = ProviderDispatchGate.shared,
     private val nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1_000L },
 ) {
     private val client = OkHttpClient.Builder()
@@ -42,13 +42,10 @@ open class XtreamClient(
         .readTimeout(30, TimeUnit.SECONDS)
         .callTimeout(45, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
-        .addInterceptor(ProviderAdmissionInterceptor(admission))
-        .eventListenerFactory(ProviderExchangeObserverFactory())
         .build()
 
     open suspend fun authenticate(portal: PortalConfig, credentials: Credentials): AuthenticatedSession {
-        val attempt = ProviderRequestTrace.queued(ProviderSurface.AUTH, null, "authenticate")
-        val root = requestObject(portal, credentials, attempt = attempt)
+        val root = requestObject(portal, credentials)
         val user = root.optJSONObject("user_info") ?: throw XtreamException.InvalidResponse
         val status = user.optString("status").trim()
         val auth = user.optInt("auth", -1)
@@ -87,107 +84,75 @@ open class XtreamClient(
 
     open suspend fun catalog(session: AuthenticatedSession, type: ContentType): Catalog =
         withContext(Dispatchers.IO) {
-            val categoryAction = when (type) {
-                ContentType.LIVE -> "get_live_categories"
-                ContentType.MOVIE -> "get_vod_categories"
-                ContentType.SERIES -> "get_series_categories"
-            }
-            val contentAction = when (type) {
-                ContentType.LIVE -> "get_live_streams"
-                ContentType.MOVIE -> "get_vod_streams"
-                ContentType.SERIES -> "get_series"
-            }
-
-            val startedNs = System.nanoTime()
-            ProviderRequestTrace.beginBatch()
-            val categoriesAttempt = ProviderRequestTrace.queued(
-                ProviderSurface.CATALOG, type, categoryAction,
-            )
-            val categories = try {
-                val partStartedNs = System.nanoTime()
-                val parsed = parseCategories(
-                    requestArray(
-                        session = session,
-                        action = categoryAction,
-                        attempt = categoriesAttempt,
-                    ),
-                    type,
-                )
-                hulkPerfLog {
-                    "catalogPart type=$type part=categories count=${parsed.size} " +
-                        "ms=${(System.nanoTime() - partStartedNs) / 1_000_000}"
+            coroutineScope {
+                val categoryAction = when (type) {
+                    ContentType.LIVE -> "get_live_categories"
+                    ContentType.MOVIE -> "get_vod_categories"
+                    ContentType.SERIES -> "get_series_categories"
                 }
-                parsed
-            } finally {
-                ProviderRequestTrace.terminalIfOpen(categoriesAttempt, ProviderOutcome.CANCELED)
-            }
-
-            val itemsAttempt = ProviderRequestTrace.queued(
-                ProviderSurface.CATALOG, type, contentAction,
-            )
-            val items = try {
-                val partStartedNs = System.nanoTime()
-                val parsed = requestCatalogItems(
-                    session = session,
-                    action = contentAction,
-                    type = type,
-                    attempt = itemsAttempt,
-                )
-                hulkPerfLog {
-                    "catalogPart type=$type part=items count=${parsed.size} " +
-                        "ms=${(System.nanoTime() - partStartedNs) / 1_000_000}"
+                val contentAction = when (type) {
+                    ContentType.LIVE -> "get_live_streams"
+                    ContentType.MOVIE -> "get_vod_streams"
+                    ContentType.SERIES -> "get_series"
                 }
-                parsed
-            } finally {
-                ProviderRequestTrace.terminalIfOpen(itemsAttempt, ProviderOutcome.CANCELED)
-            }
 
-            Catalog(categories, items).also {
-                hulkPerfLog {
-                    "catalogFetch type=$type items=${it.items.size} categories=${it.categories.size} " +
-                        "ms=${(System.nanoTime() - startedNs) / 1_000_000}"
+                val startedNs = System.nanoTime()
+                val categories = async {
+                    val partStartedNs = System.nanoTime()
+                    val parsed = parseCategories(
+                        requestArray(session.portal, session.credentials, categoryAction),
+                        type,
+                    )
+                    hulkPerfLog {
+                        "catalogPart type=$type part=categories count=${parsed.size} " +
+                            "ms=${(System.nanoTime() - partStartedNs) / 1_000_000}"
+                    }
+                    parsed
+                }
+                val items = async {
+                    val partStartedNs = System.nanoTime()
+                    val parsed = requestCatalogItems(
+                        portal = session.portal,
+                        credentials = session.credentials,
+                        action = contentAction,
+                        type = type,
+                    )
+                    hulkPerfLog {
+                        "catalogPart type=$type part=items count=${parsed.size} " +
+                            "ms=${(System.nanoTime() - partStartedNs) / 1_000_000}"
+                    }
+                    parsed
+                }
+                Catalog(categories.await(), items.await()).also {
+                    hulkPerfLog {
+                        "catalogFetch type=$type items=${it.items.size} categories=${it.categories.size} " +
+                            "ms=${(System.nanoTime() - startedNs) / 1_000_000}"
+                    }
                 }
             }
         }
 
-    suspend fun episodes(
-        session: AuthenticatedSession,
-        seriesId: Int,
-        surface: ProviderSurface = ProviderSurface.DETAILS,
-    ): List<Episode> = seriesBundle(session, seriesId, surface).episodes
+    suspend fun episodes(session: AuthenticatedSession, seriesId: Int): List<Episode> =
+        seriesBundle(session, seriesId).episodes
 
-    suspend fun contentDetails(
-        session: AuthenticatedSession,
-        movieId: Int,
-        surface: ProviderSurface = ProviderSurface.DETAILS,
-    ): ContentDetails =
+    suspend fun contentDetails(session: AuthenticatedSession, movieId: Int): ContentDetails =
         withContext(Dispatchers.IO) {
-            val attempt = ProviderRequestTrace.queued(surface, ContentType.MOVIE, "get_vod_info")
             val root = requestObject(
                 portal = session.portal,
                 credentials = session.credentials,
                 action = "get_vod_info",
                 extra = mapOf("vod_id" to movieId.toString()),
-                attempt = attempt,
-                session = session,
             )
             parseDetails(root.optJSONObject("info") ?: root, session.portal.baseUrl)
         }
 
-    open suspend fun seriesBundle(
-        session: AuthenticatedSession,
-        seriesId: Int,
-        surface: ProviderSurface = ProviderSurface.DETAILS,
-    ): SeriesBundle =
+    open suspend fun seriesBundle(session: AuthenticatedSession, seriesId: Int): SeriesBundle =
         withContext(Dispatchers.IO) {
-            val attempt = ProviderRequestTrace.queued(surface, ContentType.SERIES, "get_series_info")
             val root = requestObject(
                 portal = session.portal,
                 credentials = session.credentials,
                 action = "get_series_info",
                 extra = mapOf("series_id" to seriesId.toString()),
-                attempt = attempt,
-                session = session,
             )
             val episodeObjects = try {
                 root.boundedSeriesEpisodeObjects()
@@ -350,36 +315,26 @@ open class XtreamClient(
         credentials: Credentials,
         action: String? = null,
         extra: Map<String, String> = emptyMap(),
-        attempt: ProviderAttempt? = null,
-        session: AuthenticatedSession? = null,
     ): JSONObject = withContext(Dispatchers.IO) {
         try {
-            val body = request(portal, credentials, action, extra, attempt, session)
+            val body = request(portal, credentials, action, extra)
             currentCoroutineContext().ensureActive()
             val parsed = XtreamJsonParser.parseObject(body)
             currentCoroutineContext().ensureActive()
             parsed
         } catch (error: XtreamJsonGuardException) {
-            reportProviderTerminal(attempt, ProviderOutcome.GUARD)
             throw error.asXtreamException()
         }
     }
 
     private suspend fun requestArray(
-        session: AuthenticatedSession,
+        portal: PortalConfig,
+        credentials: Credentials,
         action: String,
-        attempt: ProviderAttempt? = null,
     ): JSONArray = withContext(Dispatchers.IO) {
         try {
             val startedNs = System.nanoTime()
-            val body = request(
-                session.portal,
-                session.credentials,
-                action,
-                attempt = attempt,
-                session = session,
-                dispatchPriority = true,
-            )
+            val body = request(portal, credentials, action)
             val httpNs = System.nanoTime()
             currentCoroutineContext().ensureActive()
             val parsed = XtreamJsonParser.parseArray(body)
@@ -391,66 +346,35 @@ open class XtreamClient(
             }
             parsed
         } catch (error: XtreamJsonGuardException) {
-            reportProviderTerminal(attempt, ProviderOutcome.GUARD)
             throw error.asXtreamException()
         }
     }
 
     private suspend fun requestCatalogItems(
-        session: AuthenticatedSession,
+        portal: PortalConfig,
+        credentials: Credentials,
         action: String,
         type: ContentType,
-        attempt: ProviderAttempt? = null,
     ): List<ContentItem> = withContext(Dispatchers.IO) {
         val startedNs = System.nanoTime()
-        val admissionBinding = providerAdmissionBinding(session)
-        val request = apiRequest(
-            session.portal,
-            session.credentials,
-            action,
-            attempt = attempt,
-            admissionSession = session,
-            admissionOwner = admissionBinding.owner,
-            admissionEnabled = !admissionBinding.stale,
-        )
+        val request = apiRequest(portal, credentials, action)
         val limit = XtreamJsonLimits.forAction(action)
         val scope = "${type.name.lowercase()} catalog"
         val context = currentCoroutineContext()
 
-        val execute: suspend () -> List<ContentItem> = {
-            client.executeCancellable(
-                request = request,
-                beforeExecute = {
-                    if (!admissionBinding.stale) {
-                        admission.awaitAdmission(session, admissionBinding.owner)
-                    }
-                    attempt?.let(ProviderRequestTrace::callIssued)
-                },
-            ) { response ->
+        try {
+            client.executeCancellable(request) { response ->
                 if (!response.isSuccessful) {
                     val body = try {
                         BoundedJsonResponseReader.readResponse(response, limit)
                     } catch (error: XtreamJsonGuardException.PayloadTooLarge) {
-                        reportProviderTerminal(
-                            attempt, ProviderOutcome.HTTP, response.code,
-                            shape = ProviderShape.UNAVAILABLE,
-                        )
                         throw XtreamException.Http(response.code)
                     } catch (error: XtreamJsonGuardException.EmptyBody) {
-                        reportProviderTerminal(
-                            attempt, ProviderOutcome.HTTP, response.code,
-                            shape = ProviderShape.UNAVAILABLE,
-                        )
                         throw XtreamException.Http(response.code)
                     }
-                    val shape = providerResponseShape(body)
-                    providerFailureChallengeCategory(body)?.let {
-                        reportProviderTerminal(
-                            attempt, ProviderOutcome.BLOCKED, response.code, it, shape,
-                        )
+                    body.challengeCategory()?.let {
                         throw XtreamException.ServiceBlocked(response.code, it)
                     }
-                    reportProviderTerminal(attempt, ProviderOutcome.HTTP, response.code, shape = shape)
                     throw XtreamException.Http(response.code)
                 }
 
@@ -467,22 +391,14 @@ open class XtreamClient(
                         // A pathological whitespace prefix exceeded the bounded peek window.
                         // Fall back to the legacy bounded text parser for this response only.
                         val text = reader.readAllText(checkCancelled)
-                        val shape = providerResponseShape(text)
-                        providerSuccessfulBodyChallengeCategory(text)?.let {
-                            reportProviderTerminal(
-                                attempt, ProviderOutcome.BLOCKED, response.code, it, shape,
-                            )
+                        text.challengeCategory()?.let {
                             throw XtreamException.ServiceBlocked(response.code, it)
                         }
                         val parseText = if (text.startsWith('\uFEFF')) text.substring(1) else text
                         val items = parseItems(
                             XtreamJsonParser.parseArray(parseText),
                             type,
-                            session.portal.baseUrl,
-                        )
-                        reportProviderTerminal(
-                            attempt, ProviderOutcome.SUCCESS, response.code,
-                            shape = ProviderShape.ARRAY_START,
+                            portal.baseUrl,
                         )
                         hulkPerfLog {
                             "xtreamItemsFallback action=$action items=${items.size} " +
@@ -496,29 +412,18 @@ open class XtreamClient(
                         first == 0xEF || first == '/'.code || first == '#'.code
                     if (!catalogCandidate) {
                         val prefix = reader.readChallengePrefix(checkCancelled)
-                        val shape = providerResponseShape(prefix)
-                        providerSuccessfulBodyChallengeCategory(prefix)?.let {
-                            reportProviderTerminal(
-                                attempt, ProviderOutcome.BLOCKED, response.code, it, shape,
-                            )
+                        prefix.challengeCategory()?.let {
                             throw XtreamException.ServiceBlocked(response.code, it)
                         }
-                        reportProviderTerminal(
-                            attempt, ProviderOutcome.OTHER, response.code, shape = shape,
-                        )
                         throw XtreamException.InvalidResponse
                     }
 
                     val items = reader.readCatalogItems(
                         type = type,
-                        portalBaseUrl = session.portal.baseUrl,
+                        portalBaseUrl = portal.baseUrl,
                         maxUniqueItems = XtreamJsonLimits.CATALOG.maxUniqueItems!!,
                         scope = scope,
                         checkCancelled = checkCancelled,
-                    )
-                    reportProviderTerminal(
-                        attempt, ProviderOutcome.SUCCESS, response.code,
-                        shape = ProviderShape.ARRAY_START,
                     )
                     hulkPerfLog {
                         "xtreamItems action=$action items=${items.size} bytes=${reader.bytesRead} " +
@@ -529,27 +434,15 @@ open class XtreamClient(
                     reader.close()
                 }
             }
-        }
-        try {
-            if (admissionBinding.stale) {
-                execute()
-            } else {
-                dispatch.withPermit(session, admissionBinding.owner, priority = true) { execute() }
-            }
         } catch (error: CancellationException) {
-            reportProviderException(attempt, error)
             throw error
         } catch (error: XtreamJsonGuardException) {
-            reportProviderException(attempt, error)
             throw error.asXtreamException()
         } catch (error: XtreamException) {
-            reportProviderException(attempt, error)
             throw error
         } catch (error: IOException) {
-            reportProviderException(attempt, error)
             throw XtreamException.Network(error)
         } catch (error: Exception) {
-            reportProviderTerminal(attempt, ProviderOutcome.OTHER)
             throw XtreamException.InvalidResponse
         }
     }
@@ -559,35 +452,13 @@ open class XtreamClient(
         credentials: Credentials,
         action: String?,
         extra: Map<String, String> = emptyMap(),
-        attempt: ProviderAttempt? = null,
-        session: AuthenticatedSession? = null,
-        dispatchPriority: Boolean = false,
     ): String = withContext(Dispatchers.IO) {
-        val admissionBinding = session?.let { providerAdmissionBinding(it) }
-        val request = apiRequest(
-            portal = portal,
-            credentials = credentials,
-            action = action,
-            extra = extra,
-            attempt = attempt,
-            admissionSession = session,
-            admissionOwner = admissionBinding?.owner,
-            admissionEnabled = admissionBinding?.stale != true,
-        )
+        val request = apiRequest(portal, credentials, action, extra)
         val limit = XtreamJsonLimits.forAction(action)
         val authenticationRequest = action == null && extra.isEmpty()
 
-        val execute: suspend () -> String = {
-            client.executeCancellable(
-                request = request,
-                beforeExecute = {
-                    val binding = admissionBinding
-                    if (session != null && binding != null && !binding.stale) {
-                        admission.awaitAdmission(session, binding.owner)
-                    }
-                    attempt?.let(ProviderRequestTrace::callIssued)
-                },
-            ) { response ->
+        try {
+            client.executeCancellable(request) { response ->
                 val body = try {
                     BoundedJsonResponseReader.readResponse(response, limit)
                 } catch (error: XtreamJsonGuardException.PayloadTooLarge) {
@@ -597,15 +468,9 @@ open class XtreamClient(
                     if (!response.isSuccessful) throw XtreamException.Http(response.code)
                     throw XtreamException.InvalidResponse
                 }
-                val shape = providerResponseShape(body)
                 if (!response.isSuccessful) {
                     if (!authenticationRequest || !body.trimStart().startsWith("{")) {
-                        providerFailureChallengeCategory(body)?.let {
-                            reportProviderTerminal(
-                                attempt, ProviderOutcome.BLOCKED, response.code, it, shape,
-                            )
-                            throw XtreamException.ServiceBlocked(response.code, it)
-                        }
+                        body.challengeCategory()?.let { throw XtreamException.ServiceBlocked(response.code, it) }
                     }
                     // Some providers return structured failed-auth evidence with 401/403.
                     // Permit only auth=0 to reach the authentication parser; never accept auth=1
@@ -615,53 +480,27 @@ open class XtreamClient(
                             XtreamJsonParser.parseObject(body).optJSONObject("user_info")
                                 ?.optInt("auth", -1) == 0
                         }.getOrDefault(false)
-                    if (!failedAuth) {
-                        reportProviderTerminal(
-                            attempt, ProviderOutcome.HTTP, response.code, shape = shape,
-                        )
-                        throw XtreamException.Http(response.code)
-                    }
+                    if (!failedAuth) throw XtreamException.Http(response.code)
                 }
                 if (!authenticationRequest || !body.trimStart().startsWith("{")) {
-                    providerSuccessfulBodyChallengeCategory(body)?.let { category ->
+                    body.challengeCategory()?.let { category ->
                         val prefix = body.trimStart().take(512).lowercase()
                         if (authenticationRequest && response.isSuccessful &&
                             category in setOf("html", "html-doctype") &&
                             "cloudflare" !in prefix && "sorry, you have been blocked" !in prefix
-                        ) {
-                            reportProviderTerminal(
-                                attempt, ProviderOutcome.OTHER, response.code, shape = shape,
-                            )
-                            throw XtreamException.InvalidResponse
-                        }
-                        reportProviderTerminal(
-                            attempt, ProviderOutcome.BLOCKED, response.code, category, shape,
-                        )
+                        ) throw XtreamException.InvalidResponse
                         throw XtreamException.ServiceBlocked(response.code, category)
                     }
                 }
-                reportProviderTerminal(attempt, ProviderOutcome.SUCCESS, response.code, shape = shape)
                 body
             }
-        }
-        try {
-            val binding = admissionBinding
-            if (session != null && binding != null && !binding.stale) {
-                dispatch.withPermit(session, binding.owner, dispatchPriority) { execute() }
-            } else {
-                execute()
-            }
         } catch (error: CancellationException) {
-            reportProviderException(attempt, error)
             throw error
         } catch (error: XtreamException) {
-            reportProviderException(attempt, error)
             throw error
         } catch (error: IOException) {
-            reportProviderException(attempt, error)
             throw XtreamException.Network(error)
         } catch (error: Exception) {
-            reportProviderTerminal(attempt, ProviderOutcome.OTHER)
             throw XtreamException.InvalidResponse
         }
     }
@@ -671,10 +510,6 @@ open class XtreamClient(
         credentials: Credentials,
         action: String?,
         extra: Map<String, String> = emptyMap(),
-        attempt: ProviderAttempt? = null,
-        admissionSession: AuthenticatedSession? = null,
-        admissionOwner: AuthenticatedSessionOwner? = null,
-        admissionEnabled: Boolean = true,
     ): Request {
         val url = (portal.baseUrl.trimEnd('/') + "/player_api.php").toHttpUrl().newBuilder()
             .addQueryParameter("username", credentials.username)
@@ -684,27 +519,12 @@ open class XtreamClient(
                 extra.forEach { (key, value) -> addQueryParameter(key, value) }
             }
             .build()
-        val builder = Request.Builder()
+        return Request.Builder()
             .url(url)
             .get()
             .header("Accept", JSON.toString())
             .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} Android")
-            .tag(
-                ProviderExchangeContext::class.java,
-                ProviderExchangeContext(
-                    attempt = attempt,
-                    expectedPortal = portal,
-                    expectedCredentials = credentials,
-                    action = action ?: "auth",
-                ),
-            )
-        if (admissionSession != null && admissionEnabled) {
-            builder.tag(
-                ProviderAdmissionContext::class.java,
-                ProviderAdmissionContext(admissionSession, admissionOwner),
-            )
-        }
-        return builder.build()
+            .build()
     }
 
     private fun parseCategories(array: JSONArray, type: ContentType): List<Category> = try {
@@ -814,6 +634,17 @@ open class XtreamClient(
     private fun JSONObject.optNullableString(key: String): String? = xtreamNullableString(key)
 
     private fun JSONObject.firstImageUrl(key: String): String? = xtreamFirstImageUrl(key)
+
+    private fun String.challengeCategory(): String? {
+        val prefix = trimStart().take(512).lowercase()
+        return when {
+            prefix.startsWith("<!doctype html") -> "html-doctype"
+            prefix.startsWith("<html") -> "html"
+            "cloudflare" in prefix -> "cloudflare"
+            "sorry, you have been blocked" in prefix -> "blocked-page"
+            else -> null
+        }
+    }
 
     private companion object {
         val JSON = "application/json".toMediaType()

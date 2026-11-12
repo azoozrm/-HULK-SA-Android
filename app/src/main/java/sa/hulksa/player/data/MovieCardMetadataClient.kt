@@ -10,7 +10,6 @@ import okhttp3.Request
 import org.json.JSONObject
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.model.AuthenticatedSession
-import sa.hulksa.player.model.ContentType
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -24,25 +23,18 @@ data class MovieCardTechnicalMetadata(
     val succeeded: Boolean = false,
 )
 
-class MovieCardMetadataClient(
-    private val admission: ProviderAdmission = ProviderAdmission.shared,
-    private val dispatch: ProviderDispatchGate = ProviderDispatchGate.shared,
-) {
+class MovieCardMetadataClient {
     private val client = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
         .callTimeout(15, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
-        .addInterceptor(ProviderAdmissionInterceptor(admission))
-        .eventListenerFactory(ProviderExchangeObserverFactory())
         .build()
 
     suspend fun fetch(
         session: AuthenticatedSession,
         movieId: Int,
-        surface: ProviderSurface = ProviderSurface.OTHER,
     ): MovieCardTechnicalMetadata = withContext(Dispatchers.IO) {
-        val attempt = ProviderRequestTrace.queued(surface, ContentType.MOVIE, "get_vod_info")
         val url = (session.portal.baseUrl.trimEnd('/') + "/player_api.php")
             .toHttpUrl()
             .newBuilder()
@@ -52,88 +44,34 @@ class MovieCardMetadataClient(
             .addQueryParameter("vod_id", movieId.toString())
             .build()
 
-        val admissionBinding = providerAdmissionBinding(session)
         val request = Request.Builder()
             .url(url)
             .get()
             .header("Accept", JSON.toString())
             .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} Android")
-            .tag(
-                ProviderExchangeContext::class.java,
-                ProviderExchangeContext(
-                    attempt = attempt,
-                    expectedPortal = session.portal,
-                    expectedCredentials = session.credentials,
-                    action = "get_vod_info",
-                ),
-            )
-            .apply {
-                if (!admissionBinding.stale) {
-                    tag(
-                        ProviderAdmissionContext::class.java,
-                        ProviderAdmissionContext(session, admissionBinding.owner),
-                    )
-                }
-            }
             .build()
 
-        val execute: suspend () -> JSONObject? = {
-            client.executeCancellable(
-                request = request,
-                beforeExecute = {
-                    if (!admissionBinding.stale) {
-                        admission.awaitAdmission(session, admissionBinding.owner)
-                    }
-                    ProviderRequestTrace.callIssued(attempt)
-                },
-            ) { response ->
+        val root = try {
+            client.executeCancellable(request) { response ->
                 val body = try {
                     BoundedJsonResponseReader.readResponse(response, XtreamJsonLimits.VOD_INFO)
                 } catch (_: XtreamJsonGuardException) {
-                    reportProviderTerminal(attempt, ProviderOutcome.GUARD, response.code)
                     return@executeCancellable null
                 }
-                val shape = providerResponseShape(body)
-                val challengeCategory = if (response.isSuccessful) {
-                    providerSuccessfulBodyChallengeCategory(body)
-                } else {
-                    providerFailureChallengeCategory(body)
-                }
-                if (!response.isSuccessful || challengeCategory != null) {
-                    val category = challengeCategory
-                    reportProviderTerminal(
-                        attempt,
-                        if (category != null) ProviderOutcome.BLOCKED else ProviderOutcome.HTTP,
-                        response.code,
-                        category,
-                        shape,
-                    )
+                if (!response.isSuccessful || body.looksLikeChallenge()) {
                     return@executeCancellable null
                 }
-                val parsed = try {
+                try {
                     XtreamJsonParser.parseObject(body)
                 } catch (_: XtreamJsonGuardException) {
-                    reportProviderTerminal(attempt, ProviderOutcome.OTHER, response.code, shape = shape)
-                    return@executeCancellable null
+                    null
                 }
-                reportProviderTerminal(attempt, ProviderOutcome.SUCCESS, response.code, shape = shape)
-                parsed
-            }
-        }
-        val root = try {
-            if (admissionBinding.stale) {
-                execute()
-            } else {
-                dispatch.withPermit(session, admissionBinding.owner, priority = false) { execute() }
             }
         } catch (error: CancellationException) {
-            reportProviderTerminal(attempt, ProviderOutcome.CANCELED)
             throw error
         } catch (_: IOException) {
-            reportProviderTerminal(attempt, ProviderOutcome.NETWORK)
             null
         } catch (_: Exception) {
-            reportProviderTerminal(attempt, ProviderOutcome.OTHER)
             null
         } ?: return@withContext MovieCardTechnicalMetadata(succeeded = false)
 
@@ -307,6 +245,14 @@ class MovieCardMetadataClient(
                 ?.let { runCatching { XtreamJsonParser.parseObject(it) }.getOrNull() }
             else -> null
         }
+    }
+
+    private fun String.looksLikeChallenge(): Boolean {
+        val prefix = trimStart().take(512).lowercase()
+        return prefix.startsWith("<!doctype html") ||
+            prefix.startsWith("<html") ||
+            "cloudflare" in prefix ||
+            "sorry, you have been blocked" in prefix
     }
 
     private companion object {

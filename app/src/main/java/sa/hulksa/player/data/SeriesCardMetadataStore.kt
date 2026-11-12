@@ -62,7 +62,6 @@ class SeriesCardMetadataStore private constructor(context: Context) {
         owner: AuthenticatedSessionOwner,
         seriesId: Int,
         requirePresentation: Boolean = false,
-        surface: ProviderSurface = ProviderSurface.OTHER,
     ): SeriesCardTechnicalMetadata {
         if (!AuthenticatedSessionRegistry.isCurrent(owner)) {
             return SeriesCardTechnicalMetadata()
@@ -75,26 +74,17 @@ class SeriesCardMetadataStore private constructor(context: Context) {
             presentationSettled = cached != null && presentationSettled(owner, seriesId),
         )
         if (cached?.isComplete() == true && !runPresentationBackfill) {
-            ProviderRequestTrace.cache(surface, ContentType.SERIES, ProviderCacheDecision.COMPLETE)
             return cached.takeIf { AuthenticatedSessionRegistry.isCurrent(owner) }
                 ?: SeriesCardTechnicalMetadata()
         }
 
         val requestKey = owner.contentMetadataKey(ContentType.SERIES, seriesId)
-        var joinedInFlight = false
         val shared = synchronized(inFlight) {
-            val existing = inFlight[requestKey]
-            if (existing != null) {
-                joinedInFlight = true
-                existing
-            } else run {
+            inFlight[requestKey] ?: run {
                 val now = System.currentTimeMillis()
                 pruneRetryOwnerLocked(owner)
                 val lastAttempt = lastAttemptAtMs[requestKey] ?: 0L
                 if (now - lastAttempt < RETRY_COOLDOWN_MS) {
-                    ProviderRequestTrace.cache(
-                        surface, ContentType.SERIES, ProviderCacheDecision.COOLDOWN_OR_SHARED,
-                    )
                     return cached
                         ?.takeIf { AuthenticatedSessionRegistry.isCurrent(owner) }
                         ?: SeriesCardTechnicalMetadata()
@@ -111,7 +101,7 @@ class SeriesCardMetadataStore private constructor(context: Context) {
                             if (!AuthenticatedSessionRegistry.isCurrent(owner)) {
                                 SeriesCardTechnicalMetadata()
                             } else {
-                                fetchAndCache(owner, seriesId, cached, surface)
+                                fetchAndCache(owner, seriesId, cached)
                             }
                         }
                         result.complete(value)
@@ -134,11 +124,6 @@ class SeriesCardMetadataStore private constructor(context: Context) {
                     job.start()
                 }
             }
-        }
-        if (joinedInFlight) {
-            ProviderRequestTrace.cache(
-                surface, ContentType.SERIES, ProviderCacheDecision.COOLDOWN_OR_SHARED,
-            )
         }
 
         val result = shared.result.await()
@@ -169,14 +154,12 @@ class SeriesCardMetadataStore private constructor(context: Context) {
         owner: AuthenticatedSessionOwner,
         seriesId: Int,
         cached: SeriesCardTechnicalMetadata?,
-        surface: ProviderSurface = ProviderSurface.OTHER,
     ): SeriesCardTechnicalMetadata {
         val fetched = try {
             client.fetch(
                 portal = owner.session.portal,
                 credentials = owner.session.credentials,
                 seriesId = seriesId,
-                surface = surface,
             )
         } catch (cancelled: CancellationException) {
             throw cancelled
