@@ -69,6 +69,94 @@ class SelectedCategoryFocusPolicyTest {
     }
 
     @Test
+    fun categoryGroupExitAlwaysSavesAndChoosesExactlyOneOriginAction() {
+        var saved = 0
+        var cleared = 0
+        var retained = 0
+        applyCategoryGroupExit(
+            saveFocusedChild = { saved += 1 },
+            ordinaryExit = true,
+            clearRetainedOrigin = { cleared += 1 },
+            retainLastFocusedOrigin = { retained += 1 },
+        )
+        assertEquals(1, saved)
+        assertEquals(1, cleared)
+        assertEquals(0, retained)
+
+        saved = 0
+        cleared = 0
+        retained = 0
+        applyCategoryGroupExit(
+            saveFocusedChild = { saved += 1 },
+            ordinaryExit = false,
+            clearRetainedOrigin = { cleared += 1 },
+            retainLastFocusedOrigin = { retained += 1 },
+        )
+        assertEquals(1, saved)
+        assertEquals(0, cleared)
+        assertEquals(1, retained)
+    }
+
+    @Test
+    fun explicitOrdinaryFocusRequestIsConsumedOnlyAfterARealRequest() {
+        val controller = CategoryFocusRestoreController()
+        assertTrue(controller.requestOrdinaryFocus { true })
+        assertTrue(controller.consumeOrdinaryExit())
+        assertFalse(controller.consumeOrdinaryExit())
+
+        assertFalse(controller.requestOrdinaryFocus { false })
+        assertFalse(controller.consumeOrdinaryExit())
+    }
+
+    @Test
+    fun sameSectionReturnAllowsTheExactUnselectedOriginChip() {
+        assertTrue(
+            canCategoryChipReceiveFocus(
+                isTv = true,
+                categoryBarHasFocus = false,
+                restorePending = false,
+                selectedId = "selected",
+                chipId = "origin",
+                retainedOriginId = "origin",
+                retainedOriginActive = true,
+            ),
+        )
+        assertFalse(
+            canCategoryChipReceiveFocus(
+                isTv = true,
+                categoryBarHasFocus = false,
+                restorePending = false,
+                selectedId = "selected",
+                chipId = "neighbor",
+                retainedOriginId = "origin",
+                retainedOriginActive = true,
+            ),
+        )
+        assertFalse(
+            canCategoryChipReceiveFocus(
+                isTv = true,
+                categoryBarHasFocus = true,
+                restorePending = true,
+                selectedId = "selected",
+                chipId = "neighbor",
+                retainedOriginId = "origin",
+                retainedOriginActive = true,
+            ),
+        )
+        assertTrue(
+            canCategoryChipReceiveFocus(
+                isTv = true,
+                categoryBarHasFocus = false,
+                restorePending = false,
+                selectedId = "selected",
+                chipId = null,
+                retainedOriginId = null,
+                retainedOriginActive = true,
+            ),
+        )
+    }
+
+    @Test
     fun restoreTargetUsesTheCurrentIdResolvedAfterReorder() {
         val reordered = listOf("d", "b", "a", "selected", "c")
         val currentIndex = selectedCategoryFocusIndex(

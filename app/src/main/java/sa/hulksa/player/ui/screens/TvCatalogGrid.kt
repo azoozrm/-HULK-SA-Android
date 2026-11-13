@@ -344,6 +344,7 @@ internal fun TvCatalogGrid(
         .coerceIn(0, content.lastIndex.coerceAtLeast(0))
     val targetKey = contentKeys.getOrNull(targetIndex)
     val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = targetIndex)
+    val gridSaveFocusRequester = remember { FocusRequester() }
     val focusRequesters = remember(contentKeys) { List(contentKeys.size) { FocusRequester() } }
     val focusScope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -564,7 +565,7 @@ internal fun TvCatalogGrid(
                     bottom = FAVORITES_MOBILE_BOTTOM_PADDING,
                 )
             },
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().saveFocusedChildOnExit(gridSaveFocusRequester),
         ) {
             itemsIndexed(content, key = { index, _ -> contentKeys[index] }) { index, item ->
                 val key = contentKeys[index]
@@ -685,6 +686,11 @@ internal fun TvCatalogGrid(
                         modifier = cardModifier,
                         onLongClick = onCardLongClick,
                         onFocused = onFocusedCard,
+                        boxedCatalogGeometry = true,
+                        artworkHeightDp = compactArtworkHeightPx?.let { heightPx ->
+                            with(density) { heightPx.toDp() }
+                        },
+                        onFooterHeightMeasured = { boxedFooterHeightPx = it },
                     )
                 } else if (seriesCard) {
                     SeriesCatalogBoxedCard(

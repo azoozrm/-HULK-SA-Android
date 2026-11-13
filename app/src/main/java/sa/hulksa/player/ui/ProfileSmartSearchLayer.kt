@@ -125,6 +125,7 @@ import sa.hulksa.player.ui.screens.FAVORITES_MOBILE_HORIZONTAL_SPACING
 import sa.hulksa.player.ui.screens.FAVORITES_MOBILE_MIN_CELL_WIDTH
 import sa.hulksa.player.ui.screens.FAVORITES_MOBILE_VERTICAL_SPACING
 import sa.hulksa.player.ui.screens.FavoritesSelectGuardDecision
+import sa.hulksa.player.ui.screens.orderMixedContentVodFirst
 import sa.hulksa.player.ui.screens.MOBILE_SECTION_COUNT_SIZE
 import sa.hulksa.player.ui.screens.MOBILE_SECTION_HORIZONTAL_PADDING
 import sa.hulksa.player.ui.screens.MOBILE_SECTION_TITLE_SIZE
@@ -314,6 +315,12 @@ internal fun ProfileSmartSearchLayer(
     } else {
         emptyList()
     }
+    val displayResults = remember(results) {
+        orderMixedContentVodFirst(results) { it.type }
+    }
+    val displayRecentEntries = remember(visibleRecentEntries) {
+        orderMixedContentVodFirst(visibleRecentEntries) { it.contentType }
+    }
     val searchPending = query.length >= SMART_SEARCH_MIN_QUERY_LENGTH &&
         (searchIndex == null ||
             settledQuery != query ||
@@ -392,8 +399,8 @@ internal fun ProfileSmartSearchLayer(
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                     state = state,
                     isTv = isTv,
-                    recentEntries = visibleRecentEntries,
-                    results = results,
+                    recentEntries = displayRecentEntries,
+                    results = displayResults,
                     selectedFilter = selectedFilter,
                     filterRequesters = filterRequesters,
                     searchPending = searchPending,
@@ -444,8 +451,8 @@ internal fun ProfileSmartSearchLayer(
                     modifier = Modifier.weight(1f).fillMaxWidth().imePadding(),
                     state = state,
                     isTv = false,
-                    recentEntries = visibleRecentEntries,
-                    results = results,
+                    recentEntries = displayRecentEntries,
+                    results = displayResults,
                     selectedFilter = selectedFilter,
                     filterRequesters = filterRequesters,
                     searchPending = searchPending,
@@ -678,6 +685,7 @@ private fun SmartSearchContent(
                             firstRecentRequester = firstRecentRequester,
                             railSearchRequester = railSearchRequester,
                             onFocusStateChanged = onSearchFieldFocusChanged,
+                            onContentFocusTargetChanged = onContentFocusTargetChanged,
                             modifier = Modifier.width(fieldWidth),
                         )
                     }
@@ -704,6 +712,7 @@ private fun SmartSearchContent(
                             firstRecentRequester = firstRecentRequester,
                             railSearchRequester = railSearchRequester,
                             onFocusStateChanged = onSearchFieldFocusChanged,
+                            onContentFocusTargetChanged = onContentFocusTargetChanged,
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
@@ -733,6 +742,7 @@ private fun SmartSearchContent(
                             firstRecentRequester = firstRecentRequester,
                             railSearchRequester = railSearchRequester,
                             onFocusStateChanged = onSearchFieldFocusChanged,
+                            onContentFocusTargetChanged = onContentFocusTargetChanged,
                             modifier = Modifier.weight(1f).widthIn(max = 630.dp),
                         )
                     }
@@ -1060,6 +1070,7 @@ private fun SmartSearchInput(
     firstRecentRequester: FocusRequester,
     railSearchRequester: FocusRequester?,
     onFocusStateChanged: (Boolean) -> Unit,
+    onContentFocusTargetChanged: (FocusRequester) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -1195,6 +1206,7 @@ private fun SmartSearchInput(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .padding(end = if (isTv) 10.dp else 8.dp),
+            onFocused = { onContentFocusTargetChanged(voiceSearchRequester) },
         )
     }
 }
@@ -1786,6 +1798,9 @@ private fun SmartSearchCatalogGrid(
                                 modifier = cardModifier,
                                 onLongClick = { onToggleFavorite(row.item) },
                                 onFocused = onFocusedCard,
+                                boxedCatalogGeometry = true,
+                                artworkHeightDp = compactArtworkHeightDp,
+                                onFooterHeightMeasured = { boxedFooterHeightPx = it },
                             )
 
                             ContentType.SERIES -> SeriesCatalogBoxedCard(
@@ -1829,7 +1844,10 @@ private fun SmartSearchCatalogGrid(
                                         },
                                         onFocused = {
                                             deleteFocusedIndex = index
-                                            onFocusedCard()
+                                            saveFocusedRow(index)
+                                            // The exact same-section return owner must retain the
+                                            // Delete control, not silently move back to the card.
+                                            onContentFocusTargetChanged(deleteRequesters[index])
                                         },
                                         onFocusLost = {
                                             if (deleteFocusedIndex == index) {
@@ -1883,6 +1901,9 @@ private fun SmartSearchCatalogGrid(
                                     modifier = cardModifier,
                                     onFocused = onFocusedCard,
                                     footerAction = deleteAction,
+                                    boxedCatalogGeometry = true,
+                                    artworkHeightDp = compactArtworkHeightDp,
+                                    onFooterHeightMeasured = { boxedFooterHeightPx = it },
                                 )
 
                                 ContentType.SERIES -> SeriesCatalogBoxedCard(
@@ -1995,6 +2016,16 @@ private fun SmartSearchRail(
         return true
     }
 
+    // Every Search rail entry owns the same explicit content return. Without this, only the
+    // selected Search entry has a LEFT route; the other entries fall through to spatial
+    // navigation and can replace the remembered content origin.
+    val contentReturnModifier = Modifier
+        .focusProperties { if (isTv) left = contentReturnRequester }
+        .onPreviewKeyEvent { event ->
+            isTv && event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft &&
+                returnToContent()
+        }
+
     LaunchedEffect(isTv, preferSearchFieldOnEnter, railHasFocus) {
         if (isTv && preferSearchFieldOnEnter && railHasFocus) {
             delay(TV_RAIL_FOCUS_REDIRECT_DELAY_MS)
@@ -2029,20 +2060,16 @@ private fun SmartSearchRail(
                     metrics = metrics,
                     modifier = Modifier
                         .focusRequester(destinationRequesters.getValue(entry.destination))
-                        .then(
-                            if (isTv && entry.destination == MainDestination.SEARCH) {
-                                Modifier
-                                    .focusProperties { left = contentReturnRequester }
-                                    .onPreviewKeyEvent { event ->
-                                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
-                                            returnToContent()
-                                        } else {
-                                            false
-                                        }
-                                    }
-                            } else Modifier,
-                        ),
-                    onClick = { onSelectDestination(entry.destination) },
+                        .then(contentReturnModifier),
+                    onClick = {
+                        // Activating the already selected Search destination must dismiss the
+                        // rail, not run destination selection (which clears a nonblank query).
+                        if (entry.destination == selected) {
+                            returnToContent()
+                        } else {
+                            onSelectDestination(entry.destination)
+                        }
+                    },
                 )
                 Spacer(Modifier.height(metrics.itemGapDp.dp))
             }
@@ -2053,6 +2080,7 @@ private fun SmartSearchRail(
             selected = false,
             expanded = expanded,
             metrics = metrics,
+            modifier = Modifier.then(contentReturnModifier),
             onClick = onSwitchProfile,
         )
 
@@ -2065,8 +2093,16 @@ private fun SmartSearchRail(
                 selected = false,
                 expanded = expanded,
                 metrics = metrics,
-                modifier = Modifier.focusRequester(destinationRequesters.getValue(entry.destination)),
-                onClick = { onSelectDestination(entry.destination) },
+                modifier = Modifier
+                    .focusRequester(destinationRequesters.getValue(entry.destination))
+                    .then(contentReturnModifier),
+                onClick = {
+                    if (entry.destination == selected) {
+                        returnToContent()
+                    } else {
+                        onSelectDestination(entry.destination)
+                    }
+                },
             )
         }
     }

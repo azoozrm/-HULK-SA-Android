@@ -453,6 +453,7 @@ internal fun InlineVoiceSearchAction(
     searchFieldRequester: FocusRequester,
     downRequester: FocusRequester?,
     modifier: Modifier = Modifier,
+    onFocused: (() -> Unit)? = null,
 ) {
     val launchVoiceSearch = LocalVoiceSearchLauncher.current ?: return
     val colors = LocalHulkColors.current
@@ -467,7 +468,10 @@ internal fun InlineVoiceSearchAction(
                 up = FocusRequester.Cancel
                 down = downRequester ?: FocusRequester.Cancel
             }
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused?.invoke()
+            }
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) {
                     false

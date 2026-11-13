@@ -214,28 +214,21 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
         self.assertNotIn("delay(", helper)
         self.assertNotIn("while (", helper)
 
-        # Lazy containers install a non-focusable focus target but no focus restorer. Home's
-        # vertical column and all three focusable lazy rows save their own direct child while it
-        # still has focus, so the content-group restore can walk the complete path to the card.
-        # This is a source contract only; the actual focus-tree recursion is a Compose runtime
-        # behavior and is not proved by this test.
-        self.assertIn("private fun Modifier.saveFocusedChildOnExit(", source)
-        self.assertIn("onExit = { requester.saveFocusedChild() }", source)
+        # Lazy/scrollable containers install a non-focusable focus target but no focus restorer.
+        # The shared save-only helper lets the content-group restore walk the saved path. This is
+        # a source contract only; the actual focus-tree recursion is a Compose runtime behavior.
+        helper = self.read(
+            Path(REPO_ROOT, "app/src/main/java/sa/hulksa/player/ui/screens/TvFocusSavePath.kt")
+        )
+        self.assertIn("internal fun Modifier.saveFocusedChildOnExit(", helper)
+        self.assertIn("onExit = { requester.saveFocusedChild() }", helper)
+        self.assertNotIn("focusRestorer", helper)
+        self.assertNotIn("onEnter", helper)
         self.assertIn(
             "modifier = Modifier.fillMaxSize().saveFocusedChildOnExit(homeColumnSaveFocusRequester)",
             source,
         )
-        # One modifier definition plus the Home column and three row call sites.
-        self.assertEqual(5, source.count(".saveFocusedChildOnExit("))
         self.assertEqual(3, source.count(".saveFocusedChildOnExit(rowSaveFocusRequester)"))
-        helper_source = source[
-            source.index("private fun Modifier.saveFocusedChildOnExit(") :
-            source.index("private class DownloadFocusHandle(")
-        ]
-        self.assertIn("onExit = { requester.saveFocusedChild() }", helper_source)
-        # Save-only: ordinary D-pad entry is not redirected by this boundary helper.
-        self.assertNotIn("focusRestorer", helper_source)
-        self.assertNotIn("onEnter", helper_source)
 
     def test_all_rail_destinations_share_the_content_focus_entry_contract(self) -> None:
         source = self.read(MAIN_SHELL)

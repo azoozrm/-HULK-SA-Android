@@ -136,6 +136,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -374,7 +375,16 @@ internal class CategoryFocusRestoreController {
         private set
     var focusedCategoryId by mutableStateOf<String?>(null)
         private set
+    // The exact chip that owned focus when the bar was left. It stays eligible only for the
+    // same-section return; ordinary entry still restores the selected category. The boolean is
+    // required because the "All" category's legitimate id is null.
+    var retainedOriginCategoryId by mutableStateOf<String?>(null)
+        private set
+    var hasRetainedOrigin by mutableStateOf(false)
+        private set
 
+    private var lastFocusedCategoryId: String? = null
+    private var ordinaryExitPending = false
     private var nextRequestId = 0L
     private val placedTargets = mutableSetOf<String?>()
     private var suppressBringIntoViewFor: Pair<Long, String?>? = null
@@ -386,9 +396,34 @@ internal class CategoryFocusRestoreController {
     fun onTargetFocusChanged(categoryId: String?, isFocused: Boolean) {
         if (isFocused) {
             focusedCategoryId = categoryId
+            lastFocusedCategoryId = categoryId
         } else if (focusedCategoryId == categoryId) {
             focusedCategoryId = null
         }
+    }
+
+    fun retainLastFocusedOrigin() {
+        retainedOriginCategoryId = lastFocusedCategoryId
+        hasRetainedOrigin = true
+    }
+
+    fun clearRetainedOrigin() {
+        retainedOriginCategoryId = null
+        hasRetainedOrigin = false
+    }
+
+    /** Marks an explicit non-rail destination such as the notice Retry control. */
+    fun requestOrdinaryFocus(request: () -> Boolean): Boolean {
+        ordinaryExitPending = true
+        val requested = runCatching(request).getOrDefault(false)
+        if (!requested) ordinaryExitPending = false
+        return requested
+    }
+
+    fun consumeOrdinaryExit(): Boolean {
+        val pending = ordinaryExitPending
+        ordinaryExitPending = false
+        return pending
     }
 
     fun hasPendingTarget(categoryId: String?): Boolean =
@@ -472,13 +507,37 @@ internal class CategoryFocusRestoreController {
     }
 }
 
+/**
+ * One effective category-group exit callback. The saved child and the origin decision must run
+ * together; separate Compose focusProperties nodes would let property precedence shadow one.
+ */
+internal fun applyCategoryGroupExit(
+    saveFocusedChild: () -> Unit,
+    ordinaryExit: Boolean,
+    clearRetainedOrigin: () -> Unit,
+    retainLastFocusedOrigin: () -> Unit,
+) {
+    saveFocusedChild()
+    if (ordinaryExit) clearRetainedOrigin() else retainLastFocusedOrigin()
+}
+
 internal fun canCategoryChipReceiveFocus(
     isTv: Boolean,
     categoryBarHasFocus: Boolean,
     restorePending: Boolean,
     selectedId: String?,
     chipId: String?,
-): Boolean = !isTv || selectedId == chipId || (categoryBarHasFocus && !restorePending)
+    retainedOriginId: String? = null,
+    retainedOriginActive: Boolean = false,
+): Boolean = !isTv ||
+    selectedId == chipId ||
+    (
+        !restorePending &&
+            (
+                (retainedOriginActive && retainedOriginId == chipId) ||
+                    categoryBarHasFocus
+                )
+        )
 
 @Composable
 internal fun Modifier.categoryFocusTarget(
@@ -536,16 +595,27 @@ private fun Modifier.categoryChipFocus(
     requester: FocusRequester,
     controller: CategoryFocusRestoreController,
     allowInitialEntry: Boolean = false,
-): Modifier = categoryFocusTarget(isTv, categoryId, requester, controller)
-    .focusProperties {
-        canFocus = allowInitialEntry || canCategoryChipReceiveFocus(
-            isTv = isTv,
-            categoryBarHasFocus = categoryBarHasFocus,
-            restorePending = controller.pendingRequest != null,
-            selectedId = selectedId,
-            chipId = categoryId,
-        )
-    }
+): Modifier {
+    val retainedOriginId = controller.retainedOriginCategoryId
+    val retainedOriginActive = controller.hasRetainedOrigin
+    return categoryFocusTarget(isTv, categoryId, requester, controller)
+        .focusProperties {
+            canFocus = allowInitialEntry || canCategoryChipReceiveFocus(
+                isTv = isTv,
+                categoryBarHasFocus = categoryBarHasFocus,
+                restorePending = controller.pendingRequest != null,
+                selectedId = selectedId,
+                chipId = categoryId,
+                retainedOriginId = retainedOriginId,
+                retainedOriginActive = retainedOriginActive,
+            )
+        }
+        .onFocusChanged { focusState ->
+            // Once a chip owns focus again, the retained exact-origin allowance has served its
+            // purpose. Ordinary entry restores the selected category through onEnter.
+            if (focusState.isFocused) controller.clearRetainedOrigin()
+        }
+}
 
 internal fun restoreSelectedCategoryFocus(
     listState: LazyListState,
@@ -856,20 +926,6 @@ private fun rememberCatalogModelForPresentation(
 
 private fun Modifier.restoreFocus(enabled: Boolean, requester: FocusRequester): Modifier =
     then(if (enabled) Modifier.focusRequester(requester) else Modifier)
-
-/**
- * Saves the exact focused child of one lazy/scrollable focus boundary when focus leaves it.
- *
- * Lazy containers install an implicit non-focusable focus target but no focus restorer, so the
- * content group's saved child stops at that boundary. Saving each boundary's direct child while
- * it still has focus lets the existing content-group `restoreFocusedChild()` walk the complete
- * saved path back to the originating card on a same-section rail dismissal. This modifier saves
- * only; ordinary D-pad entry remains owned by the existing spatial/Home restoration owners.
- */
-private fun Modifier.saveFocusedChildOnExit(requester: FocusRequester): Modifier =
-    focusRequester(requester).focusProperties {
-        onExit = { requester.saveFocusedChild() }
-    }
 
 private class DownloadFocusHandle(val requester: FocusRequester = FocusRequester()) {
     var isPlaced: Boolean = false
@@ -5497,6 +5553,7 @@ private fun LiveCatalogScreen(
         noticeWasVisible.value = noticeVisible
     }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
+    val liveListSaveFocusRequester = remember { FocusRequester() }
     val focusedChannelIndex = remember(visible) { intArrayOf(rememberedIndex) }
     val liveFocusOwner = remember { LiveFocusRequestOwner() }
     val selectCategoryAndEnterContent: (String?) -> Unit = { categoryId ->
@@ -5840,6 +5897,7 @@ private fun LiveCatalogScreen(
                             state = listState,
                             modifier = Modifier
                                 .fillMaxSize()
+                                .saveFocusedChildOnExit(liveListSaveFocusRequester)
                                 .onPreviewKeyEvent { event ->
                                     event.type == KeyEventType.KeyDown &&
                                         event.key == Key.DirectionUp &&
@@ -5937,7 +5995,12 @@ private fun LiveCatalogScreen(
                 }
             }
         } else {
-            LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.saveFocusedChildOnExit(liveListSaveFocusRequester),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                contentPadding = PaddingValues(bottom = 24.dp),
+            ) {
                 itemsIndexed(visible, key = { _, channel -> channel.id }) { index, channel ->
                     ChannelListItem(
                         item = channel,
@@ -6169,9 +6232,11 @@ private fun FavoritesTypeFilterBar(
 ) {
     val itemMetrics = rememberLiveCategoryStripMetrics()
     val sidebarUnderlap = rememberCategorySidebarUnderlap(isTv, 8.dp)
+    val barSaveFocusRequester = remember { FocusRequester() }
     LazyRow(
         modifier = Modifier
             .fillMaxWidth()
+            .saveFocusedChildOnExit(barSaveFocusRequester)
             .extendCategoryViewportTowardStart(sidebarUnderlap.viewportExtraDp.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         contentPadding = PaddingValues(
@@ -6261,7 +6326,10 @@ private fun FavoritesScreen(
     val allContent = allContentState
     val favoritesReady = allContent != null
     val content = remember(allContent, activeFilter) {
-        allContent?.let { filterFavoritesByType(it, activeFilter) }.orEmpty()
+        allContent
+            ?.let { filterFavoritesByType(it, activeFilter) }
+            ?.let { items -> orderMixedContentVodFirst(items) { it.type } }
+            .orEmpty()
     }
     val contentKeys = remember(content) { content.map { "${it.type}:${it.id}" } }
     val contentKeyIndex = remember(contentKeys) { indexContentKeys(contentKeys) }
@@ -6732,6 +6800,7 @@ private fun DownloadsScreen(
         val downloadsState = rememberLazyGridState(
             initialFirstVisibleItemIndex = initialGridIndex,
         )
+        val downloadGridSaveFocusRequester = remember { FocusRequester() }
         val inheritedBringIntoViewSpec = LocalBringIntoViewSpec.current
         val downloadsBringIntoViewSpec = remember {
             // The Downloads D-pad transaction is the sole vertical scroll owner on TV.
@@ -7034,7 +7103,10 @@ private fun DownloadsScreen(
                                 end = if (isTv) 0.dp else 4.dp,
                                 bottom = if (isTv) 12.dp else 20.dp,
                             ),
-                            modifier = Modifier.fillMaxSize().clipToBounds(),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clipToBounds()
+                                .saveFocusedChildOnExit(downloadGridSaveFocusRequester),
                         ) {
                             itemsIndexed(downloads, key = { _, item -> item.downloadId }) { _, item ->
                                 val requesters = checkNotNull(cardFocusRegistry[item.downloadId])
@@ -7112,6 +7184,7 @@ private fun DownloadsHeader(
     onCycleConcurrent: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val toolbarSaveFocusRequester = remember { FocusRequester() }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -7149,7 +7222,9 @@ private fun DownloadsHeader(
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(7.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp),
-            modifier = Modifier.focusGroup(),
+            modifier = Modifier
+                .saveFocusedChildOnExit(toolbarSaveFocusRequester)
+                .focusGroup(),
         ) {
             val controlWidth = 112.dp
             val controlHeight = if (isTv) 38.dp else 44.dp
@@ -8934,6 +9009,8 @@ private fun CatalogCategoryBar(
     val colors = LocalHulkColors.current
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val barSaveFocusRequester = remember { FocusRequester() }
+    val barScrollSaveFocusRequester = remember { FocusRequester() }
     val ownedAllFocusRequester = remember { FocusRequester() }
     val allFocusRequester = initialAllFocusRequester ?: ownedAllFocusRequester
     val favoritesFocusRequester = remember { FocusRequester() }
@@ -8962,6 +9039,16 @@ private fun CatalogCategoryBar(
             else -> selectedId?.let(categoryFocusRequesters::get)
         } ?: return null
         return CategoryFocusTarget(selectedId, targetIndex, requester)
+    }
+
+    fun retainedOriginRequester(): FocusRequester? {
+        if (!focusRestoreController.hasRetainedOrigin) return null
+        return when (val origin = focusRestoreController.retainedOriginCategoryId) {
+            null -> allFocusRequester
+            FAVORITES_CATEGORY_ID -> favoritesFocusRequester
+            CONTINUE_CATEGORY_ID -> recentFocusRequester
+            else -> categoryFocusRequesters[origin]
+        }
     }
     focusRestoreController.resolveTarget = { selectedFocusTarget() }
     focusRestoreController.restore = { cancelDefaultEntry ->
@@ -8992,23 +9079,51 @@ private fun CatalogCategoryBar(
             listState.scrollToItem(anchorIndex)
         }
     }
+    LaunchedEffect(selectedId) { focusRestoreController.clearRetainedOrigin() }
 
     LazyRow(
         state = listState,
         modifier = Modifier
+            // Keep saving and the origin callback in ONE effective group-target onExit. Splitting
+            // them across two focusProperties nodes lets Compose's precedence shadow the origin
+            // callback while retaining only the saver.
+            .focusRequester(barSaveFocusRequester)
             .focusProperties {
                 onEnter = {
                     if (isTv) {
-                        restoreSelectedCategoryFocus(
-                            listState = listState,
-                            scope = scope,
-                            controller = focusRestoreController,
-                            cancelDefaultEntry = { cancelFocusChange() },
-                        )
+                        val retainedRequester = retainedOriginRequester()
+                        val retainedFocused = retainedRequester != null &&
+                            runCatching { retainedRequester.requestFocus() }.getOrDefault(false)
+                        if (!retainedFocused) {
+                            // The same-section saved path owns this entry; only fall back to the
+                            // selected category when the exact origin no longer exists.
+                            focusRestoreController.clearRetainedOrigin()
+                            restoreSelectedCategoryFocus(
+                                listState = listState,
+                                scope = scope,
+                                controller = focusRestoreController,
+                                cancelDefaultEntry = { cancelFocusChange() },
+                            )
+                        }
                     }
+                }
+                onExit = {
+                    val ordinaryExit = focusRestoreController.consumeOrdinaryExit() ||
+                        requestedFocusDirection == FocusDirection.Up ||
+                        requestedFocusDirection == FocusDirection.Down
+                    applyCategoryGroupExit(
+                        saveFocusedChild = { barSaveFocusRequester.saveFocusedChild() },
+                        ordinaryExit = ordinaryExit,
+                        clearRetainedOrigin = focusRestoreController::clearRetainedOrigin,
+                        retainLastFocusedOrigin = focusRestoreController::retainLastFocusedOrigin,
+                    )
                 }
             }
             .focusGroup()
+            // The LazyRow's scrollable focus target is a second non-focusable boundary below the
+            // explicit group. Save its direct chip as well, otherwise legacy restoration stops
+            // here even when the group's own child was saved.
+            .saveFocusedChildOnExit(barScrollSaveFocusRequester)
             .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus }
             .then(
                 // With a visible notice, UP from any category chip returns to its Retry; without
@@ -9017,7 +9132,9 @@ private fun CatalogCategoryBar(
                     Modifier.onPreviewKeyEvent { event ->
                         event.type == KeyEventType.KeyDown &&
                             event.key == Key.DirectionUp &&
-                            runCatching { noticeRetryRequester.requestFocus() }.getOrDefault(false)
+                            focusRestoreController.requestOrdinaryFocus {
+                                noticeRetryRequester.requestFocus()
+                            }
                     }
                 } else {
                     Modifier
@@ -9125,6 +9242,8 @@ private fun LiveCategoryBar(
     val colors = LocalHulkColors.current
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val barSaveFocusRequester = remember { FocusRequester() }
+    val barScrollSaveFocusRequester = remember { FocusRequester() }
     val ownedAllFocusRequester = remember { FocusRequester() }
     val allFocusRequester = initialAllFocusRequester ?: ownedAllFocusRequester
     val favoritesFocusRequester = remember { FocusRequester() }
@@ -9159,6 +9278,16 @@ private fun LiveCategoryBar(
         } ?: return null
         return CategoryFocusTarget(selectedId, targetIndex, requester)
     }
+
+    fun retainedOriginRequester(): FocusRequester? {
+        if (!focusRestoreController.hasRetainedOrigin) return null
+        return when (val origin = focusRestoreController.retainedOriginCategoryId) {
+            null -> allFocusRequester
+            FAVORITES_CATEGORY_ID -> favoritesFocusRequester
+            LIVE_TV_PRO_MAIN_RECENT_CATEGORY -> recentFocusRequester
+            else -> categoryFocusRequesters[origin]
+        }
+    }
     focusRestoreController.resolveTarget = { selectedFocusTarget() }
     focusRestoreController.restore = { cancelDefaultEntry ->
         restoreSelectedCategoryFocus(
@@ -9188,23 +9317,51 @@ private fun LiveCategoryBar(
             listState.scrollToItem(anchorIndex)
         }
     }
+    LaunchedEffect(selectedId) { focusRestoreController.clearRetainedOrigin() }
 
     LazyRow(
         state = listState,
         modifier = Modifier
+            // Keep saving and the origin callback in ONE effective group-target onExit. Splitting
+            // them across two focusProperties nodes lets Compose's precedence shadow the origin
+            // callback while retaining only the saver.
+            .focusRequester(barSaveFocusRequester)
             .focusProperties {
                 onEnter = {
                     if (isTv) {
-                        restoreSelectedCategoryFocus(
-                            listState = listState,
-                            scope = scope,
-                            controller = focusRestoreController,
-                            cancelDefaultEntry = { cancelFocusChange() },
-                        )
+                        val retainedRequester = retainedOriginRequester()
+                        val retainedFocused = retainedRequester != null &&
+                            runCatching { retainedRequester.requestFocus() }.getOrDefault(false)
+                        if (!retainedFocused) {
+                            // The same-section saved path owns this entry; only fall back to the
+                            // selected category when the exact origin no longer exists.
+                            focusRestoreController.clearRetainedOrigin()
+                            restoreSelectedCategoryFocus(
+                                listState = listState,
+                                scope = scope,
+                                controller = focusRestoreController,
+                                cancelDefaultEntry = { cancelFocusChange() },
+                            )
+                        }
                     }
+                }
+                onExit = {
+                    val ordinaryExit = focusRestoreController.consumeOrdinaryExit() ||
+                        requestedFocusDirection == FocusDirection.Up ||
+                        requestedFocusDirection == FocusDirection.Down
+                    applyCategoryGroupExit(
+                        saveFocusedChild = { barSaveFocusRequester.saveFocusedChild() },
+                        ordinaryExit = ordinaryExit,
+                        clearRetainedOrigin = focusRestoreController::clearRetainedOrigin,
+                        retainLastFocusedOrigin = focusRestoreController::retainLastFocusedOrigin,
+                    )
                 }
             }
             .focusGroup()
+            // The LazyRow's scrollable focus target is a second non-focusable boundary below the
+            // explicit group. Save its direct chip as well, otherwise legacy restoration stops
+            // here even when the group's own child was saved.
+            .saveFocusedChildOnExit(barScrollSaveFocusRequester)
             .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus }
             .then(
                 // With a visible notice, UP from any category chip returns to its Retry; without
@@ -9213,7 +9370,9 @@ private fun LiveCategoryBar(
                     Modifier.onPreviewKeyEvent { event ->
                         event.type == KeyEventType.KeyDown &&
                             event.key == Key.DirectionUp &&
-                            runCatching { noticeRetryRequester.requestFocus() }.getOrDefault(false)
+                            focusRestoreController.requestOrdinaryFocus {
+                                noticeRetryRequester.requestFocus()
+                            }
                     }
                 } else {
                     Modifier
