@@ -47,6 +47,11 @@ No actor may claim another actor's unexecuted work as completed evidence.
 
 The canonical clone is a clean source anchor, not a task-editing workspace.
 
+Each task/PR has one dedicated branch and one task worktree. Every correction and new OpenCode
+chat for that same task reuses them and retains accepted local changes and valid evidence.
+Local rounds do not create replacement branches/worktrees/PRs. This is a working-directory policy,
+not a requirement to create a GitHub Actions workflow for each PR.
+
 For a new implementation task:
 
 1. Verify the current remote official HEAD.
@@ -60,12 +65,37 @@ For a new implementation task:
 For an existing PR correction, start from the verified current PR HEAD instead of the official
 branch. Do not rebase or rewrite history unless explicitly authorized.
 
+Discover the registered worktree with `git worktree list --porcelain` and existing task records;
+do not infer its path from the branch name. Inspect its local HEAD, staged/unstaged diff, authorized
+untracked files and prior candidate before writing. If an existing PR branch has no registered
+worktree, first verify that no other writer owns it, then attach that same branch to one dedicated
+task directory. Do not use the new-task helper to restart an existing branch from official HEAD,
+overwrite a directory or discard local work. Do not change an existing PR's base implicitly.
+
+Start OpenCode in the verified task worktree. Before source/documentation writes and after material
+steering, record actual `pwd -P`, `git rev-parse --show-toplevel`, branch, HEAD, full local diff and
+relevant remote heads. A session started elsewhere performs only safe discovery until re-entered
+from the correct worktree. A directory string in a prompt is not proof of the actual session cwd.
+
+Only one writer may own a task branch/worktree at a time. Inspect existing task locks/ownership
+through approved bounded checks without exposing unrelated process arguments or credentials;
+read-only reviewers do not become concurrent writers. Do not steal a lock or terminate another
+session. Unknown/conflicting writer ownership must be resolved before writes.
+
+The canonical checkout remains clean on the official branch. Record local/remote HEADs and any
+lag; do not silently pull/switch/reset it under a task. Wrong-branch or dirty canonical state is
+STOP, not authority to repair it. Preserve other tasks, branches, locks and evidence.
+Task closure alone grants no worktree removal, branch deletion, reset, clean, prune or destructive
+cleanup authority; those actions need separate explicit authorization.
+
 Qualified helper commands on the lab:
 
 - `hulk-task-new <task-id> <branch> <expected-head>`
 - `hulk-task-status [task-id]`
 - `hulk-task-close <task-id>`
 
+`hulk-task-new` is for a genuinely new task from verified official HEAD, not an existing PR branch.
+Use existing task-status/registry records when resuming; do not replay task creation for a new chat.
 Versioned source for these helpers lives under `ops/android-engineering-lab/`.
 
 ## 4. GitHub and credentials
@@ -168,9 +198,14 @@ Every substantive task should produce a durable result packet outside the reposi
 
 with a `MANIFEST.sha256`. Related local rounds retain immutable per-round subdirectories and
 candidate/source/dirty-state identity. The specific evidence/delivery contract is
-`docs/android-engineering-lab/DEEPSEEK-EVIDENCE-CONTRACT.md`: retain originals, prepare a complete
-review ZIP with external SHA-256, verify archive/manifest integrity and bounded hulkapp read/traverse
-access, and report exact filename/path/byte count/hash. Evidence must be reviewable without a PR.
+`docs/android-engineering-lab/DEEPSEEK-EVIDENCE-CONTRACT.md`: retain originals and deliver one complete
+self-contained reviewer ZIP with original check reports and essential referenced evidence. Verify
+content completeness, CRC/hash/exact manifest coverage and bounded hulkapp read/traverse. Report
+exact filename/path/bytes/full archive SHA-256 in the response, without sidecar or second ZIP.
+Follow that contract's sections 5–6: package the actual pre-finalization export-path access proof,
+then check hulkapp can open/read/hash the final immutable ZIP and report that separate final result
+without changing its contents or sending another evidence file.
+Evidence must be reviewable without a PR.
 
 A result packet records, as applicable:
 

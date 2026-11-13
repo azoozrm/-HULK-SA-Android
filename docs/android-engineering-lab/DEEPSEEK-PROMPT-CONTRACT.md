@@ -30,6 +30,12 @@ do not replace them with copied chat text, research, or template examples.
 Include NEW/RESUME, LOCAL_ROUND or SECTION_PUBLISH, section/round/candidate identity, the target
 repository/task/branch/PR when present, expected SHA when verified, approved source and
 physical scope, acceptance conditions, checks, current deferrals and completion boundary.
+Give the verified absolute task-worktree path, branch and relevant source/candidate identity.
+Require OpenCode to start there, actual cwd/root/branch/HEAD/full-diff verification before writes
+and after material steering, reuse for all corrections/new chats, one writer and a clean official
+canonical anchor under the lab README section 3. If the path is not yet verified, make safe task
+discovery the first action; do not invent a path, create a replacement task or edit from elsewhere.
+The working-directory rule creates no new CI workflow, publication or destructive-cleanup authority.
 Mark executor verification outstanding when a live fact is unavailable to the coordinator.
 Resolve discoverable facts from GitHub, the task checkout or approved devices; never invent
 identifiers, paths, device addresses, versions, signer identity or results.
@@ -51,7 +57,8 @@ LOCAL_ROUND is the default for iterative section work:
 3. Run relevant focused local checks and affected regressions; record current bounded deferrals.
 4. Freeze the local candidate with base HEAD, dirty state, diff/source hashes; build and refresh only
    applicable approved surfaces under the physical contract, preserving data.
-5. Perform bounded technical verification and prepare complete durable evidence/ZIP/checksum.
+5. Perform bounded technical verification and prepare one complete self-contained reviewer ZIP
+   under DEEPSEEK-EVIDENCE-CONTRACT, with full archive SHA-256 in the response, no sidecar.
 6. Report local technical verdict and exact-candidate owner review status. Keep accepted local changes.
    No automatic commit/push/PR/CI for each correction and no clean-HEAD claim for dirty source.
 
@@ -85,6 +92,21 @@ Record ACCEPTED or REJECTED only from an actual owner decision for the exact can
 Full visual/release qualification remains unproven until its separately authorized evidence exists.
 
 ## 5. Packet and report checklist
+
+A packet must explicitly require the single complete reviewer ZIP from its first delivery, not
+only say "attach evidence". Include required source/input/diff identity, original focused/full check
+reports supporting claimed totals, logs/failures/retries, applicable artifact/device evidence and
+essential referenced files. Require CRC/hash/exact-coverage AND content-completeness validation,
+bounded hulkapp access, and filename/absolute path/bytes/full ZIP SHA-256 in the response. No second
+ZIP or checksum sidecar. Missing essential records must be explicit BLOCKED delivery, never complete.
+Require packaged pre-finalization export-path access proof and a separate actual read/hash check
+of the final immutable ZIP; report the latter without changing archive contents. Follow evidence
+contract sections 5–6 rather than requesting a self-referential final-check record inside the ZIP.
+
+If physical refresh is in scope, explicitly require the owner's existing final signed official app
+`sa.hulksa.player`, same package/same installed signer, `adb install -r` and preserved data under
+PHYSICAL-ENGINEERING-INSTANCES. No Preview/Benchmark/debug/test or other package installation;
+no inferred signing/CI authority. A source-only task remains source-only.
 
 A filled packet contains only relevant fields:
 

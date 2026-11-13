@@ -1,6 +1,7 @@
 # HULK SA Android — DeepSeek Evidence Contract
 
-Version 1 · prepared 2026-10-06.
+Version 3 · owner decisions 2026-11-09 and 2026-11-13, Asia/Riyadh.
+One complete reviewer ZIP; full archive SHA-256 in the handoff, without a separate checksum file.
 
 This is the durable evidence and delivery contract for the normal OpenCode/DeepSeek executor.
 It binds every executor and reviewer, regardless of model. It owns evidence records, archives,
@@ -23,10 +24,10 @@ remain distinct. Missing/unexecuted states stay NOT RUN/BLOCKED, never inferred 
 | File/record | Required content |
 | --- | --- |
 | TASK.md | Exact bounded packet, current phase, authority and capture policy |
-| TASK.env | Sanitized live identities, branch/worktree, base HEAD, overlap/status and surfaces |
+| TASK.env | Sanitized actual cwd/repository root, task branch/worktree, base/local/remote HEADs, full diff/overlap, writer/canonical-checkout status and surfaces |
 | INTENDED-DIFF.md | Planned files/purpose, source cause/owner and protected state before editing |
 | CANDIDATE.json | Candidate ID, base HEAD, dirty state, diff hash and source-manifest hash |
-| SOURCE-MANIFEST.sha256 | Frozen authorized source inventory, including new source files |
+| SOURCE-MANIFEST.sha256 | Complete frozen tracked plus authorized new source/material-input inventory; record method/exclusions |
 | candidate.diff / final.diff | Reviewed diff tied to the candidate; retain staged/unstaged/new-file attribution |
 | RESULT.md | Phase/verdict, changes, actual checks, limitations and next boundary |
 | RUNTIME-EVIDENCE.md | Only applicable exercised behavior, steps, raw evidence paths and limits |
@@ -38,6 +39,14 @@ logs, actual device/window matrix, non-capture hierarchy/diagnostics, before/ref
 values and final Git/PR/CI records when publishing. A source/documentation task records runtime,
 APK and Android builds as NOT RUN — NOT APPLICABLE; it does not fabricate empty “PASS” logs.
 
+When a check ran, include its actual sanitized command/log, exit status, timestamp and original
+machine-readable report. For JVM/JUnit include all XML suites for the declared focused/full run,
+or the complete original report from which the aggregate can be independently recounted. Keep
+relevant failed attempts and retries with separate input/run identities. A summary or BUILD SUCCESSFUL
+line cannot replace the reports supporting a claimed test total. Package applicable lint/static/
+Compatibility/build reports and source/APK/device provenance; do not run unrelated checks merely
+to fill the ZIP. Capture/device/build evidence outside authority stays honestly NOT RUN.
+
 A local round can be complete without a commit/PR. Its identity is the immutable recorded candidate,
 not a false clean-HEAD label. Technical PASS applies only to the declared phase and mandatory criteria.
 
@@ -45,7 +54,11 @@ not a false clean-HEAD label. Technical PASS applies only to the declared phase 
 
 Record base/local HEAD AND clean/dirty state. Include authorized new source/config/resource files
 and material build inputs; omit outputs, caches and secrets. Record exclusions and the inventory
-method. Keep the reviewed diff/new-file set and source manifest immutable for that round.
+method. A changed-files-only checksum list is a separate inventory, not a complete SOURCE-MANIFEST.
+Inventory tracked plus authorized new source/material inputs; record exclusions, build options,
+toolchain/config identities and any other material inputs needed to attribute the result. The ZIP
+contains changed/new file bytes and its immutable base identity; it need not copy the entire unchanged
+repository. Keep the reviewed diff/new-file set and source manifest immutable for that round.
 
 Every result identifies:
 - criterion/state, actor, method/actual command, timestamp and PASS/FAIL/NOT RUN/BLOCKED;
@@ -84,38 +97,66 @@ Owner review defaults to PENDING. Record ACCEPTED or REJECTED only from an actua
 with candidate/APK identity and scope. A partial acceptance preserves accepted neighbors while
 listing remaining defects. Do not turn whole-section acceptance into universal device qualification.
 
-## 5. Complete downloadable archive and external checksum
+## 5. One complete downloadable reviewer ZIP
 
-DeepSeek prepares the transfer package; the owner downloads and sends it to the reviewer.
-A “complete packet” means all records needed to review that round and every referenced essential
-dependency, not an indiscriminate copy of the whole lab.
+DeepSeek/the actual executor prepares one self-contained ZIP from the first handoff of every
+substantive round. The owner only downloads and forwards that one file. The reviewer must be able
+to inspect the round's complete applicable evidence from its contents.
 
-1. Freeze the safe export directory and finalize RESULT/acceptance/status records.
-2. Copy required evidence to a self-contained staging tree, or include a complete artifact index
-   with actually reachable reviewer access. Do not leave essential dangling VPS-only references.
-3. Deduplicate large APKs across local rounds in a protected content-addressed artifact store.
-   If the reviewer cannot access that store, include the necessary APK/evidence in the final export.
-   Do not rebuild/reinstall solely to make an archive or attach identical APKs to every small round.
-4. Generate MANIFEST.sha256 from the final relative file paths; exclude the manifest itself and
-   the enclosing ZIP/external sidecar. All referenced exported files must be included.
-5. Create one ZIP with a single task/round root and stable relative names. No absolute paths,
-   traversal components, duplicate entries, unsafe symlinks or unexplained encrypted entries.
-6. Reopen/test the ZIP (including CRC), verify every manifest entry from archive bytes, and verify
-   completeness/no unexpected files. File existence or successful zip creation alone is insufficient.
-7. Compute SHA-256 over the final ZIP bytes. Write a sibling `<archive-name>.zip.sha256` containing
-   the full digest and basename. This external sidecar validates the downloaded container.
-8. Verify the sidecar against the final archive. Revalidate both after any archive modification.
-   A container checksum and an inner manifest are different checks; neither substitutes for the other.
+Include every essential referenced dependency/report/artifact needed to assess the result inside
+this ZIP. A VPS-only path, external artifact index/store, previous ZIP reference or prose summary
+does not replace required evidence bytes. Deduplicate within the archive and preserve canonical
+originals separately. Include only relevant earlier evidence, not recursively nested old ZIPs or
+an indiscriminate copy of the lab/repository. Include a necessary APK when artifact review requires
+it; do not rebuild/reinstall solely for packaging.
 
-For local rounds, use a small complete focused packet; at section publication provide the final
-candidate/acceptance index and required preserved evidence. Do not run a full audit/device census
-or package the full repository merely because a correction is small.
+Before declaring delivery complete:
+
+1. Freeze the candidate and finalize TASK/identity/diff, RESULT, applicable acceptance/runtime
+   records, original raw check reports/logs and artifact/provenance evidence from sections 2–4.
+2. Prepare one safe task/round staging root with START-HERE/index, all required files and essential
+   referenced evidence. Verify each required item is actually present; do not ask the owner to
+   assemble missing pieces or download supplementary review files.
+3. Check original focused/full reports against the declared aggregate and exact candidate/run.
+   Preserve failures/retries. Recover retained valid evidence without rerunning unchanged checks
+   merely for packaging. A report from different inputs cannot validate the new candidate.
+4. Generate MANIFEST.sha256 over every exported regular file except itself, using relative paths.
+   Include a runnable VERIFY.sh that validates hashes, exact coverage and applicable completeness
+   checks. The enclosing ZIP is not part of its own inner manifest.
+5. Create ONE ZIP with a single task/round root and stable relative paths. Reject absolute/traversal
+   paths, duplicate entries, unsafe symlinks and encrypted entries.
+6. Reopen the FINAL ZIP, test CRC, extract safely into an isolated directory, verify all hashes and
+   exact file coverage, and check all required contents/essential references. Recount included test
+   reports. Integrity PASS alone does not prove evidence completeness.
+7. Before finalization, include actual bounded hulkapp read/traverse proof for the intended export
+   directory and staged files under section 6. After creating the final ZIP, separately verify that
+   hulkapp can open/read/hash that exact archive through its intended path. Retain the final check
+   with canonical originals outside the immutable archive and report its actual result in the
+   handoff; do not deliver it as a supplementary file or edit the ZIP to insert its own final check.
+8. Compute SHA-256 over the FINAL ZIP bytes and report its full digest, filename, absolute path and
+   exact byte count in the handoff text. Recheck/recompute after any archive change.
+
+Do not create/deliver a checksum sidecar, supplementary evidence file or second ZIP for the same
+handoff. The archive digest is outside the ZIP in the response text; the inner MANIFEST is inside.
+These are distinct checks; neither replaces the other.
+
+If essential evidence or export access is missing, recover it before handoff. If unavailable, list
+the exact missing item and mark delivery BLOCKED/incomplete; do not announce a complete/PASS packet.
+Keep implementation/check verdicts separate from evidence-delivery status and owner acceptance.
+No fabrication, hidden failure or new device/capture/Git/signing authority follows from packaging.
+Missing unauthorized captures and genuinely inapplicable checks are not evidence omissions.
 
 ## 6. Bounded hulkapp access
 
-The final ZIP, external checksum and intended download path must be readable by `hulkapp`, with
+The final ZIP and intended download path must be readable by `hulkapp`, with
 directory traversal through the required parents. Verify actual read/traverse access as that account
 using its approved local execution route, rather than assuming ownership or mode bits suffice.
+
+There are two distinct access records: the pre-finalization export-directory/staged-file proof
+included inside the ZIP, and the final archive open/read/hash check performed after creation.
+Record actual commands, account, paths, time, exit status and limits. The latter remains with the
+canonical originals and is summarized in the handoff, not delivered as another file. If packaged
+evidence changes, regenerate the ZIP and repeat its final integrity, access and digest checks.
 
 Prefer files owned by hulkapp or a specifically authorized group. Grant only necessary file read
 and directory traversal on the exact task/export paths; preserve originals and restrictive defaults.
@@ -130,9 +171,8 @@ Download methods remain the existing authorized transport; this contract creates
 
 The final report supplies:
 - exact archive filename and absolute VPS path;
-- exact external checksum filename/path;
-- actual ZIP byte count and full SHA-256;
-- manifest entry count and the archive/manifest/sidecar validation result;
+- actual ZIP byte count and full SHA-256 in the response text, with no separate checksum file;
+- manifest entry count, CRC/hash/exact-coverage result and required-content completeness result;
 - verified hulkapp read/traverse result;
 - phase, candidate/base/dirty identity, changed scope and owner acceptance state;
 - Git/PR/CI identity only when actually published;

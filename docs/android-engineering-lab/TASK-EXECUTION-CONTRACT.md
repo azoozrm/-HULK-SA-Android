@@ -1,6 +1,6 @@
 # HULK SA Android — Permanent Task Execution Contract
 
-Revised 2026-10-06 · local iteration and accepted-section publication.
+Revised 2026-11-13 · stable task worktrees, signed official-app refresh and one-ZIP evidence delivery.
 
 This is the model-neutral execution contract for substantive authorized Implementation/Correction
 work. It owns execution phases and completion boundaries; it grants no authority. Read root
@@ -61,6 +61,18 @@ Verify canonical/task checkout status, local branch/HEAD, remote official HEAD, 
 open-task/PR overlap and applicable live contracts. A PR correction also verifies state/base/head.
 Record intended files/purpose before editing. Recheck relevant live state before commit/push.
 
+Use one dedicated branch and task worktree per task/PR under the lab README section 3.
+Discover an existing task through the worktree registry and task records; do not guess its path
+from a branch name or start a replacement from official HEAD. Every correction and new OpenCode
+chat for that same task reuses its worktree, branch, accepted changes and valid evidence.
+Start the session there. Before writes and after material steering record actual `pwd -P`,
+`git rev-parse --show-toplevel`, branch, HEAD, full staged/unstaged diff and authorized untracked
+files. A session in another directory may discover the task read-only, then must re-enter the
+correct worktree before editing. One writer at a time; do not steal locks or kill another session.
+The canonical checkout must remain clean on the official branch, never an editing workspace;
+wrong/dirty canonical state is STOP, not authority to reset, switch or repair it.
+These are working-directory rules, not a new CI workflow or publication trigger.
+
 If pinned HEAD mismatches, applicable remote changes, unrelated overlapping edits cannot be separated,
 an unapproved PR owns the same work, or a protected contract would change without authority: STOP
 before mutation. Reading/diagnosis may continue. Do not reset, rebase or absorb another actor's work.
@@ -93,6 +105,8 @@ to commit/push or clear the worktree. An accepted part does not automatically ac
 
 Cancellation stops mutation and records exact local/branch/PR state as CLOSED. No silent commit,
 publish, destructive cleanup or absorption of abandoned work. Do not touch another task's ownership.
+Closure alone never authorizes worktree removal, branch deletion, reset, clean or prune; preserve
+task records/locks/evidence and obtain separate authority for any destructive cleanup.
 
 ## 7. Complete diff review
 
@@ -110,7 +124,10 @@ every reversible visual detail or run the entire suite after each unchanged smal
 
 A local Android round must still establish that its actual source can build safely and that relevant
 changed behavior is verified before installing. Use the applicable focused test/compile/static checks
-for the task, then required Preview/Benchmark assembly. Record what ran and what was deferred.
+for the task, then applicable assembly/artifact validation. Physical refresh targets only the
+owner's existing signed official app under the physical contract; no Preview/Benchmark or other
+package installation. An unsigned local build proves compilation, not install eligibility.
+Record what ran and what was deferred.
 
 Reuse valid unchanged evidence; broaden/repeat checks only for new changes, failures or unresolved
 concerns. Full applicable unit/lint/Compatibility/static gates belong at section publication unless
@@ -139,9 +156,13 @@ Never present lab/Preview/Benchmark artifacts as signed production-release quali
 
 ## 10. Physical refresh and bounded runtime
 
-Follow `AGENTS.override.md` and `PHYSICAL-ENGINEERING-INSTANCES.md` for package identity, current
-qualification overrides, approved surfaces, dual refresh and state preservation. Local candidates
-are valid refresh inputs when frozen/proven; a commit or PR is not a prerequisite.
+Follow `AGENTS.override.md` and `PHYSICAL-ENGINEERING-INSTANCES.md`: refresh only the owner's
+existing signed official `sa.hulksa.player`, same package/same signer, with `adb install -r` and
+preserved data. No Preview/Benchmark/debug/test or other package installation on owner devices.
+Verify live version, signer, artifact and device identity; do not reuse fixed historical overrides.
+Frozen/proven local candidates are valid inputs, but only a matching authorized signed release
+artifact is installable. A commit/PR is not itself a prerequisite; signing/CI/publication authority
+is not implied by a local round or missing artifact. Retain the installed copy when refresh is blocked.
 
 Do not install after required validation/build failure or replace the last known-good copy.
 Verify package/version/signer and record hashes before state-preserving install; launch and verify
@@ -172,9 +193,14 @@ Changing network/display/font settings or unlocking devices requires applicable 
 
 ## 12. Evidence after every local round
 
-Follow `DEEPSEEK-EVIDENCE-CONTRACT.md` for canonical originals, minimum records, candidate/APK/state
-binding, complete downloadable ZIP, external SHA-256, archive/manifest verification, bounded hulkapp
-read/traverse access and final filename/path/size/hash handoff.
+Follow `DEEPSEEK-EVIDENCE-CONTRACT.md`: one complete self-contained reviewer ZIP from the first
+handoff, including required source/input/diff, original check reports/logs and essential referenced
+evidence. Validate completeness as well as CRC/hash/manifest coverage and actual bounded hulkapp
+read/traverse, including the final-archive check under that contract's sections 5–6. Keep packaged
+pre-finalization access proof distinct from the final check performed after ZIP creation; do not
+modify the archive to insert its own final digest/access result. Report filename/path/bytes/full
+ZIP SHA-256 and the actual final-access result in the response; no sidecar or second ZIP.
+Missing essential evidence blocks complete-delivery/PASS claims, not independent authorized work.
 
 Retain focused round records and append owner decisions; do not overwrite earlier results.
 Missing/inaccessible evidence remains explicit. No actor may claim another actor's unexecuted work.
