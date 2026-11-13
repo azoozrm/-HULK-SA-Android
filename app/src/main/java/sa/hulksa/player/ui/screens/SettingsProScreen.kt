@@ -228,6 +228,8 @@ internal fun SettingsProScreen(
     val sectionScrollStates = remember {
         SettingsSection.entries.associateWith { ScrollState(initial = 0) }
     }
+    val sectionListSaveFocusRequester = remember { FocusRequester() }
+    val detailSaveFocusRequester = remember { FocusRequester() }
 
     fun restoreFocusAfterDialog(requester: FocusRequester) {
         if (!isTv) return
@@ -714,6 +716,7 @@ internal fun SettingsProScreen(
                             top = tvTopInset,
                             bottom = bottomPadding,
                         )
+                        .saveFocusedChildOnExit(sectionListSaveFocusRequester)
                         .verticalScroll(rememberScrollState()),
                 ) {
                     SettingsSectionList(
@@ -749,6 +752,7 @@ internal fun SettingsProScreen(
                             .weight(1f)
                             .fillMaxWidth()
                             .onFocusChanged { detailOwnsFocus = it.hasFocus }
+                            .saveFocusedChildOnExit(detailSaveFocusRequester)
                             .verticalScroll(sectionScrollStates.getValue(selectedSection)),
                     ) {
                         detailContent()
@@ -775,6 +779,7 @@ internal fun SettingsProScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .saveFocusedChildOnExit(sectionListSaveFocusRequester)
                             .verticalScroll(rememberScrollState()),
                     ) {
                         SettingsSectionList(
@@ -795,6 +800,7 @@ internal fun SettingsProScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
+                            .saveFocusedChildOnExit(detailSaveFocusRequester)
                             .verticalScroll(sectionScrollStates.getValue(selectedSection)),
                     ) {
                         detailContent()

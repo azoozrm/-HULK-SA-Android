@@ -1927,6 +1927,12 @@ fun LiveChannelHomeCard(
     onLongClick: (() -> Unit)? = null,
     onFocused: (() -> Unit)? = null,
     footerAction: (@Composable () -> Unit)? = null,
+    // Scoped opt-in for Favorites/Search mixed grids. Standalone Home/Live callers keep the
+    // accepted 16:9 logo card; these grids need the Movies/Series boxed outer geometry so VOD
+    // and channel cards align. The channel logo stays contained (Fit), never cropped.
+    boxedCatalogGeometry: Boolean = false,
+    artworkHeightDp: Dp? = null,
+    onFooterHeightMeasured: ((Int) -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -1993,7 +1999,17 @@ fun LiveChannelHomeCard(
         Box(
             Modifier
                 .fillMaxWidth()
-                .aspectRatio(16f / 9f)
+                .then(
+                    if (boxedCatalogGeometry) {
+                        if (artworkHeightDp != null) {
+                            Modifier.height(artworkHeightDp)
+                        } else {
+                            Modifier.aspectRatio(1f)
+                        }
+                    } else {
+                        Modifier.aspectRatio(16f / 9f)
+                    },
+                )
                 .background(Color(0xFF15160F)),
         ) {
             if (!artworkUrl.isNullOrBlank() && !artworkFailed) {
@@ -2037,6 +2053,13 @@ fun LiveChannelHomeCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color(0xFF12130E))
+                .then(
+                    if (boxedCatalogGeometry && onFooterHeightMeasured != null) {
+                        Modifier.onSizeChanged { onFooterHeightMeasured(it.height) }
+                    } else {
+                        Modifier
+                    },
+                )
                 .padding(horizontal = 8.dp, vertical = 7.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -2046,17 +2069,19 @@ fun LiveChannelHomeCard(
                 fontWeight = FontWeight.Bold,
                 fontSize = if (adaptiveUi.isTelevision) 12.sp else 11.sp,
                 lineHeight = if (adaptiveUi.isTelevision) 15.sp else 14.sp,
-                maxLines = 1,
+                maxLines = if (boxedCatalogGeometry) 2 else 1,
+                minLines = if (boxedCatalogGeometry) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(if (boxedCatalogGeometry) 5.dp else 3.dp))
             Text(
                 text = "بث مباشر",
                 color = colors.textMuted,
-                fontSize = if (adaptiveUi.isTelevision) 10.sp else 9.sp,
-                fontWeight = FontWeight.Medium,
+                fontSize = if (boxedCatalogGeometry) 10.sp else if (adaptiveUi.isTelevision) 10.sp else 9.sp,
+                fontWeight = if (boxedCatalogGeometry) FontWeight.Bold else FontWeight.Medium,
                 maxLines = 1,
+                minLines = 1,
             )
             if (footerAction != null) {
                 Spacer(Modifier.height(4.dp))

@@ -154,7 +154,9 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
             self.assertIn("focusRestoreController", block)
         gate = self.section("internal fun canCategoryChipReceiveFocus(", "@Composable\ninternal fun Modifier.categoryFocusTarget(")
         self.assertIn("selectedId == chipId", gate)
-        self.assertIn("categoryBarHasFocus && !restorePending", gate)
+        self.assertIn("categoryBarHasFocus", gate)
+        self.assertIn("!restorePending", gate)
+        self.assertIn("retainedOriginActive", gate)
 
     def test_category_underlap_and_reorder_contracts_remain_intact(self) -> None:
         catalog = self.section("private fun CatalogCategoryBar(", "private fun LiveCategoryBar(")

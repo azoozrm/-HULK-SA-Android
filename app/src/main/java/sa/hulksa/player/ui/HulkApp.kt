@@ -381,7 +381,7 @@ fun HulkApp(
                             ProfileSmartSearchLayer(
                                 state = state,
                                 isTv = isTv,
-                                isFavorite = viewModel::isFavorite,
+                                favoriteKeys = state.favorites,
                                 navigationMemory = navigationMemory,
                                 initialFocusAcquired = searchInitialFocusAcquired,
                                 onInitialFocusAcquired = {

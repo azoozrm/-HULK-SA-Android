@@ -5,6 +5,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SMART_SEARCH = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/ProfileSmartSearchLayer.kt"
+HULK_APP = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/HulkApp.kt"
 VOICE_FOUNDATION = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/VoiceSearchFoundation.kt"
 VIEW_MODEL = REPO_ROOT / "app/src/main/java/sa/hulksa/player/HulkViewModel.kt"
 
@@ -16,6 +17,7 @@ class SearchModel01ContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.source = SMART_SEARCH.read_text(encoding="utf-8")
+        cls.app = HULK_APP.read_text(encoding="utf-8")
         cls.voice = VOICE_FOUNDATION.read_text(encoding="utf-8")
         cls.view_model = VIEW_MODEL.read_text(encoding="utf-8")
 
@@ -115,6 +117,32 @@ class SearchModel01ContractTest(unittest.TestCase):
         self.assertIn("SmartSearchHistoryDeleteAction(", self.source)
         self.assertIn("movieCompactArtworkHeightPx(", self.source)
         self.assertIn("FAVORITES_MOBILE_MIN_CELL_WIDTH", self.source)
+
+    def test_result_hearts_read_the_observed_profile_favorite_snapshot(self) -> None:
+        # The active Search grid renders hearts from the observed committed profile favorite set,
+        # not an opaque viewModel callback: a favorites-only commit changes only the snapshot and
+        # must repaint the card without changing the query, results, focus or scroll.
+        self.assertIn("favoriteKeys: Set<String>", self.source)
+        self.assertIn("CatalogFavoriteSnapshot(persisted = favoriteKeys)", self.source)
+        self.assertIn("favorites: CatalogFavoriteSnapshot", self.source)
+        self.assertIn("favoriteKeys = state.favorites", self.app)
+
+        result_start = self.source.index("is SmartSearchGridRow.Result -> when (row.item.type)")
+        result_block = self.source[
+            result_start : self.source.index("is SmartSearchGridRow.History ->", result_start)
+        ]
+        self.assertEqual(3, result_block.count("isFavorite = favorites.contains(row.item)"))
+        self.assertNotIn("isFavorite(row.item)", result_block)
+        # Movie, Series and Live all keep the once-only long-press callback; the fix only changes
+        # the observed heart value.
+        self.assertEqual(3, result_block.count("onLongClick = { onToggleFavorite(row.item) }"))
+
+        # Saved-history cards are a separate projection and keep their existing passive flags.
+        self.assertIn("isFavorite = false", self.source)
+        # No optimistic duplicate favorite state, forced recomposition or polling is introduced.
+        self.assertNotIn("optimistic", self.source)
+        self.assertNotIn("key(state.favorites", self.source)
+        self.assertNotIn("snapshotFlow { isFavorite", self.source)
 
     def test_saved_card_down_reaches_its_own_delete_without_ancestor_stealing(self) -> None:
         # R05: DOWN on a saved-content card moves to that card's own Delete; while the Delete

@@ -126,7 +126,8 @@ class TvRailSharedPresentationContractTest(unittest.TestCase):
         self.assertIn("onRailEnter = { selectedRequester.requestFocus() }", main_rail)
         self.assertIn("selectedRequester.requestFocus()", search_rail)
         self.assertIn("returnToContent()", search_rail)
-        self.assertIn(".focusProperties { left = contentReturnRequester }", search_rail)
+        self.assertIn(".focusProperties { if (isTv) left = contentReturnRequester }", search_rail)
+        self.assertGreaterEqual(search_rail.count(".then(contentReturnModifier)"), 3)
 
     def test_selected_and_focused_states_stay_distinct_and_combined(self) -> None:
         presentation = self.read(TV_RAIL_PRESENTATION)

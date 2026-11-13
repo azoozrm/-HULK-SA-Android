@@ -136,11 +136,9 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
             "Box(Modifier.fillMaxSize().background(colors.background))",
         )
 
-        self.assertIn("if (destination != state.destination)", selection)
-        self.assertLess(
-            selection.index("onSelectDestination(destination)"),
-            selection.index("pendingTvContentFocusHandoff ="),
-        )
+        self.assertIn("when (tvRailSelectionIntent(state.destination, destination))", selection)
+        self.assertIn("TvRailSelectionIntent.CHANGE_DESTINATION ->", selection)
+        self.assertIn("onSelectDestination(destination)", selection)
         self.assertIn("onSelect = selectTvDestination", shell)
         self.assertIn("handoff.destination != state.destination", handoff)
         self.assertIn("withFrameNanos { }", handoff)
@@ -150,18 +148,87 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
         self.assertNotIn("debounce", handoff.lower())
         self.assertNotIn("poll", handoff.lower())
 
-    def test_same_destination_skips_navigation_churn_but_still_requests_handoff(self) -> None:
+    def test_same_destination_dismissal_returns_to_the_content_focus_owner(self) -> None:
         source = self.read(MAIN_SHELL)
         selection = self.section(
             source,
             "val selectTvDestination: (MainDestination) -> Unit = { destination ->",
             "val homeModel =",
         )
+        policy = self.read(Path(REPO_ROOT, "app/src/main/java/sa/hulksa/player/ui/screens/TvRailSelectionPolicy.kt"))
 
-        navigation_guard_end = selection.index("}", selection.index("if (destination != state.destination)"))
-        handoff_assignment = selection.index("pendingTvContentFocusHandoff =")
-        self.assertLess(navigation_guard_end, handoff_assignment)
+        # Activating the already selected destination is a dismissal, never navigation.
+        self.assertIn("TvRailSelectionIntent.RETURN_TO_CONTENT ->", selection)
         self.assertEqual(1, selection.count("onSelectDestination(destination)"))
+        self.assertIn(
+            "if (requestedDestination == selectedDestination)",
+            policy,
+        )
+        self.assertIn("TvRailSelectionIntent.RETURN_TO_CONTENT", policy)
+
+        # The content group's saved child is restored exactly. A plain group requestFocus() lands
+        # on the group's top-left control, which was the Home "jump upward" defect.
+        before_selection = source[
+            source.index("val restoreTvContentFocus: () -> Boolean = {") :
+            source.index("val selectTvDestination: (MainDestination) -> Unit =")
+        ]
+        self.assertIn("restoreFocusedChild()", before_selection)
+        self.assertNotIn(".requestFocus()", before_selection)
+        return_branch = selection[
+            selection.index("TvRailSelectionIntent.RETURN_TO_CONTENT ->") :
+        ]
+        self.assertIn("pendingTvContentFocusHandoff = null", return_branch)
+        self.assertIn("restoreContentFocus = restoreTvContentFocus", return_branch)
+        self.assertIn("returnTvRailFocusToContent(", return_branch)
+        self.assertIn("armEntryHandoff = {", return_branch)
+        self.assertLess(
+            return_branch.index("pendingTvContentFocusHandoff = null"),
+            return_branch.index("returnTvRailFocusToContent("),
+        )
+        self.assertNotIn("currentTvDestinationFocusRequester", return_branch)
+        self.assertNotIn("tvCatalogAllFocusRequesters", return_branch)
+        self.assertNotIn("scrollToItem", return_branch)
+        self.assertNotIn("delay(", return_branch)
+
+        # Physical LEFT (RTL) closes the rail through the same saved-child owner; only a real
+        # successful restore consumes the key, so a vanished child keeps the framework fallback.
+        rail = self.section(source, "private fun CinematicNavigationRail(", "private fun DestinationContent(")
+        self.assertIn("private fun Modifier.railContentReturn(", source)
+        self.assertIn("onReturnToContent: () -> Boolean", rail)
+        self.assertIn("onReturnToContent = restoreTvContentFocus", source)
+        self.assertIn("tvRailContentReturnDirection(layoutDirection)", rail)
+        self.assertIn(".then(contentReturnModifier)", rail)
+        self.assertEqual(3, rail.count(".then(contentReturnModifier)"))
+        self.assertIn("event.key == direction &&", source)
+        self.assertIn("onReturnToContent()", source)
+
+        # The fallback arms the existing entry handoff exactly once, after a real failed restore.
+        helper_start = policy.index("internal inline fun returnTvRailFocusToContent(")
+        helper = policy[helper_start:]
+        self.assertIn("runCatching(restoreContentFocus).getOrDefault(false)", helper)
+        self.assertLess(
+            helper.index("if (restored) return TvRailReturnResult.CONTENT"),
+            helper.index("armEntryHandoff()"),
+        )
+        self.assertEqual(1, helper.count("armEntryHandoff()"))
+        self.assertNotIn("delay(", helper)
+        self.assertNotIn("while (", helper)
+
+        # Lazy/scrollable containers install a non-focusable focus target but no focus restorer.
+        # The shared save-only helper lets the content-group restore walk the saved path. This is
+        # a source contract only; the actual focus-tree recursion is a Compose runtime behavior.
+        helper = self.read(
+            Path(REPO_ROOT, "app/src/main/java/sa/hulksa/player/ui/screens/TvFocusSavePath.kt")
+        )
+        self.assertIn("internal fun Modifier.saveFocusedChildOnExit(", helper)
+        self.assertIn("onExit = { requester.saveFocusedChild() }", helper)
+        self.assertNotIn("focusRestorer", helper)
+        self.assertNotIn("onEnter", helper)
+        self.assertIn(
+            "modifier = Modifier.fillMaxSize().saveFocusedChildOnExit(homeColumnSaveFocusRequester)",
+            source,
+        )
+        self.assertEqual(3, source.count(".saveFocusedChildOnExit(rowSaveFocusRequester)"))
 
     def test_all_rail_destinations_share_the_content_focus_entry_contract(self) -> None:
         source = self.read(MAIN_SHELL)

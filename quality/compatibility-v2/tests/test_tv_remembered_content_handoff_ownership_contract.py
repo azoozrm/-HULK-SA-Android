@@ -45,7 +45,7 @@ class TvRememberedContentHandoffOwnershipContractTest(unittest.TestCase):
         )
         self.assertIn("val contentRestoreOwnsTvHandoff =", decision)
         self.assertIn(
-            "destination != state.destination && rememberedContentOwnsTvHandoff(destination)",
+            "val contentRestoreOwnsTvHandoff = rememberedContentOwnsTvHandoff(destination)",
             decision,
         )
         self.assertIn("pendingTvContentFocusHandoff = if (contentRestoreOwnsTvHandoff) {", decision)
@@ -53,9 +53,17 @@ class TvRememberedContentHandoffOwnershipContractTest(unittest.TestCase):
         null_branch = decision.index("null", owner_branch)
         request_branch = decision.index("TvContentFocusHandoffRequest(", null_branch)
         self.assertLess(null_branch, request_branch)
-        self.assertEqual(1, decision.count("pendingTvContentFocusHandoff ="))
+        # One exclusive entry-vs-remembered decision for a genuine destination change, plus the
+        # unchanged-destination clear and its own entry-handoff fallback assignment.
+        self.assertEqual(3, decision.count("pendingTvContentFocusHandoff ="))
         self.assertEqual(2, decision.count("rememberedContentOwnsTvHandoff"))
         self.assertEqual(2, decision.count("contentRestoreOwnsTvHandoff"))
+        change_branch = decision[
+            decision.index("TvRailSelectionIntent.CHANGE_DESTINATION ->") :
+            decision.index("TvRailSelectionIntent.RETURN_TO_CONTENT ->")
+        ]
+        self.assertEqual(1, change_branch.count("pendingTvContentFocusHandoff ="))
+        self.assertIn("contentRestoreOwnsTvHandoff", change_branch)
 
     def test_remembered_poster_and_home_eligibility_reuse_navigation_memory(self) -> None:
         decision = self.decision()
@@ -86,7 +94,6 @@ class TvRememberedContentHandoffOwnershipContractTest(unittest.TestCase):
     def test_initial_catalog_handoff_remains_available_without_remembered_content(self) -> None:
         shell = self.shell()
         decision = self.decision()
-        self.assertIn("if (destination != state.destination)", decision)
         self.assertIn("onSelectDestination(destination)", decision)
         self.assertIn("TvContentFocusHandoffRequest(", decision)
         self.assertIn("rememberedKey.isNotBlank()", decision)
