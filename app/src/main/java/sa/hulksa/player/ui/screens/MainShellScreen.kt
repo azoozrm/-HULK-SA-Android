@@ -157,6 +157,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -856,6 +857,20 @@ private fun rememberCatalogModelForPresentation(
 private fun Modifier.restoreFocus(enabled: Boolean, requester: FocusRequester): Modifier =
     then(if (enabled) Modifier.focusRequester(requester) else Modifier)
 
+/**
+ * Saves the exact focused child of one lazy/scrollable focus boundary when focus leaves it.
+ *
+ * Lazy containers install an implicit non-focusable focus target but no focus restorer, so the
+ * content group's saved child stops at that boundary. Saving each boundary's direct child while
+ * it still has focus lets the existing content-group `restoreFocusedChild()` walk the complete
+ * saved path back to the originating card on a same-section rail dismissal. This modifier saves
+ * only; ordinary D-pad entry remains owned by the existing spatial/Home restoration owners.
+ */
+private fun Modifier.saveFocusedChildOnExit(requester: FocusRequester): Modifier =
+    focusRequester(requester).focusProperties {
+        onExit = { requester.saveFocusedChild() }
+    }
+
 private class DownloadFocusHandle(val requester: FocusRequester = FocusRequester()) {
     var isPlaced: Boolean = false
         private set
@@ -1193,20 +1208,47 @@ internal fun MainShellScreen(
             else -> false
         }
     }
+    // The content group and Home's lazy boundaries saved the exact focus path that existed before
+    // the rail took focus. A plain group requestFocus() lands on the group's top-left control (the
+    // Home "jump upward" defect), so a dismissal explicitly restores that saved path and keeps its
+    // real row/scroll position.
+    val restoreTvContentFocus: () -> Boolean = {
+        runCatching {
+            tvContentFocusRequesters.getValue(state.destination).restoreFocusedChild()
+        }.getOrDefault(false)
+    }
     val selectTvDestination: (MainDestination) -> Unit = { destination ->
-        if (destination != state.destination) {
-            onSelectDestination(destination)
-        }
-        val contentRestoreOwnsTvHandoff =
-            destination != state.destination && rememberedContentOwnsTvHandoff(destination)
-        tvContentFocusRequestId += 1L
-        pendingTvContentFocusHandoff = if (contentRestoreOwnsTvHandoff) {
-            null
-        } else {
-            TvContentFocusHandoffRequest(
-                destination = destination,
-                requestId = tvContentFocusRequestId,
-            )
+        when (tvRailSelectionIntent(state.destination, destination)) {
+            TvRailSelectionIntent.CHANGE_DESTINATION -> {
+                onSelectDestination(destination)
+                val contentRestoreOwnsTvHandoff = rememberedContentOwnsTvHandoff(destination)
+                tvContentFocusRequestId += 1L
+                pendingTvContentFocusHandoff = if (contentRestoreOwnsTvHandoff) {
+                    null
+                } else {
+                    TvContentFocusHandoffRequest(
+                        destination = destination,
+                        requestId = tvContentFocusRequestId,
+                    )
+                }
+            }
+
+            TvRailSelectionIntent.RETURN_TO_CONTENT -> {
+                // Activating the selected destination only dismisses the rail. The saved content
+                // child is restored exactly; the entry handoff is only the vanished-origin
+                // fallback, so one owner moves focus.
+                pendingTvContentFocusHandoff = null
+                returnTvRailFocusToContent(
+                    restoreContentFocus = restoreTvContentFocus,
+                    armEntryHandoff = {
+                        tvContentFocusRequestId += 1L
+                        pendingTvContentFocusHandoff = TvContentFocusHandoffRequest(
+                            destination = destination,
+                            requestId = tvContentFocusRequestId,
+                        )
+                    },
+                )
+            }
         }
     }
     val homeModelInput = if (state.destination == MainDestination.HOME) {
@@ -1336,6 +1378,7 @@ internal fun MainShellScreen(
                     selected = state.destination,
                     onSelect = selectTvDestination,
                     onSwitchProfile = requestProfileSwitch,
+                    onReturnToContent = restoreTvContentFocus,
                     destinationFocusRequesters = tvRailFocusRequesters,
                     onRailFocused = { tvRailFocusRevision += 1L },
                 )
@@ -1553,16 +1596,34 @@ internal fun ScopedHomeActionNotice(
     }
 }
 
+/**
+ * Physical rail dismissal. The content direction returns to the content group's saved child
+ * exactly; only a real successful restore is consumed. A vanished saved child leaves the key to
+ * the framework's ordinary search, which keeps the existing empty/surviving-content geometry.
+ */
+private fun Modifier.railContentReturn(
+    direction: Key,
+    onReturnToContent: () -> Boolean,
+): Modifier = onPreviewKeyEvent { event ->
+    event.type == KeyEventType.KeyDown &&
+        event.key == direction &&
+        onReturnToContent()
+}
+
 @Composable
 private fun CinematicNavigationRail(
     entries: List<DestinationEntry>,
     selected: MainDestination,
     onSelect: (MainDestination) -> Unit,
     onSwitchProfile: () -> Unit,
+    onReturnToContent: () -> Boolean,
     destinationFocusRequesters: Map<MainDestination, FocusRequester>,
     onRailFocused: () -> Unit,
 ) {
     val adaptiveUi = LocalAdaptiveUi.current
+    val layoutDirection = LocalLayoutDirection.current
+    val contentDirection = tvRailContentReturnDirection(layoutDirection)
+    val contentReturnModifier = Modifier.railContentReturn(contentDirection, onReturnToContent)
     var railHasFocus by remember { mutableStateOf(false) }
     val expanded = railHasFocus
     val metrics = tvRailMetrics(
@@ -1601,6 +1662,7 @@ private fun CinematicNavigationRail(
                 metrics = metrics,
                 onClick = { onSelect(entry.destination) },
                 modifier = Modifier
+                    .then(contentReturnModifier)
                     .focusRequester(requester)
                     .focusProperties {
                         previousRequester?.let { up = it }
@@ -1617,6 +1679,7 @@ private fun CinematicNavigationRail(
             metrics = metrics,
             onClick = onSwitchProfile,
             modifier = Modifier
+                .then(contentReturnModifier)
                 .focusRequester(profileRequester)
                 .focusProperties {
                     primaryEntries.lastOrNull()?.let {
@@ -1636,6 +1699,7 @@ private fun CinematicNavigationRail(
                 metrics = metrics,
                 onClick = { onSelect(entry.destination) },
                 modifier = Modifier
+                    .then(contentReturnModifier)
                     .focusRequester(settingsRequester)
                     .focusProperties { up = profileRequester },
             )
@@ -2119,6 +2183,7 @@ private fun CinemaHomeScreen(
         }
     }
     val homeHeroFocusRequester = remember { FocusRequester() }
+    val homeColumnSaveFocusRequester = remember { FocusRequester() }
     // Shared by both hero-absent retry surfaces so a refresh start cannot drop focus to the rail.
     val homeRefreshFocusState = remember { HomeRefreshFocusState() }
     val requestHomeRefresh = {
@@ -2217,7 +2282,7 @@ private fun CinemaHomeScreen(
 
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().saveFocusedChildOnExit(homeColumnSaveFocusRequester),
         contentPadding = PaddingValues(bottom = if (isTv) 32.dp else 48.dp),
         verticalArrangement = Arrangement.spacedBy(if (isTv) 24.dp else 17.dp),
     ) {
@@ -2698,6 +2763,7 @@ private fun ActiveDownloadsSection(
 ) {
     val colors = LocalHulkColors.current
     val rowState = rememberLazyListState()
+    val rowSaveFocusRequester = remember { FocusRequester() }
     var firstCardFocused by remember { mutableStateOf(false) }
     SideEffect {
         val target = rowFocusTarget ?: return@SideEffect
@@ -2730,6 +2796,7 @@ private fun ActiveDownloadsSection(
         Spacer(Modifier.height(10.dp))
         LazyRow(
             state = rowState,
+            modifier = Modifier.saveFocusedChildOnExit(rowSaveFocusRequester),
             contentPadding = PaddingValues(horizontal = 5.dp, vertical = 5.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -4225,6 +4292,7 @@ private fun HomeBoxedSection(
     val targetIndex = restoredIndex ?: 0
     val rowState = rememberLazyListState(initialFirstVisibleItemIndex = targetIndex)
     val targetRequester = remember { FocusRequester() }
+    val rowSaveFocusRequester = remember { FocusRequester() }
     var firstCardFocused by remember { mutableStateOf(false) }
     var restoredTargetKey by remember { mutableStateOf<String?>(null) }
     SideEffect {
@@ -4299,7 +4367,9 @@ private fun HomeBoxedSection(
         Spacer(Modifier.height(10.dp))
         LazyRow(
             state = rowState,
-            modifier = Modifier.testTag("home-row-$rowKey"),
+            modifier = Modifier
+                .testTag("home-row-$rowKey")
+                .saveFocusedChildOnExit(rowSaveFocusRequester),
             contentPadding = PaddingValues(horizontal = 5.dp, vertical = 7.dp),
             horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
         ) {
@@ -4396,6 +4466,7 @@ private fun HomeContinueWatchingSection(
     }
     val targetIndex = restoredIndex ?: 0
     val rowState = rememberLazyListState(initialFirstVisibleItemIndex = targetIndex)
+    val rowSaveFocusRequester = remember { FocusRequester() }
     val focusRequesters = remember(itemKeys) {
         entries.associate { it.key to FocusRequester() }
     }
@@ -4487,7 +4558,9 @@ private fun HomeContinueWatchingSection(
         Spacer(Modifier.height(10.dp))
         LazyRow(
             state = rowState,
-            modifier = Modifier.testTag("home-row-$rowKey"),
+            modifier = Modifier
+                .testTag("home-row-$rowKey")
+                .saveFocusedChildOnExit(rowSaveFocusRequester),
             contentPadding = PaddingValues(horizontal = 5.dp, vertical = 7.dp),
             horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
         ) {

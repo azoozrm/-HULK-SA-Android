@@ -118,6 +118,7 @@ import sa.hulksa.player.ui.components.MoviesCatalogBoxedCard
 import sa.hulksa.player.ui.components.SeriesCatalogBoxedCard
 import sa.hulksa.player.ui.components.TvRailDestinationItem
 import sa.hulksa.player.ui.components.TvRailSurface
+import sa.hulksa.player.ui.screens.CatalogFavoriteSnapshot
 import sa.hulksa.player.ui.screens.FAVORITES_MOBILE_BOTTOM_PADDING
 import sa.hulksa.player.ui.screens.FAVORITES_MOBILE_HORIZONTAL_PADDING
 import sa.hulksa.player.ui.screens.FAVORITES_MOBILE_HORIZONTAL_SPACING
@@ -213,7 +214,7 @@ private val smartSearchDestinations = listOf(
 internal fun ProfileSmartSearchLayer(
     state: HulkUiState,
     isTv: Boolean,
-    isFavorite: (ContentItem) -> Boolean,
+    favoriteKeys: Set<String>,
     navigationMemory: NavigationMemoryStore,
     initialFocusAcquired: Boolean,
     onInitialFocusAcquired: () -> Unit,
@@ -231,6 +232,12 @@ internal fun ProfileSmartSearchLayer(
     val historyStore = remember(context) { ProfileContentSearchHistoryStore(context) }
     val profileStore = remember(context) { ProfileStore(context) }
     val activeProfileId = profileStore.activeProfileId()
+    // One observed, authoritative profile favorite snapshot for the result hearts. A favorites-only
+    // commit changes this snapshot identity, which is what invalidates the memoized lazy item
+    // content; an opaque viewModel callback would leave the heart at its last composed value.
+    val favoriteSnapshot = remember(favoriteKeys) {
+        CatalogFavoriteSnapshot(persisted = favoriteKeys)
+    }
     var historyRevision by remember(activeProfileId) { mutableIntStateOf(0) }
     // The existing per-profile navigation owner remembers the selected type filter, the focused
     // card and its location so details return restores the same surviving context.
@@ -398,7 +405,7 @@ internal fun ProfileSmartSearchLayer(
                     firstResultRequester = firstResultRequester,
                     firstRecentRequester = firstRecentRequester,
                     railSearchRequester = if (isTv) railSearchRequester else null,
-                    isFavorite = isFavorite,
+                    favorites = favoriteSnapshot,
                     onSearch = onSearch,
                     onSearchFieldFocusChanged = { focused ->
                         if (focused) {
@@ -450,7 +457,7 @@ internal fun ProfileSmartSearchLayer(
                     firstResultRequester = firstResultRequester,
                     firstRecentRequester = firstRecentRequester,
                     railSearchRequester = null,
-                    isFavorite = isFavorite,
+                    favorites = favoriteSnapshot,
                     onSearch = onSearch,
                     onSearchFieldFocusChanged = { focused ->
                         if (focused) onInitialFocusAcquired()
@@ -512,7 +519,7 @@ private fun SmartSearchContent(
     firstResultRequester: FocusRequester,
     firstRecentRequester: FocusRequester,
     railSearchRequester: FocusRequester?,
-    isFavorite: (ContentItem) -> Boolean,
+    favorites: CatalogFavoriteSnapshot,
     onSearch: (String) -> Unit,
     onSearchFieldFocusChanged: (Boolean) -> Unit,
     onContentFocusTargetChanged: (FocusRequester) -> Unit,
@@ -830,7 +837,7 @@ private fun SmartSearchContent(
                         }
                     },
                     onDeleteRow = { row -> onRemoveRecent(row.entry) },
-                    isFavorite = isFavorite,
+                    favorites = favorites,
                     onToggleFavorite = onToggleFavorite,
                 )
             }
@@ -901,7 +908,7 @@ private fun SmartSearchContent(
                             (row as? SmartSearchGridRow.Result)?.let { onOpenResult(it.item) }
                         },
                         onDeleteRow = null,
-                        isFavorite = isFavorite,
+                        favorites = favorites,
                         onToggleFavorite = onToggleFavorite,
                     )
                 }
@@ -1378,7 +1385,7 @@ private fun SmartSearchCatalogGrid(
     onContentFocusTargetChanged: (FocusRequester) -> Unit,
     onOpenRow: (SmartSearchGridRow) -> Unit,
     onDeleteRow: ((SmartSearchGridRow.History) -> Unit)?,
-    isFavorite: (ContentItem) -> Boolean,
+    favorites: CatalogFavoriteSnapshot,
     onToggleFavorite: (ContentItem) -> Unit,
 ) {
     val adaptiveUi = LocalAdaptiveUi.current
@@ -1774,7 +1781,7 @@ private fun SmartSearchCatalogGrid(
                             ContentType.LIVE -> LiveChannelHomeCard(
                                 name = row.item.name,
                                 artworkUrl = row.item.posterUrl,
-                                isFavorite = isFavorite(row.item),
+                                isFavorite = favorites.contains(row.item),
                                 onClick = { onOpenRow(row) },
                                 modifier = cardModifier,
                                 onLongClick = { onToggleFavorite(row.item) },
@@ -1783,7 +1790,7 @@ private fun SmartSearchCatalogGrid(
 
                             ContentType.SERIES -> SeriesCatalogBoxedCard(
                                 item = row.item,
-                                isFavorite = isFavorite(row.item),
+                                isFavorite = favorites.contains(row.item),
                                 onClick = { onOpenRow(row) },
                                 modifier = cardModifier,
                                 onLongClick = { onToggleFavorite(row.item) },
@@ -1794,7 +1801,7 @@ private fun SmartSearchCatalogGrid(
 
                             else -> MoviesCatalogBoxedCard(
                                 item = row.item,
-                                isFavorite = isFavorite(row.item),
+                                isFavorite = favorites.contains(row.item),
                                 onClick = { onOpenRow(row) },
                                 modifier = cardModifier,
                                 onLongClick = { onToggleFavorite(row.item) },
