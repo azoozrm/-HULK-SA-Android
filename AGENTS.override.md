@@ -18,7 +18,9 @@ A clean-state/different-package test needs separate owner authority and a separa
 it is not an automatic fallback.
 
 Verify live device/package/version/signer identity, exact source/APK provenance and compatibility
-before installation. Never uninstall, clear/wipe, downgrade, change signer or bypass failed checks.
+before installation. Bind the source candidate to the existing task worktree under
+`docs/android-engineering-lab/TASK-EXECUTION-CONTRACT.md`; a new chat is not a new task or refresh authorization.
+Never uninstall, clear/wipe, downgrade, change signer or bypass failed checks.
 Do not change versions/keys/configuration to force an update. If a suitable signed APK or authorized
 route is unavailable, retain the installed copy and report the required refresh BLOCKED.
 

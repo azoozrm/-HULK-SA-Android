@@ -50,6 +50,8 @@ from the existing owner-authorized signing/artifact route:
 2. Freeze exact source: base/local HEAD, clean/dirty candidate, reviewed diff, complete source/
    material-input manifest, build options and artifact provenance. A proven frozen local
    candidate is valid; a commit/PR is not itself an install prerequisite.
+   Bind it to the verified existing task worktree under TASK-EXECUTION-CONTRACT; corrections/new
+   chats reuse that worktree and may not silently substitute another branch/candidate.
 3. Complete required checks. Select a verified signed release APK tied to that candidate; retain
    actual run/checkout/source provenance when CI supplied it. An unsigned release, debug signer
    or unrelated old APK cannot substitute.

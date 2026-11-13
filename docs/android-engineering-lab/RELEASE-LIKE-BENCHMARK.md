@@ -44,31 +44,29 @@ optimization contract:
 | `isProfileable` | `true` (manifest `<profileable android:shell="true" />`) |
 | `signingConfig` | `debug` signing config (stable lab signer; see note below) |
 | `applicationId` | `sa.hulksa.player.benchmark` (isolated measurement identity/data) |
-| `versionName` | resolved base version name + `.benchmark`; persistent refresh uses the qualification override from the physical-instance contract |
+| `versionName` | resolved base version name + `.benchmark`; the earlier Gate used qualification overrides, not the current official-app update identity |
 
 The shipping Release identity is unchanged: `applicationId = sa.hulksa.player`,
 shipping version code/name, endpoints, ABI set and brand are not modified, and the
 Release build type keeps its existing signing behavior (unsigned when release signing
 properties are not supplied). Production signing is never used here.
 
-The `debug` signing config is a local lab test signer, but for the persistent
-`sa.hulksa.player.benchmark` engineering instance it is stable owner state whose continuity
-must be preserved: the installed package can only be refreshed with a same-signer
-`adb install -r`. It is not a disposable per-round key, and it must not be deleted,
-regenerated or replaced merely to make a test pass. See
-`docs/android-engineering-lab/PHYSICAL-ENGINEERING-INSTANCES.md` for the governing
-preservation contract.
+The earlier `sa.hulksa.player.benchmark` engineering instance used the local lab `debug`
+signer. Preserve any existing secondary-package data/key material; leave that package untouched
+under the current official-app-only policy. These historical signer details grant no authority
+to refresh, delete, regenerate or replace it. See `PHYSICAL-ENGINEERING-INSTANCES.md` for the
+current owner-device contract.
 
 The `debug` build type is intentionally **not** used as the measurement target.
 
 ## 3. Commands (Contabo lab)
 
-These are infrastructure examples, not execution or device authority. For a persistent engineering
-instance, verify live package/signer/state and resolve the owner-approved version overrides from
-`PHYSICAL-ENGINEERING-INSTANCES.md`; do not install the shipping source-baseline version by default.
-The values below mirror that contract at this documentation revision, not a live installed-state claim.
+These retained Gate commands and fixed versions are historical infrastructure examples, not current
+execution/device instructions or live installed-state claims. They no longer mirror the physical
+application contract. Current owner-device updates use only the existing signed official app;
+any separate future measurement task must resolve its own explicitly authorized surface/package.
 
-Build the measurement APKs with the persistent qualification overrides:
+Historical measurement-APK build with the then-approved qualification overrides:
 
 ```sh
 hulk-build-run ./gradlew --no-daemon --console=plain --max-workers=2 \
@@ -86,11 +84,10 @@ hulk-build-run ./gradlew --no-daemon --console=plain \
   :app:verifyBenchmarkBaselineProfilePackaging
 ```
 
-Before any connected instrumentation, prove that the exact invocation preserves persistent target
-data and cannot uninstall, clear, downgrade or reset authentication. Otherwise report that path
-BLOCKED and use only a separately authorized isolated fixture/surface; never make persistent owner
-state disposable for measurement. Required state-preserving refresh still follows the physical
-contract, including both packages when applicable; these Benchmark commands do not replace it.
+Before any separately authorized future instrumentation, prove that its exact invocation preserves
+the approved target's data and cannot uninstall, clear, downgrade or reset authentication. Otherwise
+report that path BLOCKED. These historical commands grant no owner-device/test-companion install
+authority and do not restore the former dual-refresh policy or make owner state disposable.
 
 Run the benchmarks only against the authorized, verified physical surface:
 
@@ -129,9 +126,10 @@ Generation and packaging are separate and neither is auto-adopted:
    library-provided profiles and packages them as `assets/dexopt/baseline.prof`. The
    `verifyBenchmarkBaselineProfilePackaging` task asserts the packaging.
 
-## 5. Physical qualification notes
+## 5. Historical physical qualification notes
 
-- The physical acceptance device is a Xiaomi Mi Box 4 (`MIBOX4`, API 28, `armeabi-v7a`).
+- The Gate's physical acceptance device was a Xiaomi Mi Box 4 (`MIBOX4`, API 28, `armeabi-v7a`);
+  this is historical evidence, not the device's current OS/ABI qualification.
 - The `<profileable>` manifest element is recognized from API 29. On API 28 the platform
   does not expose the profileable-by-shell hook, so the profileable declaration cannot be
   independently exercised at the platform level on this device. The non-debuggable target

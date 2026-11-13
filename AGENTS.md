@@ -41,6 +41,7 @@ More specific repository instructions govern their subtree. Current source and c
 
 Before any mutation:
 
+- verify actual `pwd -P` and `git rev-parse --show-toplevel` identify this task's registered worktree;
 - check `git status`;
 - verify the current local branch and local HEAD;
 - verify the current remote official branch and remote HEAD;
@@ -63,6 +64,15 @@ For a new fix or feature, start from the current remote official HEAD.
 For a correction inside an existing PR, continue from the current remote PR HEAD. Do not switch that task back to the official branch, change its base, rebase, or rewrite history unless explicitly requested.
 
 One confirmed atomic problem should remain one branch and one PR unless the user explicitly requests otherwise or the work is already inside an existing PR.
+
+Each task/PR has one dedicated branch and one task worktree. Start OpenCode in that worktree;
+every correction and new chat for the same task reuses it and preserves valid local work/evidence.
+Verify actual cwd, repository root, branch, HEAD and full diff before writes and after material
+steering. One writer owns the task at a time; reviewers remain read-only. The canonical checkout
+stays a clean anchor on the official branch. Do not create replacement worktrees/branches for local
+rounds or treat closure as permission to remove, reset, clean or prune them. Read the detailed
+working-directory/ownership rules in `docs/android-engineering-lab/README.md` section 3 and the
+execution contract. This is not a requirement to create a GitHub Actions workflow per PR.
 
 Do not combine independent problems or turn a targeted fix into a general refactor. An explicitly owner-defined section bundle may retain its related local correction rounds on one branch and publish as one section PR; that exception does not absorb unrelated work.
 
@@ -319,7 +329,7 @@ retain the installed copy and report required refresh BLOCKED. This rule grants 
 CI, commit/push/PR, merge, version, release or capture authority. Source-only/read-only/documentation
 tasks remain within their declared scope and do not automatically build/install/launch the app.
 
-All substantive executor handoffs follow `DEEPSEEK-EVIDENCE-CONTRACT.md`: one complete
+All substantive executor handoffs follow `docs/android-engineering-lab/DEEPSEEK-EVIDENCE-CONTRACT.md`: one complete
 self-contained reviewer ZIP, including original required reports/evidence, validated for content
 completeness as well as CRC/hash/exact manifest coverage and bounded hulkapp access. Report the
 full ZIP SHA-256 in the response with filename/absolute path/bytes; no sidecar or second ZIP.

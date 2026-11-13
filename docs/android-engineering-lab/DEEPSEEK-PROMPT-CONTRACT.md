@@ -30,6 +30,12 @@ do not replace them with copied chat text, research, or template examples.
 Include NEW/RESUME, LOCAL_ROUND or SECTION_PUBLISH, section/round/candidate identity, the target
 repository/task/branch/PR when present, expected SHA when verified, approved source and
 physical scope, acceptance conditions, checks, current deferrals and completion boundary.
+Give the verified absolute task-worktree path, branch and relevant source/candidate identity.
+Require OpenCode to start there, actual cwd/root/branch/HEAD/full-diff verification before writes
+and after material steering, reuse for all corrections/new chats, one writer and a clean official
+canonical anchor under the lab README section 3. If the path is not yet verified, make safe task
+discovery the first action; do not invent a path, create a replacement task or edit from elsewhere.
+The working-directory rule creates no new CI workflow, publication or destructive-cleanup authority.
 Mark executor verification outstanding when a live fact is unavailable to the coordinator.
 Resolve discoverable facts from GitHub, the task checkout or approved devices; never invent
 identifiers, paths, device addresses, versions, signer identity or results.
@@ -93,6 +99,9 @@ reports supporting claimed totals, logs/failures/retries, applicable artifact/de
 essential referenced files. Require CRC/hash/exact-coverage AND content-completeness validation,
 bounded hulkapp access, and filename/absolute path/bytes/full ZIP SHA-256 in the response. No second
 ZIP or checksum sidecar. Missing essential records must be explicit BLOCKED delivery, never complete.
+Require packaged pre-finalization export-path access proof and a separate actual read/hash check
+of the final immutable ZIP; report the latter without changing archive contents. Follow evidence
+contract sections 5–6 rather than requesting a self-referential final-check record inside the ZIP.
 
 If physical refresh is in scope, explicitly require the owner's existing final signed official app
 `sa.hulksa.player`, same package/same installed signer, `adb install -r` and preserved data under

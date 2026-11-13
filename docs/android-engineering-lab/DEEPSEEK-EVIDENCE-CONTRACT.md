@@ -1,6 +1,6 @@
 # HULK SA Android — DeepSeek Evidence Contract
 
-Version 2 · owner decision 2026-11-09, Asia/Riyadh.
+Version 3 · owner decisions 2026-11-09 and 2026-11-13, Asia/Riyadh.
 One complete reviewer ZIP; full archive SHA-256 in the handoff, without a separate checksum file.
 
 This is the durable evidence and delivery contract for the normal OpenCode/DeepSeek executor.
@@ -24,7 +24,7 @@ remain distinct. Missing/unexecuted states stay NOT RUN/BLOCKED, never inferred 
 | File/record | Required content |
 | --- | --- |
 | TASK.md | Exact bounded packet, current phase, authority and capture policy |
-| TASK.env | Sanitized live identities, branch/worktree, base HEAD, overlap/status and surfaces |
+| TASK.env | Sanitized actual cwd/repository root, task branch/worktree, base/local/remote HEADs, full diff/overlap, writer/canonical-checkout status and surfaces |
 | INTENDED-DIFF.md | Planned files/purpose, source cause/owner and protected state before editing |
 | CANDIDATE.json | Candidate ID, base HEAD, dirty state, diff hash and source-manifest hash |
 | SOURCE-MANIFEST.sha256 | Complete frozen tracked plus authorized new source/material-input inventory; record method/exclusions |
@@ -128,9 +128,11 @@ Before declaring delivery complete:
 6. Reopen the FINAL ZIP, test CRC, extract safely into an isolated directory, verify all hashes and
    exact file coverage, and check all required contents/essential references. Recount included test
    reports. Integrity PASS alone does not prove evidence completeness.
-7. Verify actual bounded hulkapp read/traverse access to the final ZIP/download path under section 6.
-   Final archive contents include the access proof for the intended export path; after creating the
-   final ZIP, recheck actual account access without changing packaged evidence.
+7. Before finalization, include actual bounded hulkapp read/traverse proof for the intended export
+   directory and staged files under section 6. After creating the final ZIP, separately verify that
+   hulkapp can open/read/hash that exact archive through its intended path. Retain the final check
+   with canonical originals outside the immutable archive and report its actual result in the
+   handoff; do not deliver it as a supplementary file or edit the ZIP to insert its own final check.
 8. Compute SHA-256 over the FINAL ZIP bytes and report its full digest, filename, absolute path and
    exact byte count in the handoff text. Recheck/recompute after any archive change.
 
@@ -149,6 +151,12 @@ Missing unauthorized captures and genuinely inapplicable checks are not evidence
 The final ZIP and intended download path must be readable by `hulkapp`, with
 directory traversal through the required parents. Verify actual read/traverse access as that account
 using its approved local execution route, rather than assuming ownership or mode bits suffice.
+
+There are two distinct access records: the pre-finalization export-directory/staged-file proof
+included inside the ZIP, and the final archive open/read/hash check performed after creation.
+Record actual commands, account, paths, time, exit status and limits. The latter remains with the
+canonical originals and is summarized in the handoff, not delivered as another file. If packaged
+evidence changes, regenerate the ZIP and repeat its final integrity, access and digest checks.
 
 Prefer files owned by hulkapp or a specifically authorized group. Grant only necessary file read
 and directory traversal on the exact task/export paths; preserve originals and restrictive defaults.

@@ -1,6 +1,6 @@
 # HULK SA Android — Permanent Task Execution Contract
 
-Revised 2026-11-09 · local iteration, signed official-app refresh and one-ZIP evidence delivery.
+Revised 2026-11-13 · stable task worktrees, signed official-app refresh and one-ZIP evidence delivery.
 
 This is the model-neutral execution contract for substantive authorized Implementation/Correction
 work. It owns execution phases and completion boundaries; it grants no authority. Read root
@@ -61,6 +61,18 @@ Verify canonical/task checkout status, local branch/HEAD, remote official HEAD, 
 open-task/PR overlap and applicable live contracts. A PR correction also verifies state/base/head.
 Record intended files/purpose before editing. Recheck relevant live state before commit/push.
 
+Use one dedicated branch and task worktree per task/PR under the lab README section 3.
+Discover an existing task through the worktree registry and task records; do not guess its path
+from a branch name or start a replacement from official HEAD. Every correction and new OpenCode
+chat for that same task reuses its worktree, branch, accepted changes and valid evidence.
+Start the session there. Before writes and after material steering record actual `pwd -P`,
+`git rev-parse --show-toplevel`, branch, HEAD, full staged/unstaged diff and authorized untracked
+files. A session in another directory may discover the task read-only, then must re-enter the
+correct worktree before editing. One writer at a time; do not steal locks or kill another session.
+The canonical checkout must remain clean on the official branch, never an editing workspace;
+wrong/dirty canonical state is STOP, not authority to reset, switch or repair it.
+These are working-directory rules, not a new CI workflow or publication trigger.
+
 If pinned HEAD mismatches, applicable remote changes, unrelated overlapping edits cannot be separated,
 an unapproved PR owns the same work, or a protected contract would change without authority: STOP
 before mutation. Reading/diagnosis may continue. Do not reset, rebase or absorb another actor's work.
@@ -93,6 +105,8 @@ to commit/push or clear the worktree. An accepted part does not automatically ac
 
 Cancellation stops mutation and records exact local/branch/PR state as CLOSED. No silent commit,
 publish, destructive cleanup or absorption of abandoned work. Do not touch another task's ownership.
+Closure alone never authorizes worktree removal, branch deletion, reset, clean or prune; preserve
+task records/locks/evidence and obtain separate authority for any destructive cleanup.
 
 ## 7. Complete diff review
 
@@ -182,7 +196,10 @@ Changing network/display/font settings or unlocking devices requires applicable 
 Follow `DEEPSEEK-EVIDENCE-CONTRACT.md`: one complete self-contained reviewer ZIP from the first
 handoff, including required source/input/diff, original check reports/logs and essential referenced
 evidence. Validate completeness as well as CRC/hash/manifest coverage and actual bounded hulkapp
-read/traverse. Report filename/path/bytes/full ZIP SHA-256 in the response; no sidecar or second ZIP.
+read/traverse, including the final-archive check under that contract's sections 5–6. Keep packaged
+pre-finalization access proof distinct from the final check performed after ZIP creation; do not
+modify the archive to insert its own final digest/access result. Report filename/path/bytes/full
+ZIP SHA-256 and the actual final-access result in the response; no sidecar or second ZIP.
 Missing essential evidence blocks complete-delivery/PASS claims, not independent authorized work.
 
 Retain focused round records and append owner decisions; do not overwrite earlier results.
