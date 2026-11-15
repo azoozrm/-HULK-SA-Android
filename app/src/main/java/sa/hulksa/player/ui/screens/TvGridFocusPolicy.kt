@@ -12,7 +12,7 @@ internal enum class TvGridFocusMove {
 /**
  * Resolves the next catalog-card index without spatial fallback.
  *
- * HULK's UI is forced RTL, so index 0 is the right-most card in a row:
+ * NEO 4K's UI is forced RTL, so index 0 is the right-most card in a row:
  * physical LEFT advances the index and physical RIGHT decrements it.
  * Vertical movement preserves the visual column; on a short final row it
  * chooses the nearest surviving card instead of falling back to column 1.

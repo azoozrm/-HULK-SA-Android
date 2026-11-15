@@ -49,7 +49,7 @@ data class OperationsGrowthConfig(
     val enabled: Boolean = false,
     val renewal: OperationsGrowthLinkConfig = OperationsGrowthLinkConfig(
         title = "التجديد والموقع",
-        displayText = "hulksa.com",
+        displayText = "neo4ksa.com",
     ),
     val support: OperationsGrowthLinkConfig = OperationsGrowthLinkConfig(
         title = "الدعم الفني",
@@ -73,7 +73,7 @@ fun normalizeGrowthRenewalUrl(value: String?): String? {
     val candidate = value?.trim()?.takeIf { it.length in 1..2_048 } ?: return null
     val uri = strictHttpsUri(candidate) ?: return null
     val host = uri.host.lowercase(Locale.ROOT)
-    if (host != "hulksa.com" && !host.endsWith(".hulksa.com")) return null
+    if (host != "neo4ksa.com" && !host.endsWith(".neo4ksa.com")) return null
     if (uri.rawQuery != null || uri.rawFragment != null) return null
     return candidate
 }
@@ -101,7 +101,7 @@ fun normalizeGrowthSupportUrl(value: String?): String? {
 fun normalizeGrowthCustomQrUrl(value: String?): String? {
     val candidate = value?.trim()?.takeIf { it.length in 1..1_024 } ?: return null
     val uri = strictHttpsUri(candidate) ?: return null
-    if (!uri.host.equals("hulksa.com", ignoreCase = true)) return null
+    if (!uri.host.equals("neo4ksa.com", ignoreCase = true)) return null
     if (uri.rawQuery != null || uri.rawFragment != null) return null
     val path = uri.rawPath.orEmpty()
     return candidate.takeIf {

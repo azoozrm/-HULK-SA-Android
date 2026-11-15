@@ -247,7 +247,7 @@ class PairingAckReceiptOwnerTest {
     }
 
     private companion object {
-        const val BASE_URL = "https://hulksa.com/control-center/api/app/v1/pairing/"
+        const val BASE_URL = "https://neo4ksa.com/control-center/api/app/v1/pairing/"
         const val REQUEST_ID = "11111111-2222-4333-8444-555555555555"
         const val SECOND_REQUEST_ID = "22222222-3333-4444-8555-666666666666"
         const val THIRD_REQUEST_ID = "33333333-4444-4555-8666-777777777777"

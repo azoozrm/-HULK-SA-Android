@@ -104,8 +104,15 @@ class TvPlatformIntegrationTest {
     }
 
     @Test
+    fun channelLogoMigrationIsScopedToChannelId() {
+        assertTrue(shouldMigrateTvChannelLogo(-1L, 42L))
+        assertFalse(shouldMigrateTvChannelLogo(42L, 42L))
+        assertTrue(shouldMigrateTvChannelLogo(41L, 42L))
+    }
+
+    @Test
     fun channelMetadataUsesBrandOnlyDisplayName() {
-        assertEquals("HULK SA", TV_CHANNEL_DISPLAY_NAME)
+        assertEquals("NEO 4K", TV_CHANNEL_DISPLAY_NAME)
         assertEquals("اكمل المشاهدة", TV_CONTINUE_WATCHING_LABEL)
     }
 

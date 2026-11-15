@@ -50,7 +50,7 @@ class StaticValidationTest(unittest.TestCase):
         (root / "app/build.gradle.kts").write_text(
             'namespace = "sa.hulksa.player"\napplicationId = "sa.hulksa.player"\n'
             'versionCode = 68\nversionName = "1.0.0"\n'
-            'val resellerApiUrl = "https://hulksa.com"\n'
+            'val resellerApiUrl = "https://neo4ksa.com"\n'
             'val verifyProductionRuntimeConfig = tasks.register("verifyProductionRuntimeConfig")\n'
             'buildConfigField("String", "RESELLER_API_URL", resellerApiUrl)\n'
             'arm64-v8a armeabi-v7a x86_64\n',

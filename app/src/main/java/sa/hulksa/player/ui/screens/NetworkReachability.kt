@@ -43,7 +43,7 @@ private const val DNS_TYPE_A = 1
 private const val DNS_TYPE_AAAA = 28
 
 private val STABLE_PROBE_TARGETS = listOf(
-    NetworkProbeTarget(host = "hulksa.com", port = 443),
+    NetworkProbeTarget(host = "neo4ksa.com", port = 443),
     NetworkProbeTarget(host = "www.google.com", port = 443),
 )
 

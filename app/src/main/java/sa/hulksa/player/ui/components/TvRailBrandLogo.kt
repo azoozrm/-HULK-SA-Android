@@ -43,7 +43,7 @@ fun BrandLogo(modifier: Modifier) {
         if (!isTvRailLogo) {
             Image(
                 painter = painterResource(R.drawable.hulk_sa_mark_reference),
-                contentDescription = "HULK SA",
+                contentDescription = "NEO 4K",
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit,
             )
@@ -66,7 +66,7 @@ fun BrandLogo(modifier: Modifier) {
         ) {
             Image(
                 painter = painterResource(R.drawable.hulk_sa_mark_reference),
-                contentDescription = "HULK SA",
+                contentDescription = "NEO 4K",
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit,
             )

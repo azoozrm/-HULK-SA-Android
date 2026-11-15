@@ -22,7 +22,7 @@ internal fun nextSeekStepSeconds(current: Int): Int {
 }
 
 /**
- * v1.9 preferences that HULK SA can enforce locally without pretending to
+ * v1.9 preferences that NEO 4K can enforce locally without pretending to
  * control provider-side stream quality, audio or subtitle availability.
  */
 class SettingsProStore(context: Context) {

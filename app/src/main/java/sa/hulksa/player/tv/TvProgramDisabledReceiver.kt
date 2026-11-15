@@ -10,7 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-/** Honors a TV Home user's decision to remove one of HULK SA's published programs. */
+/** Honors a TV Home user's decision to remove one of NEO 4K's published programs. */
 class TvProgramDisabledReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return

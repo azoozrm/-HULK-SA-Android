@@ -50,7 +50,7 @@ data class PairingUiState(
  * fixed strings.
  */
 internal object PairingCopy {
-    const val SERVICE_UNAVAILABLE = "تعذر الاتصال بخدمة HULK ، حاول مرة اخرى"
+    const val SERVICE_UNAVAILABLE = "تعذر الاتصال بخدمة NEO 4K ، حاول مرة اخرى"
     const val THROTTLED = "تم تعليق المحاولات مؤقتا ، حاول مرة اخرى بعد قليل"
     const val DISABLED = "خدمة تسجيل الدخول بالجوال غير متاحة حاليا"
     const val EXPIRED = "انتهت صلاحية رمز الربط ، اطلب رمزا جديدا"

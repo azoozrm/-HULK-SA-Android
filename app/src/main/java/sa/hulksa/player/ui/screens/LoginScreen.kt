@@ -119,7 +119,7 @@ import sa.hulksa.player.ui.components.entryNoticeMetrics
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
-private const val HULK_WEBSITE = "https://hulksa.com/"
+private const val NEO_WEBSITE = "https://neo4ksa.com/"
 
 internal class LoginCardFocusRequesterHolder(
     initialRequester: FocusRequester,
@@ -280,8 +280,8 @@ fun LoginScreen(
         OperationsGrowthLinkConfig(
             enabled = true,
             title = "اشتراك جديد",
-            url = HULK_WEBSITE,
-            displayText = "hulksa.com",
+            url = NEO_WEBSITE,
+            displayText = "neo4ksa.com",
         )
     }
     val persistedAccessCode = remember(view.context) {
@@ -346,7 +346,7 @@ fun LoginScreen(
         }
     }
     val openWebsite = {
-        runCatching { uriHandler.openUri(HULK_WEBSITE) }
+        runCatching { uriHandler.openUri(NEO_WEBSITE) }
             .onSuccess { websiteOpenFailed = false }
             .onFailure { websiteOpenFailed = true }
         Unit

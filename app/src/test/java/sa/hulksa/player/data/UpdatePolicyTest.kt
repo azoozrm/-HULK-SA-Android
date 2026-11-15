@@ -75,15 +75,20 @@ class UpdatePolicyTest {
 
     @Test
     fun offHostApkUrlIsNotInstallable() {
-        assertEquals(
-            OperationsUpdateDecision.NONE,
-            evaluateOperationsUpdatePolicy(
-                63,
-                update().copy(apkUrl = "https://example.com/hulk-sa-65.apk"),
-                OperationsConfigSource.NETWORK,
-                0L,
-            ),
-        )
+        for (apkUrl in listOf(
+            "https://example.com/hulk-sa-65.apk",
+            "https://hulksa.com/hulk-operations/releases/hulk-sa-65.apk",
+        )) {
+            assertEquals(
+                OperationsUpdateDecision.NONE,
+                evaluateOperationsUpdatePolicy(
+                    63,
+                    update().copy(apkUrl = apkUrl),
+                    OperationsConfigSource.NETWORK,
+                    0L,
+                ),
+            )
+        }
     }
 
     @Test
@@ -103,7 +108,7 @@ class UpdatePolicyTest {
         latestVersionCode = 65,
         latestVersionName = "0.9.3.21",
         minimumSupportedVersionCode = 64,
-        apkUrl = "https://hulksa.com/hulk-operations/releases/hulk-sa-65.apk",
+        apkUrl = "https://neo4ksa.com/hulk-operations/releases/hulk-sa-65.apk",
         apkSha256 = "a".repeat(64),
         releaseNotes = "تحسينات تشغيلية",
     )
@@ -118,7 +123,7 @@ class UpdatePolicyTest {
             "latestVersionName":"0.9.3.21",
             "minimumSupportedVersionCode":64,
             "updateType":"OPTIONAL",
-            "apkUrl":"https://hulksa.com/hulk-operations/releases/hulk-sa-65.apk",
+            "apkUrl":"https://neo4ksa.com/hulk-operations/releases/hulk-sa-65.apk",
             "apkSha256":"${"a".repeat(64)}",
             "releaseNotes":""
           },

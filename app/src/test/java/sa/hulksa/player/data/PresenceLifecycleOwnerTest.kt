@@ -313,7 +313,7 @@ class PresenceLifecycleOwnerTest {
 
     private companion object {
         val CONFIG = OperationsPresenceConfig(
-            baseUrl = "https://hulksa.com/control-center/api/app/v1/presence/",
+            baseUrl = "https://neo4ksa.com/control-center/api/app/v1/presence/",
             heartbeatSeconds = 60,
             onlineTtlSeconds = 180,
         )

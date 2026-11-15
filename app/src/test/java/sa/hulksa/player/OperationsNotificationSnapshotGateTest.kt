@@ -88,7 +88,7 @@ class OperationsNotificationSnapshotGateTest {
     private fun notification(read: Boolean) = LocalSystemNotification(
         id = "operations:MSG-001",
         messageId = "MSG-001",
-        title = "HULK SA",
+        title = "NEO 4K",
         message = "رسالة تشغيلية",
         severity = OperationsAnnouncementSeverity.IMPORTANT,
         createdAtEpochMs = 1_000L,

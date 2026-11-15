@@ -645,7 +645,7 @@ class ServerDiagnosticsEngine(context: Context) {
         }
         result += FeatureRecommendation("مراقبة جودة القنوات والتنبيه عن العطل", "جاهزة للبناء", 1, "محرك التشخيص الحالي يوفر اساس القياس الدوري بدون تشغيل كل القنوات.")
         result += FeatureRecommendation("رقابة ابوية وملفات شخصية", "جاهزة داخل التطبيق", 2, "لا تعتمد على قدرات Xtream ويمكن تنفيذها محليا ثم مزامنتها لاحقا.")
-        result += FeatureRecommendation("مزامنة المشاهدة والمفضلة بين الاجهزة", "تحتاج Backend للمنصة", 2, "تحتاج حساب عميل وواجهة مزامنة خاصة بـ HULK SA.")
+        result += FeatureRecommendation("مزامنة المشاهدة والمفضلة بين الاجهزة", "تحتاج Backend للمنصة", 2, "تحتاج حساب عميل وواجهة مزامنة خاصة بـ NEO 4K.")
         result += FeatureRecommendation("تحليل مسارات الصوت والترجمة والجودة", "تحتاج فحص تشغيل عميق", 3, "يلزم قراءة Tracks من عينات فعلية اثناء التشغيل لتجنب نتائج تخمينية.")
         return result.sortedWith(compareBy(FeatureRecommendation::priority, FeatureRecommendation::title))
     }

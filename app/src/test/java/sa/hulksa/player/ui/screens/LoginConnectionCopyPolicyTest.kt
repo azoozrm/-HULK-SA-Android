@@ -85,7 +85,7 @@ class LoginConnectionCopyPolicyTest {
     }
 
     @Test fun sharedExceptionsRetainTheirNonLoginCopyWhileLoginUsesCuratedCopy() {
-        assertEquals("تعذر الاتصال بخدمة HULK ، حاول مرة اخرى", PortalException.ServiceUnavailable.message)
+        assertEquals("تعذر الاتصال بخدمة NEO 4K ، حاول مرة اخرى", PortalException.ServiceUnavailable.message)
         assertEquals("تعذر الاتصال بالخدمة", loginErrorPresentation(PortalException.ServiceUnavailable.loginFailure, LoginConnectivityEvidence.OFFLINE).displayText)
         assertNull(loginErrorPresentation(null, LoginConnectivityEvidence.OFFLINE).displayText)
     }

@@ -28,8 +28,8 @@ class EntryErrorCopyPolicyTest {
             entryErrorDisplayText("تعذر الاتصال بالسيرفر. حاول مرة اخرى."),
         )
         assertEquals(
-            "راجع hulksa.com ثم حاول",
-            entryErrorDisplayText("راجع hulksa.com ثم حاول."),
+            "راجع neo4ksa.com ثم حاول",
+            entryErrorDisplayText("راجع neo4ksa.com ثم حاول."),
         )
         assertEquals(
             "الاصدار 0.9.3.23 غير مدعوم",

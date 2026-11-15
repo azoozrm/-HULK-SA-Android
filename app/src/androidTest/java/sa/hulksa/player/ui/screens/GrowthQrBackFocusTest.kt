@@ -21,8 +21,8 @@ class GrowthQrBackFocusTest {
     private fun fixtureLink() = OperationsGrowthLinkConfig(
         enabled = true,
         title = "تجديد الاشتراك",
-        url = "https://hulksa.com/",
-        displayText = "hulksa.com",
+        url = "https://neo4ksa.com/",
+        displayText = "neo4ksa.com",
     )
 
     @Test

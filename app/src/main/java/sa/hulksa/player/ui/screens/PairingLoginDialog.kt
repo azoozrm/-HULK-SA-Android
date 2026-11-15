@@ -308,7 +308,7 @@ private fun PairingCopyColumn(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
-                text = "او افتح \u2066hulksa.com/pair\u2069",
+                text = "او افتح \u2066neo4ksa.com/pair\u2069",
                 color = colors.textMuted,
                 fontSize = if (compactHeight) 12.sp else 13.sp,
                 textAlign = TextAlign.Center,

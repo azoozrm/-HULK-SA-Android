@@ -18,7 +18,7 @@ class OperationsPairingConfigTest {
     @Test
     fun `disabled pairing is a no-op`() {
         val parsed = checkNotNull(
-            parseOperationsConfig(configJson(""""pairing":{"enabled":false,"baseUrl":"https://hulksa.com/control-center/api/app/v1/pairing/"},""")),
+            parseOperationsConfig(configJson(""""pairing":{"enabled":false,"baseUrl":"https://neo4ksa.com/control-center/api/app/v1/pairing/"},""")),
         )
 
         assertNull(parsed.pairing)
@@ -28,12 +28,12 @@ class OperationsPairingConfigTest {
     fun `valid enabled discovery is accepted canonically`() {
         val parsed = checkNotNull(
             parseOperationsConfig(
-                configJson(""""pairing":{"enabled":true,"baseUrl":"https://HULKSa.com/control-center/api/app/v1/pairing/"},"""),
+                configJson(""""pairing":{"enabled":true,"baseUrl":"https://NEO4KSa.com/control-center/api/app/v1/pairing/"},"""),
             ),
         )
 
         assertEquals(
-            OperationsPairingConfig(baseUrl = "https://hulksa.com/control-center/api/app/v1/pairing/"),
+            OperationsPairingConfig(baseUrl = "https://neo4ksa.com/control-center/api/app/v1/pairing/"),
             parsed.pairing,
         )
     }
@@ -41,16 +41,17 @@ class OperationsPairingConfigTest {
     @Test
     fun `invalid or unsafe discovery disables only pairing`() {
         val invalidValues = listOf(
-            """"pairing":{"enabled":true,"baseUrl":"http://hulksa.com/control-center/api/app/v1/pairing/"},""",
+            """"pairing":{"enabled":true,"baseUrl":"http://neo4ksa.com/control-center/api/app/v1/pairing/"},""",
             """"pairing":{"enabled":true,"baseUrl":"https://example.com/control-center/api/app/v1/pairing/"},""",
-            """"pairing":{"enabled":true,"baseUrl":"https://hulksa.com/control-center/api/app/v1/presence/"},""",
-            """"pairing":{"enabled":true,"baseUrl":"https://hulksa.com/control-center/api/app/v1/pairing"},""",
-            """"pairing":{"enabled":true,"baseUrl":"https://user@hulksa.com/control-center/api/app/v1/pairing/"},""",
-            """"pairing":{"enabled":true,"baseUrl":"https://hulksa.com:8443/control-center/api/app/v1/pairing/"},""",
-            """"pairing":{"enabled":true,"baseUrl":"https://hulksa.com/control-center/api/app/v1/pairing/?x=1"},""",
-            """"pairing":{"enabled":true,"baseUrl":"https://hulksa.com/control-center/api/app/v1/pairing/#f"},""",
-            """"pairing":{"enabled":"true","baseUrl":"https://hulksa.com/control-center/api/app/v1/pairing/"},""",
-            """"pairing":{"baseUrl":"https://hulksa.com/control-center/api/app/v1/pairing/"},""",
+            """"pairing":{"enabled":true,"baseUrl":"https://hulksa.com/control-center/api/app/v1/pairing/"},""",
+            """"pairing":{"enabled":true,"baseUrl":"https://neo4ksa.com/control-center/api/app/v1/presence/"},""",
+            """"pairing":{"enabled":true,"baseUrl":"https://neo4ksa.com/control-center/api/app/v1/pairing"},""",
+            """"pairing":{"enabled":true,"baseUrl":"https://user@neo4ksa.com/control-center/api/app/v1/pairing/"},""",
+            """"pairing":{"enabled":true,"baseUrl":"https://neo4ksa.com:8443/control-center/api/app/v1/pairing/"},""",
+            """"pairing":{"enabled":true,"baseUrl":"https://neo4ksa.com/control-center/api/app/v1/pairing/?x=1"},""",
+            """"pairing":{"enabled":true,"baseUrl":"https://neo4ksa.com/control-center/api/app/v1/pairing/#f"},""",
+            """"pairing":{"enabled":"true","baseUrl":"https://neo4ksa.com/control-center/api/app/v1/pairing/"},""",
+            """"pairing":{"baseUrl":"https://neo4ksa.com/control-center/api/app/v1/pairing/"},""",
             """"pairing":"malformed",""",
         )
 
@@ -73,7 +74,7 @@ class OperationsPairingConfigTest {
             "latestVersionName":"0.9.3.21",
             "minimumSupportedVersionCode":64,
             "updateType":"OPTIONAL",
-            "apkUrl":"https://hulksa.com/hulk-operations/releases/hulk-sa-65.apk",
+            "apkUrl":"https://neo4ksa.com/hulk-operations/releases/hulk-sa-65.apk",
             "apkSha256":"${"a".repeat(64)}",
             "releaseNotes":""
           },

@@ -3342,7 +3342,7 @@ private fun PlayerTopBar(
             Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = if (isLive) "● بث مباشر" else "HULK SA",
+                    text = if (isLive) "● بث مباشر" else "NEO 4K",
                     color = if (isLive) Color(0xFFFF4E55) else colors.gold,
                     fontSize = 11.sp,
                     fontWeight = if (isLive) FontWeight.Bold else FontWeight.Normal,

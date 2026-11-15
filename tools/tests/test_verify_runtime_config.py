@@ -65,11 +65,11 @@ class RuntimeConfigVerifierTest(unittest.TestCase):
             directory = Path(temp)
             build_config = self.write_build_config(
                 directory,
-                reseller_api_url="http://reseller-api.hulksa.com",
+                reseller_api_url="http://reseller-api.neo4ksa.com",
             )
             archive = self.write_archive(
                 directory,
-                b"dex\nhttp://reseller-api.hulksa.com\n" + self.TEST_OPERATIONS_URL.encode("utf-8"),
+                b"dex\nhttp://reseller-api.neo4ksa.com\n" + self.TEST_OPERATIONS_URL.encode("utf-8"),
             )
 
             with self.assertRaises(MODULE.VerificationError):

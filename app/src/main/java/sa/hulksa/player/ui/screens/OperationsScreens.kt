@@ -78,10 +78,10 @@ fun RequiredUpdateScreen(
     BackHandler(enabled = true) { }
     OperationsBlockingCard(
         icon = Icons.Rounded.SystemUpdate,
-        eyebrow = "HULK SA • تحديث مطلوب",
+        eyebrow = "NEO 4K • تحديث مطلوب",
         title = "هذا الإصدار لم يعد مدعومًا",
         message = buildString {
-            append("حدّث HULK SA إلى الإصدار ")
+            append("حدّث NEO 4K إلى الإصدار ")
             append(operations.update.latestVersionName)
             if (operations.update.releaseNotes.isNotBlank()) {
                 append("\n\n")
@@ -112,7 +112,7 @@ fun MaintenanceScreen(
     }.orEmpty()
     OperationsBlockingCard(
         icon = Icons.Rounded.Build,
-        eyebrow = "HULK SA • حالة الخدمة",
+        eyebrow = "NEO 4K • حالة الخدمة",
         title = "الخدمة تحت الصيانة",
         message = message + estimated,
         isTv = isTv,
@@ -534,7 +534,7 @@ fun OptionalUpdateOverlay(
             )
             Spacer(Modifier.height(if (isTv) 14.dp else 11.dp))
             Text(
-                "HULK SA • تحديث التطبيق",
+                "NEO 4K • تحديث التطبيق",
                 color = colors.goldBright,
                 fontSize = if (isTv) 13.sp else 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -675,9 +675,9 @@ fun OperationsAnnouncementOverlay(
         -> Icons.Rounded.Warning
     }
     val severityLabel = when (announcement.severity) {
-        OperationsAnnouncementSeverity.INFO -> "HULK SA • رسالة معلومات"
-        OperationsAnnouncementSeverity.WARNING -> "HULK SA • تنبيه"
-        OperationsAnnouncementSeverity.IMPORTANT -> "HULK SA • رسالة مهمة"
+        OperationsAnnouncementSeverity.INFO -> "NEO 4K • رسالة معلومات"
+        OperationsAnnouncementSeverity.WARNING -> "NEO 4K • تنبيه"
+        OperationsAnnouncementSeverity.IMPORTANT -> "NEO 4K • رسالة مهمة"
     }
     // Severity stays inside the shared gold family; the wording carries the severity.
     val accent = when (announcement.severity) {

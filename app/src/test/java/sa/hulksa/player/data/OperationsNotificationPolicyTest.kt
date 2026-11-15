@@ -26,7 +26,7 @@ class OperationsNotificationPolicyTest {
         val system = LocalSystemNotification(
             id = "operations:MSG-001",
             messageId = "MSG-001",
-            title = "HULK SA",
+            title = "NEO 4K",
             message = "رسالة تشغيلية",
             severity = OperationsAnnouncementSeverity.IMPORTANT,
             createdAtEpochMs = 2_000L,

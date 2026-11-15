@@ -2796,7 +2796,7 @@ class HulkViewModel internal constructor(
                                 )
                                 OperationsInstallResult.UnknownSourcesBlocked -> OperationsDownloadUiState(
                                     status = OperationsDownloadStatus.UNKNOWN_SOURCES_BLOCKED,
-                                    message = "اسمح لـ HULK SA بتثبيت التطبيقات من هذا المصدر ثم أعد المحاولة.",
+                                    message = "اسمح لـ NEO 4K بتثبيت التطبيقات من هذا المصدر ثم أعد المحاولة.",
                                 )
                                 is OperationsInstallResult.Failure -> OperationsDownloadUiState(
                                     status = OperationsDownloadStatus.FAILED,
