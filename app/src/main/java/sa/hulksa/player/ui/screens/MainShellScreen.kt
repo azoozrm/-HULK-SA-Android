@@ -245,6 +245,8 @@ import sa.hulksa.player.ui.adaptive.HulkNavigationType
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.BrandBadge
+import sa.hulksa.player.ui.components.TvFittedBrandMark
+import sa.hulksa.player.ui.components.TvRailBrandTile
 import sa.hulksa.player.ui.components.TvRailDestinationItem
 import sa.hulksa.player.ui.components.TvRailSurface
 import sa.hulksa.player.ui.components.ChannelLogo
@@ -1701,7 +1703,7 @@ private fun CinematicNavigationRail(
         },
         onRailEnter = { selectedRequester.requestFocus() },
     ) {
-        BrandLogo(Modifier.size(metrics.logoSizeDp.dp))
+        TvRailBrandTile(Modifier.size(metrics.logoSizeDp.dp))
         Spacer(Modifier.height(metrics.logoItemGapDp.dp))
         primaryEntries.forEachIndexed { index, entry ->
             val requester = destinationFocusRequesters.getValue(entry.destination)
@@ -9207,6 +9209,7 @@ private fun CatalogCategoryBar(
             LiveCategoryChip(
                 category = category,
                 selected = selectedId == category.id,
+                isTv = isTv,
                 onClick = { onSelect(category.id) },
                 modifier = Modifier
                     .categoryChipFocus(
@@ -9447,6 +9450,7 @@ private fun LiveCategoryBar(
             LiveCategoryChip(
                 category = category,
                 selected = selectedId == category.id,
+                isTv = isTv,
                 onClick = { onSelect(category.id) },
                 modifier = Modifier
                     .categoryChipFocus(
@@ -9464,6 +9468,7 @@ private fun LiveCategoryBar(
 private fun LiveCategoryChip(
     category: Category,
     selected: Boolean,
+    isTv: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     metrics: LiveCategoryStripMetrics = LiveCategoryStripMetrics.Default,
@@ -9578,7 +9583,11 @@ private fun LiveCategoryChip(
                 ),
             contentAlignment = Alignment.Center,
         ) {
-            BrandLogo(Modifier.fillMaxSize().padding(if (framedBrandBadge) 3.dp else 2.dp))
+            if (isTv) {
+                TvFittedBrandMark(Modifier.fillMaxSize().padding(if (framedBrandBadge) 3.dp else 2.dp))
+            } else {
+                BrandLogo(Modifier.fillMaxSize().padding(if (framedBrandBadge) 3.dp else 2.dp))
+            }
         }
         Text(
             text = if (moving) "↔ ${category.name}" else category.name,
