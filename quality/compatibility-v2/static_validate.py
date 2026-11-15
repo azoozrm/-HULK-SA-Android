@@ -20,7 +20,7 @@ ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 DEFAULT_LOGO_SHA256 = "d347165df52c3a1decda570759cd09a3407af1b4f67835fd72036c3beedd7d01"
 APPROVED_BRAND_ASSETS = {
     "app/src/main/res/drawable-nodpi/hulk_sa_logo.png": DEFAULT_LOGO_SHA256,
-    "app/src/main/res/mipmap-xhdpi/tv_banner.png": "e9135d603726be2248871c0508f6cf387dd0c6f393888a75d8fa3366450eeda1",
+    "app/src/main/res/mipmap-xhdpi/tv_banner.png": "f5da54d6db21948ca226b37a88405e24bb8c24da1ad7b42298ae9cfff9a97a4b",
     "app/src/main/res/mipmap-xhdpi/ic_launcher_tv.png": "fdcb9ef4561caf96855a1318382f7e1ecc0399660fec2ee406893d75bca09699",
 }
 ICON_DENSITY_SPECS = {
