@@ -1,7 +1,6 @@
 package sa.hulksa.player.ui.components
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -15,7 +14,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import sa.hulksa.player.R
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
-import sa.hulksa.player.ui.theme.LocalHulkColors
 
 /** Tightly fitted NEO 4K mark for TV-only brand slots. */
 @Composable
@@ -30,20 +28,19 @@ fun TvFittedBrandMark(modifier: Modifier = Modifier) {
 
 /**
  * Explicit TV rail brand tile. The rail calls this directly in both collapsed and expanded states,
- * so the fitted mark never depends on a measured-size match. The dark backing and original 3dp
- * inset are preserved; the decorative gold border is removed.
+ * so the fitted mark never depends on a measured-size match. The mark sits directly on the
+ * TvRailSurface background: the earlier separate dark backing is removed. The original 3dp inset
+ * is preserved; the decorative gold border is removed.
  */
 @Composable
 fun TvRailBrandTile(modifier: Modifier) {
     val adaptiveUi = LocalAdaptiveUi.current
-    val colors = LocalHulkColors.current
     val shape = RoundedCornerShape(
         (adaptiveUi.tvPremiumPolicy.railLogoSizeDp * 0.18f).coerceIn(10f, 14f).dp,
     )
     Box(
         modifier = modifier
-            .clip(shape)
-            .background(colors.background),
+            .clip(shape),
         contentAlignment = Alignment.Center,
     ) {
         Image(

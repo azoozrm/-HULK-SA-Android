@@ -2,6 +2,7 @@ package sa.hulksa.player.ui.components
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -53,6 +54,18 @@ class TvFittedMarkContractTest {
         val shell = readSource("src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt")
 
         assertTrue(shell.contains("TvRailBrandTile(Modifier.size(metrics.logoSizeDp.dp))"))
+    }
+
+    @Test
+    fun `rail brand tile draws directly on the rail surface without a separate backing`() {
+        val source = readSource("src/main/java/sa/hulksa/player/ui/components/TvRailBrandLogo.kt")
+        val tile = source.substringAfter("fun TvRailBrandTile").substringBefore("/**", source)
+
+        assertFalse(tile.contains(".background("))
+        assertTrue(tile.contains(".clip(shape)"))
+        assertTrue(tile.contains("contentAlignment = Alignment.Center"))
+        assertTrue(tile.contains("painterResource(R.drawable.hulk_sa_tv_mark_fitted)"))
+        assertTrue(tile.contains("Modifier.fillMaxSize().padding(3.dp)"))
     }
 
     @Test
