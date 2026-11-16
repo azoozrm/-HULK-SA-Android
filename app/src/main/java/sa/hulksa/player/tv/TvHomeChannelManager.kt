@@ -31,10 +31,22 @@ import sa.hulksa.player.model.ProfileKind
 internal const val TV_CHANNEL_DISPLAY_NAME = "NEO 4K"
 internal const val TV_CONTINUE_WATCHING_LABEL = "اكمل المشاهدة"
 
-internal fun shouldMigrateTvChannelLogo(
-    migratedChannelId: Long,
+internal fun migrateTvChannelLogoIfNeeded(
     channelId: Long,
-): Boolean = migratedChannelId != channelId
+    migratedChannelId: Long,
+    writeLogo: () -> Unit,
+    markMigrated: (Long) -> Unit,
+) {
+    if (migratedChannelId == channelId) return
+    try {
+        writeLogo()
+    } catch (_: IOException) {
+        return
+    } catch (_: SecurityException) {
+        return
+    }
+    markMigrated(channelId)
+}
 
 sealed interface TvPlatformSyncResult {
     data object Unsupported : TvPlatformSyncResult
@@ -178,15 +190,16 @@ class TvHomeChannelManager(context: Context) {
                 .setDescription(TV_CONTINUE_WATCHING_LABEL)
                 .setAppLinkIntentUri(Uri.parse(TvDeepLinkRouter.uri(TvDeepLinkTarget.Home)))
                 .setInternalProviderId(CHANNEL_PROVIDER_ID)
-            val migrateLogo = shouldMigrateTvChannelLogo(
-                preferences.migratedChannelLogoId(),
-                channelId,
-            )
-            if (migrateLogo) builder.setLogo(channelLogo())
             helper.updatePreviewChannel(channelId, builder.build())
-            // The marker is written only after a successful update. If the logo
-            // write fails, the next sync remains eligible to retry this migration.
-            if (migrateLogo) preferences.markChannelLogoMigrated(channelId)
+            // A rejected logo write leaves the channel available for program sync and logo retry.
+            migrateTvChannelLogoIfNeeded(
+                channelId = channelId,
+                migratedChannelId = preferences.migratedChannelLogoId(),
+                writeLogo = {
+                    helper.updatePreviewChannel(channelId, builder.setLogo(channelLogo()).build())
+                },
+                markMigrated = preferences::markChannelLogoMigrated,
+            )
             return channelId
         }
         val channel = PreviewChannel.Builder()
