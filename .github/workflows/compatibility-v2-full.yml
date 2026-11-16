@@ -2,6 +2,15 @@ name: HULK SA Compatibility V2 - Full Matrix
 
 on:
   workflow_dispatch:
+    inputs:
+      expected_version_code:
+        description: 'Release candidate versionCode to use for the matrix APKs'
+        required: true
+        type: string
+      expected_version_name:
+        description: 'Release candidate versionName before the debug suffix'
+        required: true
+        type: string
   push:
     branches:
       - fix/v09318-production-host-qualification
@@ -105,7 +114,7 @@ jobs:
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Static, unit and test binaries
+      - name: Verify static and runtime harness contracts
         run: |
           set -euo pipefail
           python3 -m unittest discover -s quality/compatibility-v2/tests -p 'test_*.py' -v
@@ -115,10 +124,37 @@ jobs:
           bash -n quality/compatibility-v2/collect_runtime_evidence.sh
           bash -n quality/compatibility-v2/run_runtime_profile.sh
           bash -n quality/compatibility-v2/run_stable_emulator_profile.sh
-          ./gradlew --no-daemon --console=plain \
+      - name: Assemble matrix test binaries
+        env:
+          QUALIFICATION_VERSION_CODE: ${{ inputs.expected_version_code }}
+          QUALIFICATION_VERSION_NAME: ${{ inputs.expected_version_name }}
+        run: |
+          set -euo pipefail
+          version_args=()
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            if ! [[ "$QUALIFICATION_VERSION_CODE" =~ ^[1-9][0-9]*$ && "$QUALIFICATION_VERSION_NAME" =~ [^[:space:]] ]]; then
+              echo 'Full Matrix requires a positive expected_version_code and a non-blank expected_version_name.' >&2
+              exit 1
+            fi
+            version_args+=(
+              "-PHULK_QUALIFICATION_VERSION_CODE=$QUALIFICATION_VERSION_CODE"
+              "-PHULK_QUALIFICATION_VERSION_NAME=$QUALIFICATION_VERSION_NAME"
+            )
+          fi
+          ./gradlew --no-daemon --console=plain "${version_args[@]}" \
             clean :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+          debug_apk='app/build/outputs/apk/debug/app-debug.apk'
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            apk_version_code=$(apkanalyzer manifest version-code "$debug_apk")
+            if [[ "$apk_version_code" != "$QUALIFICATION_VERSION_CODE" ]]; then
+              printf 'Expected matrix APK versionCode %s, found %s\n' \
+                "$QUALIFICATION_VERSION_CODE" "$apk_version_code" >&2
+              exit 1
+            fi
+            printf 'Matrix APK versionCode: %s\n' "$apk_version_code"
+          fi
           mkdir -p build/compatibility-v2/binaries
-          cp app/build/outputs/apk/debug/app-debug.apk build/compatibility-v2/binaries/
+          cp "$debug_apk" build/compatibility-v2/binaries/
           cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk build/compatibility-v2/binaries/
           cp -a build/compatibility-v2/static build/compatibility-v2/binaries/
           (
