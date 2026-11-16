@@ -242,7 +242,7 @@ fun BrandLogo(
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Image(
             painter = painterResource(R.drawable.hulk_sa_mark_reference),
-            contentDescription = "HULK SA",
+            contentDescription = "NEO 4K",
             modifier = Modifier.fillMaxSize(),
             contentScale = contentScale,
         )
@@ -291,7 +291,7 @@ fun HulkFallbackArtwork(
     ) {
         Image(
             painter = rememberHulkPlaceholderPainter(),
-            contentDescription = "HULK SA",
+            contentDescription = "NEO 4K",
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Fit,
         )
@@ -302,6 +302,7 @@ fun HulkFallbackArtwork(
 fun BrandBadge(
     modifier: Modifier = Modifier,
     light: Boolean = false,
+    fittedTvMark: Boolean = false,
 ) {
     val shape = RoundedCornerShape(16.dp)
     val background = if (light) Color(0xFFF0EEE7) else LocalHulkColors.current.background
@@ -316,15 +317,17 @@ fun BrandBadge(
     ) {
         if (light) {
             Icon(
-                painter = painterResource(R.drawable.hulk_sa_badge_light),
-                contentDescription = "HULK SA",
+                painter = painterResource(
+                    if (fittedTvMark) R.drawable.hulk_sa_tv_mark_fitted else R.drawable.hulk_sa_badge_light,
+                ),
+                contentDescription = "NEO 4K",
                 tint = Color(0xFF171912),
-                modifier = Modifier.fillMaxSize().padding(2.dp),
+                modifier = Modifier.fillMaxSize().padding(if (fittedTvMark) 4.dp else 2.dp),
             )
         } else {
             Image(
                 painter = painterResource(R.drawable.hulk_sa_mark_reference),
-                contentDescription = "HULK SA",
+                contentDescription = "NEO 4K",
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize().padding(2.dp),
             )
@@ -2024,7 +2027,7 @@ fun LiveChannelHomeCard(
             } else {
                 Image(
                     painter = rememberHulkPlaceholderPainter(),
-                    contentDescription = "HULK SA",
+                    contentDescription = "NEO 4K",
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit,
                 )
@@ -2247,7 +2250,7 @@ fun ChannelLogo(
         } else {
             Image(
                 painter = rememberHulkPlaceholderPainter(),
-                contentDescription = "HULK SA",
+                contentDescription = "NEO 4K",
                 modifier = Modifier.fillMaxSize().padding(4.dp),
                 contentScale = ContentScale.Fit,
             )

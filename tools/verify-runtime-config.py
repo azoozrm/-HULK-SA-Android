@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify reviewed public HULK endpoints and absence of IPTV hosts in APK/AAB DEX."""
+"""Verify reviewed public NEO 4K endpoints and absence of IPTV hosts in APK/AAB DEX."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-PRODUCTION_RESELLER_API_URL = "https://hulksa.com"
-PRODUCTION_OPERATIONS_CONFIG_URL = "https://hulksa.com/hulk-operations/api/app/v1/config/"
+PRODUCTION_RESELLER_API_URL = "https://neo4ksa.com"
+PRODUCTION_OPERATIONS_CONFIG_URL = "https://neo4ksa.com/hulk-operations/api/app/v1/config/"
 FORBIDDEN_DEX_MARKERS = (
     b"http://3162356.xyz:8080",
     b"3162356.xyz:8080",
@@ -60,7 +60,7 @@ def verify(build_config: Path, archive: Path) -> dict[str, object]:
     operations_config_url = read_build_config_field(build_config, "OPERATIONS_CONFIG_URL")
     if reseller_api_url != PRODUCTION_RESELLER_API_URL:
         raise VerificationError(
-            "Generated release RESELLER_API_URL does not match the reviewed HULK API.",
+            "Generated release RESELLER_API_URL does not match the reviewed NEO 4K API.",
         )
     parsed = urlparse(reseller_api_url)
     if (
@@ -83,12 +83,12 @@ def verify(build_config: Path, archive: Path) -> dict[str, object]:
 
     if operations_config_url != PRODUCTION_OPERATIONS_CONFIG_URL:
         raise VerificationError(
-            "Generated release OPERATIONS_CONFIG_URL does not match the reviewed HULK endpoint.",
+            "Generated release OPERATIONS_CONFIG_URL does not match the reviewed NEO 4K endpoint.",
         )
     operations = urlparse(operations_config_url)
     if (
         operations.scheme != "https"
-        or operations.hostname != "hulksa.com"
+        or operations.hostname != "neo4ksa.com"
         or operations.username is not None
         or operations.password is not None
         or operations.params
@@ -102,11 +102,11 @@ def verify(build_config: Path, archive: Path) -> dict[str, object]:
     dex_payload = b"".join(payload for _, payload in dex_entries)
     if reseller_api_url.encode("utf-8") not in dex_payload:
         raise VerificationError(
-            "Configured HULK reseller API is absent from the compiled DEX payload.",
+            "Configured NEO 4K reseller API is absent from the compiled DEX payload.",
         )
     if operations_config_url.encode("utf-8") not in dex_payload:
         raise VerificationError(
-            "Configured HULK Operations endpoint is absent from the compiled DEX payload.",
+            "Configured NEO 4K Operations endpoint is absent from the compiled DEX payload.",
         )
     if any(marker in dex_payload for marker in FORBIDDEN_DEX_MARKERS):
         raise VerificationError(

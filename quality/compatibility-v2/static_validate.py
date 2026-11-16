@@ -17,11 +17,11 @@ from xml.etree import ElementTree
 
 STATUSES = ("PASS", "FAIL", "BLOCKED", "SKIPPED")
 ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
-DEFAULT_LOGO_SHA256 = "5fbf762c53a9ecc686c71de2d792c0b2163d296709b6e699439d1a5184a41bb0"
+DEFAULT_LOGO_SHA256 = "d347165df52c3a1decda570759cd09a3407af1b4f67835fd72036c3beedd7d01"
 APPROVED_BRAND_ASSETS = {
     "app/src/main/res/drawable-nodpi/hulk_sa_logo.png": DEFAULT_LOGO_SHA256,
-    "app/src/main/res/mipmap-xhdpi/tv_banner.png": "1a941c5425b4ae7c2194ff505b4c394e9b64e522fcbfb99e02357523241d34e2",
-    "app/src/main/res/mipmap-xhdpi/ic_launcher_tv.png": "9fcc30b1ef9122c3c15b9a8c1fa8bd83bc3329901df221d1e520f0de41eebc28",
+    "app/src/main/res/mipmap-xhdpi/tv_banner.png": "e629640c3d0ba94189b1775efc75453a3ba5110a07a2e76d54489545447ae2e3",
+    "app/src/main/res/mipmap-xhdpi/ic_launcher_tv.png": "fdcb9ef4561caf96855a1318382f7e1ecc0399660fec2ee406893d75bca09699",
 }
 ICON_DENSITY_SPECS = {
     "mdpi": {"launcher": 48, "tv_launcher": 80, "banner": (160, 90), "notification": 24},
@@ -213,7 +213,7 @@ def validate_repo(repo_root: Path, expected_logo_sha256: str = DEFAULT_LOGO_SHA2
         all(
             marker in build_text
             for marker in (
-                'val resellerApiUrl = "https://hulksa.com"',
+                'val resellerApiUrl = "https://neo4ksa.com"',
                 'buildConfigField("String", "RESELLER_API_URL"',
                 "verifyProductionRuntimeConfig",
             )

@@ -447,7 +447,7 @@ class PairingControllerTest {
 
         fun enableDiscovery() {
             controller.updateDiscovery(
-                OperationsPairingConfig(baseUrl = "https://hulksa.com/control-center/api/app/v1/pairing/"),
+                OperationsPairingConfig(baseUrl = "https://neo4ksa.com/control-center/api/app/v1/pairing/"),
             )
         }
 
@@ -572,7 +572,7 @@ class PairingControllerTest {
         const val REQUEST_ID = "11111111-2222-4333-8444-555555555555"
         const val USER_CODE = "HULKTV-ABCDEF"
         val CLAIM_TOKEN: String = canonicalBase64Url(ByteArray(32) { 2 })
-        const val VERIFICATION_URL = "https://hulksa.com/control-center/pair/#C=HULKTV-ABCDEF"
+        const val VERIFICATION_URL = "https://neo4ksa.com/control-center/pair/#C=HULKTV-ABCDEF"
         val CREDENTIALS = Credentials(accessCode = "CODE", username = "user", password = "pass")
     }
 }

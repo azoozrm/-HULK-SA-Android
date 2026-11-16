@@ -16,7 +16,7 @@ import sa.hulksa.player.model.Credentials
 
 internal const val PAIRING_BASE_PATH = "/control-center/api/app/v1/pairing/"
 
-private const val PAIRING_HOST = "hulksa.com"
+private const val PAIRING_HOST = "neo4ksa.com"
 private const val PAIRING_USER_CODE_PREFIX = "HULKTV-"
 private const val PAIRING_USER_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 private const val PAIRING_USER_CODE_LENGTH = 6
@@ -354,8 +354,8 @@ internal class PairingClient(
         // Existing R04 clients and the preserved API output use the legacy route; the R07 public
         // site uses /pair/. Accept only these two exact strings bound to the same validated code
         // and expose the canonical /pair/ URL constructed from that code.
-        val legacyVerificationUrl = "https://hulksa.com/control-center/pair/#C=$userCode"
-        val canonicalVerificationUrl = "https://hulksa.com/pair/#C=$userCode"
+        val legacyVerificationUrl = "https://neo4ksa.com/control-center/pair/#C=$userCode"
+        val canonicalVerificationUrl = "https://neo4ksa.com/pair/#C=$userCode"
         require(verificationUrl == legacyVerificationUrl || verificationUrl == canonicalVerificationUrl)
         val pollIntervalSeconds = json.strictInt("pollIntervalSeconds") ?: error("pollIntervalSeconds")
         require(pollIntervalSeconds in PAIRING_MIN_POLL_INTERVAL_SECONDS..PAIRING_MAX_POLL_INTERVAL_SECONDS)

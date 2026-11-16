@@ -35,7 +35,7 @@ class GrowthPolicyTest {
         val parsed = parseOperationsConfig(configJson(growthJson()))
 
         assertTrue(parsed!!.growth.renewal.enabled)
-        assertEquals("https://hulksa.com/", parsed.growth.renewal.url)
+        assertEquals("https://neo4ksa.com/", parsed.growth.renewal.url)
     }
 
     @Test
@@ -49,15 +49,15 @@ class GrowthPolicyTest {
     @Test
     fun renewalAllowsTrustedSubdomain() {
         assertEquals(
-            "https://renew.hulksa.com/path",
-            normalizeGrowthRenewalUrl("https://renew.hulksa.com/path"),
+            "https://renew.neo4ksa.com/path",
+            normalizeGrowthRenewalUrl("https://renew.neo4ksa.com/path"),
         )
     }
 
     @Test
     fun httpRenewalUrlIsRejected() {
         val parsed = parseOperationsConfig(
-            configJson(growthJson(renewalUrl = "http://hulksa.com/")),
+            configJson(growthJson(renewalUrl = "http://neo4ksa.com/")),
         )
 
         assertFalse(parsed!!.growth.renewal.enabled)
@@ -70,8 +70,8 @@ class GrowthPolicyTest {
             "javascript:alert(1)",
             "file:///tmp/qr.png",
             "content://sa.hulksa/qr",
-            "intent://hulksa.com/#Intent;end",
-            "ftp://hulksa.com/qr",
+            "intent://neo4ksa.com/#Intent;end",
+            "ftp://neo4ksa.com/qr",
         )) {
             assertNull(normalizeGrowthRenewalUrl(url))
         }
@@ -79,8 +79,18 @@ class GrowthPolicyTest {
 
     @Test
     fun renewalCredentialsAndQueryAreRejected() {
-        assertNull(normalizeGrowthRenewalUrl("https://user:pass@hulksa.com/"))
-        assertNull(normalizeGrowthRenewalUrl("https://hulksa.com/?accountId=1"))
+        assertNull(normalizeGrowthRenewalUrl("https://user:pass@neo4ksa.com/"))
+        assertNull(normalizeGrowthRenewalUrl("https://neo4ksa.com/?accountId=1"))
+    }
+
+    @Test
+    fun legacyHulkOriginIsRejected() {
+        assertNull(normalizeGrowthRenewalUrl("https://hulksa.com/"))
+        assertNull(
+            normalizeGrowthCustomQrUrl(
+                "https://hulksa.com/hulk-operations/growth-media/growth-renewal-${"a".repeat(32)}.png",
+            ),
+        )
     }
 
     @Test
@@ -355,8 +365,8 @@ class GrowthPolicyTest {
         renewal = OperationsGrowthLinkConfig(
             enabled = true,
             title = "التجديد والموقع",
-            url = "https://hulksa.com/",
-            displayText = "hulksa.com",
+            url = "https://neo4ksa.com/",
+            displayText = "neo4ksa.com",
         ),
         support = OperationsGrowthLinkConfig(
             enabled = true,
@@ -368,11 +378,11 @@ class GrowthPolicyTest {
     )
 
     private fun validCustomQr(slot: String): String =
-        "https://hulksa.com/hulk-operations/growth-media/growth-$slot-${"a".repeat(32)}.png"
+        "https://neo4ksa.com/hulk-operations/growth-media/growth-$slot-${"a".repeat(32)}.png"
 
     private fun growthJson(
         enabled: Boolean = true,
-        renewalUrl: String = "https://hulksa.com/",
+        renewalUrl: String = "https://neo4ksa.com/",
         renewalMode: String = "AUTO",
         renewalCustomQr: String? = null,
         days: Int = 7,
@@ -385,7 +395,7 @@ class GrowthPolicyTest {
                 "enabled":true,
                 "title":"التجديد والموقع",
                 "url":"$renewalUrl",
-                "displayText":"hulksa.com",
+                "displayText":"neo4ksa.com",
                 "qrMode":"$renewalMode",
                 "customQrUrl":$customQr
               },

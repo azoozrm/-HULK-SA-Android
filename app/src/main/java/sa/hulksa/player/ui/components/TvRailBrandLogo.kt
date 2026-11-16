@@ -1,10 +1,7 @@
 package sa.hulksa.player.ui.components
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,60 +13,57 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import sa.hulksa.player.R
-import sa.hulksa.player.ui.adaptive.HulkNavigationType
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
-import sa.hulksa.player.ui.theme.LocalHulkColors
-import kotlin.math.abs
+
+/** Tightly fitted NEO 4K mark for TV-only brand slots. */
+@Composable
+fun TvFittedBrandMark(modifier: Modifier = Modifier) {
+    Image(
+        painter = painterResource(R.drawable.hulk_sa_tv_mark_fitted),
+        contentDescription = "NEO 4K",
+        modifier = modifier,
+        contentScale = ContentScale.Fit,
+    )
+}
 
 /**
- * One-argument BrandLogo overload used by TV rail and fallback artwork surfaces.
+ * Explicit TV rail brand tile. The rail calls this directly in both collapsed and expanded states,
+ * so the fitted mark never depends on a measured-size match. The mark sits directly on the
+ * TvRailSurface background: the earlier separate dark backing is removed. The original 3dp inset
+ * is preserved; the decorative gold border is removed.
+ */
+@Composable
+fun TvRailBrandTile(modifier: Modifier) {
+    val adaptiveUi = LocalAdaptiveUi.current
+    val shape = RoundedCornerShape(
+        (adaptiveUi.tvPremiumPolicy.railLogoSizeDp * 0.18f).coerceIn(10f, 14f).dp,
+    )
+    Box(
+        modifier = modifier
+            .clip(shape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Image(
+            painter = painterResource(R.drawable.hulk_sa_tv_mark_fitted),
+            contentDescription = "NEO 4K",
+            modifier = Modifier.fillMaxSize().padding(3.dp),
+            contentScale = ContentScale.Fit,
+        )
+    }
+}
+
+/**
+ * Shared NEO mark used by poster fallbacks, Details and other non-rail surfaces.
  *
- * The TV rail owns one black framed tile with a large shield-only mark. Non-rail
- * one-argument usages stay transparent so poster fallbacks never inherit the rail frame.
+ * The TV rail uses [TvRailBrandTile] explicitly; this function deliberately keeps the larger
+ * shared artwork unchanged for every other caller.
  */
 @Composable
 fun BrandLogo(modifier: Modifier) {
-    BoxWithConstraints(
+    Image(
+        painter = painterResource(R.drawable.hulk_sa_mark_reference),
+        contentDescription = "NEO 4K",
         modifier = modifier,
-        contentAlignment = Alignment.Center,
-    ) {
-        val adaptiveUi = LocalAdaptiveUi.current
-        val expectedRailLogoSizeDp = adaptiveUi.tvPremiumPolicy.railLogoSizeDp
-        val isTvRailLogo = adaptiveUi.isTelevision &&
-            adaptiveUi.navigationType == HulkNavigationType.RAIL &&
-            abs(maxWidth.value - expectedRailLogoSizeDp) <= 0.5f &&
-            abs(maxHeight.value - expectedRailLogoSizeDp) <= 0.5f
-
-        if (!isTvRailLogo) {
-            Image(
-                painter = painterResource(R.drawable.hulk_sa_mark_reference),
-                contentDescription = "HULK SA",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
-            )
-            return@BoxWithConstraints
-        }
-
-        val colors = LocalHulkColors.current
-        val shape = RoundedCornerShape(
-            (expectedRailLogoSizeDp * 0.18f).coerceIn(10f, 14f).dp,
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(shape)
-                .background(colors.background)
-                .border(1.5.dp, colors.gold.copy(alpha = .72f), shape)
-                .padding(3.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Image(
-                painter = painterResource(R.drawable.hulk_sa_mark_reference),
-                contentDescription = "HULK SA",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
-            )
-        }
-    }
+        contentScale = ContentScale.Fit,
+    )
 }

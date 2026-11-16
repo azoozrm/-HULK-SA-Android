@@ -200,7 +200,7 @@ fun isInstallableOperationsUpdate(update: OperationsUpdateConfig): Boolean {
     val parsed = runCatching { URI(url) }.getOrNull()
     return parsed != null &&
         parsed.scheme.equals("https", ignoreCase = true) &&
-        parsed.host.equals("hulksa.com", ignoreCase = true) &&
+        parsed.host.equals("neo4ksa.com", ignoreCase = true) &&
         (parsed.port == -1 || parsed.port == 443) &&
         parsed.userInfo == null &&
         parsed.query == null &&
@@ -379,7 +379,7 @@ private fun parseOperationsPresence(value: JSONObject?): OperationsPresenceConfi
     )
 }.getOrNull()
 
-private const val PRESENCE_HOST = "hulksa.com"
+private const val PRESENCE_HOST = "neo4ksa.com"
 private const val PRESENCE_PATH = "/control-center/api/app/v1/presence/"
 private val PRESENCE_HEARTBEAT_RANGE = 15..600
 private const val PRESENCE_MAX_TTL_SECONDS = 3_600

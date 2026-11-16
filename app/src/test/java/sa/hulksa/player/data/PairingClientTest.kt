@@ -58,7 +58,7 @@ class PairingClientTest {
             .followSslRedirects(false)
             .addInterceptor { chain ->
                 // Injected local mock transport only: production validation still sees the pinned
-                // hulksa.com URL; the byte transport is redirected to the local TLS test server.
+                // neo4ksa.com URL; the byte transport is redirected to the local TLS test server.
                 val rewritten = chain.request().url.newBuilder()
                     .scheme("https")
                     .host("127.0.0.1")
@@ -132,7 +132,7 @@ class PairingClientTest {
 
     @Test
     fun `create rejects unsafe discovery and invalid input before any request`() = runBlocking {
-        val unsafe = client.create("http://hulksa.com/control-center/api/app/v1/pairing/", input())
+        val unsafe = client.create("http://neo4ksa.com/control-center/api/app/v1/pairing/", input())
         val invalidSecret = client.create(PAIRING_BASE, input().copy(clientSecret = "short"))
         val invalidUuid = client.create(PAIRING_BASE, input().copy(clientRequestId = "not-a-uuid"))
 
@@ -148,7 +148,7 @@ class PairingClientTest {
         server.enqueue(
             jsonResponse(
                 201,
-                createdBody(verificationBase = "https://hulksa.com/pair/#C="),
+                createdBody(verificationBase = "https://neo4ksa.com/pair/#C="),
             ),
         )
 
@@ -166,23 +166,25 @@ class PairingClientTest {
             "mismatched code (legacy)" to createdBody(verificationCode = "HULKTV-ZZZZZZ"),
             "mismatched code (canonical)" to
                 createdBody(
-                    verificationBase = "https://hulksa.com/pair/#C=",
+                    verificationBase = "https://neo4ksa.com/pair/#C=",
                     verificationCode = "HULKTV-ZZZZZZ",
                 ),
             "different host" to
-                createdBody(verificationBase = "https://hulksa.com.evil.test/pair/#C="),
-            "http scheme" to createdBody(verificationBase = "http://hulksa.com/pair/#C="),
-            "explicit port" to createdBody(verificationBase = "https://hulksa.com:443/pair/#C="),
-            "credentials" to createdBody(verificationBase = "https://user@hulksa.com/pair/#C="),
-            "query" to createdBody(verificationBase = "https://hulksa.com/pair/?x=1#C="),
+                createdBody(verificationBase = "https://neo4ksa.com.evil.test/pair/#C="),
+            "legacy origin" to
+                createdBody(verificationBase = "https://hulksa.com/pair/#C="),
+            "http scheme" to createdBody(verificationBase = "http://neo4ksa.com/pair/#C="),
+            "explicit port" to createdBody(verificationBase = "https://neo4ksa.com:443/pair/#C="),
+            "credentials" to createdBody(verificationBase = "https://user@neo4ksa.com/pair/#C="),
+            "query" to createdBody(verificationBase = "https://neo4ksa.com/pair/?x=1#C="),
             "encoded path" to
-                createdBody(verificationBase = "https://hulksa.com/pair%2F#C="),
+                createdBody(verificationBase = "https://neo4ksa.com/pair%2F#C="),
             "double slash path" to
-                createdBody(verificationBase = "https://hulksa.com//pair/#C="),
+                createdBody(verificationBase = "https://neo4ksa.com//pair/#C="),
             "extra fragment" to
-                createdBody(verificationBase = "https://hulksa.com/pair/#C=x;y#C="),
+                createdBody(verificationBase = "https://neo4ksa.com/pair/#C=x;y#C="),
             "other path" to
-                createdBody(verificationBase = "https://hulksa.com/control-center/pairing/#C="),
+                createdBody(verificationBase = "https://neo4ksa.com/control-center/pairing/#C="),
         )
 
         malformed.forEach { (name, body) ->
@@ -318,7 +320,7 @@ class PairingClientTest {
         server.enqueue(
             MockResponse()
                 .setResponseCode(301)
-                .setHeader("Location", "https://hulksa.com/control-center/api/app/v1/pairing/create/"),
+                .setHeader("Location", "https://neo4ksa.com/control-center/api/app/v1/pairing/create/"),
         )
 
         val result = client.create(PAIRING_BASE, input())
@@ -398,7 +400,8 @@ class PairingClientTest {
         assertFalse(isPairingUserCode("ABCDEF-HULKTV"))
         assertTrue(isPairingUuidV4(REQUEST_ID))
         assertFalse(isPairingUuidV4(REQUEST_ID.replace('4', '3', ignoreCase = false)))
-        assertNull(canonicalPairingBaseUrl("https://hulksa.com/control-center/api/app/v1/pairing"))
+        assertNull(canonicalPairingBaseUrl("https://neo4ksa.com/control-center/api/app/v1/pairing"))
+        assertNull(canonicalPairingBaseUrl("https://hulksa.com/control-center/api/app/v1/pairing/"))
         assertFalse(isPairingCanonicalToken("A".repeat(42) + "B"))
         assertTrue(isPairingCanonicalToken(encoded))
     }
@@ -478,7 +481,7 @@ class PairingClientTest {
     private fun createdBody(
         userCode: String = USER_CODE,
         verificationCode: String = USER_CODE,
-        verificationBase: String = "https://hulksa.com/control-center/pair/#C=",
+        verificationBase: String = "https://neo4ksa.com/control-center/pair/#C=",
         contractVersion: String = "1",
         claimToken: String = CLAIM_TOKEN,
         expiresAt: String = "1770000600000",
@@ -503,11 +506,11 @@ class PairingClientTest {
         .setBody(body)
 
     private companion object {
-        const val PAIRING_BASE = "https://hulksa.com/control-center/api/app/v1/pairing/"
+        const val PAIRING_BASE = "https://neo4ksa.com/control-center/api/app/v1/pairing/"
         const val REQUEST_ID = "11111111-2222-4333-8444-555555555555"
         const val INSTALLATION_ID = "99999999-8888-4777-8666-555555555555"
         const val USER_CODE = "HULKTV-ABCDEF"
-        const val CANONICAL_VERIFICATION_URL = "https://hulksa.com/pair/#C=HULKTV-ABCDEF"
+        const val CANONICAL_VERIFICATION_URL = "https://neo4ksa.com/pair/#C=HULKTV-ABCDEF"
         const val CLIENT_SECRET = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         val CLAIM_TOKEN: String = canonicalBase64Url(ByteArray(32) { 2 })
     }

@@ -248,8 +248,8 @@ private fun GrowthQrCopy(
     )
     Text(
         text = when {
-            newSubscriptionCopy -> "ابدا رحلتك مع HULK"
-            destination == GrowthDestination.RENEWAL -> "جدد اشتراكك مع HULK"
+            newSubscriptionCopy -> "ابدا رحلتك مع NEO 4K"
+            destination == GrowthDestination.RENEWAL -> "جدد اشتراكك مع NEO 4K"
             else -> "تواصل معنا عبر واتساب"
         },
         color = colors.text,

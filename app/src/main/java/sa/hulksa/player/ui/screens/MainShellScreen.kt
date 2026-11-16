@@ -245,6 +245,8 @@ import sa.hulksa.player.ui.adaptive.HulkNavigationType
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.BrandBadge
+import sa.hulksa.player.ui.components.TvFittedBrandMark
+import sa.hulksa.player.ui.components.TvRailBrandTile
 import sa.hulksa.player.ui.components.TvRailDestinationItem
 import sa.hulksa.player.ui.components.TvRailSurface
 import sa.hulksa.player.ui.components.ChannelLogo
@@ -1701,7 +1703,7 @@ private fun CinematicNavigationRail(
         },
         onRailEnter = { selectedRequester.requestFocus() },
     ) {
-        BrandLogo(Modifier.size(metrics.logoSizeDp.dp))
+        TvRailBrandTile(Modifier.size(metrics.logoSizeDp.dp))
         Spacer(Modifier.height(metrics.logoItemGapDp.dp))
         primaryEntries.forEachIndexed { index, entry ->
             val requester = destinationFocusRequesters.getValue(entry.destination)
@@ -2485,10 +2487,10 @@ private fun CinemaHomeScreen(
             item(key = "recommended") { HomeSectionPadding(isTv) { HomeBoxedSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("recommended"), rowFocusTarget("recommended")) } }
         }
         if (homeMovies.isNotEmpty()) {
-            item(key = "recent-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("recent-movies"), rowFocusTarget("recent-movies")) } }
+            item(key = "recent-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات NEO 4K — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("recent-movies"), rowFocusTarget("recent-movies")) } }
         }
         if (homeSeries.isNotEmpty()) {
-            item(key = "recent-series") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("recent-series"), rowFocusTarget("recent-series")) } }
+            item(key = "recent-series") { HomeSectionPadding(isTv) { HomeBoxedSection("احدث اضافات NEO 4K — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("recent-series"), rowFocusTarget("recent-series")) } }
         }
         if (popularMovies.isNotEmpty()) {
             item(key = "top-movies") { HomeSectionPadding(isTv) { HomeBoxedSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, favorites, onOpen, onToggleFavorite, homeModelIsCurrent, homeModelSettled, railFocusRevision, homeReturnRailBaseline, homeRestoreOwner, rowFocusRequester("top-movies"), rowFocusTarget("top-movies")) } }
@@ -8747,14 +8749,14 @@ private fun FeatureRecommendationRow(index: Int, recommendation: FeatureRecommen
 private fun shareDiagnosticsReport(context: android.content.Context, report: ServerDiagnosticsReport) {
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = "text/plain"
-        putExtra(Intent.EXTRA_SUBJECT, "تقرير تشخيص HULK SA")
+        putExtra(Intent.EXTRA_SUBJECT, "تقرير تشخيص NEO 4K")
         putExtra(Intent.EXTRA_TEXT, diagnosticsReportText(report))
     }
     runCatching { context.startActivity(Intent.createChooser(intent, "مشاركة تقرير التشخيص")) }
 }
 
 private fun diagnosticsReportText(report: ServerDiagnosticsReport): String = buildString {
-    appendLine("تقرير فحص HULK SA")
+    appendLine("تقرير فحص NEO 4K")
     appendLine("النتيجة: ${report.overallScore}/100 - ${report.overallStatus}")
     appendLine("السيرفر: ${report.portalScheme}://${report.portalHost}")
     appendLine("الشبكة: ${report.networkSummary}")
@@ -9207,6 +9209,7 @@ private fun CatalogCategoryBar(
             LiveCategoryChip(
                 category = category,
                 selected = selectedId == category.id,
+                isTv = isTv,
                 onClick = { onSelect(category.id) },
                 modifier = Modifier
                     .categoryChipFocus(
@@ -9447,6 +9450,7 @@ private fun LiveCategoryBar(
             LiveCategoryChip(
                 category = category,
                 selected = selectedId == category.id,
+                isTv = isTv,
                 onClick = { onSelect(category.id) },
                 modifier = Modifier
                     .categoryChipFocus(
@@ -9464,6 +9468,7 @@ private fun LiveCategoryBar(
 private fun LiveCategoryChip(
     category: Category,
     selected: Boolean,
+    isTv: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     metrics: LiveCategoryStripMetrics = LiveCategoryStripMetrics.Default,
@@ -9578,7 +9583,11 @@ private fun LiveCategoryChip(
                 ),
             contentAlignment = Alignment.Center,
         ) {
-            BrandLogo(Modifier.fillMaxSize().padding(if (framedBrandBadge) 3.dp else 2.dp))
+            if (isTv) {
+                TvFittedBrandMark(Modifier.fillMaxSize().padding(if (framedBrandBadge) 3.dp else 2.dp))
+            } else {
+                BrandLogo(Modifier.fillMaxSize().padding(if (framedBrandBadge) 3.dp else 2.dp))
+            }
         }
         Text(
             text = if (moving) "↔ ${category.name}" else category.name,

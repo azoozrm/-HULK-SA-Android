@@ -21,7 +21,7 @@ class OperationsPresenceConfigTest {
                 configJson(
                     """"presence":{
                       "enabled":true,
-                      "baseUrl":"https://hulksa.com/control-center/api/app/v1/presence/",
+                      "baseUrl":"https://neo4ksa.com/control-center/api/app/v1/presence/",
                       "heartbeatSeconds":60,
                       "onlineTtlSeconds":180
                     },""",
@@ -31,7 +31,7 @@ class OperationsPresenceConfigTest {
 
         assertEquals(
             OperationsPresenceConfig(
-                baseUrl = "https://hulksa.com/control-center/api/app/v1/presence/",
+                baseUrl = "https://neo4ksa.com/control-center/api/app/v1/presence/",
                 heartbeatSeconds = 60,
                 onlineTtlSeconds = 180,
             ),
@@ -51,11 +51,12 @@ class OperationsPresenceConfigTest {
     @Test
     fun `invalid discovery fails closed without invalidating unrelated config`() {
         val invalidValues = listOf(
-            """"presence":{"enabled":true,"baseUrl":"http://hulksa.com/control-center/api/app/v1/presence/","heartbeatSeconds":60,"onlineTtlSeconds":180},""",
+            """"presence":{"enabled":true,"baseUrl":"http://neo4ksa.com/control-center/api/app/v1/presence/","heartbeatSeconds":60,"onlineTtlSeconds":180},""",
             """"presence":{"enabled":true,"baseUrl":"https://example.com/control-center/api/app/v1/presence/","heartbeatSeconds":60,"onlineTtlSeconds":180},""",
-            """"presence":{"enabled":true,"baseUrl":"https://hulksa.com/api/presence/","heartbeatSeconds":60,"onlineTtlSeconds":180},""",
-            """"presence":{"enabled":true,"baseUrl":"https://hulksa.com/control-center/api/app/v1/presence/","heartbeatSeconds":14,"onlineTtlSeconds":180},""",
-            """"presence":{"enabled":true,"baseUrl":"https://hulksa.com/control-center/api/app/v1/presence/","heartbeatSeconds":60,"onlineTtlSeconds":119},""",
+            """"presence":{"enabled":true,"baseUrl":"https://hulksa.com/control-center/api/app/v1/presence/","heartbeatSeconds":60,"onlineTtlSeconds":180},""",
+            """"presence":{"enabled":true,"baseUrl":"https://neo4ksa.com/api/presence/","heartbeatSeconds":60,"onlineTtlSeconds":180},""",
+            """"presence":{"enabled":true,"baseUrl":"https://neo4ksa.com/control-center/api/app/v1/presence/","heartbeatSeconds":14,"onlineTtlSeconds":180},""",
+            """"presence":{"enabled":true,"baseUrl":"https://neo4ksa.com/control-center/api/app/v1/presence/","heartbeatSeconds":60,"onlineTtlSeconds":119},""",
             """"presence":"malformed",""",
         )
 
@@ -78,7 +79,7 @@ class OperationsPresenceConfigTest {
             "latestVersionName":"0.9.3.21",
             "minimumSupportedVersionCode":64,
             "updateType":"OPTIONAL",
-            "apkUrl":"https://hulksa.com/hulk-operations/releases/hulk-sa-65.apk",
+            "apkUrl":"https://neo4ksa.com/hulk-operations/releases/hulk-sa-65.apk",
             "apkSha256":"${"a".repeat(64)}",
             "releaseNotes":""
           },

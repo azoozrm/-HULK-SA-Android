@@ -28,8 +28,25 @@ import sa.hulksa.player.data.UserLibrary
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.ProfileKind
 
-internal const val TV_CHANNEL_DISPLAY_NAME = "HULK SA"
+internal const val TV_CHANNEL_DISPLAY_NAME = "NEO 4K"
 internal const val TV_CONTINUE_WATCHING_LABEL = "اكمل المشاهدة"
+
+internal fun migrateTvChannelLogoIfNeeded(
+    channelId: Long,
+    migratedChannelId: Long,
+    writeLogo: () -> Unit,
+    markMigrated: (Long) -> Unit,
+) {
+    if (migratedChannelId == channelId) return
+    try {
+        writeLogo()
+    } catch (_: IOException) {
+        return
+    } catch (_: SecurityException) {
+        return
+    }
+    markMigrated(channelId)
+}
 
 sealed interface TvPlatformSyncResult {
     data object Unsupported : TvPlatformSyncResult
@@ -168,28 +185,41 @@ class TvHomeChannelManager(context: Context) {
 
     private fun ensureChannel(): Long {
         findChannelId()?.let { channelId ->
-            val metadata = PreviewChannel.Builder()
+            val builder = PreviewChannel.Builder()
                 .setDisplayName(CHANNEL_NAME)
                 .setDescription(TV_CONTINUE_WATCHING_LABEL)
                 .setAppLinkIntentUri(Uri.parse(TvDeepLinkRouter.uri(TvDeepLinkTarget.Home)))
                 .setInternalProviderId(CHANNEL_PROVIDER_ID)
-                .build()
-            helper.updatePreviewChannel(channelId, metadata)
+            helper.updatePreviewChannel(channelId, builder.build())
+            // A rejected logo write leaves the channel available for program sync and logo retry.
+            migrateTvChannelLogoIfNeeded(
+                channelId = channelId,
+                migratedChannelId = preferences.migratedChannelLogoId(),
+                writeLogo = {
+                    helper.updatePreviewChannel(channelId, builder.setLogo(channelLogo()).build())
+                },
+                markMigrated = preferences::markChannelLogoMigrated,
+            )
             return channelId
         }
-        val logo = ContextCompat.getDrawable(appContext, R.mipmap.ic_launcher_tv)?.toBitmap()
-            ?: throw IOException("HULK SA TV channel logo is unavailable")
         val channel = PreviewChannel.Builder()
             .setDisplayName(CHANNEL_NAME)
             .setDescription(TV_CONTINUE_WATCHING_LABEL)
             .setAppLinkIntentUri(Uri.parse(TvDeepLinkRouter.uri(TvDeepLinkTarget.Home)))
             .setInternalProviderId(CHANNEL_PROVIDER_ID)
-            .setLogo(logo)
+            .setLogo(channelLogo())
             .build()
         val channelId = helper.publishDefaultChannel(channel)
-        if (channelId >= 0L) preferences.setChannelId(channelId)
+        if (channelId >= 0L) {
+            preferences.setChannelId(channelId)
+            preferences.markChannelLogoMigrated(channelId)
+        }
         return channelId
     }
+
+    private fun channelLogo() =
+        ContextCompat.getDrawable(appContext, R.mipmap.ic_launcher_tv)?.toBitmap()
+            ?: throw IOException("NEO 4K TV channel logo is unavailable")
 
     private fun findChannelId(): Long? {
         val storedId = preferences.channelId()
@@ -461,8 +491,17 @@ private class TvPlatformPreferences(context: Context) {
         global.edit().putLong(KEY_CHANNEL_ID, channelId).apply()
     }
 
+    fun migratedChannelLogoId(): Long = global.getLong(KEY_CHANNEL_LOGO_MIGRATED_ID, -1L)
+
+    fun markChannelLogoMigrated(channelId: Long) {
+        global.edit().putLong(KEY_CHANNEL_LOGO_MIGRATED_ID, channelId).apply()
+    }
+
     fun clearChannelId() {
-        global.edit().remove(KEY_CHANNEL_ID).apply()
+        global.edit()
+            .remove(KEY_CHANNEL_ID)
+            .remove(KEY_CHANNEL_LOGO_MIGRATED_ID)
+            .apply()
     }
 
     fun suppressedProviderIds(profileId: String): Set<String> =
@@ -481,5 +520,6 @@ private class TvPlatformPreferences(context: Context) {
         const val GLOBAL_PREFERENCES = "hulk_tv_platform_v230"
         const val SCOPED_PREFERENCES = "hulk_tv_platform_v230_suppressed"
         const val KEY_CHANNEL_ID = "channel_id"
+        const val KEY_CHANNEL_LOGO_MIGRATED_ID = "channel_logo_migrated_id"
     }
 }

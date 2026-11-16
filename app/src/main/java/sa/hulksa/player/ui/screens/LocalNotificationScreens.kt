@@ -1649,7 +1649,7 @@ private fun TvLocalNotificationCard(
             verticalArrangement = Arrangement.Center,
         ) {
             Text(
-                text = if (episode != null) "حلقة جديدة" else "رسالة من HULK SA",
+                text = if (episode != null) "حلقة جديدة" else "رسالة من NEO 4K",
                 color = colors.goldBright,
                 fontSize = 11.sp,
                 lineHeight = 14.sp,
@@ -1809,7 +1809,7 @@ private fun MobileLocalNotificationCard(
         }
         Column(Modifier.weight(1f)) {
             Text(
-                text = if (episode != null) "حلقة جديدة" else "رسالة من HULK SA",
+                text = if (episode != null) "حلقة جديدة" else "رسالة من NEO 4K",
                 color = colors.goldBright,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Black,

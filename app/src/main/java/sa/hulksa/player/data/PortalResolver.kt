@@ -140,12 +140,12 @@ sealed class PortalException(message: String, cause: Throwable? = null) : Except
             LoginFailureStage.RESOLVER,
         )
 
-    data object ConfigurationMissing : PortalException("تعذر الاتصال بخدمة HULK ، تواصل مع الدعم")
+    data object ConfigurationMissing : PortalException("تعذر الاتصال بخدمة NEO 4K ، تواصل مع الدعم")
     data object InvalidAccessCode : PortalException("كود الدخول غير صحيح")
     data object ResellerInactive : PortalException("حساب الموزع متوقف. تواصل مع الدعم")
     data object InvalidHost : PortalException("هوست الموزع غير صالح. تواصل مع الموزع")
-    data object ServiceUnavailable : PortalException("تعذر الاتصال بخدمة HULK ، حاول مرة اخرى")
-    data object InvalidResponse : PortalException("استجابة خدمة HULK غير صالحة. حاول مرة اخرى")
+    data object ServiceUnavailable : PortalException("تعذر الاتصال بخدمة NEO 4K ، حاول مرة اخرى")
+    data object InvalidResponse : PortalException("استجابة خدمة NEO 4K غير صالحة. حاول مرة اخرى")
     class Transport(error: IOException) : PortalException(ServiceUnavailable.message.orEmpty(), error)
     data class ServiceRejected(val statusCode: Int) : PortalException(ServiceUnavailable.message.orEmpty())
     data class ConnectionUncertain(val statusCode: Int) : PortalException(ServiceUnavailable.message.orEmpty())

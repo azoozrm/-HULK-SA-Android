@@ -29,7 +29,7 @@ internal class DurableDownloadForeground(
     fun createInfo(downloadId: Long, title: String?): ForegroundInfo {
         ensureNotificationChannel()
         val notificationTitle = title?.trim()?.takeIf { it.isNotEmpty() }
-            ?: "تحميل محتوى HULK SA"
+            ?: "تحميل محتوى NEO 4K"
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(context, CHANNEL_ID)
         } else {
@@ -94,14 +94,15 @@ internal class DurableDownloadForeground(
     private fun ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java)
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
+        val existing = manager.getNotificationChannel(CHANNEL_ID)
+        if (existing?.name == CHANNEL_NAME && existing.description == CHANNEL_DESCRIPTION) return
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "تحميلات HULK SA",
+                CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "حالة تحميل الافلام والحلقات في الخلفية"
+                description = CHANNEL_DESCRIPTION
                 setShowBadge(false)
             },
         )
@@ -109,6 +110,8 @@ internal class DurableDownloadForeground(
 
     private companion object {
         const val CHANNEL_ID = "hulk_durable_downloads"
+        const val CHANNEL_NAME = "تحميلات NEO 4K"
+        const val CHANNEL_DESCRIPTION = "حالة تحميل الافلام والحلقات في الخلفية"
         const val ACTION_OPEN_DOWNLOADS = "sa.hulksa.player.action.OPEN_DOWNLOADS"
     }
 }

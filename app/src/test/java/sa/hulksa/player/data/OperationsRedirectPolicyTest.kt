@@ -166,7 +166,7 @@ class OperationsRedirectPolicyTest {
                 "latestVersionName":"0.9.3.21",
                 "minimumSupportedVersionCode":64,
                 "updateType":"OPTIONAL",
-                "apkUrl":"https://hulksa.com/hulk-operations/releases/hulk-sa-65.apk",
+                "apkUrl":"https://neo4ksa.com/hulk-operations/releases/hulk-sa-65.apk",
                 "apkSha256":"${"a".repeat(64)}",
                 "releaseNotes":""
               },

@@ -121,7 +121,7 @@ private enum class SettingsSection(val title: String, val icon: ImageVector) {
     NOTIFICATIONS("الاشعارات", Icons.Rounded.Notifications),
     DOWNLOADS("التنزيلات والتخزين", Icons.Rounded.Download),
     ACCOUNT("الحساب", Icons.Rounded.Person),
-    SERVICES("خدمات HULK", Icons.Rounded.GridView),
+    SERVICES("خدمات NEO 4K", Icons.Rounded.GridView),
     ABOUT("حول التطبيق", Icons.Rounded.Info),
 }
 
@@ -626,7 +626,7 @@ internal fun SettingsProScreen(
                 if (renewalAvailable) {
                     SettingsMenuRow(
                         label = "الموقع الالكتروني",
-                        subtitle = "الاشتراك والتجديد عبر hulksa.com",
+                        subtitle = "الاشتراك والتجديد عبر neo4ksa.com",
                         value = if (isTv) "اضغط OK" else "",
                         accentValue = true,
                         leadingIcon = Icons.Rounded.Language,
@@ -1033,7 +1033,7 @@ private fun SettingsPhoneDetailHeader(title: String, onBack: () -> Unit) {
 /** The shared "حول التطبيق" table used by both the services and about detail panes. */
 @Composable
 private fun SettingsAboutInfoRows(expanded: Boolean) {
-    SettingsInfoRow("اصدار HULK SA", BuildConfig.VERSION_NAME, expanded)
+    SettingsInfoRow("اصدار NEO 4K", BuildConfig.VERSION_NAME, expanded)
     SettingsDivider()
     SettingsInfoRow(
         "اصدار Android",

@@ -12,8 +12,8 @@ plugins {
 fun String.asBuildConfigString(): String =
     "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-val resellerApiUrl = "https://hulksa.com"
-val operationsConfigUrl = "https://hulksa.com/hulk-operations/api/app/v1/config/"
+val resellerApiUrl = "https://neo4ksa.com"
+val operationsConfigUrl = "https://neo4ksa.com/hulk-operations/api/app/v1/config/"
 
 val qualificationVersionCode = providers.gradleProperty("HULK_QUALIFICATION_VERSION_CODE")
     .orNull
@@ -36,7 +36,7 @@ if (qualificationVersionCode != null && qualificationVersionCode <= 0) {
 
 val verifyProductionRuntimeConfig = tasks.register("verifyProductionRuntimeConfig") {
     group = "verification"
-    description = "Fails release builds unless the reviewed HTTPS HULK endpoints are configured."
+    description = "Fails release builds unless the reviewed HTTPS NEO 4K endpoints are configured."
 
     doLast {
         val value = resellerApiUrl.trim()
@@ -51,12 +51,21 @@ val verifyProductionRuntimeConfig = tasks.register("verifyProductionRuntimeConfi
             parsed.fragment != null
         ) {
             throw GradleException(
-                "The HULK reseller API must be a public HTTPS base URL without credentials, query, or fragment.",
+                "The NEO 4K reseller API must be a public HTTPS base URL without credentials, query, or fragment.",
+            )
+        }
+        if (
+            !parsed.host.equals("neo4ksa.com", ignoreCase = true) ||
+            (parsed.port != -1 && parsed.port != 443) ||
+            !parsed.path.isNullOrEmpty()
+        ) {
+            throw GradleException(
+                "The NEO 4K reseller API must be the reviewed public HTTPS origin.",
             )
         }
         if (value.contains("3162356.xyz", ignoreCase = true)) {
             throw GradleException(
-                "The legacy IPTV host must never be compiled as the HULK reseller API.",
+                "The legacy IPTV host must never be compiled as the NEO 4K reseller API.",
             )
         }
 
@@ -65,14 +74,14 @@ val verifyProductionRuntimeConfig = tasks.register("verifyProductionRuntimeConfi
         if (
             operationsParsed == null ||
             !operationsParsed.scheme.equals("https", ignoreCase = true) ||
-            !operationsParsed.host.equals("hulksa.com", ignoreCase = true) ||
+            !operationsParsed.host.equals("neo4ksa.com", ignoreCase = true) ||
             operationsParsed.userInfo != null ||
             operationsParsed.query != null ||
             operationsParsed.fragment != null ||
             operationsParsed.path != "/hulk-operations/api/app/v1/config/"
         ) {
             throw GradleException(
-                "The HULK Operations config endpoint must be the reviewed public HTTPS URL.",
+                "The NEO 4K Operations config endpoint must be the reviewed public HTTPS URL.",
             )
         }
     }
@@ -243,7 +252,7 @@ android {
         create("preview") {
             initWith(getByName("release"))
             applicationIdSuffix = ".preview"
-            resValue("string", "app_name", "HULK SA Preview")
+            resValue("string", "app_name", "NEO 4K Preview")
             isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true

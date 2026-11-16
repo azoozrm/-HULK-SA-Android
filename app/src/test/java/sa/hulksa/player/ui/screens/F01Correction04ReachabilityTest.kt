@@ -142,7 +142,7 @@ class F01Correction04ReachabilityTest {
 
         val targets = networkProbeTargets(request)
 
-        assertTrue(targets.contains(NetworkProbeTarget("hulksa.com", 443)))
+        assertTrue(targets.contains(NetworkProbeTarget("neo4ksa.com", 443)))
         assertTrue(targets.contains(NetworkProbeTarget("www.google.com", 443)))
         assertTrue(targets.contains(NetworkProbeTarget("cdn.example", 443)))
         assertTrue(targets.contains(NetworkProbeTarget("backup.example", 8080)))

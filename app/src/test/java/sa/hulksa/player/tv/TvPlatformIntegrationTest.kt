@@ -1,5 +1,6 @@
 package sa.hulksa.player.tv
 
+import java.io.IOException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -104,8 +105,48 @@ class TvPlatformIntegrationTest {
     }
 
     @Test
+    fun channelLogoMigrationIsScopedToChannelId() {
+        var migratedChannelId = 42L
+        val logoWrites = mutableListOf<Long>()
+        fun migrate(channelId: Long) = migrateTvChannelLogoIfNeeded(
+            channelId = channelId,
+            migratedChannelId = migratedChannelId,
+            writeLogo = { logoWrites.add(channelId) },
+            markMigrated = { migratedChannelId = it },
+        )
+
+        migrate(42L)
+        migrate(43L)
+        migrate(43L)
+
+        assertEquals(listOf(43L), logoWrites)
+        assertEquals(43L, migratedChannelId)
+    }
+
+    @Test
+    fun rejectedChannelLogoWriteCanBeRetriedOnTheSameChannel() {
+        var migratedChannelId = -1L
+        fun migrate(writeLogo: () -> Unit) = migrateTvChannelLogoIfNeeded(
+            channelId = 42L,
+            migratedChannelId = migratedChannelId,
+            writeLogo = writeLogo,
+            markMigrated = { migratedChannelId = it },
+        )
+
+        migrate { throw IOException("Logo output stream is unavailable") }
+        assertEquals(-1L, migratedChannelId)
+        migrate { throw SecurityException("Logo writes are not permitted") }
+        assertEquals(-1L, migratedChannelId)
+
+        var logoWritten = false
+        migrate { logoWritten = true }
+        assertTrue(logoWritten)
+        assertEquals(42L, migratedChannelId)
+    }
+
+    @Test
     fun channelMetadataUsesBrandOnlyDisplayName() {
-        assertEquals("HULK SA", TV_CHANNEL_DISPLAY_NAME)
+        assertEquals("NEO 4K", TV_CHANNEL_DISPLAY_NAME)
         assertEquals("اكمل المشاهدة", TV_CONTINUE_WATCHING_LABEL)
     }
 
