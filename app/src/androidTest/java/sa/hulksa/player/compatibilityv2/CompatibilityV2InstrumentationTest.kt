@@ -617,11 +617,7 @@ class CompatibilityV2InstrumentationTest {
             val (loginReachable, subscribeReachable) = resolveImeLoginActionReachability(
                 resolveLogin = { resolvedVisibleBounds(By.desc("تسجيل الدخول"), 500L) },
                 resolveSubscribe = { resolvedVisibleBounds(By.text("اشتراك جديد"), 500L) },
-                semanticScroll = {
-                    val direction =
-                        if (targetContext.resources.configuration.screenWidthDp >= 600) Direction.UP else Direction.DOWN
-                    scrollLoginPageOnce(direction)
-                },
+                semanticScroll = { scrollLoginPageOnce(Direction.DOWN) },
             )
             assertTrue("Login action was not reachable while the IME was active", loginReachable)
             assertTrue("Subscribe action was not reachable while the IME was active", subscribeReachable)

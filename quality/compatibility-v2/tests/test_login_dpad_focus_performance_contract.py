@@ -170,7 +170,7 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
             self.assertIn(selector, portrait)
             self.assertIn(selector, reachability)
 
-    def test_ime_subscription_reachability_uses_one_adaptive_semantic_scroll(self) -> None:
+    def test_ime_subscription_reachability_scrolls_down_in_centered_login_form(self) -> None:
         screen = self.screen_section()
         portrait = self.section(
             self.instrumentation_source,
@@ -178,16 +178,13 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
             "fun loginFieldsRemainReachableAcrossScrollableLayouts()",
         )
 
-        # R03 moved the subscription action into the bounded centered form on every
-        # window; the QR/website routing key is the remaining width switch.
+        # The subscription action sits below login at every width. Width controls
+        # the QR/website routing after activation.
         self.assertIn("val subscriptionUsesQr = isTv || maxWidth >= 600.dp", screen)
         self.assertEqual(1, screen.count("rememberScrollState()"))
-        self.assertIn(
-            "targetContext.resources.configuration.screenWidthDp >= 600",
-            portrait,
-        )
-        self.assertIn("Direction.UP else Direction.DOWN", portrait)
-        self.assertEqual(1, portrait.count("scrollLoginPageOnce(direction)"))
+        self.assertIn("scrollLoginPageOnce(Direction.DOWN)", portrait)
+        self.assertEqual(1, portrait.count("scrollLoginPageOnce("))
+        self.assertNotIn("Direction.UP", portrait)
         self.assertNotIn("device.swipe(", portrait)
         self.assertNotIn("repeat(6)", portrait)
 
