@@ -75,7 +75,7 @@ class OperationsLiveForeignSportsConfigTest {
 
     @Test
     fun `the verified bundled list is complete and contains exact aliases`() {
-        assertEquals(92, BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES.size)
+        assertEquals(233, BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES.size)
         assertTrue("WS TNT Sports 1" in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES)
         assertTrue(
             "UK: TNT SPORTS 1 ᴴᴰ " in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES,
@@ -83,6 +83,20 @@ class OperationsLiveForeignSportsConfigTest {
         assertTrue(
             "DE: SKY SPORT AUSTRIA 7 ᴴᴰ (720P)" in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES,
         )
+        assertTrue("TR: TABII SPORT 1 ᴿᴬᵂ" in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES)
+        assertTrue("ES M LIGA DE CAMPEONES 13 HD" in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES)
+        assertTrue("PT| DAZN SPORT 6 FHD" in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES)
+        assertTrue("Ziggo Sport Voetbal NL" in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES)
+        assertTrue("NL: ESPN 1 ᴿᴬᵂ " in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES)
+        assertTrue("ESPN 4 HD NL" in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES)
+        assertTrue("PL: ELEVEN SPORTS 1 ᴴᴰ" in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES)
+        assertTrue("PL ELEVEN SPORTS 4 FHD" in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES)
+        assertTrue("PL CANAL EXTRA 07" in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES)
+        assertTrue("RO| PRIMA SPORT HD" !in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES)
+        assertTrue("TRT 1" !in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES)
+        assertTrue("ES DAZN LA LIGA 2 FHD" !in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES)
+        assertTrue("RO| DIGI SPORT 1 FHD" !in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES)
+        assertTrue("RO| DIGI SPORT 2 FHD" !in BUNDLED_LIVE_FOREIGN_SPORTS_ALIASES)
     }
 
     private fun configJson(extra: String): String {

@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import sa.hulksa.player.MainDestination
+import sa.hulksa.player.data.VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID
 import sa.hulksa.player.hulkPerfLog
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
@@ -307,14 +308,23 @@ internal fun deriveLiveCatalogProjection(
     val items = input.catalog?.items.orEmpty()
     val query = input.query.trim()
     if (input.categoryId == null && query.isEmpty()) return items
-    return items.filter { item ->
-        liveCategoryMatches(
-            item = item,
-            selectedId = input.categoryId,
+    val scoped = if (input.categoryId == VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID) {
+        liveCategoryItems(
+            items = items,
+            categoryId = input.categoryId,
             virtualChannelIds = input.virtualChannelIds,
-            isFavorite = input.favorites::contains,
-        ) && item.matchesSearchNormalized(query)
+        )
+    } else {
+        items.filter { item ->
+            liveCategoryMatches(
+                item = item,
+                selectedId = input.categoryId,
+                virtualChannelIds = input.virtualChannelIds,
+                isFavorite = input.favorites::contains,
+            )
+        }
     }
+    return scoped.filter { item -> item.matchesSearchNormalized(query) }
 }
 
 internal fun deriveHomeContentModel(input: HomeContentModelInput): HomeContentSnapshot {

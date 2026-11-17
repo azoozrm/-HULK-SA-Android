@@ -85,6 +85,47 @@ class LiveForeignSportsMembershipTest {
     }
 
     @Test
+    fun `new foreign aliases publish the same membership to Live and the player browser`() {
+        val cached = Catalog(
+            categories = emptyList(),
+            items = listOf(
+                channel(201, "es").copy(name = "ES M LALIGA FHD"),
+                channel(202, "tr").copy(name = "TR TABii SPOR 1 FHD"),
+                channel(203, "pl").copy(name = "PL CANAL+ SPORT ᴴᴰ"),
+                channel(204, "xx").copy(name = "Unrelated football channel"),
+            ),
+        )
+        val resolved = checkNotNull(
+            resolveLiveForeignSportsCategory(
+                listOf(
+                    "TR TABii SPOR 1 FHD",
+                    "ES M LALIGA FHD",
+                    "PL CANAL+ SPORT ᴴᴰ",
+                ),
+                cached,
+            ),
+        )
+        val live = deriveLiveCatalogProjection(
+            LiveCatalogProjectionInput(
+                catalog = cached,
+                categoryId = VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
+                query = "",
+                favorites = CatalogFavoriteSnapshot(emptySet()),
+                virtualChannelIds = resolved.channelIds,
+            ),
+        )
+        val browser = liveCategoryItems(
+            items = cached.items,
+            categoryId = VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
+            virtualChannelIds = resolved.channelIds,
+        )
+
+        assertEquals(listOf(202, 201, 203), resolved.channelIds)
+        assertEquals(resolved.channelIds, live.map(ContentItem::id))
+        assertEquals(resolved.channelIds, browser.map(ContentItem::id))
+    }
+
+    @Test
     fun `live projection uses the shared virtual membership`() {
         val catalog = Catalog(
             categories = emptyList(),
