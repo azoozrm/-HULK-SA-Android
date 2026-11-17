@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import sa.hulksa.player.data.VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.Episode
@@ -511,6 +512,7 @@ class PlayerProEpisodeNavigationTest {
                 LIVE_TV_PRO_CONTEXT_RECENT,
                 "sports",
                 "missing",
+                VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
             ).forEach { context ->
                 assertEquals(
                     playerProLiveNavigationSequence(
@@ -519,6 +521,7 @@ class PlayerProEpisodeNavigationTest {
                         launchContext = context,
                         favoriteIds = favoriteIds,
                         recentIds = recentIds,
+                        virtualChannelIds = listOf(1, 3, 5),
                     ).map(ContentItem::id),
                     liveNavigationSequenceFromIndex(
                         index = index,
@@ -526,6 +529,7 @@ class PlayerProEpisodeNavigationTest {
                         launchContext = context,
                         favoriteChannels = index.favoriteChannels(favoriteIds),
                         recentChannels = index.recentChannels(recentIds),
+                        virtualChannelIds = listOf(1, 3, 5),
                     ).map(ContentItem::id),
                 )
             }

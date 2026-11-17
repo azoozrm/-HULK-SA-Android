@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui.screens
 
+import sa.hulksa.player.data.VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID
 import sa.hulksa.player.model.ContentItem
 
 /**
@@ -52,8 +53,21 @@ internal fun liveNavigationSequenceFromIndex(
     launchContext: String,
     favoriteChannels: List<ContentItem>,
     recentChannels: List<ContentItem>,
+    virtualChannelIds: List<Int> = emptyList(),
 ): List<ContentItem> {
     if (index.items.isEmpty()) return emptyList()
+    if (launchContext == VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID) {
+        // Membership is still loading: keep the current channel until the ordered virtual IDs
+        // arrive. Falling back to the provider category here would expose provider headers and
+        // the provider group instead of the virtual category.
+        if (virtualChannelIds.isEmpty()) return listOfNotNull(index.byId[currentStreamId])
+        val virtualSequence = virtualChannelIds
+            .mapNotNull(index.byId::get)
+            .distinctBy(ContentItem::id)
+        return virtualSequence
+            .takeIf { sequence -> sequence.any { it.id == currentStreamId } }
+            ?: index.sequenceFor(currentStreamId)
+    }
     val contextual = when (launchContext) {
         LIVE_TV_PRO_CONTEXT_FAVORITES -> favoriteChannels
         LIVE_TV_PRO_CONTEXT_RECENT -> recentChannels
