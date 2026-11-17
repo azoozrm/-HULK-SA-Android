@@ -86,6 +86,7 @@ import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material.icons.rounded.Redo
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Replay
@@ -182,6 +183,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import sa.hulksa.player.data.SettingsProStore
 import sa.hulksa.player.data.AuthenticatedSessionOwner
+import sa.hulksa.player.data.AuthenticatedSessionRegistry
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
@@ -657,6 +659,7 @@ fun PlayerScreen(
     }
     var retryNonce by remember(request) { mutableIntStateOf(0) }
     var playerInstanceGeneration by remember(request) { mutableIntStateOf(0) }
+    var playerPreparedOnce by remember(request) { mutableStateOf(false) }
     var audioOutputMode by remember(request) { mutableStateOf(PlayerAudioOutputMode.NORMAL) }
     var pendingPlayerReplacement by remember(request) { mutableStateOf<PlayerReplacementState?>(null) }
     var recoveryDelayMs by remember(request) { mutableLongStateOf(0L) }
@@ -711,6 +714,8 @@ fun PlayerScreen(
     var activePanel by remember(request) { mutableStateOf<PlayerPanel?>(null) }
     var liveMorePanel by remember(request) { mutableStateOf<PlayerLiveMorePanelView?>(null) }
     var liveMoreMenuFocusRow by remember(request) { mutableStateOf(PlayerLiveMoreRow.MUTE) }
+    var commentaryDialogVisible by remember(request) { mutableStateOf(false) }
+    var commentaryErrorSurfaceHandled by remember(request) { mutableStateOf(false) }
     var vodMorePanel by remember(request) { mutableStateOf<VodMorePanelView?>(null) }
     var vodMoreMenuFocusRow by remember(request) { mutableStateOf(VodMoreRow.GO_TO_TIME) }
     var vodGoToTimeVisible by remember(request) { mutableStateOf(false) }
@@ -884,6 +889,37 @@ fun PlayerScreen(
 
     val player = remember(request, playerInstanceGeneration, audioOutputMode) {
         playerFactory.create(audioOutputMode)
+    }
+    val commentaryScope = rememberCoroutineScope()
+    val latestMutedForCommentary by rememberUpdatedState(isMuted)
+    val commentaryExpectedOwner = remember(request) { AuthenticatedSessionRegistry.currentOwner() }
+    val commentaryOwner = remember(request, player, playerFactory, commentaryScope) {
+        ArabicCommentaryOwner(
+            factory = playerFactory,
+            videoPlayer = player,
+            scope = commentaryScope,
+            expectedOwner = commentaryExpectedOwner,
+            onAudioRouteChanged = { commentaryAudible ->
+                // Exactly one audible source: mute the foreign picture before raising commentary
+                // audio, and restore it only after the commentary output is muted.
+                player.volume = if (commentaryAudible || latestMutedForCommentary) 0f else 1f
+            },
+        )
+    }
+    DisposableEffect(commentaryOwner) {
+        onDispose { commentaryOwner.release() }
+    }
+    LaunchedEffect(commentaryOwner, isMuted, commentaryOwner.state.commentaryAudible) {
+        commentaryOwner.setOutputMuted(isMuted)
+        player.volume = if (isMuted || commentaryOwner.state.commentaryAudible) 0f else 1f
+    }
+    val commentaryAccountNotice = remember(request) {
+        AuthenticatedSessionRegistry.currentOwner()?.session?.account?.let { account ->
+            arabicCommentaryConnectionNotice(
+                activeConnections = account.activeConnections,
+                maxConnections = account.maxConnections,
+            )
+        }
     }
     // Track options are bound to the exact player instance that produced them. A stale option from
     // another title, episode or recreated player can therefore never address this player's groups.
@@ -1560,6 +1596,8 @@ fun PlayerScreen(
                 Lifecycle.Event.ON_STOP -> {
                     appForeground = false
                     playerSession.onAppForegroundChanged(player, foreground = false)
+                    commentaryOwner.onAppForegroundChanged(foreground = false)
+                    commentaryDialogVisible = false
                     if (
                         playerBackgroundLifecycleAction(player.playbackState) ==
                         PlayerLifecyclePlaybackAction.STOP
@@ -1579,6 +1617,47 @@ fun PlayerScreen(
 
     DisposableEffect(playerSession) {
         onDispose { playerSession.invalidate() }
+    }
+
+    // A terminal playback failure or a confirmed outage invalidates the two-source alignment.
+    // Commentary resources are released and the original audio is restored; the owner never
+    // presents the old offset as still synchronized after an interruption.
+    LaunchedEffect(
+        request.historyKey,
+        request.isLive,
+        offlineFailure,
+        finalError,
+        confirmedOutage,
+    ) {
+        if (!request.isLive) return@LaunchedEffect
+        if (offlineFailure || finalError != null || confirmedOutage) {
+            commentaryOwner.onPlaybackInterrupted(
+                "انقطع التشغيل؛ تم ايقاف التعليق والعودة للصوت الاصلي. اعد المحاولة بعد استقرار القناة.",
+            )
+            commentaryDialogVisible = false
+        }
+    }
+
+    // A commentary-only failure restores the original audio immediately. Bring the bounded error
+    // surface forward once so the owner sees the reason and the explicit retry action; closing it
+    // does not reopen in a loop.
+    LaunchedEffect(
+        commentaryOwner.state.phase,
+        commentaryOwner.state.error,
+        finalError,
+        offlineFailure,
+        browserVisible,
+        appForeground,
+    ) {
+        val commentaryError = commentaryOwner.state.phase == ArabicCommentaryPhase.ERROR
+        val canOpen = finalError == null && !offlineFailure && request.isLive &&
+            !browserVisible && appForeground
+        if (commentaryError && !commentaryErrorSurfaceHandled && canOpen) {
+            commentaryErrorSurfaceHandled = true
+            commentaryDialogVisible = true
+        } else if (!commentaryError) {
+            commentaryErrorSurfaceHandled = false
+        }
     }
 
     LaunchedEffect(
@@ -1997,6 +2076,16 @@ fun PlayerScreen(
         hasActiveSubtitles = false
         audioLanguageLabel = ""
         subtitleLanguageLabel = ""
+        if (playerPreparedOnce) {
+            // A reprepare/recovery reloads the foreign source at its own live position. The old
+            // two-source offset is no longer attributable, so commentary is released rather than
+            // presenting a stale synchronization value.
+            commentaryOwner.onPlaybackInterrupted(
+                "اعيد تحميل القناة؛ تم ايقاف التعليق. اعد المحاولة بعد استقرار التشغيل.",
+            )
+            commentaryDialogVisible = false
+        }
+        playerPreparedOnce = true
         player.setMediaItem(mediaItem)
         android.util.Log.i(
             "HulkPlayer",
@@ -2019,7 +2108,7 @@ fun PlayerScreen(
             )
             preparation.seekTargetMs?.let(player::seekTo)
             player.setPlaybackSpeed(replacement.speed)
-            player.volume = replacement.volume
+            player.volume = if (commentaryOwner.state.commentaryAudible) 0f else replacement.volume
             // Apply the start decision before prepare so a pending Resume/Restart decision never
             // starts playback in the gap between prepare() and the post-prepare state write.
             player.playWhenReady = preparation.playWhenReady
@@ -2150,6 +2239,7 @@ fun PlayerScreen(
     LaunchedEffect(player, request) {
         while (isActive) {
             delay(500L)
+            commentaryOwner.ensureAuthenticatedSession()
             playerSession.observeHealth(
                 player = player,
                 appForeground = appForeground,
@@ -2229,6 +2319,7 @@ fun PlayerScreen(
             playbackSettings.autoHideControls &&
             controlsVisible && !browserVisible && activePanel == null && liveMorePanel == null &&
             vodMorePanel == null && !vodGoToTimeVisible && vodSeekPreviewMs == null &&
+            !commentaryDialogVisible &&
             !resumePromptVisible && !buffering && finalError == null && isPlaying && !controlsLocked &&
             manualSeekTargetMs == null && !vodActiveSeekInteraction
         ) {
@@ -2266,6 +2357,7 @@ fun PlayerScreen(
         activePanel,
         vodMorePanel,
         browserVisible,
+        commentaryDialogVisible,
         liveErrorForegroundActive,
         offlineFailure,
         movieModalActive,
@@ -2281,6 +2373,7 @@ fun PlayerScreen(
             movieErrorActive -> offlineRetryFocus
             liveErrorForegroundActive -> null
             browserVisible || activePanel != null -> null
+            commentaryDialogVisible -> null
             vodMorePanel != null -> null
             resumePromptVisible -> resumeFocus
             nextCountdown >= 0 -> nextEpisodePlayFocus
@@ -2319,7 +2412,8 @@ fun PlayerScreen(
 
     val panelInputActive = playerChildPanelInputActive(
         activePanel != null,
-        liveMorePanel != null || vodMorePanel != null || vodGoToTimeVisible,
+        liveMorePanel != null || vodMorePanel != null || vodGoToTimeVisible ||
+            commentaryDialogVisible,
     )
     val latestOnPanelActiveChanged by rememberUpdatedState(onPanelActiveChanged)
     DisposableEffect(panelInputActive) {
@@ -2352,9 +2446,11 @@ fun PlayerScreen(
         // the modal was visible keeps rejecting every later surface tap in the same session. The
         // browser and a suppressed Live error surface are keys for the same reason: while they own
         // input the player surface behind them must not toggle controls or switch channels.
-        .pointerInput(request, liveErrorForegroundActive, liveErrorSurfaceSuppressed, movieModalActive, browserVisible) {
+        .pointerInput(request, liveErrorForegroundActive, liveErrorSurfaceSuppressed, movieModalActive, browserVisible, commentaryDialogVisible) {
             detectTapGestures(onTap = {
-                if (browserVisible || liveErrorSurfaceSuppressed || resumePromptVisible || movieModalActive) {
+                if (browserVisible || liveErrorSurfaceSuppressed || resumePromptVisible ||
+                    movieModalActive || commentaryDialogVisible
+                ) {
                     return@detectTapGestures
                 }
                 when {
@@ -2365,8 +2461,10 @@ fun PlayerScreen(
                 }
             })
         }
-        .pointerInput(request.isLive, liveErrorForegroundActive, liveErrorSurfaceSuppressed, browserVisible) {
-            if (request.isLive && !browserVisible && !liveErrorSurfaceSuppressed && !liveErrorForegroundActive) {
+        .pointerInput(request.isLive, liveErrorForegroundActive, liveErrorSurfaceSuppressed, browserVisible, commentaryDialogVisible) {
+            if (request.isLive && !browserVisible && !liveErrorSurfaceSuppressed &&
+                !liveErrorForegroundActive && !commentaryDialogVisible
+            ) {
                 var verticalDrag = 0f
                 detectVerticalDragGestures(
                     onVerticalDrag = { change, amount -> change.consume(); verticalDrag += amount },
@@ -2713,13 +2811,23 @@ fun PlayerScreen(
                                     sourceCount = request.candidates.size,
                                     candidateIndex = candidateIndex,
                                     resizeModeIndex = resizeModeIndex,
+                                    commentaryValue = arabicCommentaryMenuValue(
+                                        commentaryOwner.state.phase,
+                                    ),
                                     menuFocusRow = liveMoreMenuFocusRow,
                                     onClose = ::closeLiveMorePanelToTrigger,
                                     onBackToMenu = ::handleLiveMoreBack,
                                     onToggleMute = {
                                         val muted = !isMuted
                                         isMuted = muted
-                                        player.volume = if (muted) 0f else 1f
+                                        commentaryOwner.setOutputMuted(muted)
+                                        player.volume = if (
+                                            muted || commentaryOwner.state.commentaryAudible
+                                        ) {
+                                            0f
+                                        } else {
+                                            1f
+                                        }
                                     },
                                     onReload = {
                                         closeLiveMorePanelForSelection()
@@ -2732,6 +2840,11 @@ fun PlayerScreen(
                                     onOpenResize = {
                                         liveMoreMenuFocusRow = PlayerLiveMoreRow.RESIZE
                                         liveMorePanel = PlayerLiveMorePanelView.RESIZE
+                                    },
+                                    onOpenCommentary = {
+                                        liveMoreMenuFocusRow = PlayerLiveMoreRow.COMMENTARY
+                                        liveMorePanel = null
+                                        commentaryDialogVisible = true
                                     },
                                     onSelectSource = { index ->
                                         closeLiveMorePanelForSelection()
@@ -3137,6 +3250,33 @@ fun PlayerScreen(
             )
         }
 
+        if (commentaryDialogVisible && request.isLive) {
+            ArabicCommentaryDialog(
+                catalog = liveCatalog,
+                currentStreamId = request.streamId,
+                state = commentaryOwner.state,
+                accountNotice = commentaryAccountNotice,
+                onSelectChannel = commentaryOwner::start,
+                onStepSelected = commentaryOwner::setStep,
+                onAdjust = commentaryOwner::adjust,
+                onReset = commentaryOwner::reset,
+                onReturnToOriginal = {
+                    commentaryOwner.returnToOriginalAudio()
+                    commentaryDialogVisible = false
+                    liveMoreMenuFocusRow = PlayerLiveMoreRow.COMMENTARY
+                    liveMorePanel = PlayerLiveMorePanelView.MENU
+                },
+                onRetry = commentaryOwner::retry,
+                onDismiss = {
+                    // BACK returns to the originating commentary row; the next BACK closes the
+                    // More panel and restores its trigger.
+                    commentaryDialogVisible = false
+                    liveMoreMenuFocusRow = PlayerLiveMoreRow.COMMENTARY
+                    liveMorePanel = PlayerLiveMorePanelView.MENU
+                },
+            )
+        }
+
         activePanel?.let { panel ->
             when (panel) {
                 PlayerPanel.AUDIO -> TrackSelectionPanel(
@@ -3260,6 +3400,8 @@ fun PlayerScreen(
                         onReload = {},
                         onOpenSource = {},
                         onOpenResize = {},
+                        commentaryValue = null,
+                        onOpenCommentary = {},
                         onSelectSource = { index ->
                             // The selected source supersedes the suspended error surface; the new
                             // prepare owns any new failure presentation on its own.
@@ -4401,6 +4543,7 @@ private fun LiveMorePanel(
     sourceCount: Int,
     candidateIndex: Int,
     resizeModeIndex: Int,
+    commentaryValue: String?,
     menuFocusRow: PlayerLiveMoreRow,
     onClose: () -> Unit,
     onBackToMenu: () -> Unit,
@@ -4408,6 +4551,7 @@ private fun LiveMorePanel(
     onReload: () -> Unit,
     onOpenSource: () -> Unit,
     onOpenResize: () -> Unit,
+    onOpenCommentary: () -> Unit,
     onSelectSource: (Int) -> Unit,
     onSelectResize: (Int) -> Unit,
     metrics: LivePlayerControlsMetrics,
@@ -4420,6 +4564,7 @@ private fun LiveMorePanel(
     val reloadFocus = remember { FocusRequester() }
     val sourceFocus = remember { FocusRequester() }
     val resizeFocus = remember { FocusRequester() }
+    val commentaryFocus = remember { FocusRequester() }
     val selectedOptionFocus = remember { FocusRequester() }
 
     LaunchedEffect(view, menuFocusRow, candidateIndex, resizeModeIndex, sourceCount) {
@@ -4429,6 +4574,7 @@ private fun LiveMorePanel(
                 PlayerLiveMoreRow.RELOAD -> reloadFocus
                 PlayerLiveMoreRow.SOURCE -> sourceFocus
                 PlayerLiveMoreRow.RESIZE -> resizeFocus
+                PlayerLiveMoreRow.COMMENTARY -> commentaryFocus
             }
             PlayerLiveMorePanelView.SOURCE,
             PlayerLiveMorePanelView.RESIZE,
@@ -4525,6 +4671,15 @@ private fun LiveMorePanel(
                         showChevron = true,
                         onClick = onOpenResize,
                         focusRequester = resizeFocus,
+                    )
+                    VodPanelDivider()
+                    LiveMoreRow(
+                        text = "التعليق العربي",
+                        icon = Icons.Rounded.RecordVoiceOver,
+                        value = commentaryValue,
+                        showChevron = true,
+                        onClick = onOpenCommentary,
+                        focusRequester = commentaryFocus,
                     )
                 }
                 PlayerLiveMorePanelView.SOURCE -> {
