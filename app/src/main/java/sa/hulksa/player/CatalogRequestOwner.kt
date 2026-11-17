@@ -7,6 +7,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import sa.hulksa.player.data.LiveForeignSportsCategory
 import sa.hulksa.player.model.AuthenticatedSession
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentType
@@ -16,6 +17,8 @@ internal data class CatalogLoadResult(
     val home: Catalog,
     /** Profile whose favorites/history produced [home]; null when not profile-ranked. */
     val homeProfileId: String? = null,
+    val liveForeignSports: LiveForeignSportsCategory? = null,
+    val liveForeignSportsAliases: List<String>? = null,
 )
 
 /**

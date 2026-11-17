@@ -46,6 +46,9 @@ private val SUPERSCRIPT_TO_PLAIN = mapOf(
     '₅' to '5', '₆' to '6', '₇' to '7', '₈' to '8', '₉' to '9',
 )
 
+private val ALIAS_SEPARATOR = Regex("[^0-9a-z\\u0600-\\u06FF]+")
+private val ALIAS_WHITESPACE = Regex("\\s+")
+
 private val DECORATIVE_SYMBOLS = setOf(
     '◉', '⚽', '⭐', '▶', '☪', '☾', '✟', '❆', '∎', '⎋', '▼', '●', '•', '✯', '☽',
 )
@@ -71,9 +74,9 @@ internal fun normalizeLiveForeignSportsAlias(raw: String): String {
     }
     return normalized
         .lowercase(Locale.ROOT)
-        .replace(Regex("[^0-9a-z\\u0600-\\u06FF]+"), " ")
+        .replace(ALIAS_SEPARATOR, " ")
         .trim()
-        .replace(Regex("\\s+"), " ")
+        .replace(ALIAS_WHITESPACE, " ")
 }
 
 /**
