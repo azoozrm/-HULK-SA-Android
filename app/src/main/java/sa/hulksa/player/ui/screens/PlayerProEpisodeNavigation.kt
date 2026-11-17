@@ -201,6 +201,7 @@ fun PlayerProScreen(
     request: PlaybackRequest,
     liveTvProEnabled: Boolean,
     liveCatalog: Catalog?,
+    virtualChannelIds: List<Int> = emptyList(),
     isFavorite: (ContentItem) -> Boolean,
     favoriteKeys: Set<String>,
     vodItem: ContentItem? = null,
@@ -648,6 +649,7 @@ fun PlayerProScreen(
         PlayerScreen(
             request = request,
             liveCatalog = liveCatalog,
+            virtualChannelIds = virtualChannelIds,
             isFavorite = isFavorite,
             favoriteKeys = favoriteKeys,
             vodItem = vodItem,

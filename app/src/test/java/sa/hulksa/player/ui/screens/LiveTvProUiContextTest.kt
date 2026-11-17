@@ -3,6 +3,7 @@ package sa.hulksa.player.ui.screens
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import sa.hulksa.player.data.VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID
 import sa.hulksa.player.data.providerStableIdentity
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
@@ -69,6 +70,32 @@ class LiveTvProUiContextTest {
                 currentStreamId = 7,
                 favoriteIds = emptySet(),
                 recentIds = emptyList(),
+            ),
+        )
+    }
+
+    @Test
+    fun browserRestoresTheVirtualCategoryOnlyWhenThePlayingChannelBelongsToIt() {
+        assertEquals(
+            VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
+            liveTvProInitialBrowserCategory(
+                launchContext = VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
+                currentCategoryId = "sports",
+                currentStreamId = 488864,
+                favoriteIds = emptySet(),
+                recentIds = emptyList(),
+                virtualChannelIds = listOf(488864, 488865),
+            ),
+        )
+        assertEquals(
+            "sports",
+            liveTvProInitialBrowserCategory(
+                launchContext = VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
+                currentCategoryId = "sports",
+                currentStreamId = 1,
+                favoriteIds = emptySet(),
+                recentIds = emptyList(),
+                virtualChannelIds = listOf(488864, 488865),
             ),
         )
     }

@@ -715,6 +715,7 @@ fun HulkApp(
                                 request = playback,
                                 liveTvProEnabled = state.operations.features.liveTvProEnabled,
                                 liveCatalog = state.catalogs[ContentType.LIVE],
+                                virtualChannelIds = state.liveForeignSports?.channelIds.orEmpty(),
                                 isFavorite = viewModel::isFavorite,
                                 favoriteKeys = state.favorites,
                                 vodItem = vodFavoriteItem,

@@ -32,6 +32,10 @@ import sa.hulksa.player.data.AuthenticatedSessionOwner
 import sa.hulksa.player.data.AuthenticatedSessionRegistry
 import sa.hulksa.player.data.CatalogSnapshotKey
 import sa.hulksa.player.data.HomeBootstrapKey
+import sa.hulksa.player.data.LiveForeignSportsCategory
+import sa.hulksa.player.data.VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID
+import sa.hulksa.player.data.liveForeignSportsAliasesFor
+import sa.hulksa.player.data.resolveLiveForeignSportsCategory
 import sa.hulksa.player.data.CatalogPersistBaselines
 import sa.hulksa.player.data.CatalogWriteGate
 import sa.hulksa.player.data.HomeBootstrapSnapshot
@@ -224,6 +228,7 @@ data class HulkUiState(
     val destination: MainDestination = MainDestination.HOME,
     val selectedType: ContentType = ContentType.MOVIE,
     val catalogs: Map<ContentType, Catalog> = emptyMap(),
+    val liveForeignSports: LiveForeignSportsCategory? = null,
     val selectedCategoryId: String? = null,
     val searchQuery: String = "",
     val favorites: Set<String> = emptySet(),
@@ -672,6 +677,7 @@ class HulkViewModel internal constructor(
     private var sessionOwnershipEpoch = 0L
     private val loadedCatalogs = mutableMapOf<ContentType, Catalog>()
     private val homeCatalogs = mutableMapOf<ContentType, Catalog>()
+    private var lastValidLiveForeignSportsOverride: List<String>? = null
     // Home bootstrap is a small profile-owned first frame read from disk. It never stands in for
     // a complete catalog on Movies/Series/Live, and it is never used for Kids profiles.
     private val homeBootstrapCatalogs = java.util.EnumMap<ContentType, Catalog>(ContentType::class.java)
@@ -757,6 +763,11 @@ class HulkViewModel internal constructor(
                 val firstFailure = failures.values.firstOrNull()
                 state.copy(
                     catalogs = catalogsForDestination(state.destination, base),
+                    liveForeignSports = if (type == ContentType.LIVE) {
+                        resolveLiveForeignSportsFor(result.full)
+                    } else {
+                        state.liveForeignSports
+                    },
                     loadingTypes = remaining,
                     catalogFailures = failures,
                     errorMessage = when {
@@ -1138,16 +1149,49 @@ class HulkViewModel internal constructor(
         else -> null
     }
 
+    private fun resolveLiveForeignSportsFor(catalog: Catalog?): LiveForeignSportsCategory? {
+        val aliases = liveForeignSportsAliasesFor(
+            override = activeOperationsConfig?.liveForeignSports,
+            lastValidOverride = lastValidLiveForeignSportsOverride,
+        )
+        return resolveLiveForeignSportsCategory(aliases, catalog)
+    }
+
+    private fun decorateLiveCatalogForPresentation(catalog: Catalog): Catalog {
+        val withoutVirtual = catalog.categories.filterNot {
+            it.id == VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID
+        }
+        val virtual = resolveLiveForeignSportsFor(catalog)
+        return catalog.copy(
+            categories = if (virtual == null) withoutVirtual else withoutVirtual + virtual.category,
+        )
+    }
+
+    private fun refreshLiveForeignSportsPresentation() {
+        val catalog = loadedCatalogs[ContentType.LIVE] ?: mutableState.value.catalogs[ContentType.LIVE]
+        val resolved = resolveLiveForeignSportsFor(catalog)
+        mutableState.update { state ->
+            state.copy(
+                liveForeignSports = resolved,
+                catalogs = catalogsForDestination(state.destination, state.catalogs),
+            )
+        }
+    }
+
     private fun catalogsForDestination(
         destination: MainDestination,
         current: Map<ContentType, Catalog>,
-    ): Map<ContentType, Catalog> = projectCatalogsForDestination(
-        destination = destination,
-        current = current,
-        loaded = loadedCatalogs,
-        home = homeCatalogs,
-        bootstrap = homeBootstrapCatalogs,
-    )
+    ): Map<ContentType, Catalog> {
+        val projected = projectCatalogsForDestination(
+            destination = destination,
+            current = current,
+            loaded = loadedCatalogs,
+            home = homeCatalogs,
+            bootstrap = homeBootstrapCatalogs,
+        )
+        val live = projected[ContentType.LIVE] ?: return projected
+        return projected + (ContentType.LIVE to decorateLiveCatalogForPresentation(live))
+    }
 
     private fun ensureDestinationCatalogs(
         destination: MainDestination,
@@ -2845,9 +2889,17 @@ class HulkViewModel internal constructor(
     private fun refreshOperations(force: Boolean) {
         if (operationsRefreshJob?.isActive == true) return
         operationsRefreshJob = viewModelScope.launch {
-            val (cached, operationsSnapshot) = runOperationsPersistenceOffMain {
-                operationsStore.cachedConfig() to operationsStore.systemNotificationSnapshot()
+            val initial = runOperationsPersistenceOffMain {
+                Triple(
+                    operationsStore.cachedConfig(),
+                    operationsStore.lastValidLiveForeignSports(),
+                    operationsStore.systemNotificationSnapshot(),
+                )
             }
+            val cached = initial.first
+            lastValidLiveForeignSportsOverride = initial.second
+            refreshLiveForeignSportsPresentation()
+            val operationsSnapshot = initial.third
             publishOperationsSystemNotifications(
                 operationsSnapshot,
                 clearPopup = false,
@@ -2916,6 +2968,7 @@ class HulkViewModel internal constructor(
                 )
             }
         }
+        refreshLiveForeignSportsPresentation()
     }
 
     private suspend fun applyOperationsConfig(
@@ -2925,6 +2978,9 @@ class HulkViewModel internal constructor(
     ) {
         activeOperationsConfig = config
         activeOperationsFetchedAtEpochMs = fetchedAtEpochMs
+        config.liveForeignSports?.let { configured ->
+            lastValidLiveForeignSportsOverride = configured.channelAliases
+        }
         presenceLifecycleOwner.updateDiscovery(config.presence)
         pairingController.updateDiscovery(if (operationsDeviceIsTv) config.pairing else null)
         val nowEpochMs = System.currentTimeMillis()
@@ -2982,6 +3038,9 @@ class HulkViewModel internal constructor(
         if (!config.features.episodeNotificationsEnabled) {
             notificationScanJob?.cancel()
         }
+        val resolvedLiveForeignSports = resolveLiveForeignSportsFor(
+            loadedCatalogs[ContentType.LIVE] ?: mutableState.value.catalogs[ContentType.LIVE],
+        )
         mutableState.update { state ->
             val safeDestination = if (
                 !config.features.downloadsEnabled && state.destination == MainDestination.DOWNLOADS
@@ -2992,11 +3051,8 @@ class HulkViewModel internal constructor(
             }
             state.copy(
                 destination = safeDestination,
-                catalogs = if (safeDestination != state.destination) {
-                    catalogsForDestination(safeDestination, state.catalogs)
-                } else {
-                    state.catalogs
-                },
+                catalogs = catalogsForDestination(safeDestination, state.catalogs),
+                liveForeignSports = resolvedLiveForeignSports,
                 notificationPopup = if (config.features.episodeNotificationsEnabled) {
                     state.notificationPopup
                 } else {
@@ -4324,8 +4380,13 @@ class HulkViewModel internal constructor(
             // A type already restored or network-published must not be replaced by its bootstrap.
             if (loadedCatalogs[type] == null) homeBootstrapCatalogs[type] = catalog
         }
+        val bootstrapLiveForeignSports = bootstrap.catalogs[ContentType.LIVE]
+            ?.let(::resolveLiveForeignSportsFor)
         mutableState.update { state ->
-            state.copy(catalogs = catalogsForDestination(state.destination, state.catalogs))
+            state.copy(
+                catalogs = catalogsForDestination(state.destination, state.catalogs),
+                liveForeignSports = bootstrapLiveForeignSports ?: state.liveForeignSports,
+            )
         }
         refreshHomePreparationState()
         hulkPerfLog {
@@ -4365,8 +4426,16 @@ class HulkViewModel internal constructor(
         homeRankingProfiles[type] = profileId
         catalogSourceGenerations[type] = (catalogSourceGenerations[type] ?: 0L) + 1L
         homeBootstrapCatalogs.remove(type)
+        val resolvedLiveForeignSports = if (type == ContentType.LIVE) {
+            resolveLiveForeignSportsFor(catalog)
+        } else {
+            mutableState.value.liveForeignSports
+        }
         mutableState.update { state ->
-            state.copy(catalogs = catalogsForDestination(state.destination, state.catalogs))
+            state.copy(
+                catalogs = catalogsForDestination(state.destination, state.catalogs),
+                liveForeignSports = resolvedLiveForeignSports,
+            )
         }
         refreshHomePreparationState()
         hulkPerfLog {

@@ -4,6 +4,7 @@ import android.content.Context
 import sa.hulksa.player.data.AccountProfileStateScope
 import sa.hulksa.player.data.AccountProfileStateStore
 import sa.hulksa.player.data.LegacyProfileStatePolicy
+import sa.hulksa.player.data.VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID
 
 internal const val LIVE_TV_PRO_MAIN_FAVORITES_CATEGORY = "__hulk_favorites__"
 internal const val LIVE_TV_PRO_MAIN_CONTINUE_CATEGORY = "__hulk_continue__"
@@ -50,6 +51,7 @@ internal fun liveTvProInitialBrowserCategory(
     currentStreamId: Int,
     favoriteIds: Set<Int>,
     recentIds: List<Int>,
+    virtualChannelIds: List<Int> = emptyList(),
 ): String? = when (launchContext) {
     LIVE_TV_PRO_CONTEXT_FAVORITES -> {
         if (currentStreamId in favoriteIds) LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY else currentCategoryId
@@ -59,6 +61,8 @@ internal fun liveTvProInitialBrowserCategory(
     }
     LIVE_TV_PRO_CONTEXT_ALL -> null
     null, "" -> currentCategoryId
+    VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID ->
+        if (currentStreamId in virtualChannelIds) launchContext else currentCategoryId
     else -> if (launchContext == currentCategoryId) launchContext else currentCategoryId
 }
 

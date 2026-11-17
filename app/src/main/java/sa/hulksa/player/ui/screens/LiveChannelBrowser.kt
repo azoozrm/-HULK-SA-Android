@@ -141,6 +141,7 @@ internal fun liveChannelBrowserCopy(origin: LiveChannelBrowserOrigin): LiveChann
 internal fun LiveChannelBrowser(
     catalog: Catalog?,
     currentStreamId: Int,
+    virtualChannelIds: List<Int> = emptyList(),
     origin: LiveChannelBrowserOrigin,
     isFavorite: (ContentItem) -> Boolean,
     favoriteKeys: Set<String>,
@@ -226,6 +227,7 @@ internal fun LiveChannelBrowser(
             currentStreamId = currentStreamId,
             favoriteIds = favoriteIds,
             recentIds = recentChannelIds,
+            virtualChannelIds = virtualChannelIds,
         ) ?: if (launchContext == LIVE_TV_PRO_CONTEXT_ALL) null else current?.categoryId
         // A hidden saved selection resolves to visible "الكل" instead of an invisible target.
         resolved?.takeUnless { it in hiddenCategoryIds }
@@ -248,7 +250,11 @@ internal fun LiveChannelBrowser(
         LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY -> recentChannels
         LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY -> catalog?.items.orEmpty().filter { it.id in favoriteIds }
         null -> catalog?.items.orEmpty()
-        else -> catalog?.items.orEmpty().filter { it.categoryId == selectedCategory }
+        else -> liveCategoryItems(
+            items = catalog?.items.orEmpty(),
+            categoryId = selectedCategory,
+            virtualChannelIds = virtualChannelIds,
+        )
     }
     val normalizedQuery = searchQuery.trim()
     val visible = if (normalizedQuery.isBlank()) {

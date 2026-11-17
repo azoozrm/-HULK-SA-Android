@@ -151,6 +151,7 @@ internal class LiveCatalogProjectionInput(
     val categoryId: String?,
     val query: String,
     val favorites: CatalogFavoriteSnapshot,
+    val virtualChannelIds: List<Int> = emptyList(),
 ) {
     override fun equals(other: Any?): Boolean =
         other is LiveCatalogProjectionInput &&
@@ -158,14 +159,16 @@ internal class LiveCatalogProjectionInput(
             categoryId == other.categoryId &&
             query == other.query &&
             favorites.persisted === other.favorites.persisted &&
-            favorites.optimistic == other.favorites.optimistic
+            favorites.optimistic == other.favorites.optimistic &&
+            virtualChannelIds == other.virtualChannelIds
 
     override fun hashCode(): Int {
         var result = System.identityHashCode(catalog)
         result = 31 * result + (categoryId?.hashCode() ?: 0)
         result = 31 * result + query.hashCode()
         result = 31 * result + System.identityHashCode(favorites.persisted)
-        return 31 * result + favorites.optimistic.hashCode()
+        result = 31 * result + favorites.optimistic.hashCode()
+        return 31 * result + virtualChannelIds.hashCode()
     }
 }
 
@@ -305,8 +308,12 @@ internal fun deriveLiveCatalogProjection(
     val query = input.query.trim()
     if (input.categoryId == null && query.isEmpty()) return items
     return items.filter { item ->
-        categoryMatches(item, input.categoryId, input.favorites::contains) &&
-            item.matchesSearchNormalized(query)
+        liveCategoryMatches(
+            item = item,
+            selectedId = input.categoryId,
+            virtualChannelIds = input.virtualChannelIds,
+            isFavorite = input.favorites::contains,
+        ) && item.matchesSearchNormalized(query)
     }
 }
 
