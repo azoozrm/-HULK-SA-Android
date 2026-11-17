@@ -101,6 +101,44 @@ class LiveTvProUiContextTest {
     }
 
     @Test
+    fun lateVirtualMembershipResolvesTheBrowserBackToTheVirtualCategory() {
+        assertNull(
+            liveTvProResolvedBrowserCategory(
+                launchContext = VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
+                currentCategoryId = "sports",
+                currentStreamId = 488864,
+                virtualChannelIds = emptyList(),
+            ),
+        )
+        assertEquals(
+            VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
+            liveTvProResolvedBrowserCategory(
+                launchContext = VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
+                currentCategoryId = "sports",
+                currentStreamId = 488864,
+                virtualChannelIds = listOf(488864, 488865),
+            ),
+        )
+        assertEquals(
+            "sports",
+            liveTvProResolvedBrowserCategory(
+                launchContext = VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
+                currentCategoryId = "sports",
+                currentStreamId = 1,
+                virtualChannelIds = listOf(488864, 488865),
+            ),
+        )
+        assertNull(
+            liveTvProResolvedBrowserCategory(
+                launchContext = "sports",
+                currentCategoryId = "sports",
+                currentStreamId = 488864,
+                virtualChannelIds = listOf(488864, 488865),
+            ),
+        )
+    }
+
+    @Test
     fun staleCategoryContextFallsBackToCurrentChannelsRealCategory() {
         assertEquals(
             "news",

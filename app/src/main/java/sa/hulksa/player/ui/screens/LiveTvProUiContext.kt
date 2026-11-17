@@ -66,6 +66,25 @@ internal fun liveTvProInitialBrowserCategory(
     else -> if (launchContext == currentCategoryId) launchContext else currentCategoryId
 }
 
+/**
+ * Resolves the browser category after virtual membership arrives.
+ *
+ * The initial browser category is computed when the browser opens. Virtual membership can be
+ * resolved a moment later; this pure resolver lets the browser switch back to the virtual
+ * category once the IDs are available, without guessing while the list is still empty.
+ */
+internal fun liveTvProResolvedBrowserCategory(
+    launchContext: String?,
+    currentCategoryId: String?,
+    currentStreamId: Int,
+    virtualChannelIds: List<Int>,
+): String? = when {
+    launchContext != VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID -> null
+    virtualChannelIds.isEmpty() -> null
+    currentStreamId in virtualChannelIds -> VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID
+    else -> currentCategoryId
+}
+
 internal fun decodeLiveTvProRecentChannelIds(raw: String?): List<Int> = raw
     .orEmpty()
     .split(',')
