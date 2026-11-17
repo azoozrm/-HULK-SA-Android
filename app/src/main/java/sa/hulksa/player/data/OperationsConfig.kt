@@ -103,6 +103,7 @@ data class OperationsConfig(
     val growth: OperationsGrowthConfig = OperationsGrowthConfig(),
     val presence: OperationsPresenceConfig? = null,
     val pairing: OperationsPairingConfig? = null,
+    val liveForeignSports: OperationsLiveForeignSportsConfig? = null,
 )
 
 data class OperationsPairingConfig(
@@ -321,6 +322,7 @@ fun parseOperationsConfig(rawJson: String): OperationsConfig? = runCatching {
     val growth = parseOperationsGrowth(root.optJSONObject("growth"))
     val presence = parseOperationsPresence(root.optJSONObject("presence"))
     val pairing = parseOperationsPairing(root.optJSONObject("pairing"))
+    val liveForeignSports = parseLiveForeignSports(root.optJSONObject("liveForeignSports"))
 
     OperationsConfig(
         schemaVersion = schemaVersion,
@@ -332,8 +334,27 @@ fun parseOperationsConfig(rawJson: String): OperationsConfig? = runCatching {
         growth = growth,
         presence = presence,
         pairing = pairing,
+        liveForeignSports = liveForeignSports,
     )
 }.getOrNull()
+
+/**
+ * Optional app-only Live category. Invalid/missing data disables this field only; the rest of the
+ * Operations payload remains valid. The override is name-based and independent of host/port/URL.
+ * A valid empty alias list is an explicit hide.
+ */
+private fun parseLiveForeignSports(value: JSONObject?): OperationsLiveForeignSportsConfig? =
+    runCatching {
+        requireNotNull(value)
+        val channels = value.optJSONArray("channelAliases") ?: return@runCatching null
+        require(channels.length() <= MAX_LIVE_FOREIGN_SPORTS_ALIASES)
+        val aliases = buildList {
+            for (index in 0 until channels.length()) {
+                channels.optString(index).trim().takeIf(String::isNotEmpty)?.let(::add)
+            }
+        }.distinct()
+        OperationsLiveForeignSportsConfig(aliases)
+    }.getOrNull()
 
 /**
  * Optional pairing advertisement. Missing/false/malformed/invalid data disables pairing only and

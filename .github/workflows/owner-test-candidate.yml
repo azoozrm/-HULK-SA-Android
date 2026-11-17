@@ -35,7 +35,8 @@ jobs:
       github.event.pull_request.head.ref == 'feature/vod-more-audio-subtitles-r01' ||
       github.event.pull_request.head.ref == 'fix/home-hero-copy-layout-r01' ||
       github.event.pull_request.head.ref == 'fix/search-favorite-rail-focus-r01' ||
-      github.event.pull_request.head.ref == 'feat/neo4k-android-rebrand-r01') &&
+      github.event.pull_request.head.ref == 'feat/neo4k-android-rebrand-r01' ||
+      github.event.pull_request.head.ref == 'feature/neo4k-live-foreign-sports-r01') &&
       github.event.pull_request.base.ref == 'phase-3-v0.9.3.0-adaptive-foundation'
     runs-on: ubuntu-latest
     environment: production-signing
@@ -45,8 +46,8 @@ jobs:
       WORKFLOW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       WORKFLOW_MERGE_SHA: ${{ github.sha }}
       EXPECTED_PACKAGE: sa.hulksa.player
-      EXPECTED_VERSION_CODE: '69'
-      EXPECTED_VERSION_NAME: 1.0.1
+      EXPECTED_VERSION_CODE: ${{ github.event.pull_request.head.ref == 'feature/neo4k-live-foreign-sports-r01' && '70' || '69' }}
+      EXPECTED_VERSION_NAME: ${{ github.event.pull_request.head.ref == 'feature/neo4k-live-foreign-sports-r01' && '1.0.2' || '1.0.1' }}
       EXPECTED_INSTALLED_CERT_SHA256: 144e0548da502aa8bd060a9a280a98bb9dc6763387bf8b20ea100b5fed652fe0
       GH_TOKEN: ${{ github.token }}
       HULK_RELEASE_KEYSTORE_BASE64: ${{ secrets.HULK_RELEASE_KEYSTORE_BASE64 }}

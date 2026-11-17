@@ -5,11 +5,14 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import sa.hulksa.player.data.VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID
+import sa.hulksa.player.data.VIRTUAL_FOREIGN_SPORTS_CATEGORY_NAME
 import sa.hulksa.player.model.Category
 import sa.hulksa.player.model.ContentType
 
 class LiveCategoryOrderPolicyTest {
-    private fun category(id: String) = Category(id = id, name = id, type = ContentType.LIVE)
+    private fun category(id: String, name: String = id) =
+        Category(id = id, name = name, type = ContentType.LIVE)
 
     @Test
     fun `legacy adoption keeps displayed server order and drops synthetic fixed rows`() {
@@ -160,5 +163,127 @@ class LiveCategoryOrderPolicyTest {
         val target = liveCategoryDragTargetKey(currentRows, pointerY = 150f, viewportTop = 100f)
 
         assertEquals("b", target)
+    }
+
+    @Test
+    fun `app-only foreign sports category follows documentary on first placement`() {
+        val ordered = orderedLiveServerCategories(
+            categories = listOf(
+                category("news", "AR| NEWS الأخبار"),
+                category("documentary", "AR| DOCUMENTARY وثائقي"),
+                category("bein", "AR| BEIN SPORTS ◉⚽"),
+                category(VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID, VIRTUAL_FOREIGN_SPORTS_CATEGORY_NAME),
+            ),
+            committedOrderIds = listOf("news", "documentary", "bein"),
+        ).map(Category::id)
+
+        assertEquals(
+            listOf("news", "documentary", VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID, "bein"),
+            ordered,
+        )
+    }
+
+    @Test
+    fun `conflicting saved anchors place the new category before the first sports row`() {
+        val ordered = orderedLiveServerCategories(
+            categories = listOf(
+                category("news", "AR| NEWS الأخبار"),
+                category("bein", "AR| BEIN SPORTS ◉⚽"),
+                category("documentary", "AR| DOCUMENTARY وثائقي"),
+                category(VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID, VIRTUAL_FOREIGN_SPORTS_CATEGORY_NAME),
+            ),
+            committedOrderIds = listOf("news", "bein", "documentary"),
+        ).map(Category::id)
+
+        assertEquals(
+            listOf("news", VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID, "bein", "documentary"),
+            ordered,
+        )
+    }
+
+    @Test
+    fun `hidden app-only category keeps its saved position while the visible strip omits it`() {
+        val ordered = orderedLiveServerCategories(
+            categories = listOf(
+                category("news", "AR| NEWS الأخبار"),
+                category("documentary", "AR| DOCUMENTARY وثائقي"),
+                category("bein", "AR| BEIN SPORTS ◉⚽"),
+                category(VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID, VIRTUAL_FOREIGN_SPORTS_CATEGORY_NAME),
+            ),
+            committedOrderIds = listOf(
+                "news",
+                "documentary",
+                VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
+                "bein",
+            ),
+        )
+        val hidden = setOf(VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID)
+
+        assertEquals(
+            listOf(
+                "news",
+                "documentary",
+                VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
+                "bein",
+            ),
+            ordered.map(Category::id),
+        )
+        assertEquals(
+            listOf("news", "documentary", "bein"),
+            ordered.filterNot { it.id in hidden }.map(Category::id),
+        )
+    }
+
+    @Test
+    fun `conflicting saved order places the category before the earliest sports group`() {
+        val ordered = orderedLiveServerCategories(
+            categories = listOf(
+                category("news", "AR| NEWS الأخبار"),
+                category("arabic-sports", "AR| ARABIC SPORTS ⚽ رياضة"),
+                category("bein", "AR| BEIN SPORTS ◉⚽"),
+                category("documentary", "AR| DOCUMENTARY وثائقي"),
+                category(VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID, VIRTUAL_FOREIGN_SPORTS_CATEGORY_NAME),
+            ),
+            committedOrderIds = listOf(
+                "news",
+                "arabic-sports",
+                "bein",
+                "documentary",
+            ),
+        ).map(Category::id)
+
+        assertEquals(
+            listOf(
+                "news",
+                VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
+                "arabic-sports",
+                "bein",
+                "documentary",
+            ),
+            ordered,
+        )
+    }
+
+    @Test
+    fun `a saved placement for the app-only category wins`() {
+        val ordered = orderedLiveServerCategories(
+            categories = listOf(
+                category("news", "AR| NEWS الأخبار"),
+                category("documentary", "AR| DOCUMENTARY وثائقي"),
+                category("bein", "AR| BEIN SPORTS ◉⚽"),
+                category(VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID, VIRTUAL_FOREIGN_SPORTS_CATEGORY_NAME),
+            ),
+            committedOrderIds = listOf(
+                "news",
+                "bein",
+                VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
+                "documentary",
+            ),
+        ).map(Category::id)
+
+        assertEquals(
+            listOf("news", "bein", VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID, "documentary"),
+            ordered,
+        )
     }
 }

@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import sa.hulksa.player.MainDestination
+import sa.hulksa.player.data.VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID
 import sa.hulksa.player.hulkPerfLog
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
@@ -151,6 +152,7 @@ internal class LiveCatalogProjectionInput(
     val categoryId: String?,
     val query: String,
     val favorites: CatalogFavoriteSnapshot,
+    val virtualChannelIds: List<Int> = emptyList(),
 ) {
     override fun equals(other: Any?): Boolean =
         other is LiveCatalogProjectionInput &&
@@ -158,14 +160,16 @@ internal class LiveCatalogProjectionInput(
             categoryId == other.categoryId &&
             query == other.query &&
             favorites.persisted === other.favorites.persisted &&
-            favorites.optimistic == other.favorites.optimistic
+            favorites.optimistic == other.favorites.optimistic &&
+            virtualChannelIds == other.virtualChannelIds
 
     override fun hashCode(): Int {
         var result = System.identityHashCode(catalog)
         result = 31 * result + (categoryId?.hashCode() ?: 0)
         result = 31 * result + query.hashCode()
         result = 31 * result + System.identityHashCode(favorites.persisted)
-        return 31 * result + favorites.optimistic.hashCode()
+        result = 31 * result + favorites.optimistic.hashCode()
+        return 31 * result + virtualChannelIds.hashCode()
     }
 }
 
@@ -304,10 +308,23 @@ internal fun deriveLiveCatalogProjection(
     val items = input.catalog?.items.orEmpty()
     val query = input.query.trim()
     if (input.categoryId == null && query.isEmpty()) return items
-    return items.filter { item ->
-        categoryMatches(item, input.categoryId, input.favorites::contains) &&
-            item.matchesSearchNormalized(query)
+    val scoped = if (input.categoryId == VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID) {
+        liveCategoryItems(
+            items = items,
+            categoryId = input.categoryId,
+            virtualChannelIds = input.virtualChannelIds,
+        )
+    } else {
+        items.filter { item ->
+            liveCategoryMatches(
+                item = item,
+                selectedId = input.categoryId,
+                virtualChannelIds = input.virtualChannelIds,
+                isFavorite = input.favorites::contains,
+            )
+        }
     }
+    return scoped.filter { item -> item.matchesSearchNormalized(query) }
 }
 
 internal fun deriveHomeContentModel(input: HomeContentModelInput): HomeContentSnapshot {

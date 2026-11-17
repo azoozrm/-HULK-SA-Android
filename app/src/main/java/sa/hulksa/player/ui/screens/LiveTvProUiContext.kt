@@ -4,6 +4,7 @@ import android.content.Context
 import sa.hulksa.player.data.AccountProfileStateScope
 import sa.hulksa.player.data.AccountProfileStateStore
 import sa.hulksa.player.data.LegacyProfileStatePolicy
+import sa.hulksa.player.data.VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID
 
 internal const val LIVE_TV_PRO_MAIN_FAVORITES_CATEGORY = "__hulk_favorites__"
 internal const val LIVE_TV_PRO_MAIN_CONTINUE_CATEGORY = "__hulk_continue__"
@@ -50,6 +51,7 @@ internal fun liveTvProInitialBrowserCategory(
     currentStreamId: Int,
     favoriteIds: Set<Int>,
     recentIds: List<Int>,
+    virtualChannelIds: List<Int> = emptyList(),
 ): String? = when (launchContext) {
     LIVE_TV_PRO_CONTEXT_FAVORITES -> {
         if (currentStreamId in favoriteIds) LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY else currentCategoryId
@@ -59,7 +61,28 @@ internal fun liveTvProInitialBrowserCategory(
     }
     LIVE_TV_PRO_CONTEXT_ALL -> null
     null, "" -> currentCategoryId
+    VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID ->
+        if (currentStreamId in virtualChannelIds) launchContext else currentCategoryId
     else -> if (launchContext == currentCategoryId) launchContext else currentCategoryId
+}
+
+/**
+ * Resolves the browser category after virtual membership arrives.
+ *
+ * The initial browser category is computed when the browser opens. Virtual membership can be
+ * resolved a moment later; this pure resolver lets the browser switch back to the virtual
+ * category once the IDs are available, without guessing while the list is still empty.
+ */
+internal fun liveTvProResolvedBrowserCategory(
+    launchContext: String?,
+    currentCategoryId: String?,
+    currentStreamId: Int,
+    virtualChannelIds: List<Int>,
+): String? = when {
+    launchContext != VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID -> null
+    virtualChannelIds.isEmpty() -> null
+    currentStreamId in virtualChannelIds -> VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID
+    else -> currentCategoryId
 }
 
 internal fun decodeLiveTvProRecentChannelIds(raw: String?): List<Int> = raw

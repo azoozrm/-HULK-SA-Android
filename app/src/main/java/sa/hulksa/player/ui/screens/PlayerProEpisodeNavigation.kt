@@ -21,6 +21,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
+import sa.hulksa.player.data.VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.Episode
@@ -161,9 +162,19 @@ internal fun playerProLiveNavigationSequence(
     launchContext: String,
     favoriteIds: Set<Int>,
     recentIds: List<Int>,
+    virtualChannelIds: List<Int> = emptyList(),
 ): List<ContentItem> {
     if (channels.isEmpty()) return emptyList()
     val byId = channels.associateBy(ContentItem::id)
+    if (launchContext == VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID) {
+        if (virtualChannelIds.isEmpty()) return listOfNotNull(byId[currentStreamId])
+        val virtualSequence = virtualChannelIds
+            .mapNotNull(byId::get)
+            .distinctBy(ContentItem::id)
+        return virtualSequence
+            .takeIf { sequence -> sequence.any { it.id == currentStreamId } }
+            ?: liveTvProChannelSequence(channels, currentStreamId)
+    }
     val contextual = when (launchContext) {
         LIVE_TV_PRO_CONTEXT_FAVORITES -> channels.filter { it.id in favoriteIds }
         LIVE_TV_PRO_CONTEXT_RECENT -> recentIds.mapNotNull(byId::get).distinctBy(ContentItem::id)
@@ -201,6 +212,7 @@ fun PlayerProScreen(
     request: PlaybackRequest,
     liveTvProEnabled: Boolean,
     liveCatalog: Catalog?,
+    virtualChannelIds: List<Int> = emptyList(),
     isFavorite: (ContentItem) -> Boolean,
     favoriteKeys: Set<String>,
     vodItem: ContentItem? = null,
@@ -291,6 +303,7 @@ fun PlayerProScreen(
         liveFavoriteChannels,
         liveRecentChannels,
         liveLaunchContext,
+        virtualChannelIds,
     ) {
         liveNavigationSequenceFromIndex(
             index = liveCatalogIndex,
@@ -298,6 +311,7 @@ fun PlayerProScreen(
             launchContext = liveLaunchContext,
             favoriteChannels = liveFavoriteChannels,
             recentChannels = liveRecentChannels,
+            virtualChannelIds = virtualChannelIds,
         )
     }
 
@@ -510,7 +524,7 @@ fun PlayerProScreen(
         }
         if (channel.id == request.streamId && pendingLiveChannelId == null) return
 
-        val sequence = liveCatalogIndex.sequenceFor(request.streamId)
+        val sequence = liveNavigationSequence
         val currentIndex = sequence.indexOfFirst { it.id == request.streamId }
         val requestedIndex = sequence.indexOfFirst { it.id == channel.id }
         val relativeDelta = if (currentIndex >= 0 && requestedIndex >= 0 && sequence.size > 1) {
@@ -648,6 +662,7 @@ fun PlayerProScreen(
         PlayerScreen(
             request = request,
             liveCatalog = liveCatalog,
+            virtualChannelIds = virtualChannelIds,
             isFavorite = isFavorite,
             favoriteKeys = favoriteKeys,
             vodItem = vodItem,

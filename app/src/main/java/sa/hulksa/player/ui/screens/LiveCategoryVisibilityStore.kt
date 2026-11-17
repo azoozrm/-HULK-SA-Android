@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import sa.hulksa.player.data.AccountProfileStateScope
 import sa.hulksa.player.data.AccountProfileStateStore
 import sa.hulksa.player.data.LegacyProfileStatePolicy
+import sa.hulksa.player.data.VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID
 import sa.hulksa.player.model.Category
 
 private const val LIVE_CATEGORY_VISIBILITY_PREFS = "live_category_visibility"
@@ -62,7 +63,62 @@ internal fun orderedLiveServerCategories(
     val byId = serverCategories.associateBy(Category::id)
     val ordered = committedOrderIds.distinct().mapNotNull(byId::get)
     val orderedIds = ordered.mapTo(hashSetOf(), Category::id)
-    return ordered + serverCategories.filterNot { it.id in orderedIds }
+    val complete = ordered + serverCategories.filterNot { it.id in orderedIds }
+    return placeFirstTimeLiveForeignSports(complete, committedOrderIds)
+}
+
+/**
+ * First placement for the app-only foreign-sports category.
+ *
+ * A committed placement always wins. Otherwise the category follows the verified documentary
+ * category when that keeps it ahead of the first sports/beIN category. If saved anchors conflict,
+ * it is placed immediately before the first available sports category. Other categories retain
+ * their relative order.
+ */
+internal fun placeFirstTimeLiveForeignSports(
+    categories: List<Category>,
+    committedOrderIds: List<String>,
+): List<Category> {
+    val virtual = categories.firstOrNull { it.id == VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID }
+        ?: return categories
+    if (virtual.id in committedOrderIds) return categories
+    val without = categories.filterNot { it.id == VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID }
+    val documentaryIndex = without.indexOfFirst { isDocumentaryCategoryName(it.name) }
+    val firstBeinIndex = without.indexOfFirst { isBeinCategoryName(it.name) }
+    val firstSportsIndex = without.indexOfFirst { isLiveSportsCategoryName(it.name) }
+    val firstSportsGroupIndex = listOfNotNull(
+        firstBeinIndex.takeIf { it >= 0 },
+        firstSportsIndex.takeIf { it >= 0 },
+    ).minOrNull()
+    val insertAt = when {
+        documentaryIndex >= 0 &&
+            (firstSportsGroupIndex == null || documentaryIndex < firstSportsGroupIndex) ->
+            documentaryIndex + 1
+        firstSportsGroupIndex != null -> firstSportsGroupIndex
+        else -> without.size
+    }
+    return without.toMutableList().apply { add(insertAt, virtual) }
+}
+
+internal fun isDocumentaryCategoryName(name: String): Boolean {
+    val normalized = name.lowercase()
+    return normalized.contains("documentary") ||
+        normalized.contains("وثائقي") ||
+        normalized.contains("وثائقيه") ||
+        normalized.contains("وثائقية")
+}
+
+internal fun isBeinCategoryName(name: String): Boolean =
+    name.uppercase().contains("BEIN")
+
+internal fun isLiveSportsCategoryName(name: String): Boolean {
+    val normalized = name.uppercase()
+    return normalized.contains("BEIN") ||
+        normalized.contains("SPORT") ||
+        normalized.contains("DAZN") ||
+        normalized.contains("TNT") ||
+        normalized.contains("SKY") ||
+        normalized.contains("UEFA")
 }
 
 /**

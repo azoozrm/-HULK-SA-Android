@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import sa.hulksa.player.data.VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
 
@@ -89,6 +90,97 @@ class LiveTvProChannelPolicyTest {
                 delta = 1,
             )?.id,
         )
+    }
+
+    @Test
+    fun virtualCategoryNavigationSkipsAnAdjacentProviderHeaderAndWraps() {
+        val providerHeader = channel(99, "bundesliga")
+            .copy(name = "### SKY BUNDESLIGA HD/4K ###")
+        val bundesliga = channel(100, "bundesliga")
+            .copy(name = "DE: SKY SPORT BUNDESLIGA HD")
+        val bundesliga2 = channel(101, "bundesliga")
+            .copy(name = "DE: SKY SPORT BUNDESLIGA 2 HD")
+        val laliga = channel(200, "laliga")
+            .copy(name = "ES: MOVISTAR LA LIGA HD")
+        val tabii = channel(300, "tabii")
+            .copy(name = "TR: TABII SPORT 1")
+        val channels = listOf(providerHeader, bundesliga, bundesliga2, laliga, tabii)
+        val index = LiveChannelCatalogIndex(channels)
+        val virtualIds = listOf(100, 200, 300)
+
+        val sequence = liveNavigationSequenceFromIndex(
+            index = index,
+            currentStreamId = 100,
+            launchContext = VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
+            favoriteChannels = emptyList(),
+            recentChannels = emptyList(),
+            virtualChannelIds = virtualIds,
+        )
+
+        assertEquals(listOf(100, 200, 300), sequence.map(ContentItem::id))
+        assertTrue(sequence.none { it.id == providerHeader.id })
+        assertEquals(
+            200,
+            playerProQueuedRelativeChannel(sequence, 100, pendingStreamId = null, delta = 1)?.id,
+        )
+        assertEquals(
+            300,
+            playerProQueuedRelativeChannel(sequence, 100, pendingStreamId = null, delta = -1)?.id,
+        )
+        assertEquals(
+            300,
+            playerProQueuedRelativeChannel(sequence, 100, pendingStreamId = 200, delta = 1)?.id,
+        )
+        assertEquals(
+            100,
+            playerProQueuedRelativeChannel(sequence, 100, pendingStreamId = 300, delta = 1)?.id,
+        )
+    }
+
+    @Test
+    fun virtualCategoryNavigationKeepsTheCurrentChannelWhileMembershipLoads() {
+        val channels = listOf(
+            channel(100, "bundesliga").copy(name = "DE: SKY SPORT BUNDESLIGA HD"),
+            channel(200, "laliga").copy(name = "ES: MOVISTAR LA LIGA HD"),
+        )
+        val index = LiveChannelCatalogIndex(channels)
+
+        val sequence = liveNavigationSequenceFromIndex(
+            index = index,
+            currentStreamId = 100,
+            launchContext = VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
+            favoriteChannels = emptyList(),
+            recentChannels = emptyList(),
+            virtualChannelIds = emptyList(),
+        )
+
+        assertEquals(listOf(100), sequence.map(ContentItem::id))
+        assertEquals(
+            100,
+            playerProQueuedRelativeChannel(sequence, 100, pendingStreamId = null, delta = 1)?.id,
+        )
+    }
+
+    @Test
+    fun virtualContextForANonMemberKeepsTheProviderCategorySequence() {
+        val channels = listOf(
+            channel(99, "bundesliga").copy(name = "### SKY BUNDESLIGA HD/4K ###"),
+            channel(100, "bundesliga").copy(name = "DE: SKY SPORT BUNDESLIGA HD"),
+            channel(101, "bundesliga").copy(name = "DE: SKY SPORT BUNDESLIGA 2 HD"),
+            channel(200, "laliga").copy(name = "ES: MOVISTAR LA LIGA HD"),
+        )
+        val index = LiveChannelCatalogIndex(channels)
+
+        val sequence = liveNavigationSequenceFromIndex(
+            index = index,
+            currentStreamId = 101,
+            launchContext = VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID,
+            favoriteChannels = emptyList(),
+            recentChannels = emptyList(),
+            virtualChannelIds = listOf(100, 200),
+        )
+
+        assertEquals(listOf(99, 100, 101), sequence.map(ContentItem::id))
     }
 
     @Test

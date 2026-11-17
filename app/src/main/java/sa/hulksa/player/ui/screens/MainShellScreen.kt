@@ -5437,6 +5437,9 @@ private fun LiveCatalogScreen(
     val colors = LocalHulkColors.current
     val context = LocalContext.current
     val catalog = state.catalogs[ContentType.LIVE]
+    val virtualChannelIds = remember(state.liveForeignSports) {
+        state.liveForeignSports?.channelIds.orEmpty()
+    }
     // The explicit snapshot is the observed favorite revision for both membership and hearts;
     // the opaque view-model callback is not a Compose state read in this subtree.
     val projectionInput = remember(
@@ -5445,12 +5448,14 @@ private fun LiveCatalogScreen(
         state.searchQuery,
         favorites.persisted,
         favorites.optimistic,
+        virtualChannelIds,
     ) {
         LiveCatalogProjectionInput(
             catalog = catalog,
             categoryId = state.selectedCategoryId,
             query = state.searchQuery,
             favorites = favorites,
+            virtualChannelIds = virtualChannelIds,
         )
     }
     val cachedProjection = remember(projectionInput) {

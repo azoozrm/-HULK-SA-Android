@@ -588,6 +588,7 @@ private fun cacheVerifiedMovieCardMetadata(
 fun PlayerScreen(
     request: PlaybackRequest,
     liveCatalog: Catalog?,
+    virtualChannelIds: List<Int> = emptyList(),
     isFavorite: (ContentItem) -> Boolean,
     favoriteKeys: Set<String> = emptySet(),
     vodItem: ContentItem? = null,
@@ -3096,6 +3097,7 @@ fun PlayerScreen(
             LiveChannelBrowser(
                 catalog = liveCatalog,
                 currentStreamId = request.streamId,
+                virtualChannelIds = virtualChannelIds,
                 origin = browserOrigin,
                 isFavorite = isFavorite,
                 favoriteKeys = favoriteKeys,

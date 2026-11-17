@@ -71,13 +71,25 @@ class OperationsStore(context: Context) {
     }
 
     fun saveConfig(rawJson: String, fetchedAtEpochMs: Long): Boolean = synchronized(lock) {
-        if (fetchedAtEpochMs <= 0L || parseOperationsConfig(rawJson) == null) {
-            return@synchronized false
-        }
-        preferences.edit()
+        if (fetchedAtEpochMs <= 0L) return@synchronized false
+        val parsed = parseOperationsConfig(rawJson) ?: return@synchronized false
+        val editor = preferences.edit()
             .putString(KEY_CONFIG_JSON, rawJson)
             .putLong(KEY_CONFIG_FETCHED_AT, fetchedAtEpochMs)
-            .commit()
+        parsed.liveForeignSports?.let { configured ->
+            editor.putString(
+                KEY_LIVE_FOREIGN_SPORTS,
+                encodeLiveForeignSportsLastValid(configured.channelAliases),
+            )
+        }
+        editor.commit()
+    }
+
+    /** Last valid alias override; null means no override has ever been stored. */
+    fun lastValidLiveForeignSports(): List<String>? = synchronized(lock) {
+        decodeLiveForeignSportsLastValid(
+            preferences.getString(KEY_LIVE_FOREIGN_SPORTS, null),
+        )
     }
 
     fun acknowledgedMessageIds(): Set<String> = synchronized(lock) {
@@ -261,6 +273,7 @@ class OperationsStore(context: Context) {
         private const val KEY_CONFIG_JSON = "config_json"
         private const val KEY_CONFIG_FETCHED_AT = "config_fetched_at"
         private const val KEY_ACKNOWLEDGED_MESSAGES = "acknowledged_messages"
+        private const val KEY_LIVE_FOREIGN_SPORTS = "live_foreign_sports"
         private const val KEY_SYSTEM_NOTIFICATIONS = "system_notifications"
         private const val KEY_RECORDED_SYSTEM_MESSAGES = "recorded_system_messages"
         private const val MAX_SYSTEM_NOTIFICATIONS = 100
