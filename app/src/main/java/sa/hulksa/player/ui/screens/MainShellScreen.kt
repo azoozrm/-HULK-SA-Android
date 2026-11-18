@@ -5545,7 +5545,15 @@ private fun LiveCatalogScreen(
     LaunchedEffect(guideChannel, hostWindowFocused) {
         if (guideChannel == null && guideReturnFocusPending && hostWindowFocused) {
             withFrameNanos { }
-            runCatching { guideRequester.requestFocus() }
+            val firstAttempt = runCatching { guideRequester.requestFocus() }.getOrDefault(false)
+            // A Dialog window can still be releasing focus on the first frame. The second request is
+            // one more composition-frame synchronization, never a timed retry loop.
+            withFrameNanos { }
+            val secondAttempt = runCatching { guideRequester.requestFocus() }.getOrDefault(false)
+            hulkPerfLog {
+                "epgGuideFocusRestore first=$firstAttempt second=$secondAttempt " +
+                    "windowFocused=$hostWindowFocused"
+            }
             guideReturnFocusPending = false
         }
     }
