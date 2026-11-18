@@ -248,7 +248,6 @@ private fun LiveEpgGuidePanel(
     val nowNext = state.nowNext(channelId, nowEpochSeconds)
     val listState = rememberLazyListState()
     val initialFocus = remember { FocusRequester() }
-    val closeFocus = remember { FocusRequester() }
     var expandedStart by remember(channel.id) { mutableStateOf<Long?>(null) }
     val focusStart = nowNext.current?.startEpochSeconds
         ?: programmes.firstOrNull()?.startEpochSeconds
@@ -268,35 +267,25 @@ private fun LiveEpgGuidePanel(
     }
 
     // A Dialog window is not focusable immediately after show. Wait for its actual window-focus
-    // event, then place focus on the current programme (or the first row/close fallback). This is
-    // event-driven, not a timed retry loop.
+    // event and for the target row to enter the real LazyList layout, then place focus on the
+    // current programme (or the first programme). The close action is intentionally pointer/Back
+    // owned and stays outside this initial D-pad focus graph.
     LaunchedEffect(channel.id, dialogWindowFocused, focusStart) {
         if (initialFocusApplied || !dialogWindowFocused) return@LaunchedEffect
         val index = programmes.indexOfFirst { it.startEpochSeconds == focusStart }
-        if (index >= 0) {
-            listState.scrollToItem(index)
-            // The Dialog's first layout is not the list's first layout. Wait until the target row
-            // actually exists in the laid-out list before attaching the focus request.
-            snapshotFlow {
-                listState.layoutInfo.visibleItemsInfo.any { it.index == index }
-            }.first { it }
-            withFrameNanos { }
-            val focused = runCatching { initialFocus.requestFocus() }.getOrDefault(false)
-            if (focused) {
-                initialFocusApplied = true
-            } else {
-                withFrameNanos { }
-                if (runCatching { initialFocus.requestFocus() }.getOrDefault(false)) {
-                    initialFocusApplied = true
-                } else {
-                    initialFocusApplied = true
-                    runCatching { closeFocus.requestFocus() }
-                }
-            }
+        if (index < 0) return@LaunchedEffect
+        listState.scrollToItem(index)
+        snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo.any { it.index == index }
+        }.first { it }
+        withFrameNanos { }
+        if (runCatching { initialFocus.requestFocus() }.getOrDefault(false)) {
+            initialFocusApplied = true
         } else {
             withFrameNanos { }
-            initialFocusApplied = true
-            runCatching { closeFocus.requestFocus() }
+            if (runCatching { initialFocus.requestFocus() }.getOrDefault(false)) {
+                initialFocusApplied = true
+            }
         }
     }
 
@@ -341,8 +330,7 @@ private fun LiveEpgGuidePanel(
                 modifier = Modifier
                     .width(88.dp)
                     .height(40.dp)
-                    .focusRequester(closeFocus)
-                    .focusProperties { canFocus = initialFocusApplied },
+                    .focusProperties { canFocus = false },
                 primary = false,
                 outlined = true,
                 compact = true,
