@@ -753,7 +753,9 @@ fun PlayerScreen(
     val commentarySession = AuthenticatedSessionRegistry.currentOwner()
     val commentaryProfile = if (request.isLive) context.liveTvProStateScope() else null
     val muteScope = if (request.isLive) request.historyKey else request
-    val muteIntent = remember(muteScope, commentarySession, commentaryProfile) { PlayerMuteIntent() }
+    val muteSessionKey = commentarySession?.let { "${it.accountId}|${it.providerId}|${it.sessionId}" }
+    val muteProfileKey = commentaryProfile?.let { "${it.accountId}|${it.profileId}" }
+    val muteIntent = remember(muteScope, muteSessionKey, muteProfileKey) { PlayerMuteIntent() }
     val isMuted = muteIntent.muted
     var videoHeight by remember(request) { mutableIntStateOf(0) }
     var resizeModeIndex by remember(request) { mutableIntStateOf(0) }
@@ -952,7 +954,7 @@ fun PlayerScreen(
     DisposableEffect(commentaryOwner) {
         onDispose { commentaryOwner.release() }
     }
-    LaunchedEffect(commentaryOwner, isMuted) {
+    LaunchedEffect(commentaryOwner, isMuted, player) {
         commentaryOwner.setOutputMuted(isMuted)
         player.volume = muteIntent.pictureVolume(commentaryOwner.state.commentaryAudible)
     }

@@ -44,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,6 +80,11 @@ import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 private enum class CommentaryPage { CONTROL, CHANNELS, SOURCES, SYNC }
+
+private val CommentaryControlWidth = 620.dp
+private val CommentaryChildWidth = 560.dp
+private val CommentaryControlHeight = 268.dp
+private val CommentaryChildHeight = 420.dp
 
 @Composable
 internal fun ArabicCommentaryDialog(
@@ -136,11 +142,21 @@ internal fun ArabicCommentaryDialog(
                 contentAlignment = Alignment.BottomCenter,
             ) {
                 val shape = RoundedCornerShape(12.dp)
+                val panelWidth = if (visiblePage == CommentaryPage.CONTROL) {
+                    CommentaryControlWidth
+                } else {
+                    CommentaryChildWidth
+                }
+                val panelHeight = if (visiblePage == CommentaryPage.CONTROL) {
+                    CommentaryControlHeight
+                } else {
+                    CommentaryChildHeight
+                }
                 Column(
                     modifier = Modifier
-                        .widthIn(max = 880.dp)
+                        .widthIn(max = panelWidth)
                         .fillMaxWidth()
-                        .heightIn(max = maxHeight)
+                        .height(minOf(panelHeight, maxHeight))
                         .onPreviewKeyEvent { event ->
                             val key = event.nativeKeyEvent
                             when (key.keyCode) {
@@ -182,7 +198,9 @@ internal fun ArabicCommentaryDialog(
                             color = colors.goldBright,
                         )
                         if (visiblePage == CommentaryPage.CONTROL) {
-                            Box(Modifier.weight(1.5f)) { CommentaryStatus(state, pictureLoading, compact = true) }
+                            Box(Modifier.weight(1.5f).heightIn(min = 24.dp)) {
+                                CommentaryStatus(state, pictureLoading, compact = true)
+                            }
                         }
                         FocusButton(
                             text = "اغلاق",
@@ -199,7 +217,7 @@ internal fun ArabicCommentaryDialog(
                         CommentaryPage.CONTROL -> {
                             val feed = state.feed
                             Column(
-                                modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
                                 CommentaryShortcuts(
@@ -213,7 +231,7 @@ internal fun ArabicCommentaryDialog(
                                     onAll = { page = CommentaryPage.CHANNELS },
                                 )
                                 CommentaryDivider()
-                                Row(Modifier.widthIn(max = 370.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(Modifier.widthIn(max = 280.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     CommentaryFooterButton(
                                         "ضبط التزامن", { page = CommentaryPage.SYNC },
                                         Modifier.weight(1f).commentaryEntryFocus(
@@ -230,7 +248,7 @@ internal fun ArabicCommentaryDialog(
                             }
                         }
                         CommentaryPage.SYNC -> CommentaryControls(
-                            state, Modifier.weight(1f, fill = false), focusPending, focusPending,
+                            state, Modifier.weight(1f), focusPending, focusPending,
                             focusPlaced, onStepSelected, onAdjust, onReset, onRetry, pictureLoading,
                         )
                         CommentaryPage.CHANNELS -> {
@@ -239,7 +257,7 @@ internal fun ArabicCommentaryDialog(
                                 state = state,
                                 focusPending = focusPending,
                                 onFocusPlaced = focusPlaced,
-                                modifier = Modifier.weight(1f, fill = false),
+                                modifier = Modifier.weight(1f),
                                 onSelect = { feed ->
                                     returnFrom = CommentaryPage.CHANNELS
                                     page = CommentaryPage.CONTROL
@@ -255,7 +273,7 @@ internal fun ArabicCommentaryDialog(
                                     selected = state.source,
                                     focusPending = focusPending,
                                     onFocusPlaced = focusPlaced,
-                                    modifier = Modifier.weight(1f, fill = false),
+                                    modifier = Modifier.weight(1f),
                                     onSelect = { source ->
                                         returnFrom = CommentaryPage.SOURCES
                                         page = CommentaryPage.CONTROL
@@ -364,28 +382,40 @@ private fun CommentaryControls(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                Text(
+                    text = "الخطوة",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textMuted,
+                )
                 for (step in listOf(ARABIC_COMMENTARY_FINE_STEP_MS, ARABIC_COMMENTARY_COARSE_STEP_MS)) {
                     CommentaryRow(
                         title = arabicCommentaryStepLabel(step),
                         selectedOption = state.stepMs == step,
                         numeric = true,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.width(120.dp),
                         onClick = { onStepSelected(step) },
                     )
                 }
             }
-            CommentaryRow(
-                title = "التعليق يسبق الصورة",
-                icon = Icons.Rounded.RecordVoiceOver,
-                modifier = Modifier.commentaryEntryFocus(earlyFocus, onFocusPlaced),
-                onClick = { onAdjust(ArabicCommentarySymptom.COMMENTARY_EARLY) },
-            )
-            CommentaryRow(
-                title = "التعليق متاخر عن الصورة",
-                icon = Icons.Rounded.LiveTv,
-                onClick = { onAdjust(ArabicCommentarySymptom.COMMENTARY_LATE) },
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CommentaryRow(
+                    title = "التعليق يسبق الصورة",
+                    icon = Icons.Rounded.RecordVoiceOver,
+                    modifier = Modifier.weight(1f).commentaryEntryFocus(earlyFocus, onFocusPlaced),
+                    onClick = { onAdjust(ArabicCommentarySymptom.COMMENTARY_EARLY) },
+                )
+                CommentaryRow(
+                    title = "التعليق متاخر عن الصورة",
+                    icon = Icons.Rounded.LiveTv,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onAdjust(ArabicCommentarySymptom.COMMENTARY_LATE) },
+                )
+            }
             CommentaryRow(
                 title = "اعادة الضبط",
                 icon = Icons.Rounded.Replay,
@@ -486,7 +516,7 @@ private fun CommentaryChannelPicker(
                 if (query.isBlank()) "لا توجد قنوات beIN SPORTS عربية" else "لا توجد قناة مطابقة",
             )
             else -> LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f, fill = false).focusGroup(),
+                modifier = Modifier.fillMaxWidth().weight(1f).focusGroup(),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 items(feeds, key = { it.key.rowKey }) { feed ->
@@ -523,7 +553,7 @@ private fun CommentarySourcePicker(
         Text(feed.key.label, style = MaterialTheme.typography.titleSmall, color = colors.text)
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxWidth().weight(1f, fill = false).focusGroup(),
+            modifier = Modifier.fillMaxWidth().weight(1f).focusGroup(),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             items(feed.sources, key = { it.key }) { source ->
@@ -608,7 +638,14 @@ private fun Modifier.commentaryEntryFocus(request: Boolean, onPlaced: () -> Unit
     val requester = remember { FocusRequester() }
     var attached by remember { mutableStateOf(false) }
     LaunchedEffect(request, attached) {
-        if (request && attached && requester.requestFocus()) onPlaced()
+        if (!request || !attached) return@LaunchedEffect
+        repeat(5) {
+            if (requester.requestFocus()) {
+                onPlaced()
+                return@LaunchedEffect
+            }
+            withFrameNanos { }
+        }
     }
     return focusRequester(requester).onGloballyPositioned { attached = it.isAttached }
 }
@@ -636,7 +673,12 @@ private fun CommentaryAlignmentStatus(alignment: ArabicCommentaryAlignment) {
         pictureRetained = alignment.needsReadjustment,
     )
     if (alignment.delays.hasDelay || !alignment.pictureHoldIncomplete) {
-        CommentarySecondaryText(delayNumber.replace(summary) { match -> "\u2066${match.value}\u2069" })
+        Text(
+            text = delayNumber.replace(summary) { match -> "\u2066${match.value}\u2069" },
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = LocalHulkColors.current.goldBright,
+        )
     }
     if (alignment.pictureHoldIncomplete) {
         CommentarySecondaryText("قد يبقى جزء من تأخير الصورة بعد قطع الضبط")

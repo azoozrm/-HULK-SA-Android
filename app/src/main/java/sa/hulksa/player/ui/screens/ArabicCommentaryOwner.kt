@@ -403,8 +403,13 @@ internal class ArabicCommentaryOwner(
         val target = if (result.delayedSource == ArabicCommentaryDelayedSource.VIDEO) videoPlayer else commentary
         val other = if (target === videoPlayer) commentary else videoPlayer
         val bufferedAheadMs = (target.bufferedPosition - target.currentPosition).coerceAtLeast(0L)
-        if (target.playbackState != Player.STATE_READY || bufferedAheadMs < result.appliedMs) {
+        if (target.playbackState != Player.STATE_READY || bufferedAheadMs < result.appliedMs + 500L) {
             state = state.copy(message = "انتظر تجهيز البث قبل تطبيق هذه الخطوة")
+            Log.i(
+                TAG,
+                "commentary adjust blocked source=${result.delayedSource} step=${result.appliedMs} " +
+                    "bufferedAheadMs=$bufferedAheadMs targetState=${target.playbackState}",
+            )
             return
         }
 
@@ -413,7 +418,15 @@ internal class ArabicCommentaryOwner(
         state = state.copy(adjusting = true, message = null)
         adjustmentJob = scope.launch {
             try {
+                Log.i(
+                    TAG,
+                    "commentary adjust start error=${state.error} symptom=$symptom stepMs=${state.stepMs} " +
+                        "source=${result.delayedSource} appliedMs=${result.appliedMs} bufferedAheadMs=$bufferedAheadMs " +
+                        "videoState=${videoPlayer.playbackState} videoPlaying=${videoPlayer.isPlaying} " +
+                        "commentaryState=${commentary.playbackState} commentaryPlaying=${commentary.isPlaying}",
+                )
                 if (!pauseAndConfirm(operation)) {
+                    Log.i(TAG, "commentary adjust pause failed source=${result.delayedSource}")
                     if (hold === operation) cancelAdjustment("لم تكتمل خطوة ضبط التزامن")
                     return@launch
                 }
@@ -426,21 +439,41 @@ internal class ArabicCommentaryOwner(
                     released = released,
                 )
                 if (!shouldResume) {
+                    Log.i(
+                        TAG,
+                        "commentary adjust interrupted source=${result.delayedSource} " +
+                            "videoState=${videoPlayer.playbackState} videoPlaying=${videoPlayer.isPlaying} " +
+                            "commentaryState=${commentary.playbackState} commentaryPlaying=${commentary.isPlaying}",
+                    )
                     if (hold === operation) cancelAdjustment("لم تكتمل خطوة ضبط التزامن")
                     return@launch
                 }
                 hold = null
+                restoreHeldPlayer(operation)
+                if (target.playerError != null || !target.playWhenReady) {
+                    state = state.copy(
+                        adjusting = false,
+                        message = "تعذر استئناف التشغيل بعد الخطوة. لم يتم تثبيت التأخير",
+                    )
+                    Log.w(
+                        TAG,
+                        "commentary adjust resume failed source=${result.delayedSource} " +
+                            "targetError=${target.playerError?.errorCodeName} playWhenReady=${target.playWhenReady}",
+                    )
+                    return@launch
+                }
                 state = state.copy(
                     adjusting = false,
                     alignment = state.alignment.copy(delays = result.delays, needsReadjustment = false),
                     message = if (result.limitReached) "بلغت حد التأخير البالغ 10 ثوان لهذا المصدر" else null,
                 )
-                restoreHeldPlayer(operation)
                 followVideo()
                 Log.i(
                     TAG,
                     "commentary adjusted source=${result.delayedSource} appliedMs=${result.appliedMs} " +
-                        "commentaryMs=${result.delays.commentaryMs} videoMs=${result.delays.videoMs}",
+                        "commentaryMs=${result.delays.commentaryMs} videoMs=${result.delays.videoMs} " +
+                        "videoState=${videoPlayer.playbackState} videoPlaying=${videoPlayer.isPlaying} " +
+                        "videoPlayWhenReady=${videoPlayer.playWhenReady}",
                 )
             } finally {
                 if (hold === operation) detachAdjustment()
@@ -547,10 +580,17 @@ internal class ArabicCommentaryOwner(
     }
 
     fun onPlaybackInterrupted(message: String, pictureReloaded: Boolean = false) {
+        val hadPictureAdjustment = state.alignment.hasPictureAdjustment
         interrupt(message, restorePicture = false)
         if (pictureReloaded && state.alignment.hasPictureAdjustment) {
             state = state.copy(alignment = state.alignment.pictureRepositioned())
         }
+        Log.i(
+            TAG,
+            "commentary interrupted pictureReloaded=$pictureReloaded " +
+                "hadPictureAdjustment=$hadPictureAdjustment " +
+                "commentaryMs=${state.alignment.delays.commentaryMs} videoMs=${state.alignment.delays.videoMs}",
+        )
     }
 
     fun ensureAuthenticatedSession(): Boolean {
