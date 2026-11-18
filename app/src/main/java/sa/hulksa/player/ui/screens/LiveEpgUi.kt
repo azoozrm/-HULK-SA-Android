@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui.screens
 
+import android.view.ViewTreeObserver
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -42,6 +44,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -246,21 +249,44 @@ private fun LiveEpgGuidePanel(
     var expandedStart by remember(channel.id) { mutableStateOf<Long?>(null) }
     val focusStart = nowNext.current?.startEpochSeconds
         ?: programmes.firstOrNull()?.startEpochSeconds
+    val dialogView = LocalView.current
+    var dialogWindowFocused by remember(dialogView) {
+        mutableStateOf(dialogView.hasWindowFocus())
+    }
+    var initialFocusApplied by remember(channel.id) { mutableStateOf(false) }
+    DisposableEffect(dialogView) {
+        val listener = ViewTreeObserver.OnWindowFocusChangeListener { focused ->
+            dialogWindowFocused = focused
+        }
+        dialogView.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+        onDispose {
+            dialogView.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
+        }
+    }
 
-    LaunchedEffect(channel.id) {
+    // A Dialog window is not focusable immediately after show. Wait for its actual window-focus
+    // event, then place focus on the current programme (or the first row/close fallback). This is
+    // event-driven, not a timed retry loop.
+    LaunchedEffect(channel.id, dialogWindowFocused, focusStart) {
+        if (initialFocusApplied || !dialogWindowFocused) return@LaunchedEffect
         val index = programmes.indexOfFirst { it.startEpochSeconds == focusStart }
         if (index >= 0) {
             listState.scrollToItem(index)
             withFrameNanos { }
-            val firstAttempt = runCatching { initialFocus.requestFocus() }.getOrDefault(false)
-            withFrameNanos { }
-            val secondAttempt = runCatching { initialFocus.requestFocus() }.getOrDefault(false)
-            if (!firstAttempt && !secondAttempt) {
-                runCatching { closeFocus.requestFocus() }
+            val focused = runCatching { initialFocus.requestFocus() }.getOrDefault(false)
+            if (focused) {
+                initialFocusApplied = true
+            } else {
+                withFrameNanos { }
+                if (runCatching { initialFocus.requestFocus() }.getOrDefault(false)) {
+                    initialFocusApplied = true
+                }
             }
         } else {
             withFrameNanos { }
-            runCatching { closeFocus.requestFocus() }
+            if (runCatching { closeFocus.requestFocus() }.getOrDefault(true)) {
+                initialFocusApplied = true
+            }
         }
     }
 
