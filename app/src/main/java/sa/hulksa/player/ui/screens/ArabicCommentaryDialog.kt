@@ -49,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -108,8 +109,14 @@ internal fun ArabicCommentaryDialog(
     val syncHasAction = state.phase == ArabicCommentaryPhase.ACTIVE || state.canRetry &&
         state.phase in setOf(ArabicCommentaryPhase.INTERRUPTED, ArabicCommentaryPhase.ERROR)
     var focusPending by remember(visiblePage, state.sessionAvailable) { mutableStateOf(true) }
+    var closeFocusable by remember(visiblePage) { mutableStateOf(false) }
+    LaunchedEffect(visiblePage) {
+        repeat(12) { withFrameNanos { } }
+        closeFocusable = true
+    }
     val focusPlaced = {
         focusPending = false
+        closeFocusable = true
         returnFrom = null
     }
 
@@ -205,7 +212,9 @@ internal fun ArabicCommentaryDialog(
                         FocusButton(
                             text = "اغلاق",
                             onClick = onDismiss,
-                            modifier = Modifier.heightIn(min = 44.dp),
+                            modifier = Modifier
+                                .heightIn(min = 44.dp)
+                                .focusProperties { canFocus = closeFocusable },
                             primary = false,
                             compact = true,
                             outlined = true,
@@ -639,7 +648,7 @@ private fun Modifier.commentaryEntryFocus(request: Boolean, onPlaced: () -> Unit
     var attached by remember { mutableStateOf(false) }
     LaunchedEffect(request, attached) {
         if (!request || !attached) return@LaunchedEffect
-        repeat(5) {
+        repeat(30) {
             if (requester.requestFocus()) {
                 onPlaced()
                 return@LaunchedEffect

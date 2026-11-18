@@ -954,7 +954,7 @@ fun PlayerScreen(
     DisposableEffect(commentaryOwner) {
         onDispose { commentaryOwner.release() }
     }
-    LaunchedEffect(commentaryOwner, isMuted, player) {
+    LaunchedEffect(commentaryOwner, isMuted, player, commentaryOwner.state.commentaryAudible) {
         commentaryOwner.setOutputMuted(isMuted)
         player.volume = muteIntent.pictureVolume(commentaryOwner.state.commentaryAudible)
     }
