@@ -6190,58 +6190,56 @@ private fun LiveStage(
                         modifier = Modifier.padding(horizontal = 2.dp),
                     )
                 }
+                if (liveEpg.guideEnabled) {
+                    Spacer(Modifier.height(8.dp))
+                    FocusButton(
+                        EPG_GUIDE_ACTION_LABEL,
+                        onOpenGuide,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .focusRequester(guideRequester)
+                            .focusProperties {
+                                down = playRequester
+                                right = channelRequester
+                                left = favoriteRequester
+                            },
+                        primary = false,
+                        outlined = true,
+                        compact = true,
+                        trailingIcon = Icons.Outlined.Schedule,
+                    )
+                }
                 Spacer(Modifier.height(12.dp))
                 Box(
                     Modifier
                         .fillMaxWidth()
                         .padding(bottom = TV_LIVE_ACTION_INSET),
                 ) {
-                    Column(Modifier.fillMaxWidth()) {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            val guideDownTarget = guideRequester.takeIf { liveEpg.guideEnabled }
-                            FocusButton(
-                                "تشغيل القناة", onWatch,
-                                modifier = Modifier.weight(1f).height(50.dp).focusRequester(playRequester)
-                                    .focusProperties {
-                                        left = favoriteRequester; right = channelRequester
-                                        if (guideDownTarget != null) down = guideDownTarget
-                                    }, compact = true,
-                                trailingIcon = Icons.Rounded.PlayArrow,
-                            )
-                            FocusButton(
-                                "المفضلة", onToggleFavorite,
-                                modifier = Modifier.weight(1f).height(50.dp).focusRequester(favoriteRequester)
-                                    .focusProperties {
-                                        left = channelRequester; right = playRequester
-                                        if (guideDownTarget != null) down = guideDownTarget
-                                    }, primary = false, outlined = true, compact = true,
-                                trailingIcon = if (isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
-                                trailingIconTint = if (isFavorite) colors.gold else null,
-                            )
-                        }
-                        if (liveEpg.guideEnabled) {
-                            Spacer(Modifier.height(8.dp))
-                            FocusButton(
-                                EPG_GUIDE_ACTION_LABEL,
-                                onOpenGuide,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(46.dp)
-                                    .focusRequester(guideRequester)
-                                    .focusProperties {
-                                        up = playRequester
-                                        right = channelRequester
-                                        left = favoriteRequester
-                                    },
-                                primary = false,
-                                outlined = true,
-                                compact = true,
-                                trailingIcon = Icons.Outlined.Schedule,
-                            )
-                        }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        val guideUpTarget = guideRequester.takeIf { liveEpg.guideEnabled }
+                        FocusButton(
+                            "تشغيل القناة", onWatch,
+                            modifier = Modifier.weight(1f).height(50.dp).focusRequester(playRequester)
+                                .focusProperties {
+                                    left = favoriteRequester; right = channelRequester
+                                    if (guideUpTarget != null) up = guideUpTarget
+                                }, compact = true,
+                            trailingIcon = Icons.Rounded.PlayArrow,
+                        )
+                        FocusButton(
+                            "المفضلة", onToggleFavorite,
+                            modifier = Modifier.weight(1f).height(50.dp).focusRequester(favoriteRequester)
+                                .focusProperties {
+                                    left = channelRequester; right = playRequester
+                                    if (guideUpTarget != null) up = guideUpTarget
+                                }, primary = false, outlined = true, compact = true,
+                            trailingIcon = if (isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
+                            trailingIconTint = if (isFavorite) colors.gold else null,
+                        )
                     }
                 }
             }
