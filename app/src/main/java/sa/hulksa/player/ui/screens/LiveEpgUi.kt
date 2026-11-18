@@ -1,6 +1,7 @@
 package sa.hulksa.player.ui.screens
 
 import android.view.ViewTreeObserver
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,7 +20,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
@@ -176,6 +177,60 @@ private fun EpgNowNextLine(
  * theme colours and restrained 1.5dp gold focus edge. Compact windows use the same panel policy at
  * their available width. The header and close action stay fixed; only the programme list scrolls.
  */
+/**
+ * In-window catalogue host for the shared guide. Keeping the catalogue panel in the same window
+ * makes Back-to-guide-button focus restoration deterministic; the player keeps the Dialog host so
+ * its playback input remains isolated.
+ */
+@Composable
+internal fun LiveEpgGuideInlineOverlay(
+    channel: ContentItem,
+    state: LiveEpgUiState,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val adaptiveUi = LocalAdaptiveUi.current
+    val layoutDirection = LocalLayoutDirection.current
+    val panelAlignment = if (layoutDirection == LayoutDirection.Rtl) {
+        Alignment.CenterEnd
+    } else {
+        Alignment.CenterStart
+    }
+    BackHandler(onBack = onDismiss)
+    Box(modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = if (adaptiveUi.isTelevision) .42f else .55f)),
+        )
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .padding(
+                    horizontal = if (adaptiveUi.isTelevision) 30.dp else 12.dp,
+                    vertical = if (adaptiveUi.isTelevision) 18.dp else 10.dp,
+                ),
+        ) {
+            val metrics = livePlayerControlsMetrics(
+                screenWidthDp = adaptiveUi.screenWidthDp,
+                screenHeightDp = adaptiveUi.screenHeightDp,
+                remoteLayout = adaptiveUi.isTelevision,
+            )
+            val panelWidth = minOf(metrics.morePanelWidthDp.dp, maxWidth)
+            LiveEpgGuidePanel(
+                channel = channel,
+                state = state,
+                onDismiss = onDismiss,
+                modifier = Modifier
+                    .width(panelWidth)
+                    .fillMaxHeight()
+                    .align(panelAlignment),
+            )
+        }
+    }
+}
+
 @Composable
 internal fun LiveEpgGuideOverlay(
     channel: ContentItem,
@@ -235,7 +290,7 @@ internal fun LiveEpgGuideOverlay(
 }
 
 @Composable
-private fun LiveEpgGuidePanel(
+internal fun LiveEpgGuidePanel(
     channel: ContentItem,
     state: LiveEpgUiState,
     onDismiss: () -> Unit,
@@ -365,10 +420,10 @@ private fun LiveEpgGuidePanel(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                items(
+                itemsIndexed(
                     items = programmes,
-                    key = { programme -> programme.startEpochSeconds },
-                ) { programme ->
+                    key = { _, programme -> programme.startEpochSeconds },
+                ) { index, programme ->
                     EpgGuideRow(
                         programme = programme,
                         colors = colors,
@@ -379,6 +434,8 @@ private fun LiveEpgGuidePanel(
                             nowEpochSeconds = nowEpochSeconds,
                         ),
                         expanded = expandedStart == programme.startEpochSeconds,
+                        isFirst = index == 0,
+                        isLast = index == programmes.lastIndex,
                         onToggle = {
                             expandedStart = if (expandedStart == programme.startEpochSeconds) {
                                 null
@@ -405,6 +462,8 @@ private fun EpgGuideRow(
     isCurrent: Boolean,
     progress: Float?,
     expanded: Boolean,
+    isFirst: Boolean,
+    isLast: Boolean,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -433,6 +492,12 @@ private fun EpgGuideRow(
                 color = if (showFocused) colors.goldBright else Color.White.copy(alpha = .06f),
                 shape = shape,
             )
+            .focusProperties {
+                left = FocusRequester.Cancel
+                right = FocusRequester.Cancel
+                if (isFirst) up = FocusRequester.Cancel
+                if (isLast) down = FocusRequester.Cancel
+            }
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onToggle)
             .padding(horizontal = 11.dp, vertical = 9.dp),

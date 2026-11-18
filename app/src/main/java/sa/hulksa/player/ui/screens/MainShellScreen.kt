@@ -5811,6 +5811,7 @@ private fun LiveCatalogScreen(
     // rail. The first focus gain is required so initial composition on another surface cannot
     // consume entry restoration before it starts.
     var liveContentHadFocus by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxSize()) {
     Column(
         Modifier
             .fillMaxSize()
@@ -6076,11 +6077,12 @@ private fun LiveCatalogScreen(
         )
     }
     guideChannel?.let { channel ->
-        LiveEpgGuideOverlay(
+        LiveEpgGuideInlineOverlay(
             channel = channel,
             state = state.liveEpg,
             onDismiss = { guideChannel = null },
         )
+    }
     }
 }
 
