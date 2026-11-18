@@ -136,6 +136,52 @@ class ArabicCommentaryCatalogTest {
         assertEquals(5, otherRecovery.nextSource()?.item?.id)
     }
 
+    @Test
+    fun snapshotReopensReuseIndexAndOnlyRemoveCurrentPictureSource() {
+        val items = (1..12000).map { item(it, "TNT $it", "other") } + listOf(
+            item(20001, "beIN 1 HD", "ar"), item(20002, "BE: beIN 1 RAW", "ar"),
+            item(20003, "F: beIN 1 AFC RAW", "ar"), item(20004, "beIN 1 AFC", "ar"),
+            item(20005, "beIN 1 XTRA", "ar"),
+        )
+        val catalog = Catalog(listOf(category("ar", "Arabic beIN Sports")), items)
+        val profile = sa.hulksa.player.data.AccountProfileStateScope("account", "profile")
+        val snapshot = CommentarySnapshot(null, profile, catalog)
+        val started = System.nanoTime()
+        val first = snapshot.index.forPicture(1)
+        val firstMs = (System.nanoTime() - started) / 1_000_000
+        val reopened = System.nanoTime()
+        val again = snapshot.index.forPicture(2)
+        println("synthetic 12005 rows; cold index + first lookup ms=$firstMs; warm lookup ns=" +
+            (System.nanoTime() - reopened))
+        assertSame(first, again)
+        assertEquals(3, first.size)
+        assertEquals(listOf(20001, 20002), first.shortcut(1)?.sources?.map { it.item.id })
+        assertEquals(2, first.single { it.key.qualifier == "afc" }.sources.size)
+        assertEquals(20002, snapshot.index.forPicture(20001).shortcut(1)?.sources?.single()?.item?.id)
+        assertEquals(snapshot, CommentarySnapshot(null, profile, catalog))
+        assertFalse(snapshot == CommentarySnapshot(null, profile.copy(profileId = "other"), catalog))
+        assertFalse(snapshot == CommentarySnapshot(null, profile.copy(accountId = "other"), catalog))
+        assertFalse(snapshot == CommentarySnapshot(null, profile, catalog.copy()))
+    }
+
+    @Test
+    fun replacementKeepsRetrySelectionButDropsRouteAndOffsets() {
+        val feed = arabicCommentaryFeeds(Catalog(listOf(category("a", "Sports")),
+            listOf(item(1, "beIN 1 HD", "a")))).single()
+        val before = ArabicCommentaryState(
+            feed = feed, source = feed.sources.single(), phase = ArabicCommentaryPhase.ACTIVE,
+            commentaryAudible = true, adjusting = true, buffering = true,
+            alignment = ArabicCommentaryAlignment(ArabicCommentaryDelays(100, 1000)),
+        )
+        val after = requireNotNull(before.afterPictureReplacement())
+        assertTrue(after.canRetry)
+        assertSame(feed, after.feed)
+        assertEquals(ArabicCommentaryPhase.INTERRUPTED, after.phase)
+        assertTrue(after.alignment.needsReadjustment)
+        assertFalse(after.alignment.delays.hasDelay || after.adjusting || after.buffering || after.commentaryAudible)
+        assertNull(before.copy(sessionAvailable = false).afterPictureReplacement())
+    }
+
     private fun category(id: String, name: String) = Category(id, name, ContentType.LIVE)
 
     private fun item(id: Int, name: String, category: String) = ContentItem(

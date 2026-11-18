@@ -51,6 +51,18 @@ internal data class ArabicCommentaryState(
     val sessionAvailable: Boolean = true,
 ) {
     val canRetry: Boolean get() = sessionAvailable && feed != null && source != null
+
+    fun afterPictureReplacement(): ArabicCommentaryState? {
+        if (!sessionAvailable || feed == null) return null
+        return ArabicCommentaryState(
+            phase = ArabicCommentaryPhase.INTERRUPTED,
+            feed = feed,
+            source = source,
+            stepMs = stepMs,
+            alignment = ArabicCommentaryAlignment(needsReadjustment = true),
+            message = "اعيد تحميل القناة؛ اعد اختيار التعليق او المحاولة بعد استقرار التشغيل",
+        )
+    }
 }
 
 /** Owns one audio-only player at a time and the manual holds for the two active streams. */
@@ -59,10 +71,11 @@ internal class ArabicCommentaryOwner(
     private val videoPlayer: ExoPlayer,
     private val scope: CoroutineScope,
     private val expectedOwner: AuthenticatedSessionOwner?,
+    initialState: ArabicCommentaryState,
     private val onVideoHeld: () -> Unit,
     private val onAudioRouteChanged: (Boolean) -> Unit,
 ) {
-    var state by mutableStateOf(ArabicCommentaryState(sessionAvailable = expectedOwner != null))
+    var state by mutableStateOf(initialState)
         private set
 
     private class Hold(val target: ExoPlayer, val other: ExoPlayer, val source: ArabicCommentaryDelayedSource) {

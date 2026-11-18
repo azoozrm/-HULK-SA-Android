@@ -15,6 +15,20 @@ import sa.hulksa.player.playback.ownsRecoveryCommand
 class PlayerReplacementPreparationTest {
 
     @Test
+    fun onePressUnmutesAfterSameChannelReloadAndSourceReplacement() {
+        for (captured in listOf(null, 0f)) {
+            val intent = PlayerMuteIntent()
+            intent.toggle()
+            assertTrue(intent.muted)
+            assertEquals(0f, playerPreparationVolume(true, intent.muted, false, captured))
+            intent.toggle()
+            assertFalse(intent.muted)
+            assertEquals(1f, intent.pictureVolume(false))
+            assertEquals(0f, intent.pictureVolume(true))
+        }
+    }
+
+    @Test
     fun liveReplacementRestoresOriginalAudioAfterRetiringCommentary() {
         assertEquals(
             1f,

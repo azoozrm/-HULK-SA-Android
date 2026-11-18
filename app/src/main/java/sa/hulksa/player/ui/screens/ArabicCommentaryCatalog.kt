@@ -49,26 +49,28 @@ private val adjacentNumberMarker = Regex(
 )
 private val nameWords = Regex("[\\p{L}\\p{N}]+")
 private val qualityPhrases = Regex("""\b(full hd|ultra hd|h[ .]26[45]|\d+\s*fps)\b""")
-private val standardDefinition = setOf("lq", "sd", "480p", "576p")
+private val standardDefinition = setOf("low", "lq", "sd", "480p", "576p")
 private val highDefinition = setOf("hd", "720p", "avc", "h264")
 private val fullDefinitionOrHevc = setOf("fhd", "1080p", "hevc", "h265")
-private val ultraHighDefinition = setOf("uhd", "4k", "8k", "2160p", "4320p")
-private val qualityWords = standardDefinition + highDefinition + fullDefinitionOrHevc + ultraHighDefinition
+private val ultraHighDefinition = setOf("uhd", "4k", "8k", "2160p", "3840p", "4320p")
+private val qualityWords = standardDefinition + highDefinition + fullDefinitionOrHevc + ultraHighDefinition + "raw"
 private val namedFamilies = ArabicCommentaryFeedFamily.entries.drop(1).associateBy { it.name.lowercase(Locale.ROOT) }
+// In the Arabic sports groups these occur before the colon as source-bouquet prefixes.
+private val sourcePrefixes = setOf("be", "f", "nm", "ss", "sa")
 private val sportsWords = setOf("sport", "sports", "سبورت", "سبورتس", "الرياضية", "رياضة")
 private val arabicWords = setOf("ar", "ara", "arab", "arabic", "mena", "عربي", "عربية", "العربي", "العربية")
 private val foreignWords = setOf(
     "en", "eng", "english", "uk", "us", "usa", "american", "ca", "canada", "canadian",
     "fr", "french", "france", "francais", "français", "es", "esp", "spanish", "espanol", "español",
     "tr", "turkish", "turkey", "türkiye", "turkce", "türkçe", "au", "australia", "australian", "aus", "nz",
-    "id", "indonesia", "malaysia", "sg", "singapore", "th", "thailand", "thai", "philippines", "hongkong",
+    "id", "indonesia", "malaysia", "sg", "singapore", "th", "thailand", "thai", "ph", "philippines", "philipines", "hongkong",
     "de", "german", "germany", "deutsch", "it", "italian", "italy", "pl", "polish", "poland",
     "nl", "dutch", "netherlands", "pt", "portuguese", "portugal", "br", "brazil", "greek", "greece",
     "russian", "russia", "chinese", "china", "japanese", "japan", "korean", "korea",
     "انجليزي", "انجليزية", "الانجليزية", "فرنسي", "فرنسية", "فرنسا", "اسباني", "تركي", "تركية",
 )
 private val nonSportWords = setOf(
-    "news", "global", "movie", "movies", "cinema", "series", "kids", "gourmet", "drama",
+    "news", "global", "od", "movie", "movies", "cinema", "series", "kids", "gourmet", "drama",
     "اخبار", "الاخبار", "اخبارية", "الاخبارية", "افلام", "مسلسلات", "اطفال",
 )
 
@@ -111,7 +113,13 @@ private fun classifySource(
     source: ArabicCommentaryCatalogSource,
     categoryWords: List<String>,
 ): ClassifiedCommentarySource? {
-    val name = commentaryName(source.item.name)
+    val originalName = source.item.name
+    val prefixEnd = originalName.indexOf(':')
+    val hasSourcePrefix = prefixEnd in 1..6 && categoryWords.any(arabicWords::contains) &&
+        categoryWords.any(sportsWords::contains) &&
+        commentaryName(originalName.substring(0, prefixEnd)) in sourcePrefixes
+    val name = commentaryName(if (hasSourcePrefix) originalName.substring(prefixEnd + 1) else originalName)
+    if ("od" in categoryWords) return null
     val words = name.split(' ').filter(String::isNotEmpty)
     if (words.any { it in foreignWords || it in nonSportWords }) return null
     if (words.none(arabicWords::contains) && categoryWords.any(foreignWords::contains) &&
@@ -123,6 +131,7 @@ private fun classifySource(
     if (!branded && !brandCategory) return null
     val hasSportsName = words.any(sportsWords::contains)
     val sportsCategory = categoryWords.any(sportsWords::contains)
+    if ("box office" in name && !hasSportsName && !sportsCategory) return null
     val formatNormalized = name.replace(qualityPhrases) {
         when (it.value) {
             "full hd" -> "fhd"
@@ -169,7 +178,7 @@ private fun classifySource(
 }
 
 /** A projection of the account catalog. Original stream identifiers and names remain intact. */
-internal fun arabicCommentaryFeeds(catalog: Catalog?, currentStreamId: Int): List<ArabicCommentaryFeed> {
+internal fun arabicCommentaryFeeds(catalog: Catalog?, currentStreamId: Int? = null): List<ArabicCommentaryFeed> {
     if (catalog == null) return emptyList()
     val categories = catalog.categories.filter { it.type == ContentType.LIVE }.associateBy { it.id }
     val categoryWords = categories.mapValues { (_, category) -> arabicCommentarySearchWords(category.name) }
@@ -187,4 +196,39 @@ internal fun arabicCommentaryFeeds(catalog: Catalog?, currentStreamId: Int): Lis
             ArabicCommentaryFeed(feed, sources)
         }
         .sortedWith(compareBy({ it.key.family }, { it.key.number ?: Int.MAX_VALUE }, { it.key.qualifier }))
+}
+
+// Catalog snapshots are replaced as a unit. Identity comparison avoids walking the entire catalog
+// on the main thread and treats a refreshed equal-valued snapshot as a new revision.
+internal class CommentarySnapshot(
+    private val owner: sa.hulksa.player.data.AuthenticatedSessionOwner?,
+    private val profile: sa.hulksa.player.data.AccountProfileStateScope?,
+    private val catalog: Catalog?,
+) {
+    override fun equals(other: Any?): Boolean = other is CommentarySnapshot &&
+        owner === other.owner && profile == other.profile && catalog === other.catalog
+
+    override fun hashCode(): Int = 31 * (31 * System.identityHashCode(owner) +
+        (profile?.hashCode() ?: 0)) + System.identityHashCode(catalog)
+
+    val index by lazy { ArabicCommentaryIndex(arabicCommentaryFeeds(catalog)) }
+}
+
+internal class ArabicCommentaryIndex(private val feeds: List<ArabicCommentaryFeed>) {
+    private val streamIds = feeds.flatMap { feed -> feed.sources.map { it.item.id } }.toSet()
+
+    fun forPicture(streamId: Int): List<ArabicCommentaryFeed> {
+        if (streamId !in streamIds) return feeds
+        return feeds.mapNotNull { feed ->
+            if (feed.sources.none { it.item.id == streamId }) return@mapNotNull feed
+            val alternatives = feed.sources.filter { it.item.id != streamId }
+            if (alternatives.isEmpty()) null else feed.copy(sources = alternatives)
+        }
+    }
+}
+
+internal fun List<ArabicCommentaryFeed>.shortcut(number: Int): ArabicCommentaryFeed? {
+    val numbered = filter { it.key.family == ArabicCommentaryFeedFamily.SPORTS && it.key.number == number }
+    return numbered.firstOrNull { it.key.qualifier.isEmpty() }
+        ?: numbered.firstOrNull { it.key.qualifier in setOf("nm", "d", "f", "s", "be") }
 }
