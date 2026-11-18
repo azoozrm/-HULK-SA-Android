@@ -16,6 +16,44 @@ class HomeHistoryRemovalTest {
     private val keys = listOf("MOVIE:1", "SERIES:2", "MOVIE:3")
 
     @Test
+    fun footballRowRestoresTheSurvivingMatchIdentityAndThenTheSettledFallback() {
+        val remembered = NavigationPosition(
+            rowKey = "football-matches",
+            rowIndex = 2,
+            itemKey = "football:202",
+            itemIndex = 1,
+        )
+
+        assertEquals(
+            0,
+            resolveHomeRowRestoreIndex(
+                remembered = remembered,
+                rowKey = "football-matches",
+                itemKeys = listOf("football:202", "football:303"),
+                allowIndexFallback = true,
+            ),
+        )
+        assertEquals(
+            "a replaced event keeps the remembered slot only after the model settles",
+            1,
+            resolveHomeRowRestoreIndex(
+                remembered = remembered,
+                rowKey = "football-matches",
+                itemKeys = listOf("football:101", "football:303"),
+                allowIndexFallback = true,
+            ),
+        )
+        assertNull(
+            resolveHomeRowRestoreIndex(
+                remembered = remembered,
+                rowKey = "football-matches",
+                itemKeys = emptyList(),
+                allowIndexFallback = true,
+            ),
+        )
+    }
+
+    @Test
     fun rowRestore_resolvesStableKeyThenNearbyIndexOnlyAfterSettled() {
         val remembered = NavigationPosition(
             rowKey = "recent-movies",

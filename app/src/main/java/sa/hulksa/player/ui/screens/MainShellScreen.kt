@@ -91,6 +91,7 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SportsSoccer
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.SystemUpdate
@@ -217,6 +218,16 @@ import sa.hulksa.player.data.OperationsUpdateConfig
 import sa.hulksa.player.data.OperationsUpdateDecision
 import sa.hulksa.player.data.GrowthDestination
 import sa.hulksa.player.data.RenewalBannerContent
+import sa.hulksa.player.data.FootballFeedUiState
+import sa.hulksa.player.data.FootballFeedError
+import sa.hulksa.player.data.FootballFavoriteTeam
+import sa.hulksa.player.data.FootballMatch
+import sa.hulksa.player.data.FootballMatchStatus
+import sa.hulksa.player.data.FootballTeam
+import sa.hulksa.player.data.filterFootballTeams
+import sa.hulksa.player.data.footballRiyadhDayLabel
+import sa.hulksa.player.data.footballRiyadhTimeLabel
+import sa.hulksa.player.data.footballTeamsFromMatches
 import sa.hulksa.player.data.evaluateRenewalBanner
 import sa.hulksa.player.data.link
 import sa.hulksa.player.data.resolveGrowthAction
@@ -756,6 +767,7 @@ internal data class HomeContentSnapshot(
 
 /** Stable LazyColumn content-row order used by Continue Watching's post-removal handoff. */
 private val HOME_CONTENT_ROW_ORDER = listOf(
+    "football-matches",
     "continue",
     "downloads",
     "because-watched",
@@ -1222,6 +1234,9 @@ internal fun MainShellScreen(
     onOpenAnnouncementDetail: (OperationsAnnouncement) -> Unit,
     onOpenUpdateDetail: () -> Unit,
     onActionNotice: (String, ImageVector) -> Unit,
+    onSelectFootballTeam: (FootballTeam) -> Unit = {},
+    onClearFootballTeam: () -> Unit = {},
+    onRefreshFootballFeed: () -> Unit = {},
     mobileHomeFocusRequester: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
@@ -1487,6 +1502,9 @@ internal fun MainShellScreen(
                         onOpenAnnouncementDetail = onOpenAnnouncementDetail,
                         onOpenUpdateDetail = onOpenUpdateDetail,
                         onActionNotice = onActionNotice,
+                        onSelectFootballTeam = onSelectFootballTeam,
+                        onClearFootballTeam = onClearFootballTeam,
+                        onRefreshFootballFeed = onRefreshFootballFeed,
                         homeEntryFocusRequester = tvRailFocusRequesters[MainDestination.HOME],
                         homeRemovalInputGuard = homeRemovalInputGuard,
                         initialAllFocusRequester = tvCatalogAllFocusRequesters[state.destination],
@@ -1550,6 +1568,9 @@ internal fun MainShellScreen(
                         onOpenAnnouncementDetail = onOpenAnnouncementDetail,
                         onOpenUpdateDetail = onOpenUpdateDetail,
                         onActionNotice = onActionNotice,
+                        onSelectFootballTeam = onSelectFootballTeam,
+                        onClearFootballTeam = onClearFootballTeam,
+                        onRefreshFootballFeed = onRefreshFootballFeed,
                         homeEntryFocusRequester = mobileHomeFocusRequester,
                         homeRemovalInputGuard = homeRemovalInputGuard,
                     )
@@ -1808,6 +1829,9 @@ private fun DestinationContent(
     onOpenAnnouncementDetail: (OperationsAnnouncement) -> Unit,
     onOpenUpdateDetail: () -> Unit,
     onActionNotice: (String, ImageVector) -> Unit,
+    onSelectFootballTeam: (FootballTeam) -> Unit,
+    onClearFootballTeam: () -> Unit,
+    onRefreshFootballFeed: () -> Unit,
     homeEntryFocusRequester: FocusRequester? = null,
     homeRemovalInputGuard: HomeRemovalInputGuard? = null,
     initialAllFocusRequester: FocusRequester? = null,
@@ -1843,6 +1867,9 @@ private fun DestinationContent(
             onOpenAnnouncementDetail = onOpenAnnouncementDetail,
             onOpenUpdateDetail = onOpenUpdateDetail,
             onActionNotice = onActionNotice,
+            onSelectFootballTeam = onSelectFootballTeam,
+            onClearFootballTeam = onClearFootballTeam,
+            onRefreshFootballFeed = onRefreshFootballFeed,
             homeEntryFocusRequester = homeEntryFocusRequester,
             homeRemovalInputGuard = homeRemovalInputGuard,
         )
@@ -1979,6 +2006,9 @@ private fun CinemaHomeScreen(
     onOpenAnnouncementDetail: (OperationsAnnouncement) -> Unit,
     onOpenUpdateDetail: () -> Unit,
     onActionNotice: (String, ImageVector) -> Unit,
+    onSelectFootballTeam: (FootballTeam) -> Unit,
+    onClearFootballTeam: () -> Unit,
+    onRefreshFootballFeed: () -> Unit,
     homeEntryFocusRequester: FocusRequester?,
     homeRemovalInputGuard: HomeRemovalInputGuard?,
 ) {
@@ -2180,6 +2210,7 @@ private fun CinemaHomeScreen(
     var rowCursor = homeRowCursorStart(isTv)
     val messageRow = if (hasHomeMessages) rowCursor++ else -1
     if (homeNoticeCopy != null) rowCursor++
+    val footballRow = if (state.footballFeed.available) rowCursor++ else -1
     val continueRow = if (continueWatching.isNotEmpty()) rowCursor++ else -1
     val downloadsRow = if (activeDownloads.isNotEmpty()) rowCursor++ else -1
     val becauseRow = if (becauseYouWatched.isNotEmpty()) rowCursor++ else -1
@@ -2191,13 +2222,14 @@ private fun CinemaHomeScreen(
     val lastLiveRow = if (lastLive != null) rowCursor++ else -1
     val popularLiveRow = if (suggestedLive.isNotEmpty()) rowCursor++ else -1
     val rowIndexByKey = mapOf(
-        "home-messages" to messageRow, "continue" to continueRow, "downloads" to downloadsRow, "because-watched" to becauseRow,
+        "home-messages" to messageRow, "football-matches" to footballRow, "continue" to continueRow, "downloads" to downloadsRow, "because-watched" to becauseRow,
         "recommended" to recommendedRow, "recent-movies" to moviesRow, "recent-series" to seriesRow, "top-movies" to topMoviesRow,
         "top-series" to topSeriesRow, "last-live" to lastLiveRow, "popular-live" to popularLiveRow,
     )
     val initialRow = rowIndexByKey[remembered.rowKey]?.takeIf { it >= 0 } ?: 0
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialRow)
     val availableHomeContentRows = buildSet {
+        if (state.footballFeed.available) add("football-matches")
         if (activeDownloads.isNotEmpty()) add("downloads")
         if (becauseYouWatched.isNotEmpty()) add("because-watched")
         if (suggested.isNotEmpty()) add("recommended")
@@ -2454,6 +2486,28 @@ private fun CinemaHomeScreen(
                             horizontal = if (isTv) 0.dp else 14.dp,
                             vertical = if (isTv) 4.dp else 6.dp,
                         ),
+                    )
+                }
+            }
+        }
+        if (state.footballFeed.available) {
+            item(key = "football-matches") {
+                HomeSectionPadding(isTv) {
+                    HomeFootballSection(
+                        feed = state.footballFeed,
+                        isTv = isTv,
+                        rowIndex = footballRow,
+                        navigationMemory = navigationMemory,
+                        homeModelIsCurrent = homeModelIsCurrent,
+                        homeModelSettled = homeModelSettled,
+                        railFocusRevision = railFocusRevision,
+                        homeReturnRailBaseline = homeReturnRailBaseline,
+                        homeRestoreOwner = homeRestoreOwner,
+                        firstItemFocusRequester = rowFocusRequester("football-matches"),
+                        rowFocusTarget = rowFocusTarget("football-matches"),
+                        onSelectTeam = onSelectFootballTeam,
+                        onClearTeam = onClearFootballTeam,
+                        onRefresh = onRefreshFootballFeed,
                     )
                 }
             }
@@ -2808,6 +2862,826 @@ private fun homeUpdateCardBody(
     OperationsDownloadStatus.UNKNOWN_SOURCES_BLOCKED -> "اسمح بالتثبيت من هذا المصدر ثم اعد المحاولة"
     OperationsDownloadStatus.FAILED -> download.message ?: "تعذر تنزيل التحديث"
     OperationsDownloadStatus.IDLE -> "الإصدار ${update.latestVersionName}"
+}
+
+@Composable
+private fun HomeFootballSection(
+    feed: FootballFeedUiState,
+    isTv: Boolean,
+    rowIndex: Int,
+    navigationMemory: NavigationMemoryStore,
+    homeModelIsCurrent: Boolean,
+    homeModelSettled: Boolean,
+    railFocusRevision: Long,
+    homeReturnRailBaseline: Long,
+    homeRestoreOwner: HomeFocusRestoreOwner,
+    firstItemFocusRequester: FocusRequester?,
+    rowFocusTarget: HomeRowFocusTarget?,
+    onSelectTeam: (FootballTeam) -> Unit,
+    onClearTeam: () -> Unit,
+    onRefresh: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    val remembered = navigationMemory.position(MainDestination.HOME)
+    val currentRailFocusRevision by rememberUpdatedState(railFocusRevision)
+    var pickerVisible by remember { mutableStateOf(false) }
+    val matches = feed.matches
+    val itemKeys = remember(matches) { matches.map(FootballMatch::stableIdentity) }
+    val restoredIndex = remember(
+        remembered.rowKey,
+        remembered.itemKey,
+        remembered.itemIndex,
+        itemKeys,
+        homeModelSettled,
+    ) {
+        resolveHomeRowRestoreIndex(
+            remembered = remembered,
+            rowKey = "football-matches",
+            itemKeys = itemKeys,
+            allowIndexFallback = homeModelSettled,
+        )
+    }
+    val rowState = rememberLazyListState(initialFirstVisibleItemIndex = restoredIndex ?: 0)
+    val targetRequester = remember { FocusRequester() }
+    val emptyRequester = remember { FocusRequester() }
+    val rowSaveFocusRequester = remember { FocusRequester() }
+    var firstCardFocused by remember { mutableStateOf(false) }
+    var emptyFocused by remember { mutableStateOf(false) }
+    var emptyPlaced by remember { mutableStateOf(false) }
+    var restoredTargetKey by remember { mutableStateOf<String?>(null) }
+
+    DisposableEffect(matches.isEmpty()) {
+        if (matches.isEmpty()) emptyPlaced = false
+        onDispose {
+            if (matches.isEmpty()) emptyPlaced = false
+        }
+    }
+
+    val firstRequester = if (matches.isNotEmpty()) firstItemFocusRequester else emptyRequester
+    SideEffect {
+        val target = rowFocusTarget ?: return@SideEffect
+        target.attach {
+            focusHomeRowFirstCard(
+                firstCardVisible = {
+                    if (matches.isEmpty()) {
+                        emptyPlaced
+                    } else {
+                        !homeRowFirstCardNeedsReveal(rowState.layoutInfo.visibleItemsInfo.map { it.index })
+                    }
+                },
+                revealFirstCard = {
+                    if (matches.isNotEmpty()) rowState.scrollToItem(0)
+                },
+                awaitFirstCard = {
+                    if (matches.isEmpty()) {
+                        snapshotFlow { emptyPlaced }.first { it }
+                    } else {
+                        snapshotFlow { rowState.layoutInfo.visibleItemsInfo.any { it.index == 0 } }
+                            .first { it }
+                    }
+                },
+                requestFocus = {
+                    firstRequester?.let { requester ->
+                        runCatching { requester.requestFocus() }.getOrDefault(false)
+                    } ?: false
+                },
+                awaitFocused = {
+                    snapshotFlow { if (matches.isEmpty()) emptyFocused else firstCardFocused }
+                        .first { it }
+                },
+            )
+        }
+    }
+    DisposableEffect(rowFocusTarget) {
+        onDispose { rowFocusTarget?.detach() }
+    }
+    LaunchedEffect(
+        matches,
+        feed.favoriteTeam,
+        remembered.rowKey,
+        remembered.itemKey,
+        remembered.itemIndex,
+        homeModelIsCurrent,
+        homeModelSettled,
+    ) {
+        if (!homeModelIsCurrent || remembered.rowKey != "football-matches") return@LaunchedEffect
+        fun restoreNoLongerOwned(): Boolean =
+            !homeRestoreOwner.canRestoreRow(
+                remembered = remembered,
+                current = navigationMemory.position(MainDestination.HOME),
+                railFocusBaseline = homeReturnRailBaseline,
+                currentRailFocusRevision = currentRailFocusRevision,
+            )
+        if (restoreNoLongerOwned()) return@LaunchedEffect
+        val restoreIndex = resolveHomeRowRestoreIndex(
+            remembered = remembered,
+            rowKey = "football-matches",
+            itemKeys = itemKeys,
+            allowIndexFallback = homeModelSettled,
+        )
+        if (restoreIndex == null || matches.isEmpty()) {
+            snapshotFlow { emptyPlaced }.first { it }
+            if (restoreNoLongerOwned()) return@LaunchedEffect
+            val focused = runCatching { emptyRequester.requestFocus() }.getOrDefault(false)
+            if (focused) {
+                navigationMemory.save(
+                    MainDestination.HOME,
+                    "football-empty",
+                    0,
+                    "football-matches",
+                    rowIndex,
+                )
+                homeRestoreOwner.onRestored()
+            }
+            return@LaunchedEffect
+        }
+        val item = matches.getOrNull(restoreIndex) ?: return@LaunchedEffect
+        val itemKey = item.stableIdentity
+        if (restoredTargetKey == itemKey) return@LaunchedEffect
+        val focused = focusHomeRowCard(
+            listState = rowState,
+            targetIndex = restoreIndex,
+            targetKey = itemKey,
+            isFocusOwnershipLost = ::restoreNoLongerOwned,
+            requestFocus = {
+                val requester = if (restoreIndex == 0) {
+                    firstItemFocusRequester ?: targetRequester
+                } else {
+                    targetRequester
+                }
+                runCatching { requester.requestFocus() }.getOrDefault(false)
+            },
+        )
+        if (focused) {
+            restoredTargetKey = itemKey
+            navigationMemory.save(MainDestination.HOME, itemKey, restoreIndex, "football-matches", rowIndex)
+            homeRestoreOwner.onRestored()
+        }
+    }
+
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            HomeSectionHeadingText("مباريات اليوم", isTv)
+            Spacer(Modifier.weight(1f))
+            FootballFavoriteTeamAction(
+                favorite = feed.favoriteTeam,
+                isTv = isTv,
+                onClick = { pickerVisible = true },
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        if (feed.stale) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Schedule,
+                    contentDescription = null,
+                    tint = colors.gold,
+                    modifier = Modifier.size(16.dp),
+                )
+                Text(
+                    text = feed.snapshot?.cachedAtEpochMs?.takeIf { it > 0L }?.let { cachedAt ->
+                        "بيانات قديمة من اخر تحديث ${footballRiyadhTimeLabel(cachedAt)}"
+                    } ?: "بيانات قديمة من اخر تحديث ناجح",
+                    color = colors.textMuted,
+                    fontSize = 11.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                FocusButton(
+                    "تحديث",
+                    onRefresh,
+                    compact = true,
+                    primary = false,
+                    scaleOnFocus = false,
+                    trailingIcon = Icons.Rounded.Refresh,
+                )
+            }
+        }
+        when {
+            feed.snapshot == null && feed.loading -> FootballFeedStatusCard(
+                isTv = isTv,
+                title = "جاري تحميل مباريات اليوم",
+                icon = Icons.Rounded.SportsSoccer,
+                showLoading = true,
+            )
+
+            feed.snapshot == null && feed.error != null -> FootballFeedStatusCard(
+                isTv = isTv,
+                title = "تعذر تحميل مباريات اليوم",
+                body = footballFeedErrorCopy(feed.error),
+                icon = Icons.Outlined.ErrorOutline,
+                action = "اعادة المحاولة",
+                onAction = onRefresh,
+            )
+
+            feed.stale && matches.isEmpty() -> FootballFeedStatusCard(
+                isTv = isTv,
+                title = "تعذر تحديث مباريات اليوم",
+                body = "لا توجد بيانات محفوظة لهذا اليوم بعد اخر تحديث ناجح",
+                icon = Icons.Outlined.ErrorOutline,
+                action = "اعادة المحاولة",
+                onAction = onRefresh,
+            )
+
+            matches.isEmpty() -> FootballEmptyDayCard(
+                isTv = isTv,
+                favorite = feed.favoriteTeam,
+                buttonRequester = emptyRequester,
+                onButtonPlaced = { emptyPlaced = true },
+                onButtonFocused = { emptyFocused = true },
+                onOpenPicker = { pickerVisible = true },
+            )
+
+            else -> LazyRow(
+                state = rowState,
+                modifier = Modifier
+                    .testTag("home-row-football-matches")
+                    .saveFocusedChildOnExit(rowSaveFocusRequester),
+                contentPadding = PaddingValues(horizontal = 5.dp, vertical = 7.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
+            ) {
+                itemsIndexed(matches, key = { _, match -> match.stableIdentity }) { index, match ->
+                    val matchKey = match.stableIdentity
+                    val restore = index == restoredIndex
+                    val itemModifier = if (index == 0 && firstItemFocusRequester != null) {
+                        Modifier.focusRequester(firstItemFocusRequester)
+                    } else {
+                        Modifier.restoreFocus(restore, targetRequester)
+                    }
+                    FootballMatchCard(
+                        match = match,
+                        isTv = isTv,
+                        favoriteTeamId = feed.favoriteTeam?.teamId,
+                        modifier = itemModifier,
+                        onFocused = {
+                            firstCardFocused = index == 0
+                            navigationMemory.save(
+                                MainDestination.HOME,
+                                matchKey,
+                                index,
+                                "football-matches",
+                                rowIndex,
+                            )
+                            homeRestoreOwner.onContentFocused(
+                                navigationMemory.position(MainDestination.HOME),
+                            )
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    if (pickerVisible) {
+        FootballTeamPickerDialog(
+            teams = (feed.knownTeams + footballTeamsFromMatches(matches, feed.favoriteTeam))
+                .distinctBy(FootballTeam::id)
+                .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name }),
+            favorite = feed.favoriteTeam,
+            isTv = isTv,
+            onSelect = { team ->
+                pickerVisible = false
+                onSelectTeam(team)
+            },
+            onClear = {
+                pickerVisible = false
+                onClearTeam()
+            },
+            onDismiss = { pickerVisible = false },
+        )
+    }
+}
+
+@Composable
+private fun FootballFavoriteTeamAction(
+    favorite: FootballFavoriteTeam?,
+    isTv: Boolean,
+    onClick: () -> Unit,
+) {
+    val label = favorite?.teamName?.let { "فريقي المفضل: $it" } ?: "فريقي المفضل"
+    FocusButton(
+        label,
+        onClick,
+        compact = true,
+        primary = false,
+        scaleOnFocus = false,
+        trailingIcon = Icons.Rounded.Star,
+        modifier = Modifier.widthIn(max = if (isTv) 300.dp else 230.dp),
+    )
+}
+
+@Composable
+private fun FootballMatchCard(
+    match: FootballMatch,
+    isTv: Boolean,
+    favoriteTeamId: String?,
+    modifier: Modifier = Modifier,
+    onFocused: () -> Unit = {},
+) {
+    val colors = LocalHulkColors.current
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(if (isTv) 16.dp else 14.dp)
+    val isFavoriteFixture = favoriteTeamId != null && match.involvesTeam(favoriteTeamId)
+    Column(
+        modifier = modifier
+            .width(if (isTv) 316.dp else 272.dp)
+            .heightIn(min = if (isTv) 158.dp else 146.dp)
+            .clip(shape)
+            .background(if (focused) Color(0xFF232116) else colors.surface.copy(alpha = .94f))
+            .goldFocusEdge(shape = shape, visible = focused)
+            .border(
+                width = if (focused) 0.dp else 1.dp,
+                color = if (isFavoriteFixture) colors.gold.copy(alpha = .50f) else colors.line.copy(alpha = .42f),
+                shape = shape,
+            )
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
+            .focusable()
+            .padding(horizontal = 13.dp, vertical = 11.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Text(
+                text = match.competition.name,
+                color = colors.goldBright,
+                fontSize = if (isTv) 11.sp else 10.sp,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = footballStatusChip(match),
+                color = if (match.status == FootballMatchStatus.LIVE) Color(0xFF100E04) else colors.textMuted,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(99.dp))
+                    .background(
+                        if (match.status == FootballMatchStatus.LIVE) {
+                            colors.goldBright
+                        } else {
+                            colors.surfaceRaised
+                        },
+                    )
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        FootballTeamScoreRow(
+            team = match.homeTeam,
+            score = match.scoreFor(match.homeTeam.id),
+            showScore = match.status.isStarted,
+            isFavorite = favoriteTeamId == match.homeTeam.id,
+            isTv = isTv,
+        )
+        Spacer(Modifier.height(6.dp))
+        FootballTeamScoreRow(
+            team = match.awayTeam,
+            score = match.scoreFor(match.awayTeam.id),
+            showScore = match.status.isStarted,
+            isFavorite = favoriteTeamId == match.awayTeam.id,
+            isTv = isTv,
+        )
+        Spacer(Modifier.weight(1f))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Schedule,
+                contentDescription = null,
+                tint = colors.gold,
+                modifier = Modifier.size(14.dp),
+            )
+            Text(
+                text = "${footballRiyadhDayLabel(footballMatchDayKey(match), System.currentTimeMillis())} ${footballRiyadhTimeLabel(match.kickoffEpochMs)}",
+                color = colors.textMuted,
+                fontSize = 10.sp,
+                lineHeight = 13.sp,
+            )
+            Spacer(Modifier.weight(1f))
+            if (isFavoriteFixture) {
+                Icon(
+                    imageVector = Icons.Rounded.Star,
+                    contentDescription = "فريقي المفضل",
+                    tint = colors.goldBright,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
+        }
+    }
+}
+
+private fun footballMatchDayKey(match: FootballMatch): String =
+    sa.hulksa.player.data.footballRiyadhDayKey(match.kickoffEpochMs)
+
+@Composable
+private fun FootballTeamScoreRow(
+    team: FootballTeam,
+    score: Int?,
+    showScore: Boolean,
+    isFavorite: Boolean,
+    isTv: Boolean,
+) {
+    val colors = LocalHulkColors.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = team.name,
+            color = if (isFavorite) colors.goldBright else colors.text,
+            fontSize = if (isTv) 14.sp else 13.sp,
+            lineHeight = 18.sp,
+            fontWeight = if (isFavorite) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (showScore) {
+            Text(
+                text = score?.toString() ?: "-",
+                color = colors.text,
+                fontSize = if (isTv) 16.sp else 15.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+private fun footballStatusChip(match: FootballMatch): String = when (match.status) {
+    FootballMatchStatus.LIVE -> match.minute?.let { "مباشر $it'" } ?: "مباشر"
+    FootballMatchStatus.FINISHED -> "انتهت"
+    FootballMatchStatus.POSTPONED -> "مؤجلة"
+    FootballMatchStatus.CANCELLED -> "ملغاة"
+    FootballMatchStatus.UNRESOLVED -> "غير مؤكدة"
+    FootballMatchStatus.UPCOMING -> footballRiyadhTimeLabel(match.kickoffEpochMs)
+}
+
+@Composable
+private fun FootballEmptyDayCard(
+    isTv: Boolean,
+    favorite: FootballFavoriteTeam?,
+    buttonRequester: FocusRequester,
+    onButtonPlaced: () -> Unit,
+    onButtonFocused: () -> Unit,
+    onOpenPicker: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    val shape = RoundedCornerShape(if (isTv) 18.dp else 16.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = if (isTv) 116.dp else 128.dp)
+            .clip(shape)
+            .background(colors.surface.copy(alpha = .78f))
+            .border(1.dp, colors.line.copy(alpha = .38f), shape)
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(13.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.SportsSoccer,
+            contentDescription = null,
+            tint = colors.gold,
+            modifier = Modifier.size(if (isTv) 28.dp else 24.dp),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = "لا توجد مباريات اليوم",
+                color = colors.text,
+                fontSize = if (isTv) 15.sp else 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = favorite?.let { "سنعرض مباريات ${it.teamName} هنا" }
+                    ?: "اختر فريقك المفضل ليظهر اولا في مباريات اليوم",
+                color = colors.textMuted,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
+        FocusButton(
+            "فريقي المفضل",
+            onOpenPicker,
+            compact = true,
+            primary = false,
+            scaleOnFocus = false,
+            trailingIcon = Icons.Rounded.Star,
+            modifier = Modifier
+                .focusRequester(buttonRequester)
+                .onPlaced { onButtonPlaced() }
+                .onFocusChanged { if (it.isFocused) onButtonFocused() },
+        )
+    }
+}
+
+@Composable
+private fun FootballFeedStatusCard(
+    isTv: Boolean,
+    title: String,
+    icon: ImageVector,
+    body: String? = null,
+    action: String? = null,
+    onAction: (() -> Unit)? = null,
+    showLoading: Boolean = false,
+) {
+    val colors = LocalHulkColors.current
+    val shape = RoundedCornerShape(if (isTv) 18.dp else 16.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = if (isTv) 104.dp else 116.dp)
+            .clip(shape)
+            .background(colors.surface.copy(alpha = .78f))
+            .border(1.dp, colors.line.copy(alpha = .38f), shape)
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(13.dp),
+    ) {
+        if (showLoading) {
+            LoadingRing(Modifier.size(if (isTv) 26.dp else 22.dp))
+        } else {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = colors.gold,
+                modifier = Modifier.size(if (isTv) 26.dp else 22.dp),
+            )
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = colors.text,
+                fontSize = if (isTv) 15.sp else 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            if (body != null) {
+                Spacer(Modifier.height(3.dp))
+                Text(body, color = colors.textMuted, fontSize = 11.sp, lineHeight = 15.sp)
+            }
+        }
+        if (action != null && onAction != null) {
+            FocusButton(
+                action,
+                onAction,
+                compact = true,
+                primary = false,
+                scaleOnFocus = false,
+                trailingIcon = Icons.Rounded.Refresh,
+            )
+        }
+    }
+}
+
+private fun footballFeedErrorCopy(error: FootballFeedError?): String = when (error) {
+    FootballFeedError.RATE_LIMITED -> "المزود طلب الانتظار قبل التحديث التالي"
+    FootballFeedError.INVALID_RESPONSE -> "وصلت بيانات غير مكتملة من الخادم"
+    FootballFeedError.NOT_CONFIGURED -> "خدمة المباريات غير مفعلة"
+    FootballFeedError.UNAVAILABLE, null -> "تعذر الوصول الى خدمة المباريات"
+}
+
+@Composable
+private fun FootballTeamPickerDialog(
+    teams: List<FootballTeam>,
+    favorite: FootballFavoriteTeam?,
+    isTv: Boolean,
+    onSelect: (FootballTeam) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(teams, query) { filterFootballTeams(teams, query) }
+    val fieldRequester = remember { FocusRequester() }
+    val firstTeamRequester = remember { FocusRequester() }
+    val listState = rememberLazyListState()
+    var firstTeamPlaced by remember { mutableStateOf(false) }
+    var initialFocusAssigned by remember { mutableStateOf(false) }
+    LaunchedEffect(filtered, isTv, firstTeamPlaced) {
+        if (initialFocusAssigned) return@LaunchedEffect
+        if (isTv && filtered.isNotEmpty()) {
+            if (!firstTeamPlaced) return@LaunchedEffect
+            if (runCatching { firstTeamRequester.requestFocus() }.getOrDefault(false)) {
+                initialFocusAssigned = true
+            }
+        } else {
+            withFrameNanos { }
+            if (runCatching { fieldRequester.requestFocus() }.getOrDefault(false)) {
+                initialFocusAssigned = true
+            }
+        }
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            val dialogWidth = if (isTv) {
+                (maxWidth * 0.44f).coerceIn(340.dp, 560.dp)
+            } else {
+                (maxWidth * 0.92f).coerceIn(280.dp, 520.dp)
+            }
+            val shape = RoundedCornerShape(18.dp)
+            Column(
+                modifier = Modifier
+                    .width(dialogWidth)
+                    .heightIn(max = (maxHeight * 0.86f).coerceAtLeast(220.dp))
+                    .clip(shape)
+                    .background(colors.surface)
+                    .border(1.dp, colors.line, shape)
+                    .padding(horizontal = 15.dp, vertical = 13.dp),
+            ) {
+                Text(
+                    text = "فريقي المفضل",
+                    color = colors.text,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = "اختر فريقا واحدا لهذا الملف الشخصي",
+                    color = colors.textMuted,
+                    fontSize = 11.sp,
+                )
+                Spacer(Modifier.height(11.dp))
+                HulkTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = "ابحث عن فريق",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(fieldRequester),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        runCatching { firstTeamRequester.requestFocus() }
+                    }),
+                )
+                if (favorite != null) {
+                    Spacer(Modifier.height(9.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(colors.surfaceRaised)
+                            .padding(horizontal = 11.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = favorite.teamName,
+                            color = colors.goldBright,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        FocusButton(
+                            "ازالة",
+                            onClear,
+                            compact = true,
+                            primary = false,
+                            scaleOnFocus = false,
+                            trailingIcon = Icons.Rounded.DeleteOutline,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(9.dp))
+                if (filtered.isEmpty()) {
+                    Text(
+                        text = if (teams.isEmpty()) {
+                            "تظهر الفرق بعد تحميل مباريات اليوم"
+                        } else {
+                            "لا توجد فرق مطابقة"
+                        },
+                        color = colors.textMuted,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(vertical = 12.dp),
+                    )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.weight(1f, fill = false),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        items(filtered, key = FootballTeam::id) { team ->
+                            FootballTeamPickerRow(
+                                team = team,
+                                selected = team.id == favorite?.teamId,
+                                requester = if (team == filtered.first()) firstTeamRequester else null,
+                                onPlaced = if (team == filtered.first()) {
+                                    { firstTeamPlaced = true }
+                                } else {
+                                    null
+                                },
+                                onSelect = { onSelect(team) },
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    FocusButton(
+                        "تم",
+                        onDismiss,
+                        compact = true,
+                        primary = false,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FootballTeamPickerRow(
+    team: FootballTeam,
+    selected: Boolean,
+    requester: FocusRequester?,
+    onPlaced: (() -> Unit)?,
+    onSelect: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(10.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(
+                when {
+                    focused -> colors.gold.copy(alpha = .16f)
+                    selected -> colors.gold.copy(alpha = .10f)
+                    else -> colors.surfaceRaised.copy(alpha = .74f)
+                },
+            )
+            .goldFocusEdge(shape = shape, visible = focused)
+            .border(
+                1.dp,
+                when {
+                    focused -> Color.Transparent
+                    selected -> colors.gold.copy(alpha = .44f)
+                    else -> colors.line.copy(alpha = .30f)
+                },
+                shape,
+            )
+            .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
+            .then(if (onPlaced != null) Modifier.onPlaced { onPlaced() } else Modifier)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(role = Role.Button, onClick = onSelect)
+            .padding(horizontal = 11.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = team.name,
+            color = if (selected) colors.goldBright else colors.text,
+            fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (selected) {
+            Icon(
+                imageVector = Icons.Rounded.Check,
+                contentDescription = "الفريق المختار",
+                tint = colors.goldBright,
+                modifier = Modifier.size(17.dp),
+            )
+        }
+    }
 }
 
 @Composable

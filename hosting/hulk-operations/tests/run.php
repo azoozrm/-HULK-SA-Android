@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/lib/policies.php';
 require_once dirname(__DIR__) . '/lib/operations.php';
+require_once __DIR__ . '/football-feed.php';
 
 $tests = 0;
 

@@ -38,4 +38,26 @@ return [
         'enabled' => false,
         'base_url' => 'https://hulksa.com/control-center/api/app/v1/pairing/',
     ],
+
+    // Optional first-party football feed. Provider credentials are server-held and must never
+    // be committed. The Android app only receives the discovery fields in the public config.
+    // Keep disabled until the owner deploys and verifies the feed route.
+    'football' => [
+        'enabled' => false,
+        'feed_url' => 'https://neo4ksa.com/hulk-operations/api/app/v1/sports/',
+        'refresh_seconds' => 60,
+        'max_requests_per_day' => 500,
+        'max_requests_per_refresh' => 2,
+        'timeout_seconds' => 8,
+        // Optional absolute cache directory. Empty uses the system temporary directory.
+        'cache_directory' => '',
+        'bzzoiro' => [
+            'base_url' => 'https://sports.bzzoiro.com/api/v2',
+            'api_key' => '',
+        ],
+        'api_football' => [
+            'base_url' => 'https://v3.football.api-sports.io',
+            'api_key' => '',
+        ],
+    ],
 ];

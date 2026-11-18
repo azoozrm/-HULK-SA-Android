@@ -9,6 +9,7 @@ import sa.hulksa.player.OperationsNotificationSnapshotGate
 enum class LocalNotificationKind {
     NEW_EPISODE,
     SYSTEM_MESSAGE,
+    FOOTBALL_KICKOFF,
 }
 
 data class LocalSystemNotification(
@@ -40,15 +41,24 @@ sealed interface LocalNotificationItem {
         override val read: Boolean = notification.read
         override val kind: LocalNotificationKind = LocalNotificationKind.SYSTEM_MESSAGE
     }
+
+    data class Kickoff(val notification: FootballKickoffNotification) : LocalNotificationItem {
+        override val id: String = notification.id
+        override val createdAtEpochMs: Long = notification.detectedAtEpochMs
+        override val read: Boolean = notification.read
+        override val kind: LocalNotificationKind = LocalNotificationKind.FOOTBALL_KICKOFF
+    }
 }
 
 fun mergeNotificationCenterItems(
     episodeNotifications: List<LocalEpisodeNotification>,
     systemNotifications: List<LocalSystemNotification>,
+    kickoffNotifications: List<FootballKickoffNotification> = emptyList(),
     limit: Int = 200,
 ): List<LocalNotificationItem> = buildList {
     addAll(episodeNotifications.map(LocalNotificationItem::Episode))
     addAll(systemNotifications.map(LocalNotificationItem::System))
+    addAll(kickoffNotifications.map(LocalNotificationItem::Kickoff))
 }.distinctBy(LocalNotificationItem::id)
     .sortedByDescending(LocalNotificationItem::createdAtEpochMs)
     .take(limit.coerceAtLeast(0))

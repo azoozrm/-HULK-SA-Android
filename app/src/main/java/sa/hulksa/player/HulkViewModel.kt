@@ -47,6 +47,27 @@ import sa.hulksa.player.data.DownloadPrimaryActionDispatcher
 import sa.hulksa.player.data.DownloadRepository
 import sa.hulksa.player.data.EpisodeNotificationPopup
 import sa.hulksa.player.data.EpisodeNotificationSubscription
+import sa.hulksa.player.data.AccountProfileStateScope
+import sa.hulksa.player.data.FootballFavoriteTeam
+import sa.hulksa.player.data.FootballFeedCacheStore
+import sa.hulksa.player.data.FootballFeedClient
+import sa.hulksa.player.data.FootballFeedError
+import sa.hulksa.player.data.FootballFeedSnapshot
+import sa.hulksa.player.data.FootballFeedUiState
+import sa.hulksa.player.data.FootballFetchResult
+import sa.hulksa.player.data.FootballInboxState
+import sa.hulksa.player.data.FootballKickoffNotification
+import sa.hulksa.player.data.FootballProfileStateStore
+import sa.hulksa.player.data.FootballTeam
+import sa.hulksa.player.data.clearFootballKickoffs
+import sa.hulksa.player.data.deleteFootballKickoff
+import sa.hulksa.player.data.footballFeedAllowedForProfile
+import sa.hulksa.player.data.footballOwnerStillCurrent
+import sa.hulksa.player.data.footballRiyadhDayKey
+import sa.hulksa.player.data.generateFootballKickoffNotifications
+import sa.hulksa.player.data.markAllFootballKickoffsRead
+import sa.hulksa.player.data.markFootballKickoffRead
+import sa.hulksa.player.data.orderFootballMatches
 import sa.hulksa.player.data.SessionOwnershipCleanupGate
 import sa.hulksa.player.data.SessionOwnershipCleanupResult
 import sa.hulksa.player.data.SessionPublicationGate
@@ -251,6 +272,7 @@ data class HulkUiState(
     val unreadNotificationCount: Int = 0,
     val episodeNotificationsEnabled: Boolean = true,
     val notificationPopup: EpisodeNotificationPopup? = null,
+    val footballFeed: FootballFeedUiState = FootballFeedUiState(),
     val operations: OperationsUiState = OperationsUiState(),
     val pairing: PairingUiState = PairingUiState(),
     val playback: PlaybackRequest? = null,
@@ -594,6 +616,9 @@ class HulkViewModel internal constructor(
     private val profileStore = ProfileStore(application)
     private val kidsContentFilterStore = KidsContentFilterStore(application)
     private val localEpisodeNotificationStore = LocalEpisodeNotificationStore(application)
+    private val footballFeedClient = FootballFeedClient()
+    private val footballFeedCacheStore = FootballFeedCacheStore(application)
+    private val footballProfileStore = FootballProfileStateStore(application)
     private val operationsStore = OperationsStore(application)
     private val operationsInstaller = OperationsApkInstaller(application)
     private val operationsDeviceIsTv = application.isTelevisionDevice()
@@ -871,6 +896,13 @@ class HulkViewModel internal constructor(
     private var playerProgressPersistenceJob: Job? = null
     private var playerProgressProfileOwner: String? = null
     private var notificationScanJob: Job? = null
+    private var footballFeedJob: Job? = null
+    private var footballOwnerGeneration = 0L
+    private var footballInbox = FootballInboxState()
+    private var footballInboxScope: AccountProfileStateScope? = null
+    private var footballRetryAtEpochMs = 0L
+    private var footballCatchUpPending = false
+    private val footballInboxMutex = Mutex()
     private var pendingNotificationScanTrigger: NotificationScanTrigger? = null
     private var foregroundNotificationScanJob: Job? = null
     private var foregroundNotificationScanWake = MutableStateFlow(0L)
@@ -2497,8 +2529,312 @@ class HulkViewModel internal constructor(
         scanSubscribedSeries(NotificationScanTrigger.NOTIFICATION_CENTER)
     }
 
+    /**
+     * One bounded first-party refresh owner. Cached last-good data is published immediately; the
+     * network fetch is skipped while the server discovery is fresh, while Retry-After is active or
+     * when the owner/profile/team generation changed.
+     */
+    fun refreshFootballFeed(force: Boolean = false, catchUpInbox: Boolean = false) {
+        val discovery = mutableState.value.operations.football
+        if (discovery == null || session == null || !footballFeedAllowedForProfile(profileStore.activeProfile().kind)) {
+            resetFootballFeed()
+            return
+        }
+        if (footballFeedJob?.isActive == true) {
+            if (catchUpInbox) footballCatchUpPending = true
+            if (!force) return
+            footballFeedJob?.cancel()
+            footballFeedJob = null
+        }
+        val scope = footballProfileStore.activeScope() ?: return
+        val generation = ++footballOwnerGeneration
+        footballFeedJob = viewModelScope.launch {
+            val launchedJob = coroutineContext[Job]
+            try {
+                val now = System.currentTimeMillis()
+                val day = footballRiyadhDayKey(now)
+                val cached = withContext(Dispatchers.IO) { footballFeedCacheStore.load(day) }
+                val favorite = withContext(Dispatchers.IO) { footballProfileStore.favoriteTeam(scope) }
+                val loadedInbox = withContext(Dispatchers.IO) { footballProfileStore.inboxState(scope) }
+                var knownTeams = withContext(Dispatchers.IO) { footballProfileStore.knownTeams(scope) }
+                cached?.teams?.let { cachedTeams ->
+                    knownTeams = (knownTeams + cachedTeams)
+                        .distinctBy(FootballTeam::id)
+                        .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+                        .take(300)
+                }
+                if (!isFootballOwnerCurrent(scope, generation)) return@launch
+
+                footballInboxMutex.withLock {
+                    var current = if (footballInboxScope == scope) footballInbox else loadedInbox
+                    if (cached != null) {
+                        val catchUp = generateFootballKickoffNotifications(
+                            accountId = scope.accountId,
+                            profileId = scope.profileId,
+                            favoriteTeam = favorite ?: FootballFavoriteTeam("", "", 0L),
+                            previous = cached,
+                            current = cached,
+                            inbox = current,
+                            nowEpochMs = now,
+                            catchUpOnly = true,
+                        )
+                        current = catchUp.inbox
+                        if (catchUp.added.isNotEmpty()) {
+                            withContext(Dispatchers.IO) {
+                                footballProfileStore.saveInboxState(scope, current)
+                            }
+                        }
+                    }
+                    footballInbox = current
+                    footballInboxScope = scope
+                    current
+                }
+                publishFootballState(
+                    snapshot = cached,
+                    favorite = favorite,
+                    knownTeams = knownTeams,
+                    error = null,
+                    loading = true,
+                    lastAttemptEpochMs = now,
+                )
+
+                val cacheFresh = cached != null &&
+                    cached.dayKey == day &&
+                    !cached.stale &&
+                    now - cached.cachedAtEpochMs in 0 until discovery.refreshSeconds * 1_000L
+                if (!force && cacheFresh) {
+                    publishFootballState(
+                        snapshot = cached,
+                        favorite = favorite,
+                        knownTeams = knownTeams,
+                        error = null,
+                        loading = false,
+                        lastAttemptEpochMs = now,
+                    )
+                    return@launch
+                }
+                if (now < footballRetryAtEpochMs) {
+                    publishFootballState(
+                        snapshot = cached,
+                        favorite = favorite,
+                        knownTeams = knownTeams,
+                        error = null,
+                        loading = false,
+                        lastAttemptEpochMs = now,
+                    )
+                    return@launch
+                }
+
+                when (val result = footballFeedClient.fetch(discovery, day)) {
+                    is FootballFetchResult.Success -> {
+                        if (!isFootballOwnerCurrent(scope, generation)) return@launch
+                        val attemptedAt = System.currentTimeMillis()
+                        result.snapshot.retryAfterSeconds?.let { seconds ->
+                            footballRetryAtEpochMs = attemptedAt + seconds * 1_000L
+                        } ?: run { footballRetryAtEpochMs = 0L }
+                        withContext(Dispatchers.IO) {
+                            footballFeedCacheStore.save(day, result.rawJson)
+                            footballFeedCacheStore.recordAttempt(attemptedAt)
+                        }
+                        val previous = mutableState.value.footballFeed.snapshot
+                        footballInboxMutex.withLock {
+                            val currentInbox = withContext(Dispatchers.IO) {
+                                footballProfileStore.inboxState(scope)
+                            }
+                            if (footballProfileStore.activeScope() != scope) return@withLock
+                            val generated = generateFootballKickoffNotifications(
+                                accountId = scope.accountId,
+                                profileId = scope.profileId,
+                                favoriteTeam = favorite ?: FootballFavoriteTeam("", "", 0L),
+                                previous = previous,
+                                current = result.snapshot,
+                                inbox = currentInbox,
+                                nowEpochMs = attemptedAt,
+                                catchUpOnly = catchUpInbox,
+                            )
+                            if (generated.inbox != currentInbox) {
+                                withContext(Dispatchers.IO) {
+                                    footballProfileStore.saveInboxState(scope, generated.inbox)
+                                }
+                            }
+                            footballInbox = generated.inbox
+                            footballInboxScope = scope
+                        }
+                        publishFootballState(
+                            snapshot = result.snapshot,
+                            favorite = favorite,
+                            knownTeams = knownTeams,
+                            error = null,
+                            loading = false,
+                            lastAttemptEpochMs = attemptedAt,
+                        )
+                    }
+
+                    is FootballFetchResult.Failure -> {
+                        if (!isFootballOwnerCurrent(scope, generation)) return@launch
+                        val attemptedAt = System.currentTimeMillis()
+                        result.retryAfterSeconds?.let { seconds ->
+                            footballRetryAtEpochMs = attemptedAt + seconds * 1_000L
+                        }
+                        withContext(Dispatchers.IO) { footballFeedCacheStore.recordAttempt(attemptedAt) }
+                        publishFootballState(
+                            snapshot = cached?.copy(stale = true),
+                            favorite = favorite,
+                            knownTeams = knownTeams,
+                            error = result.error,
+                            loading = false,
+                            lastAttemptEpochMs = attemptedAt,
+                        )
+                    }
+                }
+            } finally {
+                if (footballFeedJob === launchedJob) footballFeedJob = null
+                if (footballCatchUpPending) {
+                    footballCatchUpPending = false
+                    refreshFootballFeed(catchUpInbox = true)
+                }
+            }
+        }
+    }
+
+    fun selectFootballFavoriteTeam(team: FootballTeam) {
+        if (!footballFeedAllowedForProfile(profileStore.activeProfile().kind)) return
+        val scope = footballProfileStore.activeScope() ?: return
+        if (team.id.isBlank() || team.name.isBlank()) return
+        val favorite = FootballFavoriteTeam(
+            teamId = team.id,
+            teamName = team.name,
+            selectedAtEpochMs = System.currentTimeMillis(),
+        )
+        invalidateFootballOwner()
+        val selectionGeneration = footballOwnerGeneration
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { footballProfileStore.saveFavoriteTeam(scope, favorite) }
+            if (footballProfileStore.activeScope() != scope) return@launch
+            if (selectionGeneration != footballOwnerGeneration) return@launch
+            mutableState.update { state ->
+                state.copy(
+                    footballFeed = state.footballFeed.copy(
+                        favoriteTeam = favorite,
+                        snapshot = state.footballFeed.snapshot?.let { snapshot ->
+                            snapshot.copy(matches = orderFootballMatches(snapshot.matches, favorite.teamId))
+                        },
+                    ),
+                )
+            }
+            refreshFootballFeed(force = true, catchUpInbox = true)
+        }
+    }
+
+    fun clearFootballFavoriteTeam() {
+        val scope = footballProfileStore.activeScope() ?: return
+        invalidateFootballOwner()
+        val selectionGeneration = footballOwnerGeneration
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { footballProfileStore.clearFavoriteTeam(scope) }
+            if (footballProfileStore.activeScope() != scope) return@launch
+            if (selectionGeneration != footballOwnerGeneration) return@launch
+            mutableState.update { state ->
+                state.copy(
+                    footballFeed = state.footballFeed.copy(
+                        favoriteTeam = null,
+                        snapshot = state.footballFeed.snapshot?.let { snapshot ->
+                            snapshot.copy(matches = orderFootballMatches(snapshot.matches, null))
+                        },
+                    ),
+                )
+            }
+            refreshFootballFeed(force = false)
+        }
+    }
+
+    private fun resetFootballFeed() {
+        invalidateFootballOwner()
+        footballInbox = FootballInboxState()
+        footballInboxScope = null
+        mutableState.update { it.copy(footballFeed = FootballFeedUiState()) }
+        refreshNotificationState(clearPopup = false)
+    }
+
+    private fun invalidateFootballOwner() {
+        footballOwnerGeneration += 1L
+        footballFeedJob?.cancel()
+        footballFeedJob = null
+        footballRetryAtEpochMs = 0L
+        footballCatchUpPending = false
+    }
+
+    private fun isFootballOwnerCurrent(
+        scope: AccountProfileStateScope,
+        generation: Long,
+    ): Boolean {
+        if (session == null || generation != footballOwnerGeneration) return false
+        if (mutableState.value.operations.football == null) return false
+        return footballOwnerStillCurrent(
+            expected = scope,
+            active = footballProfileStore.activeScope(),
+            expectedGeneration = generation,
+            currentGeneration = footballOwnerGeneration,
+        )
+    }
+
+    private fun publishFootballState(
+        snapshot: FootballFeedSnapshot?,
+        favorite: FootballFavoriteTeam?,
+        knownTeams: List<FootballTeam>,
+        error: FootballFeedError?,
+        loading: Boolean,
+        lastAttemptEpochMs: Long,
+    ) {
+        val ordered = snapshot?.copy(
+            matches = orderFootballMatches(snapshot.matches, favorite?.teamId),
+        )
+        mutableState.update { state ->
+            state.copy(
+                footballFeed = FootballFeedUiState(
+                    available = true,
+                    loading = loading,
+                    snapshot = ordered,
+                    favoriteTeam = favorite,
+                    knownTeams = knownTeams,
+                    error = error,
+                    lastAttemptEpochMs = lastAttemptEpochMs,
+                ),
+            )
+        }
+        refreshNotificationState(clearPopup = false)
+    }
+
+    private fun footballKickoffNotificationsForActiveScope(): List<FootballKickoffNotification> {
+        if (!footballFeedAllowedForProfile(profileStore.activeProfile().kind)) return emptyList()
+        val scope = footballProfileStore.activeScope() ?: return emptyList()
+        if (footballInboxScope != scope) return emptyList()
+        return footballInbox.notifications
+    }
+
+    private fun mutateFootballInbox(
+        transform: (FootballInboxState) -> FootballInboxState,
+    ) {
+        val scope = footballProfileStore.activeScope() ?: return
+        viewModelScope.launch {
+            footballInboxMutex.withLock {
+                val current = withContext(Dispatchers.IO) { footballProfileStore.inboxState(scope) }
+                if (footballProfileStore.activeScope() != scope) return@withLock
+                val updated = transform(current)
+                withContext(Dispatchers.IO) { footballProfileStore.saveInboxState(scope, updated) }
+                footballInbox = updated
+                footballInboxScope = scope
+            }
+            refreshNotificationState(clearPopup = false)
+        }
+    }
+
     fun markNotificationRead(notificationId: String) {
         val item = mutableState.value.localNotifications.firstOrNull { it.id == notificationId } ?: return
+        if (item is LocalNotificationItem.Kickoff) {
+            mutateFootballInbox { markFootballKickoffRead(it, notificationId) }
+            return
+        }
         val profileId = profileStore.activeProfileId()
         val accountId = localEpisodeNotificationStore.activeAccountId()
         viewModelScope.launch {
@@ -2512,6 +2848,7 @@ class HulkViewModel internal constructor(
                     }
                     is LocalNotificationItem.System ->
                         operationsStore.markSystemNotificationReadAndSnapshot(notificationId)
+                    is LocalNotificationItem.Kickoff -> error("handled before launch")
                 }
             }
             publishOperationsSystemNotifications(operationsSnapshot, clearPopup = false)
@@ -2521,6 +2858,7 @@ class HulkViewModel internal constructor(
     fun markAllNotificationsRead() {
         val profileId = profileStore.activeProfileId()
         val accountId = localEpisodeNotificationStore.activeAccountId()
+        mutateFootballInbox(::markAllFootballKickoffsRead)
         viewModelScope.launch {
             val operationsSnapshot = withContext(Dispatchers.IO) {
                 accountId?.let { localEpisodeNotificationStore.markAllRead(profileId, it) }
@@ -2532,6 +2870,10 @@ class HulkViewModel internal constructor(
 
     fun deleteNotification(notificationId: String) {
         val item = mutableState.value.localNotifications.firstOrNull { it.id == notificationId } ?: return
+        if (item is LocalNotificationItem.Kickoff) {
+            mutateFootballInbox { deleteFootballKickoff(it, notificationId) }
+            return
+        }
         val profileId = profileStore.activeProfileId()
         val accountId = localEpisodeNotificationStore.activeAccountId()
         viewModelScope.launch {
@@ -2545,6 +2887,7 @@ class HulkViewModel internal constructor(
                     }
                     is LocalNotificationItem.System ->
                         operationsStore.deleteSystemNotificationAndSnapshot(notificationId)
+                    is LocalNotificationItem.Kickoff -> error("handled before launch")
                 }
             }
             publishOperationsSystemNotifications(operationsSnapshot, clearPopup = false)
@@ -2554,6 +2897,7 @@ class HulkViewModel internal constructor(
     fun clearNotifications() {
         val profileId = profileStore.activeProfileId()
         val accountId = localEpisodeNotificationStore.activeAccountId()
+        mutateFootballInbox(::clearFootballKickoffs)
         viewModelScope.launch {
             val operationsSnapshot = withContext(Dispatchers.IO) {
                 accountId?.let { localEpisodeNotificationStore.clearNotifications(profileId, it) }
@@ -2568,6 +2912,11 @@ class HulkViewModel internal constructor(
         onResult: (String?) -> Unit = {},
     ) {
         val item = mutableState.value.localNotifications.firstOrNull { it.id == notificationId }
+        if (item is LocalNotificationItem.Kickoff) {
+            mutateFootballInbox { markFootballKickoffRead(it, notificationId) }
+            onResult(null)
+            return
+        }
         if (item is LocalNotificationItem.System) {
             viewModelScope.launch {
                 val operationsSnapshot = withContext(Dispatchers.IO) {
@@ -2746,6 +3095,16 @@ class HulkViewModel internal constructor(
             }
         }
         refreshNotificationState(clearPopup = true)
+        footballInbox = FootballInboxState()
+        footballInboxScope = null
+        invalidateFootballOwner()
+        mutableState.update { state ->
+            state.copy(
+                footballFeed = FootballFeedUiState(available = state.operations.football != null, loading = state.operations.football != null),
+            )
+        }
+        refreshNotificationState(clearPopup = true)
+        refreshFootballFeed(force = true)
         foregroundNotificationLastAttemptElapsedRealtimeMs = 0L
         scanSubscribedSeries(NotificationScanTrigger.PROFILE_SWITCH)
         wakeForegroundNotificationScheduler()
@@ -2755,6 +3114,7 @@ class HulkViewModel internal constructor(
     fun removeNotificationProfileData(accountId: String, profileId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             localEpisodeNotificationStore.removeProfile(profileId, accountId)
+            footballProfileStore.removeProfile(accountId, profileId)
         }
     }
 
@@ -2776,6 +3136,7 @@ class HulkViewModel internal constructor(
 
     fun onAppResumed() {
         refreshOperations(force = false)
+        refreshFootballFeed(catchUpInbox = true)
         scanSubscribedSeries(NotificationScanTrigger.APP_RESUME)
         wakeForegroundNotificationScheduler()
         scheduleTvPlatformSync(immediate = false)
@@ -3122,6 +3483,9 @@ class HulkViewModel internal constructor(
         val service = config.service.copy(
             status = effectiveOperationsServiceStatus(config.service, source),
         )
+        val previousFootballDiscovery = mutableState.value.operations.football
+        val footballDiscoveryChanged = previousFootballDiscovery?.feedUrl != config.football?.feedUrl ||
+            previousFootballDiscovery?.refreshSeconds != config.football?.refreshSeconds
         val updateChanged =
             mutableState.value.operations.update.latestVersionCode != config.update.latestVersionCode
         if (updateChanged) {
@@ -3162,10 +3526,17 @@ class HulkViewModel internal constructor(
                     announcementPopup = announcementPopup,
                     persistentAnnouncement = persistentAnnouncement,
                     download = if (updateChanged) OperationsDownloadUiState() else state.operations.download,
+                    football = config.football,
                 ),
             )
         }
+        if (footballDiscoveryChanged) invalidateFootballOwner()
         refreshNotificationState(clearPopup = false)
+        if (config.football != null) {
+            refreshFootballFeed(force = false, catchUpInbox = true)
+        } else {
+            resetFootballFeed()
+        }
         if (config.features.episodeNotificationsEnabled) drainPendingNotificationScan()
         wakeForegroundNotificationScheduler()
     }
@@ -3243,6 +3614,7 @@ class HulkViewModel internal constructor(
         val notificationCenterItems = mergeNotificationCenterItems(
             episodeNotifications = safeNotifications,
             systemNotifications = operationsSystemNotifications,
+            kickoffNotifications = footballKickoffNotificationsForActiveScope(),
         )
         val safeSubscribed = snapshot.subscriptions.asSequence()
             .filter(EpisodeNotificationSubscription::enabled)
@@ -3854,6 +4226,9 @@ class HulkViewModel internal constructor(
         notificationScanJob = null
         pendingNotificationScanTrigger = null
         notificationUiReady = false
+        invalidateFootballOwner()
+        footballInbox = FootballInboxState()
+        footballInboxScope = null
         foregroundNotificationLastAttemptElapsedRealtimeMs = 0L
         wakeForegroundNotificationScheduler()
         invalidateCatalogRequests()
@@ -3904,6 +4279,7 @@ class HulkViewModel internal constructor(
                     unreadNotificationCount = 0,
                     episodeNotificationsEnabled = true,
                     notificationPopup = null,
+                    footballFeed = FootballFeedUiState(),
                     operations = operationsState,
                     pairing = pairingState,
                     errorMessage = errorMessage,
@@ -4132,6 +4508,9 @@ class HulkViewModel internal constructor(
             downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
             downloadPriorityMutationQueues.clear()
             presenceLifecycleOwner.logout()
+            invalidateFootballOwner()
+            footballInbox = FootballInboxState()
+            footballInboxScope = null
             val state = mutableState.value
             mutableState.value = HulkUiState(
                 isStarting = false,

@@ -503,6 +503,9 @@ fun HulkApp(
                                         postDownloadFeedback(viewModel.cycleDownloadPriority(item))
                                     },
                                     onActionNotice = postActionNotice,
+                                    onSelectFootballTeam = viewModel::selectFootballFavoriteTeam,
+                                    onClearFootballTeam = viewModel::clearFootballFavoriteTeam,
+                                    onRefreshFootballFeed = { viewModel.refreshFootballFeed(force = true) },
                                     onRefreshAccount = { viewModel.refreshAccount { message ->
                                         postActionNotice(
                                             scopedNoticeDisplayText(message),

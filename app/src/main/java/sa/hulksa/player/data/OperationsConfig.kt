@@ -104,6 +104,7 @@ data class OperationsConfig(
     val presence: OperationsPresenceConfig? = null,
     val pairing: OperationsPairingConfig? = null,
     val liveForeignSports: OperationsLiveForeignSportsConfig? = null,
+    val football: FootballFeedDiscovery? = null,
 )
 
 data class OperationsPairingConfig(
@@ -152,6 +153,7 @@ data class OperationsUiState(
     val announcementPopup: OperationsAnnouncement? = null,
     val persistentAnnouncement: OperationsAnnouncement? = null,
     val download: OperationsDownloadUiState = OperationsDownloadUiState(),
+    val football: FootballFeedDiscovery? = null,
 )
 
 fun evaluateOperationsUpdatePolicy(
@@ -323,6 +325,7 @@ fun parseOperationsConfig(rawJson: String): OperationsConfig? = runCatching {
     val presence = parseOperationsPresence(root.optJSONObject("presence"))
     val pairing = parseOperationsPairing(root.optJSONObject("pairing"))
     val liveForeignSports = parseLiveForeignSports(root.optJSONObject("liveForeignSports"))
+    val football = parseFootballDiscovery(root.optJSONObject("football"))
 
     OperationsConfig(
         schemaVersion = schemaVersion,
@@ -335,6 +338,7 @@ fun parseOperationsConfig(rawJson: String): OperationsConfig? = runCatching {
         presence = presence,
         pairing = pairing,
         liveForeignSports = liveForeignSports,
+        football = football,
     )
 }.getOrNull()
 
@@ -355,6 +359,34 @@ private fun parseLiveForeignSports(value: JSONObject?): OperationsLiveForeignSpo
         }.distinct()
         OperationsLiveForeignSportsConfig(aliases)
     }.getOrNull()
+
+/**
+ * Optional first-party football feed discovery. Missing/false/malformed data disables this
+ * capability only. The app never receives a provider key and never calls the provider directly.
+ */
+private fun parseFootballDiscovery(value: JSONObject?): FootballFeedDiscovery? = runCatching {
+    requireNotNull(value)
+    require(value.has("enabled") && value.get("enabled") is Boolean)
+    if (!value.getBoolean("enabled")) return@runCatching null
+    val feedUrl = value.getString("feedUrl").trim().let { url ->
+        if (url.endsWith('/')) url else "$url/"
+    }
+    val endpoint = URI(feedUrl)
+    require(endpoint.scheme.equals("https", ignoreCase = true))
+    require(endpoint.host.equals("neo4ksa.com", ignoreCase = true) ||
+        endpoint.host.equals("hulksa.com", ignoreCase = true))
+    require(endpoint.port == -1 || endpoint.port == 443)
+    require(endpoint.userInfo == null)
+    require(endpoint.query == null)
+    require(endpoint.fragment == null)
+    require(endpoint.rawPath == FOOTBALL_FEED_PATH)
+    val refreshSeconds = value.getInt("refreshSeconds")
+    require(refreshSeconds in FOOTBALL_MIN_REFRESH_SECONDS..FOOTBALL_MAX_REFRESH_SECONDS)
+    val canonicalUrl = "https://${endpoint.host.lowercase()}${FOOTBALL_FEED_PATH}"
+    FootballFeedDiscovery(feedUrl = canonicalUrl, refreshSeconds = refreshSeconds)
+}.getOrNull()
+
+private const val FOOTBALL_FEED_PATH = "/hulk-operations/api/app/v1/sports/"
 
 /**
  * Optional pairing advertisement. Missing/false/malformed/invalid data disables pairing only and

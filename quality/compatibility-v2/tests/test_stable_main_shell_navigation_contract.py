@@ -228,7 +228,7 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
             "modifier = Modifier.fillMaxSize().saveFocusedChildOnExit(homeColumnSaveFocusRequester)",
             source,
         )
-        self.assertEqual(3, source.count(".saveFocusedChildOnExit(rowSaveFocusRequester)"))
+        self.assertEqual(4, source.count(".saveFocusedChildOnExit(rowSaveFocusRequester)"))
 
     def test_all_rail_destinations_share_the_content_focus_entry_contract(self) -> None:
         source = self.read(MAIN_SHELL)

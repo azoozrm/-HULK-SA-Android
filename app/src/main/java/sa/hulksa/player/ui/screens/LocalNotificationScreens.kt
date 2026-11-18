@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.MarkEmailRead
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.SportsSoccer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -88,6 +89,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import sa.hulksa.player.data.EpisodeNotificationPopup
 import sa.hulksa.player.data.LocalNotificationItem
+import sa.hulksa.player.data.footballKickoffDetail
+import sa.hulksa.player.data.footballKickoffHeadline
 import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.components.goldFocusEdge
@@ -890,7 +893,8 @@ internal fun TvLocalNotificationCenter(
             cards = notifications.map { notification ->
                 NotificationTvCardFocusSpec(
                     notificationId = notification.id,
-                    markReadVisible = notification is LocalNotificationItem.Episode && !notification.read,
+                    markReadVisible = (notification is LocalNotificationItem.Episode ||
+                        notification is LocalNotificationItem.Kickoff) && !notification.read,
                 )
             },
             unreadCount = unreadCount,
@@ -1584,11 +1588,16 @@ private fun TvLocalNotificationCard(
     val colors = LocalHulkColors.current
     val episode = (notification as? LocalNotificationItem.Episode)?.notification
     val system = (notification as? LocalNotificationItem.System)?.notification
-    val title = episode?.seriesName ?: system?.title.orEmpty()
-    val detail = if (episode != null) {
-        "الموسم ${episode.seasonNumber} • الحلقة ${episode.episodeNumber}"
-    } else {
-        system?.message.orEmpty()
+    val kickoff = (notification as? LocalNotificationItem.Kickoff)?.notification
+    val title = when {
+        episode != null -> episode.seriesName
+        kickoff != null -> footballKickoffHeadline(kickoff)
+        else -> system?.title.orEmpty()
+    }
+    val detail = when {
+        episode != null -> "الموسم ${episode.seasonNumber} • الحلقة ${episode.episodeNumber}"
+        kickoff != null -> footballKickoffDetail(kickoff)
+        else -> system?.message.orEmpty()
     }
     val openTarget = NotificationTvFocusTarget.CardAction(
         notification.id,
@@ -1628,7 +1637,7 @@ private fun TvLocalNotificationCard(
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = Icons.Rounded.Notifications,
+                imageVector = if (kickoff != null) Icons.Rounded.SportsSoccer else Icons.Rounded.Notifications,
                 contentDescription = null,
                 tint = if (notification.read) colors.textMuted else Color(0xFF100E04),
                 modifier = Modifier.size((bellDiameterDp * .55f).dp),
@@ -1649,7 +1658,11 @@ private fun TvLocalNotificationCard(
             verticalArrangement = Arrangement.Center,
         ) {
             Text(
-                text = if (episode != null) "حلقة جديدة" else "رسالة من NEO 4K",
+                text = when {
+                    episode != null -> "حلقة جديدة"
+                    kickoff != null -> "انطلقت مباراة"
+                    else -> "رسالة من NEO 4K"
+                },
                 color = colors.goldBright,
                 fontSize = 11.sp,
                 lineHeight = 14.sp,
@@ -1703,7 +1716,7 @@ private fun TvLocalNotificationCard(
                 onTvDirection = { direction -> onDirection(deleteTarget, direction) },
                 onFocused = { onFocused(deleteTarget) },
             )
-            if (episode != null && !notification.read) {
+            if ((episode != null || kickoff != null) && !notification.read) {
                 NotificationActionButton(
                     text = "تعليم كمقروء",
                     onClick = onMarkRead,
@@ -1756,11 +1769,16 @@ private fun MobileLocalNotificationCard(
     val shape = RoundedCornerShape(14.dp)
     val episode = (notification as? LocalNotificationItem.Episode)?.notification
     val system = (notification as? LocalNotificationItem.System)?.notification
-    val title = episode?.seriesName ?: system?.title.orEmpty()
-    val detail = if (episode != null) {
-        "الموسم ${episode.seasonNumber} • الحلقة ${episode.episodeNumber}"
-    } else {
-        system?.message.orEmpty()
+    val kickoff = (notification as? LocalNotificationItem.Kickoff)?.notification
+    val title = when {
+        episode != null -> episode.seriesName
+        kickoff != null -> footballKickoffHeadline(kickoff)
+        else -> system?.title.orEmpty()
+    }
+    val detail = when {
+        episode != null -> "الموسم ${episode.seasonNumber} • الحلقة ${episode.episodeNumber}"
+        kickoff != null -> footballKickoffDetail(kickoff)
+        else -> system?.message.orEmpty()
     }
     Row(
         modifier = Modifier
@@ -1793,6 +1811,13 @@ private fun MobileLocalNotificationCard(
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
                 )
+            } else if (kickoff != null) {
+                Icon(
+                    imageVector = Icons.Rounded.SportsSoccer,
+                    contentDescription = null,
+                    tint = colors.gold,
+                    modifier = Modifier.size((metrics.posterWidthDp * .52f).dp),
+                )
             } else {
                 BrandLogo(Modifier.size((metrics.posterWidthDp * .72f).dp))
             }
@@ -1809,7 +1834,11 @@ private fun MobileLocalNotificationCard(
         }
         Column(Modifier.weight(1f)) {
             Text(
-                text = if (episode != null) "حلقة جديدة" else "رسالة من NEO 4K",
+                text = when {
+                    episode != null -> "حلقة جديدة"
+                    kickoff != null -> "انطلقت مباراة"
+                    else -> "رسالة من NEO 4K"
+                },
                 color = colors.goldBright,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Black,
@@ -1848,7 +1877,7 @@ private fun MobileLocalNotificationCard(
                     isTv = false,
                     modifier = Modifier.heightIn(min = 48.dp),
                 )
-                if (episode != null && !notification.read) {
+                if ((episode != null || kickoff != null) && !notification.read) {
                     NotificationActionButton(
                         text = "تعليم كمقروء",
                         onClick = onMarkRead,

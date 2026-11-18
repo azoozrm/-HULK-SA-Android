@@ -359,6 +359,42 @@ function ops_pairing_discovery(?array $settings = null): ?array
     ];
 }
 
+/**
+ * Optional first-party football feed discovery. The provider keys remain in this server config;
+ * the app receives only the feed URL and refresh policy. Missing/false/malformed/misconfigured
+ * data disables the capability without rejecting the rest of the Operations payload.
+ */
+function ops_football_discovery(?array $settings = null): ?array
+{
+    $football = $settings ?? (ops_load_config()['football'] ?? []);
+    if (!is_array($football) || ($football['enabled'] ?? false) !== true) {
+        return null;
+    }
+    $feedUrl = rtrim(trim((string) ($football['feed_url'] ?? '')), '/') . '/';
+    $parts = parse_url($feedUrl);
+    $allowedHosts = ['neo4ksa.com', 'hulksa.com'];
+    if (
+        !is_array($parts)
+        || ($parts['scheme'] ?? '') !== 'https'
+        || !in_array(strtolower((string) ($parts['host'] ?? '')), $allowedHosts, true)
+        || isset($parts['user'])
+        || isset($parts['pass'])
+        || isset($parts['query'])
+        || isset($parts['fragment'])
+        || ($parts['path'] ?? '') !== '/hulk-operations/api/app/v1/sports/'
+    ) {
+        return null;
+    }
+    $refreshSeconds = (int) ($football['refresh_seconds'] ?? 60);
+    $refreshSeconds = max(30, min(300, $refreshSeconds));
+
+    return [
+        'enabled' => true,
+        'feedUrl' => $feedUrl,
+        'refreshSeconds' => $refreshSeconds,
+    ];
+}
+
 function ops_build_public_config(PDO $db, ?DateTimeImmutable $now = null): array
 {
     $currentTime = $now ?? new DateTimeImmutable('now');
@@ -384,6 +420,10 @@ function ops_build_public_config(PDO $db, ?DateTimeImmutable $now = null): array
     $pairing = ops_pairing_discovery();
     if ($pairing !== null) {
         $payload['pairing'] = $pairing;
+    }
+    $football = ops_football_discovery();
+    if ($football !== null) {
+        $payload['football'] = $football;
     }
     return $payload;
 }
