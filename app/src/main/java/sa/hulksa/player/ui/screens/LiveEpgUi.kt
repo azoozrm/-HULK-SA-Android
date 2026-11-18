@@ -252,7 +252,12 @@ private fun LiveEpgGuidePanel(
         if (index >= 0) {
             listState.scrollToItem(index)
             withFrameNanos { }
-            runCatching { initialFocus.requestFocus() }
+            val firstAttempt = runCatching { initialFocus.requestFocus() }.getOrDefault(false)
+            withFrameNanos { }
+            val secondAttempt = runCatching { initialFocus.requestFocus() }.getOrDefault(false)
+            if (!firstAttempt && !secondAttempt) {
+                runCatching { closeFocus.requestFocus() }
+            }
         } else {
             withFrameNanos { }
             runCatching { closeFocus.requestFocus() }
