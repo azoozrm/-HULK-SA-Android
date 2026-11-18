@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.StatFs
 import android.util.Log
 import android.view.KeyEvent as AndroidKeyEvent
+import android.view.ViewTreeObserver
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -160,6 +161,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.onClick
@@ -5522,11 +5524,26 @@ private fun LiveCatalogScreen(
     val guideRequester = remember { FocusRequester() }
     var guideChannel by remember { mutableStateOf<ContentItem?>(null) }
     var guideReturnFocusPending by remember { mutableStateOf(false) }
+    val hostView = LocalView.current
+    var hostWindowFocused by remember(hostView) {
+        mutableStateOf(hostView.hasWindowFocus())
+    }
+    DisposableEffect(hostView) {
+        val listener = ViewTreeObserver.OnWindowFocusChangeListener { focused ->
+            hostWindowFocused = focused
+        }
+        hostView.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+        onDispose {
+            hostView.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
+        }
+    }
     LaunchedEffect(state.liveEpg.guideEnabled) {
         if (!state.liveEpg.guideEnabled) guideChannel = null
     }
-    LaunchedEffect(guideChannel) {
-        if (guideChannel == null && guideReturnFocusPending) {
+    // The guide is a Dialog window. Restore focus only after the host window owns focus again,
+    // instead of requesting against a still-transitioning window and silently losing the request.
+    LaunchedEffect(guideChannel, hostWindowFocused) {
+        if (guideChannel == null && guideReturnFocusPending && hostWindowFocused) {
             withFrameNanos { }
             runCatching { guideRequester.requestFocus() }
             guideReturnFocusPending = false
