@@ -2,6 +2,7 @@
 
 package sa.hulksa.player.ui.screens
 
+import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -10,7 +11,6 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -20,111 +20,103 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import sa.hulksa.player.data.AuthenticatedSessionOwner
 import sa.hulksa.player.data.AuthenticatedSessionRegistry
-import sa.hulksa.player.data.ArabicCommentarySource
 import sa.hulksa.player.data.resolveArabicCommentarySource
-import sa.hulksa.player.model.ContentItem
-import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.playback.HulkPlayerFactory
+import sa.hulksa.player.playback.LIVE_STALL_TIMEOUT_MS
 import sa.hulksa.player.playback.MediaSourcePlan
+import sa.hulksa.player.playback.PlannedMediaSource
 import sa.hulksa.player.playback.PlayerAudioOutputMode
+import sa.hulksa.player.playback.SOURCE_SWITCH_BACKOFF_MS
 import sa.hulksa.player.playback.planMediaSources
 
 private const val TAG = "HulkPlayer"
 private const val PREPARATION_TIMEOUT_MS = 20_000L
 private const val PAUSE_CONFIRM_TIMEOUT_MS = 900L
 
-internal enum class ArabicCommentaryPhase {
-    INACTIVE,
-    PREPARING,
-    ACTIVE,
-    INTERRUPTED,
-    ERROR,
-}
+internal enum class ArabicCommentaryPhase { INACTIVE, PREPARING, ACTIVE, INTERRUPTED, ERROR }
 
 internal data class ArabicCommentaryState(
     val phase: ArabicCommentaryPhase = ArabicCommentaryPhase.INACTIVE,
-    val selectedChannel: ContentItem? = null,
-    val delays: ArabicCommentaryDelays = ArabicCommentaryDelays(),
+    val feed: ArabicCommentaryFeed? = null,
+    val source: ArabicCommentaryCatalogSource? = null,
+    val alignment: ArabicCommentaryAlignment = ArabicCommentaryAlignment(),
     val stepMs: Long = ARABIC_COMMENTARY_FINE_STEP_MS,
     val commentaryAudible: Boolean = false,
+    val outputMuted: Boolean = false,
     val adjusting: Boolean = false,
+    val buffering: Boolean = false,
+    val recovering: Boolean = false,
     val message: String? = null,
     val error: String? = null,
-    val canRetry: Boolean = false,
-    val connectionNotice: String? = null,
     val sessionAvailable: Boolean = true,
 ) {
-    val busy: Boolean get() = adjusting || phase == ArabicCommentaryPhase.PREPARING
+    val canRetry: Boolean get() = sessionAvailable && feed != null && source != null
 }
 
-/**
- * Owns the optional second Live playback used as the Arabic commentary source.
- *
- * The foreign video player stays the visible/lifecycle player. This owner only creates an
- * audio-focused ExoPlayer for the commentary channel, disables its video/text tracks, and routes
- * one audible source at a time. A rejected/stale callback never mutates a newer activation because
- * every listener and coroutine is bound to a generation token.
- *
- * Synchronization mechanism:
- * - A source is delayed by holding that source's `playWhenReady` for exactly the requested step
- *   while the other source continues. The held player keeps filling its bounded forward buffer.
- * - Reset/return uses the stream's live/default position where it is seekable. On a stream that
- *   cannot seek live, the UI reports the limitation instead of claiming the delay was removed.
- * - The total applied delay is manually tracked per source; the feature never assumes a shared
- *   content clock and never uses a displayed-only offset.
- */
+/** Owns one audio-only player at a time and the manual holds for the two active streams. */
 internal class ArabicCommentaryOwner(
     private val factory: HulkPlayerFactory,
     private val videoPlayer: ExoPlayer,
     private val scope: CoroutineScope,
     private val expectedOwner: AuthenticatedSessionOwner?,
+    private val onVideoHeld: () -> Unit,
     private val onAudioRouteChanged: (Boolean) -> Unit,
 ) {
-    var state by mutableStateOf(ArabicCommentaryState())
+    var state by mutableStateOf(ArabicCommentaryState(sessionAvailable = expectedOwner != null))
         private set
 
-    private var commentaryPlayer: ExoPlayer? = null
-    private var source: ArabicCommentarySource? = null
+    private class Hold(val target: ExoPlayer, val other: ExoPlayer, val source: ArabicCommentaryDelayedSource) {
+        var pauseApplied = false
+        val canContinue: Boolean
+            get() = target.playbackState == Player.STATE_READY && other.isPlaying &&
+                (!pauseApplied || !target.playWhenReady)
+    }
+
+    private var fallback: ArabicCommentaryFallback? = null
     private var sourcePlan: MediaSourcePlan? = null
-    private var generation = 0
-    private var candidateIndex = 0
-    private var muted = false
-    private var holdTarget: ExoPlayer? = null
-    private var adjustmentJob: Job? = null
-    private var watchdogJob: Job? = null
+    private var candidateIndex = -1
+    private var preparationDeadlineMs = 0L
+    private var commentaryPlayer: ExoPlayer? = null
     private var commentaryListener: Player.Listener? = null
+    private var watchdogJob: Job? = null
+    private var switchJob: Job? = null
+    private var hold: Hold? = null
+    private var adjustmentJob: Job? = null
     private var released = false
+    private val workingSourceKeys = mutableMapOf<ArabicCommentaryFeedKey, String>()
+
+    val videoPlaybackIntended: Boolean
+        get() = videoPlayer.playWhenReady || videoPlayer.isPlaying ||
+            hold?.let { it.target === videoPlayer && it.pauseApplied } == true
 
     private val videoListener = object : Player.Listener {
-        override fun onIsPlayingChanged(isPlaying: Boolean) {
-            if (state.adjusting) return
-            val commentary = commentaryPlayer ?: return
-            if (state.phase != ArabicCommentaryPhase.PREPARING &&
-                state.phase != ArabicCommentaryPhase.ACTIVE
-            ) {
-                return
-            }
-            commentary.playWhenReady = isPlaying && !state.adjusting
-            updateAudibleSource()
+        override fun onEvents(player: Player, events: Player.Events) {
+            if (!events.containsAny(
+                    Player.EVENT_PLAYBACK_STATE_CHANGED,
+                    Player.EVENT_IS_PLAYING_CHANGED,
+                    Player.EVENT_PLAY_WHEN_READY_CHANGED,
+                    Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED,
+                )
+            ) return
+            if (commentaryPlayer == null || !ensureAuthenticatedSession()) return
+            followVideo()
         }
 
-        override fun onPlaybackStateChanged(playbackState: Int) {
-            if (state.adjusting) return
-            val commentary = commentaryPlayer ?: return
-            if (state.phase != ArabicCommentaryPhase.PREPARING &&
-                state.phase != ArabicCommentaryPhase.ACTIVE
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int,
+        ) {
+            if (oldPosition.positionMs == newPosition.positionMs ||
+                !state.alignment.hasPictureAdjustment && state.phase != ArabicCommentaryPhase.ACTIVE
+            ) return
+            if (reason == Player.DISCONTINUITY_REASON_SEEK ||
+                reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT ||
+                reason == Player.DISCONTINUITY_REASON_REMOVE
             ) {
-                return
+                cancelAdjustment("تغير موضع الصورة اثناء الضبط")
+                state = state.copy(alignment = state.alignment.pictureRepositioned())
             }
-            when (playbackState) {
-                Player.STATE_BUFFERING,
-                Player.STATE_IDLE,
-                -> commentary.playWhenReady = false
-                Player.STATE_READY -> if (videoPlayer.playWhenReady) {
-                    commentary.playWhenReady = true
-                }
-            }
-            updateAudibleSource()
         }
     }
 
@@ -132,618 +124,494 @@ internal class ArabicCommentaryOwner(
         videoPlayer.addListener(videoListener)
     }
 
-    fun start(channel: ContentItem, notice: String? = null) {
-        if (released || channel.type != ContentType.LIVE) return
-        val keptStep = state.stepMs
-        val previousNotice = state.connectionNotice
-        val expected = expectedOwner
-        val resolved = resolveArabicCommentarySource(channel)
-        stopInternal(removeVideoDelay = true)
-        if (expected == null) {
-            state = ArabicCommentaryState(
-                phase = ArabicCommentaryPhase.ERROR,
-                selectedChannel = channel,
-                stepMs = keptStep,
-                connectionNotice = previousNotice,
-                error = "تعذر التحقق من جلسة الحساب.",
-                canRetry = false,
-                sessionAvailable = false,
-            )
-            Log.i(TAG, "commentary rejected reason=owner_unavailable channelId=${channel.id}")
-            return
-        }
-        if (resolved == null) {
-            val sessionAvailable = AuthenticatedSessionRegistry.currentOwner() != null
-            state = ArabicCommentaryState(
-                phase = ArabicCommentaryPhase.ERROR,
-                selectedChannel = channel,
-                stepMs = keptStep,
-                connectionNotice = previousNotice,
-                error = "تعذر تجهيز قناة التعليق من الحساب الحالي.",
-                canRetry = sessionAvailable,
-                sessionAvailable = sessionAvailable,
-            )
-            Log.i(TAG, "commentary rejected reason=source_unavailable channelId=${channel.id}")
-            return
-        }
-        if (resolved.owner !== expected) {
-            state = ArabicCommentaryState(
-                phase = ArabicCommentaryPhase.ERROR,
-                selectedChannel = channel,
-                stepMs = keptStep,
-                connectionNotice = previousNotice,
-                error = "تغيرت جلسة الحساب؛ لم يتم تشغيل التعليق.",
-                canRetry = false,
-                sessionAvailable = false,
-            )
-            Log.i(TAG, "commentary rejected reason=owner_mismatch channelId=${channel.id}")
-            return
-        }
+    fun selectChannel(feed: ArabicCommentaryFeed) {
+        val preferred = feed.sources.firstOrNull { it.key == workingSourceKeys[feed.key] }
+            ?: feed.sources.firstOrNull()
+            ?: return
+        start(feed, preferred)
+    }
 
-        source = resolved
-        val plan = planMediaSources(resolved.request)
-        sourcePlan = plan
-        val gen = generation
-        val firstCandidateIndex = plan.firstCandidateIndex
-        if (firstCandidateIndex == null) {
-            fail(gen, "لا يوجد مصدر تشغيل صالح لقناة التعليق.", null)
-            return
-        }
-        candidateIndex = firstCandidateIndex
-        val connectionNoticeText = arabicCommentaryConnectionNotice(
-            activeConnections = resolved.activeConnections,
-            maxConnections = resolved.maxConnections,
-        )
-        state = ArabicCommentaryState(
-            phase = ArabicCommentaryPhase.PREPARING,
-            selectedChannel = channel,
-            stepMs = keptStep,
-            connectionNotice = connectionNoticeText,
-            message = notice,
-        )
-        Log.i(
-            TAG,
-            "commentary preparing channelId=${channel.id} active=${resolved.activeConnections} " +
-                "max=${resolved.maxConnections} candidates=${resolved.request.candidates.size}",
-        )
-
-        val player = runCatching {
-            // The main player owns audio focus. The commentary player must never request it, or it
-            // would pause the visible foreign picture when it becomes audible.
-            factory.create(
-                outputMode = PlayerAudioOutputMode.NORMAL,
-                handleAudioFocus = false,
-            )
-        }.getOrElse { error ->
-            fail(gen, "تعذر انشاء مشغل التعليق.", error)
-            return
-        }
-        commentaryPlayer = player
-        player.volume = 0f
-        // The commentary component is audio-only. A multiplexed transport may still download
-        // video bytes; this only prevents a video decoder from being selected/opened.
-        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-            .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-            .build()
-        val listener = createCommentaryListener(gen)
-        commentaryListener = listener
-        player.addListener(listener)
-        prepareCandidate(gen, firstCandidateIndex)
-
-        watchdogJob?.cancel()
-        watchdogJob = scope.launch {
-            delay(PREPARATION_TIMEOUT_MS)
-            if (gen == generation && state.phase == ArabicCommentaryPhase.PREPARING) {
-                fail(gen, "تعذر تشغيل قناة التعليق خلال 20 ثانية.", null)
-            }
-        }
+    fun selectSource(source: ArabicCommentaryCatalogSource) {
+        val feed = state.feed ?: return
+        if (feed.sources.none { it.key == source.key }) return
+        if (source.key == state.source?.key && state.phase == ArabicCommentaryPhase.ACTIVE) return
+        start(feed, source)
     }
 
     fun retry() {
-        val channel = state.selectedChannel ?: return
-        start(channel)
+        val feed = state.feed ?: return
+        val source = state.source ?: return
+        start(feed, source)
+    }
+
+    private fun start(
+        feed: ArabicCommentaryFeed,
+        source: ArabicCommentaryCatalogSource,
+        message: String? = null,
+    ) {
+        if (!ensureAuthenticatedSession()) return
+        stopRecovery(restorePicture = true)
+        val recovery = ArabicCommentaryFallback(feed, source)
+        fallback = recovery
+        state = state.copy(
+            phase = ArabicCommentaryPhase.PREPARING,
+            feed = feed,
+            source = null,
+            alignment = state.alignment.sourceReplaced(
+                recheck = state.feed != null || state.alignment.hasPictureAdjustment,
+            ),
+            recovering = false,
+            error = null,
+            message = message,
+        )
+        prepareNextSource(recovery)
+    }
+
+    private fun prepareNextSource(recovery: ArabicCommentaryFallback) {
+        if (fallback !== recovery || !ensureAuthenticatedSession()) return
+        val source = recovery.nextSource()
+        if (source == null) {
+            stopRecovery(restorePicture = true)
+            state = state.copy(
+                phase = ArabicCommentaryPhase.ERROR,
+                recovering = false,
+                message = null,
+                error = "تعذر تشغيل التعليق. عاد الصوت الاصلي",
+            )
+            return
+        }
+        state = state.copy(source = source)
+        val request = expectedOwner?.let { resolveArabicCommentarySource(it, source.item) }
+        val plan = request?.let(::planMediaSources)
+        sourcePlan = plan
+        val first = plan?.candidates?.firstOrNull()
+        if (first == null) {
+            scheduleFallback(recovery, nextCandidate = null)
+            return
+        }
+        preparationDeadlineMs = SystemClock.elapsedRealtime() + PREPARATION_TIMEOUT_MS
+        prepare(recovery, first)
+    }
+
+    private fun prepare(recovery: ArabicCommentaryFallback, candidate: PlannedMediaSource) {
+        if (fallback !== recovery || !ensureAuthenticatedSession()) return
+        candidateIndex = candidate.candidateIndex
+        val token = recovery.beginAttempt()
+        try {
+            val player = factory.create(
+                outputMode = PlayerAudioOutputMode.NORMAL,
+                handleAudioFocus = false,
+            )
+            commentaryPlayer = player
+            player.volume = 0f
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                .setPreferredAudioLanguage("ar")
+                .build()
+            val listener = createCommentaryListener(token)
+            commentaryListener = listener
+            player.addListener(listener)
+            player.setMediaItem(
+                MediaItem.Builder().setUri(candidate.uri).setMimeType(candidate.containerMimeType).build(),
+            )
+            player.playWhenReady = videoPlayer.isPlaying
+            player.prepare()
+        } catch (failure: Exception) {
+            recover(token, failure.javaClass.simpleName)
+            return
+        }
+        if (recovery.accepts(token) && state.phase == ArabicCommentaryPhase.PREPARING) {
+            val timeLeft = (preparationDeadlineMs - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+            watchdogJob = scope.launch {
+                delay(timeLeft)
+                recover(token, "prepare_timeout", sourceTimedOut = true)
+            }
+        }
+        Log.i(TAG, "commentary preparing channelId=${state.source?.item?.id} candidate=$candidateIndex")
+    }
+
+    private fun createCommentaryListener(token: Any): Player.Listener = object : Player.Listener {
+        override fun onEvents(player: Player, events: Player.Events) {
+            if (!events.containsAny(
+                    Player.EVENT_PLAYBACK_STATE_CHANGED,
+                    Player.EVENT_IS_PLAYING_CHANGED,
+                    Player.EVENT_TRACKS_CHANGED,
+                    Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED,
+                )
+            ) return
+            if (!accepts(token)) return
+            val commentary = commentaryPlayer ?: return
+            if (player.playbackState == Player.STATE_ENDED) {
+                recover(token, "ended")
+                return
+            }
+            if (state.phase == ArabicCommentaryPhase.PREPARING && player.playbackState == Player.STATE_READY &&
+                (commentary.audioFormat != null || player.currentTracks.isTypeSelected(C.TRACK_TYPE_AUDIO))
+            ) {
+                cancelWatchdog()
+                state = state.copy(phase = ArabicCommentaryPhase.ACTIVE, recovering = false)
+                Log.i(TAG, "commentary ready channelId=${state.source?.item?.id} candidate=$candidateIndex")
+            }
+            if (state.phase == ArabicCommentaryPhase.ACTIVE) {
+                followVideo()
+            }
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            recover(token, error.errorCodeName)
+        }
+    }
+
+    private fun accepts(token: Any): Boolean =
+        fallback?.accepts(token) == true && ensureAuthenticatedSession()
+
+    private fun recover(token: Any, reason: String, sourceTimedOut: Boolean = false) {
+        if (!accepts(token)) return
+        val recovery = fallback ?: return
+        val wasActive = state.phase == ArabicCommentaryPhase.ACTIVE
+        if (wasActive) preparationDeadlineMs = SystemClock.elapsedRealtime() + PREPARATION_TIMEOUT_MS
+        val plan = sourcePlan
+        val next = if (plan != null && !sourceTimedOut && SystemClock.elapsedRealtime() < preparationDeadlineMs) {
+            plan.nextCandidateIndex(candidateIndex)?.let(plan::candidate)
+        } else {
+            null
+        }
+        Log.i(TAG, "commentary attempt failed channelId=${state.source?.item?.id} candidate=$candidateIndex reason=$reason")
+        scheduleFallback(recovery, next)
+    }
+
+    private fun scheduleFallback(recovery: ArabicCommentaryFallback, nextCandidate: PlannedMediaSource?) {
+        val wasActive = state.phase == ArabicCommentaryPhase.ACTIVE
+        releaseAttempt(restorePicture = true)
+        state = state.copy(
+            phase = ArabicCommentaryPhase.PREPARING,
+            alignment = state.alignment.sourceReplaced(recheck = wasActive || nextCandidate == null),
+            recovering = true,
+        )
+        switchJob?.cancel()
+        switchJob = scope.launch {
+            delay(SOURCE_SWITCH_BACKOFF_MS)
+            if (fallback !== recovery || !ensureAuthenticatedSession()) return@launch
+            if (nextCandidate != null && SystemClock.elapsedRealtime() < preparationDeadlineMs) {
+                prepare(recovery, nextCandidate)
+            } else {
+                prepareNextSource(recovery)
+            }
+        }
+    }
+
+    private fun observeCommentaryBuffering(token: Any, commentary: ExoPlayer) {
+        when (arabicCommentaryBufferingTransition(
+            wasBuffering = state.buffering,
+            videoPlaying = videoPlayer.isPlaying,
+            commentaryBuffering = commentary.playbackState == Player.STATE_BUFFERING,
+            adjusting = hold != null,
+        )) {
+            ArabicCommentaryBufferingTransition.START -> {
+                state = state.copy(buffering = true)
+                watchdogJob = scope.launch {
+                    delay(LIVE_STALL_TIMEOUT_MS)
+                    if (state.buffering) recover(token, "buffering_timeout")
+                }
+            }
+            ArabicCommentaryBufferingTransition.CANCEL -> {
+                state = state.copy(buffering = false)
+                cancelWatchdog()
+            }
+            ArabicCommentaryBufferingTransition.KEEP -> Unit
+        }
+    }
+
+    private fun followVideo() {
+        val token = fallback?.currentAttempt ?: return
+        val commentary = commentaryPlayer ?: return
+        if (hold?.canContinue != true) {
+            if (hold != null) cancelAdjustment("انقطع التشغيل اثناء الضبط ولم تكتمل الخطوة")
+            if (commentaryPlayer !== commentary) return
+            commentary.playWhenReady = videoPlayer.isPlaying
+            if (commentaryPlayer !== commentary) return
+            updateAudibleSource(commentary)
+        }
+        // A picture-only resume can leave the secondary in the same buffering state.
+        if (state.phase == ArabicCommentaryPhase.ACTIVE && commentaryPlayer === commentary && accepts(token)) {
+            observeCommentaryBuffering(token, commentary)
+        }
+    }
+
+    /** Mute the departing route before restoring or raising the other volume. */
+    private fun updateAudibleSource(commentary: ExoPlayer) {
+        val desired = arabicCommentaryDesiredAudibleSource(
+            commentaryActive = state.phase == ArabicCommentaryPhase.ACTIVE,
+            adjusting = hold != null,
+            videoPlaying = videoPlayer.isPlaying,
+            commentaryPlaying = commentary.isPlaying,
+        ) ?: return
+        val useCommentary = desired == ArabicCommentaryAudibleSource.COMMENTARY
+        if (useCommentary == state.commentaryAudible) return
+        if (useCommentary) {
+            val feed = state.feed
+            val source = state.source
+            if (feed != null && source != null) workingSourceKeys[feed.key] = source.key
+            onAudioRouteChanged(true)
+            commentary.volume = if (state.outputMuted) 0f else 1f
+        } else {
+            commentary.volume = 0f
+            onAudioRouteChanged(false)
+        }
+        state = state.copy(commentaryAudible = useCommentary)
+        Log.i(TAG, "commentary audio route=$desired channelId=${state.source?.item?.id}")
+    }
+
+    fun setOutputMuted(muted: Boolean) {
+        if (released || state.outputMuted == muted) return
+        commentaryPlayer?.volume = if (state.commentaryAudible && !muted) 1f else 0f
+        state = state.copy(outputMuted = muted)
     }
 
     fun setStep(stepMs: Long) {
-        if (stepMs != ARABIC_COMMENTARY_FINE_STEP_MS && stepMs != ARABIC_COMMENTARY_COARSE_STEP_MS) {
-            return
+        if (stepMs == ARABIC_COMMENTARY_FINE_STEP_MS || stepMs == ARABIC_COMMENTARY_COARSE_STEP_MS) {
+            state = state.copy(stepMs = stepMs)
         }
-        state = state.copy(stepMs = stepMs)
     }
 
     fun adjust(symptom: ArabicCommentarySymptom) {
-        if (released || state.adjusting) return
-        if (state.phase != ArabicCommentaryPhase.ACTIVE) return
-        val result = applyArabicCommentaryStep(
-            delays = state.delays,
-            symptom = symptom,
-            stepMs = state.stepMs,
-        )
-        if (result.appliedMs <= 0L) {
-            state = state.copy(
-                message = "وصلت الى الحد الاقصى المدعوم (10 ث لكل مصدر).",
-            )
+        if (!ensureAuthenticatedSession() || state.adjusting || state.phase != ArabicCommentaryPhase.ACTIVE) return
+        val commentary = commentaryPlayer ?: return
+        if (!videoPlayer.isPlaying || !commentary.isPlaying) {
+            state = state.copy(message = "شغل الصورة والتعليق قبل ضبط التزامن")
             return
         }
-        val target = when (result.delayedSource) {
-            ArabicCommentaryDelayedSource.COMMENTARY -> commentaryPlayer
-            ArabicCommentaryDelayedSource.VIDEO -> videoPlayer
-        }
-        if (target == null) {
-            state = state.copy(message = "مصدر التعليق غير جاهز للضبط.")
+        val result = applyArabicCommentaryStep(state.alignment.delays, symptom, state.stepMs)
+        if (result.appliedMs == 0L) {
+            state = state.copy(message = "بلغت حد التأخير البالغ 10 ثوان لهذا المصدر")
             return
         }
-        if (!videoPlayer.isPlaying) {
-            state = state.copy(message = "شغل القناة اولا ثم اضبط التزامن.")
-            return
-        }
-        if (result.delayedSource == ArabicCommentaryDelayedSource.COMMENTARY && !target.isPlaying) {
-            state = state.copy(message = "التعليق غير جاهز للضبط الان.")
-            return
-        }
+        val target = if (result.delayedSource == ArabicCommentaryDelayedSource.VIDEO) videoPlayer else commentary
+        val other = if (target === videoPlayer) commentary else videoPlayer
         val bufferedAheadMs = (target.bufferedPosition - target.currentPosition).coerceAtLeast(0L)
         if (target.playbackState != Player.STATE_READY || bufferedAheadMs < result.appliedMs) {
-            state = state.copy(
-                message = "البيانات المتوفرة لا تكفي لهذه الخطوة. انتظر تجهيز المخزن المؤقت.",
-            )
+            state = state.copy(message = "انتظر تجهيز البث قبل تطبيق هذه الخطوة")
             return
         }
 
-        val gen = generation
-        state = state.copy(
-            adjusting = true,
-            message = "جاري ضبط التزامن…",
-            error = null,
-        )
+        val operation = Hold(target, other, result.delayedSource)
+        hold = operation
+        state = state.copy(adjusting = true, message = null)
         adjustmentJob = scope.launch {
-            // Register the hold before pausing so a cancellation during confirmation still lets
-            // the stop/release path find the source and restore it. The finally block below never
-            // resumes playback on its own: an interrupted adjustment is owned by whatever
-            // interrupted it (stop, return, release, user intent or lifecycle change).
-            holdTarget = target
             try {
-                when (pauseAndConfirm(target)) {
-                    PauseAttempt.CONFIRMED -> Unit
-                    PauseAttempt.NOT_PLAYING -> {
-                        // The source was already paused by its owner: never start it here.
-                        if (holdTarget === target) holdTarget = null
-                        if (gen == generation) {
-                            state = state.copy(
-                                adjusting = false,
-                                message = "المصدر متوقف حاليا؛ لم يتم تطبيق الخطوة.",
-                            )
-                        }
-                        return@launch
-                    }
-                    PauseAttempt.TIMEOUT -> {
-                        // We paused a playing source and it did not confirm; restoring that pause
-                        // is not a new playback start.
-                        if (holdTarget === target) holdTarget = null
-                        if (gen == generation) {
-                            runCatching { if (!target.playWhenReady) target.playWhenReady = true }
-                            state = state.copy(
-                                adjusting = false,
-                                message = "تعذر ايقاف المصدر مؤقتا لضبط التزامن.",
-                            )
-                        }
-                        return@launch
-                    }
-                }
-                if (gen != generation || state.phase != ArabicCommentaryPhase.ACTIVE) {
+                if (!pauseAndConfirm(operation)) {
+                    if (hold === operation) cancelAdjustment("لم تكتمل خطوة ضبط التزامن")
                     return@launch
                 }
                 delay(result.appliedMs)
+                if (!ensureAuthenticatedSession()) return@launch
                 val shouldResume = arabicCommentaryShouldResumeAfterAdjustment(
-                    interrupted = false,
-                    generationCurrent = gen == generation,
+                    interrupted = !operation.canContinue,
+                    generationCurrent = hold === operation,
                     phaseActive = state.phase == ArabicCommentaryPhase.ACTIVE,
                     released = released,
                 )
-                if (!shouldResume) return@launch
-                target.playWhenReady = true
-                holdTarget = null
+                if (!shouldResume) {
+                    if (hold === operation) cancelAdjustment("لم تكتمل خطوة ضبط التزامن")
+                    return@launch
+                }
+                hold = null
                 state = state.copy(
-                    delays = result.delays,
                     adjusting = false,
-                    message = null,
+                    alignment = state.alignment.copy(delays = result.delays, needsReadjustment = false),
+                    message = if (result.limitReached) "بلغت حد التأخير البالغ 10 ثوان لهذا المصدر" else null,
                 )
+                restoreHeldPlayer(operation)
+                followVideo()
                 Log.i(
                     TAG,
-                    "commentary adjusted source=${result.delayedSource} " +
-                        "appliedMs=${result.appliedMs} commentaryMs=${result.delays.commentaryMs} " +
-                        "videoMs=${result.delays.videoMs}",
+                    "commentary adjusted source=${result.delayedSource} appliedMs=${result.appliedMs} " +
+                        "commentaryMs=${result.delays.commentaryMs} videoMs=${result.delays.videoMs}",
                 )
             } finally {
-                if (holdTarget === target) holdTarget = null
-                if (gen == generation && state.adjusting) {
-                    state = state.copy(adjusting = false)
-                }
+                if (hold === operation) detachAdjustment()
             }
+        }
+    }
+
+    private suspend fun pauseAndConfirm(operation: Hold): Boolean {
+        val target = operation.target
+        if (!target.isPlaying || !operation.canContinue) return false
+        val paused = CompletableDeferred<Unit>()
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (!isPlaying) paused.complete(Unit)
+            }
+        }
+        target.addListener(listener)
+        try {
+            operation.pauseApplied = true
+            target.playWhenReady = false
+            if (target === videoPlayer && hold === operation) onVideoHeld()
+            return !target.isPlaying || withTimeoutOrNull(PAUSE_CONFIRM_TIMEOUT_MS) { paused.await() } != null
+        } finally {
+            target.removeListener(listener)
+        }
+    }
+
+    private fun detachAdjustment(): Hold? {
+        val operation = hold
+        hold = null
+        adjustmentJob?.cancel()
+        adjustmentJob = null
+        if (operation != null) {
+            state = state.copy(
+                adjusting = false,
+                alignment = if (operation.pauseApplied) {
+                    state.alignment.holdInterrupted(operation.source)
+                } else {
+                    state.alignment
+                },
+            )
+        }
+        return operation
+    }
+
+    private fun cancelAdjustment(message: String) {
+        val operation = detachAdjustment() ?: return
+        state = state.copy(message = message)
+        restoreHeldPlayer(operation)
+    }
+
+    private fun restoreHeldPlayer(operation: Hold) {
+        val target = operation.target
+        if (operation.pauseApplied && target.playerError == null && !target.playWhenReady &&
+            (target === videoPlayer || target === commentaryPlayer && videoPlayer.isPlaying)
+        ) {
+            target.playWhenReady = true
         }
     }
 
     fun reset() {
-        if (released || state.adjusting) return
-        if (state.phase != ArabicCommentaryPhase.ACTIVE) return
-        val current = state.delays
-        if (!current.hasDelay) {
-            state = state.copy(message = "لا يوجد تأخير لاعادة ضبطه.")
+        if (!ensureAuthenticatedSession() || state.adjusting || state.phase != ArabicCommentaryPhase.ACTIVE) return
+        val feed = state.feed ?: return
+        val source = state.source ?: return
+        val alignment = state.alignment
+        if (!alignment.delays.hasDelay && !alignment.hasPictureAdjustment && !alignment.needsReadjustment) {
+            state = state.copy(message = "لا توجد خطوات تأخير لاعادة ضبطها")
             return
         }
-        val channel = state.selectedChannel ?: return
-        if (current.videoMs > 0L && !videoPlayer.isCurrentMediaItemSeekable) {
-            state = state.copy(
-                message = "هذه القناة لا تدعم الرجوع للبث المباشر؛ لم يتم ازالة تأخير الصورة.",
-            )
-            return
+        val canResetPicture = alignment.canResetPicture(
+            isLive = videoPlayer.isCurrentMediaItemLive,
+            seekable = videoPlayer.isCurrentMediaItemSeekable,
+            defaultSeekAvailable = videoPlayer.isCommandAvailable(Player.COMMAND_SEEK_TO_DEFAULT_POSITION),
+        )
+        if (canResetPicture) {
+            // The primary discontinuity listener clears picture steps when the position moves.
+            videoPlayer.seekToDefaultPosition()
         }
-        // Rebuild the commentary at its live/default source instead of seeking the current HLS
-        // reader. A live-edge seek can fail as an HTTP error on providers with a short window;
-        // a bounded fresh start is the same baseline and still falls back to the next candidate.
-        Log.i(TAG, "commentary reset restart channelId=${channel.id}")
-        start(channel, notice = "جاري اعادة الضبط من البث المباشر…")
+        val message = if (alignment.hasPictureAdjustment && !canResetPicture) {
+            "البث الحالي لا يتيح اعادة ضبط موضع الصورة"
+        } else null
+        start(feed, source, message)
     }
 
     fun returnToOriginalAudio() {
         if (released) return
-        val step = state.stepMs
-        stopInternal(removeVideoDelay = true)
-        state = ArabicCommentaryState(
+        stopRecovery(restorePicture = true)
+        state = state.copy(
             phase = ArabicCommentaryPhase.INACTIVE,
-            stepMs = step,
-            message = "تمت العودة للصوت الاصلي.",
+            feed = null,
+            source = null,
+            alignment = state.alignment.sourceReplaced(recheck = false),
+            recovering = false,
+            message = null,
+            error = null,
         )
         Log.i(TAG, "commentary stopped reason=original_audio")
     }
 
-    fun setOutputMuted(muted: Boolean) {
-        this.muted = muted
-        commentaryPlayer?.volume = if (state.commentaryAudible && !muted) 1f else 0f
-    }
-
     fun onAppForegroundChanged(foreground: Boolean) {
         if (foreground || released) return
-        interrupt(
-            message = "تم ايقاف التعليق عند مغادرة التطبيق. يمكنك اعادة تشغيله.",
-            reason = "background",
-        )
+        // Restore only an owned primary hold before the screen applies its normal background stop.
+        interrupt("توقف التعليق عند مغادرة التطبيق", restorePicture = true)
     }
 
-    fun onPlaybackInterrupted(message: String) {
-        interrupt(message = message, reason = "playback_interrupted")
+    fun onPlaybackInterrupted(message: String, pictureReloaded: Boolean = false) {
+        interrupt(message, restorePicture = false)
+        if (pictureReloaded && state.alignment.hasPictureAdjustment) {
+            state = state.copy(alignment = state.alignment.pictureRepositioned())
+        }
     }
 
-    fun ensureAuthenticatedSession() {
-        val owner = source?.owner ?: return
-        if (!AuthenticatedSessionRegistry.isCurrent(owner)) {
-            val step = state.stepMs
-            val notice = state.connectionNotice
-            stopInternal(removeVideoDelay = true)
-            state = ArabicCommentaryState(
+    fun ensureAuthenticatedSession(): Boolean {
+        if (released) return false
+        if (expectedOwner != null && AuthenticatedSessionRegistry.isCurrent(expectedOwner)) return true
+        if (state.sessionAvailable) {
+            stopRecovery(restorePicture = true)
+            workingSourceKeys.clear()
+            state = state.copy(
                 phase = ArabicCommentaryPhase.INTERRUPTED,
-                stepMs = step,
-                connectionNotice = notice,
-                message = "انتهت جلسة الحساب؛ تم ايقاف التعليق واخراج الصوت التعليقي.",
-                canRetry = false,
+                feed = null,
+                source = null,
+                alignment = state.alignment.sourceReplaced(recheck = false),
+                recovering = false,
+                message = null,
+                error = null,
                 sessionAvailable = false,
             )
             Log.i(TAG, "commentary interrupted reason=session_changed")
         }
+        return false
+    }
+
+    private fun interrupt(message: String, restorePicture: Boolean) {
+        if (released || state.phase == ArabicCommentaryPhase.INACTIVE ||
+            state.phase == ArabicCommentaryPhase.INTERRUPTED
+        ) return
+        stopRecovery(restorePicture)
+        state = state.copy(
+            phase = ArabicCommentaryPhase.INTERRUPTED,
+            alignment = state.alignment.sourceReplaced(recheck = true),
+            recovering = false,
+            message = message,
+            error = null,
+        )
     }
 
     fun release() {
         if (released) return
         released = true
         videoPlayer.removeListener(videoListener)
-        stopInternal(removeVideoDelay = true)
-        Log.i(TAG, "commentary owner released")
+        stopRecovery(restorePicture = false)
     }
 
-    private fun interrupt(message: String, reason: String) {
-        if (released) return
-        if (state.phase == ArabicCommentaryPhase.INACTIVE ||
-            state.phase == ArabicCommentaryPhase.INTERRUPTED
-        ) {
-            return
-        }
-        val channel = state.selectedChannel
-        val step = state.stepMs
-        val notice = state.connectionNotice
-        stopInternal(removeVideoDelay = true)
-        state = ArabicCommentaryState(
-            phase = ArabicCommentaryPhase.INTERRUPTED,
-            selectedChannel = channel,
-            stepMs = step,
-            connectionNotice = notice,
-            message = message,
-            canRetry = channel != null,
-        )
-        Log.i(TAG, "commentary interrupted reason=$reason")
-    }
-
-    private fun createCommentaryListener(gen: Int): Player.Listener = object : Player.Listener {
-        override fun onPlaybackStateChanged(playbackState: Int) {
-            if (gen != generation) return
-            when (playbackState) {
-                Player.STATE_READY -> markReady(gen)
-                Player.STATE_BUFFERING -> if (state.phase == ArabicCommentaryPhase.ACTIVE) {
-                    updateAudibleSource()
-                    if (!state.adjusting && state.message == null) {
-                        state = state.copy(
-                            message = "توقف التعليق مؤقتا؛ قد تحتاج اعادة ضبط التزامن بعد الاستئناف.",
-                        )
-                    }
-                }
-                else -> Unit
-            }
-        }
-
-        override fun onTracksChanged(tracks: Tracks) {
-            if (gen != generation) return
-            logAudioTrack(tracks)
-            markReady(gen)
-        }
-
-        override fun onIsPlayingChanged(isPlaying: Boolean) {
-            if (gen != generation) return
-            if (isPlaying) {
-                markReady(gen)
-            }
-            if (state.phase == ArabicCommentaryPhase.ACTIVE) {
-                updateAudibleSource()
-            }
-        }
-
-        override fun onPlayerError(error: PlaybackException) {
-            if (gen != generation) return
-            handleCommentaryError(gen, error)
-        }
-    }
-
-    private fun markReady(gen: Int) {
-        if (gen != generation) return
-        val player = commentaryPlayer ?: return
-        if (state.phase != ArabicCommentaryPhase.PREPARING &&
-            state.phase != ArabicCommentaryPhase.ACTIVE
-        ) {
-            return
-        }
-        val hasAudio = player.audioFormat != null ||
-            player.currentTracks.groups.any { it.type == C.TRACK_TYPE_AUDIO && it.length > 0 }
-        if (player.playbackState != Player.STATE_READY || !hasAudio) return
-        if (state.phase == ArabicCommentaryPhase.PREPARING) {
-            watchdogJob?.cancel()
-            watchdogJob = null
-            state = state.copy(
-                phase = ArabicCommentaryPhase.ACTIVE,
-                message = null,
-                error = null,
-            )
-            Log.i(
-                TAG,
-                "commentary ready channelId=${state.selectedChannel?.id} " +
-                    "seekable=${player.isCurrentMediaItemSeekable}",
-            )
-        }
-        updateAudibleSource()
-    }
-
-    /**
-     * Routes exactly one audible source. The video is muted before the commentary is raised and the
-     * commentary is muted before the original audio returns.
-     */
-    private fun updateAudibleSource() {
-        val commentary = commentaryPlayer ?: return
-        if (state.phase != ArabicCommentaryPhase.ACTIVE) return
-        val desired = arabicCommentaryDesiredAudibleSource(
-            commentaryActive = state.phase == ArabicCommentaryPhase.ACTIVE,
-            adjusting = state.adjusting,
-            videoPlaying = videoPlayer.isPlaying,
-            commentaryPlaying = commentary.isPlaying,
-        ) ?: return
-        val useCommentary = desired == ArabicCommentaryAudibleSource.COMMENTARY
-        if (state.commentaryAudible == useCommentary) {
-            commentary.volume = if (useCommentary && !muted) 1f else 0f
-            return
-        }
-        if (useCommentary) {
-            runCatching { onAudioRouteChanged(true) }
-            commentary.volume = if (muted) 0f else 1f
-        } else {
-            commentary.volume = 0f
-            runCatching { onAudioRouteChanged(false) }
-        }
-        state = state.copy(commentaryAudible = useCommentary)
-        Log.i(
-            TAG,
-            "commentary audio route=${if (useCommentary) "COMMENTARY" else "ORIGINAL"} " +
-                "channelId=${state.selectedChannel?.id} mainVolume=${videoPlayer.volume} " +
-                "commentaryVolume=${commentary.volume}",
-        )
-    }
-
-    private fun prepareCandidate(gen: Int, index: Int) {
-        if (gen != generation) return
-        val player = commentaryPlayer ?: return
-        val resolved = source ?: return
-        val planned = sourcePlan?.candidate(index)
-        if (planned == null) {
-            fail(gen, "لا يوجد مصدر تشغيل صالح لقناة التعليق.", null)
-            return
-        }
-        val firstCandidate = sourcePlan?.firstCandidateIndex == index
-        candidateIndex = index
-        state = state.copy(
-            phase = ArabicCommentaryPhase.PREPARING,
-            message = if (firstCandidate) null else "جاري تجربة مصدر بديل…",
-        )
-        runCatching {
-            player.setMediaItem(
-                MediaItem.Builder()
-                    .setUri(planned.uri)
-                    .also { builder ->
-                        planned.containerMimeType?.let(builder::setMimeType)
-                    }
-                    .build(),
-            )
-            player.prepare()
-            player.playWhenReady = videoPlayer.playWhenReady
-        }.onFailure { error ->
-            fail(gen, "تعذر تحضير قناة التعليق.", error)
-        }
-        Log.i(
-            TAG,
-            "commentary prepared channelId=${resolved.request.streamId} candidate=$index " +
-                "type=${planned.type} extension=${resolved.request.extension}",
-        )
-    }
-
-    private fun handleCommentaryError(gen: Int, error: PlaybackException) {
-        if (gen != generation) return
-        val nextCandidate = sourcePlan?.nextCandidateIndex(afterIndex = candidateIndex)
-        val hasNext = nextCandidate != null
-        Log.i(
-            TAG,
-            "commentary error phase=${state.phase} candidate=$candidateIndex " +
-                "next=$hasNext code=${error.errorCodeName}",
-        )
-        if (state.phase == ArabicCommentaryPhase.PREPARING && nextCandidate != null) {
-            commentaryPlayer?.stop()
-            prepareCandidate(gen, nextCandidate)
-            return
-        }
-        fail(gen, "تعذر تشغيل قناة التعليق. تمت العودة للصوت الاصلي.", error)
-    }
-
-    private fun fail(gen: Int, message: String, error: Throwable?) {
-        if (gen != generation) return
-        val channel = state.selectedChannel
-        val step = state.stepMs
-        val notice = state.connectionNotice
-        stopInternal(removeVideoDelay = true)
-        state = ArabicCommentaryState(
-            phase = ArabicCommentaryPhase.ERROR,
-            selectedChannel = channel,
-            stepMs = step,
-            connectionNotice = notice,
-            error = message,
-            canRetry = channel != null,
-        )
-        Log.i(
-            TAG,
-            "commentary failed channelId=${channel?.id} " +
-                "cause=${error?.javaClass?.simpleName.orEmpty()}",
-        )
-    }
-
-    /**
-     * Pauses one source and waits for the player to confirm. The listener is removed in `finally`
-     * so cancellation, timeout and normal return all detach it exactly once. The caller owns the
-     * resume decision; this function never resumes on cancellation.
-     */
-    private enum class PauseAttempt {
-        NOT_PLAYING,
-        CONFIRMED,
-        TIMEOUT,
-    }
-
-    private suspend fun pauseAndConfirm(target: ExoPlayer): PauseAttempt {
-        if (!target.isPlaying) return PauseAttempt.NOT_PLAYING
-        val paused = CompletableDeferred<Unit>()
-        val listener = object : Player.Listener {
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (!isPlaying && !paused.isCompleted) paused.complete(Unit)
-            }
-        }
-        target.addListener(listener)
-        try {
-            target.playWhenReady = false
-            val confirmed = withTimeoutOrNull(PAUSE_CONFIRM_TIMEOUT_MS) { paused.await() } != null
-            return if (confirmed) PauseAttempt.CONFIRMED else PauseAttempt.TIMEOUT
-        } finally {
-            target.removeListener(listener)
-        }
-    }
-
-    private fun logAudioTrack(tracks: Tracks) {
-        val audio = tracks.groups
-            .firstOrNull { it.type == C.TRACK_TYPE_AUDIO && it.length > 0 }
-            ?: return
-        val format = audio.getTrackFormat(0)
-        Log.i(
-            TAG,
-            "commentary audio channelId=${state.selectedChannel?.id} " +
-                "mime=${format.sampleMimeType.orEmpty()} " +
-                "container=${format.containerMimeType.orEmpty()} " +
-                "codecs=${format.codecs.orEmpty()} channels=${format.channelCount} " +
-                "sampleRate=${format.sampleRate}",
-        )
-    }
-
-    private fun stopInternal(removeVideoDelay: Boolean) {
-        generation += 1
-        val wasCommentaryAudible = state.commentaryAudible
-        val videoDelayMs = state.delays.videoMs
-        watchdogJob?.cancel()
-        watchdogJob = null
-        adjustmentJob?.cancel()
-        adjustmentJob = null
-        val held = holdTarget
-        holdTarget = null
-        held?.let { runCatching { if (!it.playWhenReady) it.playWhenReady = true } }
-
-        val player = commentaryPlayer
-        commentaryPlayer = null
-        commentaryListener?.let { listener -> player?.removeListener(listener) }
-        commentaryListener = null
-        if (player != null) {
-            runCatching { player.volume = 0f }
-            runCatching { player.stop() }
-            runCatching { player.release() }
-        }
-        if (wasCommentaryAudible) {
-            runCatching { onAudioRouteChanged(false) }
-        }
-        if (removeVideoDelay && videoDelayMs > 0L) {
-            restoreVideoToLive(videoDelayMs)
-        }
-        source = null
+    private fun stopRecovery(restorePicture: Boolean) {
+        switchJob?.cancel()
+        switchJob = null
+        releaseAttempt(restorePicture)
+        fallback = null
         sourcePlan = null
     }
 
-    private fun restoreVideoToLive(videoDelayMs: Long) {
-        val seekable = runCatching { videoPlayer.isCurrentMediaItemSeekable }.getOrDefault(false)
-        val restored = if (seekable) {
-            moveToLiveEdge(videoPlayer)
-        } else {
-            // A live window that does not expose seeking cannot be proven to return to live. Make
-            // the best-effort live request but do not report this path as a verified reset.
-            runCatching { videoPlayer.seekToDefaultPosition() }.isSuccess
+    private fun releaseAttempt(restorePicture: Boolean) {
+        fallback?.endAttempt()
+        cancelWatchdog()
+        val operation = detachAdjustment()
+        val player = commentaryPlayer
+        commentaryPlayer = null
+        val listener = commentaryListener
+        commentaryListener = null
+        if (player != null) {
+            if (listener != null) player.removeListener(listener)
+            player.volume = 0f
+            player.release()
         }
-        Log.i(
-            TAG,
-            "commentary video live restore delayMs=$videoDelayMs seekable=$seekable restored=$restored",
-        )
+        if (state.commentaryAudible) {
+            runCatching { onAudioRouteChanged(false) }
+        }
+        state = state.copy(commentaryAudible = false, buffering = false)
+        if (restorePicture && operation?.target === videoPlayer) restoreHeldPlayer(operation)
     }
 
-    /**
-     * `Player.seekToDefaultPosition` is the Media3 contract for returning a live item to its live
-     * default position (typically the live edge). It is only treated as verified when the window
-     * exposes seeking, so a non-seekable provider never receives a false reset claim.
-     */
-    private fun moveToLiveEdge(player: ExoPlayer): Boolean {
-        val seekable = runCatching { player.isCurrentMediaItemSeekable }.getOrDefault(false)
-        if (!seekable) return false
-        val beforeOffsetMs = runCatching { player.currentLiveOffset }.getOrDefault(C.TIME_UNSET)
-        val applied = runCatching {
-            player.seekToDefaultPosition()
-            true
-        }.getOrDefault(false)
-        Log.i(
-            TAG,
-            "commentary live-edge seek applied=$applied beforeOffsetMs=$beforeOffsetMs",
-        )
-        return applied
+    private fun cancelWatchdog() {
+        watchdogJob?.cancel()
+        watchdogJob = null
     }
 }

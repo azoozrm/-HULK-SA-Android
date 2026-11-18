@@ -1,18 +1,15 @@
 package sa.hulksa.player.ui.screens
 
+import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,13 +18,14 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.LiveTv
@@ -35,59 +33,60 @@ import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import sa.hulksa.player.model.Catalog
-import sa.hulksa.player.model.ContentItem
-import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
-import sa.hulksa.player.ui.components.ErrorNotice
+import sa.hulksa.player.ui.components.EntryNotice
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.HulkTextField
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
-/**
- * Owner-facing opt-in surface for Arabic commentary over the current Live channel.
- *
- * The dialog is a real modal window, so D-pad focus cannot leak to the player behind it. Closing
- * always returns to the originating commentary row in the More panel.
- */
+private enum class CommentaryPage { CONTROL, CHANNELS, SOURCES }
+
 @Composable
 internal fun ArabicCommentaryDialog(
     catalog: Catalog?,
     currentStreamId: Int,
     state: ArabicCommentaryState,
-    accountNotice: String?,
-    onSelectChannel: (ContentItem) -> Unit,
+    onSelectChannel: (ArabicCommentaryFeed) -> Unit,
+    onSelectSource: (ArabicCommentaryCatalogSource) -> Unit,
     onStepSelected: (Long) -> Unit,
     onAdjust: (ArabicCommentarySymptom) -> Unit,
     onReset: () -> Unit,
@@ -96,566 +95,397 @@ internal fun ArabicCommentaryDialog(
     onDismiss: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    val expanded = adaptiveUi.isTelevision || adaptiveUi.screenWidthDp >= 720
-    val connectionNotice = state.connectionNotice ?: accountNotice
-    var searchQuery by remember { mutableStateOf("") }
-    var pickerVisible by remember(state.selectedChannel?.id) {
-        mutableStateOf(state.selectedChannel == null)
-    }
-    // Counts deliberate picker entries (initial opt-in and «تغيير قناة التعليق»). Search-result
-    // changes never increment it, so typing keeps focus and the IME in the search field.
-    var pickerEntryTick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(pickerVisible) {
-        if (pickerVisible) pickerEntryTick += 1
+    val television = LocalAdaptiveUi.current.isTelevision
+    var page by remember { mutableStateOf(if (state.feed == null) CommentaryPage.CHANNELS else CommentaryPage.CONTROL) }
+    var returnFrom by remember { mutableStateOf<CommentaryPage?>(null) }
+    val visiblePage = if (state.sessionAvailable) page else CommentaryPage.CONTROL
+    val phase = state.phase.takeIf { visiblePage == CommentaryPage.CONTROL }
+    var focusPending by remember(visiblePage, phase, state.sessionAvailable) { mutableStateOf(true) }
+    val focusPlaced = {
+        focusPending = false
+        returnFrom = null
     }
 
-    // One bounded pass per catalog instance. Filtering 16k Live rows on every keystroke on the
-    // composition thread would be avoidable jank; the normalized name is precomputed once.
-    val searchableChannels = remember(catalog, currentStreamId) {
-        catalog?.items.orEmpty()
-            .asSequence()
-            .filter { it.type == ContentType.LIVE && it.id != currentStreamId }
-            .map { it to it.name.lowercase() }
-            .toList()
-    }
-    val channels = remember(catalog, currentStreamId, searchQuery) {
-        val query = searchQuery.trim().lowercase()
-        if (query.isEmpty()) {
-            searchableChannels.map { it.first }
+    fun goBack() {
+        if (visiblePage == CommentaryPage.CONTROL || state.feed == null) {
+            onDismiss()
         } else {
-            searchableChannels
-                .filter { (channel, normalized) ->
-                    normalized.contains(query) || channel.id.toString().contains(query)
-                }
-                .map { it.first }
+            returnFrom = visiblePage
+            page = CommentaryPage.CONTROL
         }
-    }
-
-    val closeFocus = remember { FocusRequester() }
-    val searchFocus = remember { FocusRequester() }
-    val firstChannelFocus = remember { FocusRequester() }
-    val retryFocus = remember { FocusRequester() }
-    val earlyFocus = remember { FocusRequester() }
-    val lateFocus = remember { FocusRequester() }
-    val resetFocus = remember { FocusRequester() }
-    val returnFocus = remember { FocusRequester() }
-    val changeChannelFocus = remember { FocusRequester() }
-    val stepFineFocus = remember { FocusRequester() }
-    val stepCoarseFocus = remember { FocusRequester() }
-
-    // Deliberate picker entry only: the first available row when the list is attached, otherwise
-    // the search field. Result-count changes do not restart this effect.
-    LaunchedEffect(pickerEntryTick) {
-        if (!pickerVisible) return@LaunchedEffect
-        withFrameNanos { }
-        val target = arabicCommentaryFocusTarget(
-            sessionAvailable = state.sessionAvailable,
-            pickerVisible = true,
-            channelsAvailable = channels.isNotEmpty(),
-            phase = state.phase,
-            deliberatePickerEntry = true,
-        )
-        val requester = when (target) {
-            ArabicCommentaryFocusTarget.FIRST_CHANNEL -> firstChannelFocus
-            ArabicCommentaryFocusTarget.SEARCH -> searchFocus
-            ArabicCommentaryFocusTarget.CLOSE -> closeFocus
-            ArabicCommentaryFocusTarget.RETRY -> retryFocus
-            ArabicCommentaryFocusTarget.EARLY -> earlyFocus
-            ArabicCommentaryFocusTarget.RETURN -> returnFocus
-        }
-        runCatching { requester.requestFocus() }
-    }
-
-    LaunchedEffect(
-        pickerVisible,
-        state.phase,
-        state.selectedChannel?.id,
-        state.sessionAvailable,
-    ) {
-        if (pickerVisible) return@LaunchedEffect
-        withFrameNanos { }
-        val target = when (
-            arabicCommentaryFocusTarget(
-                sessionAvailable = state.sessionAvailable,
-                pickerVisible = false,
-                channelsAvailable = false,
-                phase = state.phase,
-                deliberatePickerEntry = false,
-            )
-        ) {
-            ArabicCommentaryFocusTarget.CLOSE -> closeFocus
-            ArabicCommentaryFocusTarget.SEARCH -> searchFocus
-            ArabicCommentaryFocusTarget.FIRST_CHANNEL -> firstChannelFocus
-            ArabicCommentaryFocusTarget.RETRY -> retryFocus
-            ArabicCommentaryFocusTarget.EARLY -> earlyFocus
-            ArabicCommentaryFocusTarget.RETURN -> returnFocus
-        }
-        runCatching { target.requestFocus() }
     }
 
     Dialog(
-        onDismissRequest = {
-            if (pickerVisible && state.selectedChannel != null) {
-                pickerVisible = false
-            } else {
-                onDismiss()
-            }
-        },
+        onDismissRequest = ::goBack,
         properties = DialogProperties(
-            dismissOnBackPress = true,
             dismissOnClickOutside = false,
             usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
         ),
     ) {
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .safeDrawingPadding()
-                .imePadding()
-                .padding(horizontal = if (expanded) 28.dp else 14.dp, vertical = 12.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            val dialogWidth = if (expanded) {
-                maxWidth.coerceAtMost(620.dp)
-            } else {
-                maxWidth
-            }
-            val dialogHeight = (maxHeight * if (expanded) .88f else .92f).coerceAtLeast(240.dp)
-            val shape = RoundedCornerShape(20.dp)
-            Column(
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+            BoxWithConstraints(
                 modifier = Modifier
-                    .width(dialogWidth)
-                    .widthIn(max = 620.dp)
-                    .height(dialogHeight)
-                    .focusGroup()
-                    .clip(shape)
-                    .background(Color(0xF2141510))
-                    .border(1.dp, colors.gold.copy(alpha = .55f), shape)
-                    .padding(horizontal = if (expanded) 20.dp else 14.dp, vertical = 14.dp),
+                    .fillMaxSize()
+                    .safeDrawingPadding()
+                    .imePadding()
+                    .padding(horizontal = if (television) 24.dp else 12.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
+                val shape = RoundedCornerShape(12.dp)
+                val controlFocus = arabicCommentaryFocusTarget(
+                    sessionAvailable = state.sessionAvailable,
+                    pickerVisible = false,
+                    channelsAvailable = false,
+                    phase = state.phase,
+                    deliberatePickerEntry = false,
+                    canRetry = state.canRetry,
+                )
+                Column(
+                    modifier = Modifier
+                        .widthIn(max = 560.dp)
+                        .fillMaxWidth()
+                        .heightIn(max = maxHeight)
+                        .onPreviewKeyEvent { event ->
+                            val key = event.nativeKeyEvent
+                            when (key.keyCode) {
+                                AndroidKeyEvent.KEYCODE_ESCAPE -> {
+                                    if (event.type == KeyEventType.KeyDown && key.repeatCount == 0) goBack()
+                                    true
+                                }
+                                AndroidKeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                                AndroidKeyEvent.KEYCODE_MEDIA_PLAY,
+                                AndroidKeyEvent.KEYCODE_MEDIA_PAUSE,
+                                AndroidKeyEvent.KEYCODE_MEDIA_NEXT,
+                                AndroidKeyEvent.KEYCODE_MEDIA_PREVIOUS,
+                                AndroidKeyEvent.KEYCODE_MEDIA_REWIND,
+                                AndroidKeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+                                AndroidKeyEvent.KEYCODE_MEDIA_STOP,
+                                AndroidKeyEvent.KEYCODE_CHANNEL_UP,
+                                AndroidKeyEvent.KEYCODE_CHANNEL_DOWN,
+                                -> true
+                                else -> false
+                            }
+                        }
+                        .clip(shape)
+                        .background(Color(0xF2141510))
+                        .border(1.dp, colors.gold.copy(alpha = .42f), shape)
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .focusGroup(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         Text(
                             text = "التعليق العربي",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
                             color = colors.goldBright,
-                            fontSize = if (expanded) 21.sp else 19.sp,
-                            fontWeight = FontWeight.Black,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
                         )
-                        Text(
-                            text = "صوت عربي من قناة مباشرة اخرى فوق صورة القناة الحالية",
-                            color = colors.textMuted,
-                            fontSize = 11.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
+                        FocusButton(
+                            text = "اغلاق",
+                            onClick = onDismiss,
+                            modifier = Modifier
+                                .heightIn(min = 44.dp)
+                                .commentaryEntryFocus(
+                                    focusPending && visiblePage == CommentaryPage.CONTROL &&
+                                        (controlFocus == ArabicCommentaryFocusTarget.CLOSE || state.feed == null),
+                                    focusPlaced,
+                                ),
+                            primary = false,
+                            compact = true,
+                            outlined = true,
+                            scaleOnFocus = false,
                         )
                     }
-                    Spacer(Modifier.width(8.dp))
-                    FocusButton(
-                        text = "اغلاق",
-                        onClick = onDismiss,
-                        primary = false,
-                        outlined = true,
-                        compact = true,
-                        scaleOnFocus = false,
-                        modifier = Modifier
-                            .focusRequester(closeFocus)
-                            .focusProperties {
-                                left = FocusRequester.Cancel
-                                right = FocusRequester.Cancel
-                            },
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
 
-                if (state.sessionAvailable) {
-                    connectionNotice?.let { notice ->
-                        Text(
-                            text = notice,
-                            color = if (notice.startsWith("تنبيه")) colors.gold else colors.textMuted,
-                            fontSize = 11.sp,
-                            lineHeight = 17.sp,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Spacer(Modifier.height(6.dp))
+                    when (visiblePage) {
+                        CommentaryPage.CONTROL -> {
+                            val feed = state.feed
+                            val canChangeSource = feed != null && feed.sources.size > 1
+                            CommentaryControls(
+                                state = state,
+                                modifier = Modifier.weight(1f, fill = false),
+                                earlyFocus = focusPending && returnFrom == null &&
+                                    controlFocus == ArabicCommentaryFocusTarget.EARLY,
+                                retryFocus = focusPending && returnFrom == null &&
+                                    controlFocus == ArabicCommentaryFocusTarget.RETRY,
+                                sourceFocus = focusPending && returnFrom == CommentaryPage.SOURCES && canChangeSource,
+                                onFocusPlaced = focusPlaced,
+                                onChangeSource = { returnFrom = null; page = CommentaryPage.SOURCES },
+                                onStepSelected = onStepSelected,
+                                onAdjust = onAdjust,
+                                onReset = onReset,
+                                onRetry = { returnFrom = null; onRetry() },
+                            )
+                            if (state.sessionAvailable && feed != null) {
+                                CommentaryDivider()
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    CommentaryFooterButton(
+                                        text = "تغيير قناة التعليق",
+                                        onClick = { returnFrom = null; page = CommentaryPage.CHANNELS },
+                                        modifier = Modifier.weight(1f).commentaryEntryFocus(
+                                            focusPending && (returnFrom == CommentaryPage.CHANNELS ||
+                                                returnFrom == CommentaryPage.SOURCES && !canChangeSource),
+                                            focusPlaced,
+                                        ),
+                                    )
+                                    CommentaryFooterButton(
+                                        text = "العودة للصوت الاصلي",
+                                        onClick = onReturnToOriginal,
+                                        modifier = Modifier.weight(1f).commentaryEntryFocus(
+                                            focusPending && returnFrom == null &&
+                                                controlFocus == ArabicCommentaryFocusTarget.RETURN,
+                                            focusPlaced,
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+                        CommentaryPage.CHANNELS -> {
+                            CommentaryChannelPicker(
+                                catalog = catalog,
+                                currentStreamId = currentStreamId,
+                                state = state,
+                                focusPending = focusPending,
+                                onFocusPlaced = focusPlaced,
+                                modifier = Modifier.weight(1f, fill = false),
+                                onSelect = { feed ->
+                                    returnFrom = null
+                                    page = CommentaryPage.CONTROL
+                                    onSelectChannel(feed)
+                                },
+                            )
+                        }
+                        CommentaryPage.SOURCES -> {
+                            state.feed?.let { feed ->
+                                CommentarySourcePicker(
+                                    feed = feed,
+                                    selected = state.source,
+                                    focusPending = focusPending,
+                                    onFocusPlaced = focusPlaced,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                    onSelect = { source ->
+                                        returnFrom = CommentaryPage.SOURCES
+                                        page = CommentaryPage.CONTROL
+                                        onSelectSource(source)
+                                    },
+                                )
+                            }
+                        }
                     }
-                    state.message?.let { message ->
-                        Text(
-                            text = message,
-                            color = colors.textMuted,
-                            fontSize = 11.sp,
-                            lineHeight = 17.sp,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Spacer(Modifier.height(6.dp))
-                    }
-                }
 
-                if (state.sessionAvailable && state.selectedChannel != null && !pickerVisible) {
-                    CommentarySummaryCard(state)
-                    Spacer(Modifier.height(6.dp))
-                }
-
-                if (!state.sessionAvailable) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        ErrorNotice(
-                            message = "انتهت جلسة الحساب. اخرج من المشغل ثم سجل الدخول من جديد.",
-                        )
-                    }
-                } else if (pickerVisible) {
-                    ChannelPickerContent(
-                        channels = channels,
-                        selectedChannelId = state.selectedChannel?.id,
-                        searchQuery = searchQuery,
-                        onSearchQueryChange = { searchQuery = it },
-                        searchFocus = searchFocus,
-                        firstChannelFocus = firstChannelFocus,
-                        onSelectChannel = { channel ->
-                            pickerVisible = false
-                            onSelectChannel(channel)
-                        },
-                        expanded = expanded,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (state.selectedChannel != null) {
-                        Spacer(Modifier.height(8.dp))
-                        CommentaryDirectRow(
+                    if (visiblePage != CommentaryPage.CONTROL && state.feed != null) {
+                        CommentaryDivider()
+                        CommentaryFooterButton(
                             text = "رجوع للتحكم",
-                            icon = Icons.Rounded.RecordVoiceOver,
-                            showChevron = false,
-                            onClick = { pickerVisible = false },
-                            focusRequester = changeChannelFocus,
+                            onClick = ::goBack,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
-                } else {
-                    CommentaryControlContent(
-                        state = state,
-                        onStepSelected = onStepSelected,
-                        onAdjust = onAdjust,
-                        onReset = onReset,
-                        onReturnToOriginal = onReturnToOriginal,
-                        onRetry = onRetry,
-                        onChangeChannel = { pickerVisible = true },
-                        retryFocus = retryFocus,
-                        earlyFocus = earlyFocus,
-                        lateFocus = lateFocus,
-                        resetFocus = resetFocus,
-                        returnFocus = returnFocus,
-                        changeChannelFocus = changeChannelFocus,
-                        stepFineFocus = stepFineFocus,
-                        stepCoarseFocus = stepCoarseFocus,
-                        modifier = Modifier.weight(1f),
-                    )
                 }
             }
         }
     }
 }
 
-private fun commentaryStatusLabel(state: ArabicCommentaryState): String = when (state.phase) {
-    ArabicCommentaryPhase.PREPARING -> "جاري التحضير…"
-    ArabicCommentaryPhase.ACTIVE -> if (state.commentaryAudible) {
-        "التعليق مسموع"
-    } else {
-        "جاهز"
-    }
-    ArabicCommentaryPhase.INTERRUPTED -> "متوقف"
-    ArabicCommentaryPhase.ERROR -> "تعذر التشغيل"
-    ArabicCommentaryPhase.INACTIVE -> "غير مفعل"
-}
-
 @Composable
-private fun CommentarySummaryCard(state: ArabicCommentaryState) {
-    val colors = LocalHulkColors.current
-    val status = commentaryStatusLabel(state)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF1B1A0E))
-            .border(1.dp, colors.gold.copy(alpha = .30f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp, vertical = 9.dp),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(9.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.LiveTv,
-                contentDescription = null,
-                tint = colors.gold,
-                modifier = Modifier.size(20.dp),
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "قناة التعليق",
-                    color = colors.textMuted,
-                    fontSize = 10.sp,
-                )
-                Text(
-                    text = state.selectedChannel?.name ?: "قناة التعليق",
-                    color = colors.text,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Text(
-                text = status,
-                color = if (state.phase == ArabicCommentaryPhase.ACTIVE) {
-                    colors.goldBright
-                } else {
-                    colors.textMuted
-                },
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = "التأخير الحالي: ${arabicCommentaryDelaySummary(state.delays)}",
-            color = colors.text,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
-private fun CommentaryControlContent(
+private fun CommentaryControls(
     state: ArabicCommentaryState,
+    modifier: Modifier,
+    earlyFocus: Boolean,
+    retryFocus: Boolean,
+    sourceFocus: Boolean,
+    onFocusPlaced: () -> Unit,
+    onChangeSource: () -> Unit,
     onStepSelected: (Long) -> Unit,
     onAdjust: (ArabicCommentarySymptom) -> Unit,
     onReset: () -> Unit,
-    onReturnToOriginal: () -> Unit,
     onRetry: () -> Unit,
-    onChangeChannel: () -> Unit,
-    retryFocus: FocusRequester,
-    earlyFocus: FocusRequester,
-    lateFocus: FocusRequester,
-    resetFocus: FocusRequester,
-    returnFocus: FocusRequester,
-    changeChannelFocus: FocusRequester,
-    stepFineFocus: FocusRequester,
-    stepCoarseFocus: FocusRequester,
-    modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    val stepFineSelected = state.stepMs == ARABIC_COMMENTARY_FINE_STEP_MS
-    val stepCoarseSelected = state.stepMs == ARABIC_COMMENTARY_COARSE_STEP_MS
-    val remainingEarly = arabicCommentaryRemainingMs(
-        state.delays,
-        ArabicCommentarySymptom.COMMENTARY_EARLY,
-    )
-    val remainingLate = arabicCommentaryRemainingMs(
-        state.delays,
-        ArabicCommentarySymptom.COMMENTARY_LATE,
-    )
-    val active = state.phase == ArabicCommentaryPhase.ACTIVE
-    val canAdjustEarly = active && state.commentaryAudible && !state.busy &&
-        remainingEarly >= state.stepMs
-    val canAdjustLate = active && state.commentaryAudible && !state.busy &&
-        remainingLate >= state.stepMs
-
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(7.dp),
+        modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        if (state.phase == ArabicCommentaryPhase.PREPARING) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                LoadingRing(
-                    label = "الصوت الاصلي يعمل حتى يجهز التعليق",
-                    modifier = Modifier.weight(1f),
-                )
+        if (!state.sessionAvailable) {
+            EntryNotice(message = "انتهت جلسة الحساب", compact = true)
+            return@Column
+        }
+
+        state.feed?.let { feed ->
+            Text(
+                text = feed.key.label,
+                style = MaterialTheme.typography.titleSmall,
+                color = colors.text,
+            )
+            state.source?.let { source ->
+                CommentarySourceName(source)
             }
         }
 
-        state.error?.let { error ->
-            ErrorNotice(message = error)
+        val status = when {
+            state.phase == ArabicCommentaryPhase.ERROR -> null
+            state.phase == ArabicCommentaryPhase.INTERRUPTED -> state.message ?: "التعليق متوقف"
+            state.phase == ArabicCommentaryPhase.PREPARING && state.recovering -> "جاري تجربة مصدر بديل"
+            state.phase == ArabicCommentaryPhase.PREPARING -> "جاري تجهيز التعليق"
+            state.adjusting -> "جاري ضبط التزامن"
+            state.buffering -> "جاري استئناف التعليق"
+            state.commentaryAudible && state.outputMuted -> "التعليق مفعل · الصوت مكتوم"
+            state.commentaryAudible -> "التعليق مفعل"
+            state.phase == ArabicCommentaryPhase.ACTIVE -> "التعليق جاهز"
+            else -> "الصوت الاصلي"
         }
-        if (state.canRetry && (state.phase == ArabicCommentaryPhase.ERROR ||
-                state.phase == ArabicCommentaryPhase.INTERRUPTED)
-        ) {
-            FocusButton(
-                text = "اعادة المحاولة",
-                onClick = onRetry,
-                leadingIcon = Icons.Rounded.Refresh,
-                scaleOnFocus = false,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 46.dp)
-                    .focusRequester(retryFocus),
+        if (status != null) {
+            Row(
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (state.phase == ArabicCommentaryPhase.PREPARING || state.buffering || state.adjusting) {
+                    LoadingRing(Modifier.size(16.dp))
+                }
+                Text(status, style = MaterialTheme.typography.bodySmall, color = colors.goldBright)
+            }
+        }
+        state.error?.let { EntryNotice(message = it, compact = true) }
+        if (state.phase != ArabicCommentaryPhase.INTERRUPTED) {
+            state.message?.let { CommentarySecondaryText(it) }
+        }
+        if ((state.feed?.sources?.size ?: 0) > 1) {
+            CommentaryRow(
+                title = "تغيير المصدر",
+                icon = Icons.Rounded.LiveTv,
+                openChild = true,
+                modifier = Modifier.commentaryEntryFocus(sourceFocus, onFocusPlaced),
+                onClick = onChangeSource,
             )
         }
 
-        if (active) {
+        if (state.phase == ArabicCommentaryPhase.ACTIVE) {
+            CommentaryDivider()
             Text(
-                text = "المدى المدعوم حتى 10 ث لكل مصدر حسب دعم القناة. يتم تأخير احد المصدرين " +
-                    "مؤقتا ثم متابعة التشغيل. ستلاحظ توقفا قصيرا بمقدار الخطوة، وقد يختلف قليلا " +
-                    "حسب المخزن المؤقت.",
-                color = colors.textMuted,
-                fontSize = 10.sp,
-                lineHeight = 16.sp,
+                text = "ضبط التزامن",
+                style = MaterialTheme.typography.titleSmall,
+                color = colors.text,
             )
-
-            Text(
-                text = "الخطوة",
-                color = colors.textMuted,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-            )
+            CommentaryAlignmentStatus(state.alignment)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                StepChip(
-                    label = "0.1 ث",
-                    selected = stepFineSelected,
-                    enabled = !state.adjusting,
-                    onClick = { onStepSelected(ARABIC_COMMENTARY_FINE_STEP_MS) },
-                    focusRequester = stepFineFocus,
-                    modifier = Modifier.weight(1f),
-                )
-                StepChip(
-                    label = "1 ث",
-                    selected = stepCoarseSelected,
-                    enabled = !state.adjusting,
-                    onClick = { onStepSelected(ARABIC_COMMENTARY_COARSE_STEP_MS) },
-                    focusRequester = stepCoarseFocus,
-                    modifier = Modifier.weight(1f),
+                for (step in listOf(ARABIC_COMMENTARY_FINE_STEP_MS, ARABIC_COMMENTARY_COARSE_STEP_MS)) {
+                    CommentaryRow(
+                        title = arabicCommentaryStepLabel(step),
+                        selectedOption = state.stepMs == step,
+                        numeric = true,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onStepSelected(step) },
+                    )
+                }
+            }
+            CommentaryRow(
+                title = "التعليق يسبق الصورة",
+                icon = Icons.Rounded.RecordVoiceOver,
+                modifier = Modifier.commentaryEntryFocus(earlyFocus, onFocusPlaced),
+                onClick = { onAdjust(ArabicCommentarySymptom.COMMENTARY_EARLY) },
+            )
+            CommentaryRow(
+                title = "التعليق متاخر عن الصورة",
+                icon = Icons.Rounded.LiveTv,
+                onClick = { onAdjust(ArabicCommentarySymptom.COMMENTARY_LATE) },
+            )
+            CommentaryRow(
+                title = "اعادة الضبط",
+                icon = Icons.Rounded.Replay,
+                onClick = onReset,
+            )
+        } else {
+            if (state.alignment.hasPictureAdjustment) CommentaryAlignmentStatus(state.alignment)
+            if (state.canRetry && (state.phase == ArabicCommentaryPhase.ERROR ||
+                    state.phase == ArabicCommentaryPhase.INTERRUPTED)
+            ) {
+                CommentaryRow(
+                    title = "اعادة المحاولة",
+                    icon = Icons.Rounded.Refresh,
+                    modifier = Modifier.commentaryEntryFocus(retryFocus, onFocusPlaced),
+                    onClick = onRetry,
                 )
             }
-
-            CommentaryActionRow(
-                title = "التعليق يسبق الصورة",
-                subtitle = if (remainingEarly < state.stepMs) {
-                    "وصل تأخير التعليق الى الحد الاقصى"
-                } else {
-                    "زيادة تأخير صوت التعليق"
-                },
-                icon = Icons.Rounded.RecordVoiceOver,
-                enabled = canAdjustEarly,
-                onClick = { onAdjust(ArabicCommentarySymptom.COMMENTARY_EARLY) },
-                focusRequester = earlyFocus,
-            )
-            CommentaryActionRow(
-                title = "التعليق متاخر عن الصورة",
-                subtitle = if (remainingLate < state.stepMs) {
-                    "وصل تأخير الصورة الى الحد الاقصى"
-                } else {
-                    "زيادة تأخير صورة القناة الاجنبية"
-                },
-                icon = Icons.Rounded.Tv,
-                enabled = canAdjustLate,
-                onClick = { onAdjust(ArabicCommentarySymptom.COMMENTARY_LATE) },
-                focusRequester = lateFocus,
-            )
         }
-
-        Spacer(Modifier.height(2.dp))
-        CommentaryDirectRow(
-            text = "اعادة الضبط",
-            icon = Icons.Rounded.Replay,
-            enabled = active && !state.busy && state.delays.hasDelay,
-            onClick = onReset,
-            focusRequester = resetFocus,
-        )
-        CommentaryDirectRow(
-            text = "العودة للصوت الاصلي",
-            icon = Icons.AutoMirrored.Rounded.VolumeUp,
-            enabled = state.phase != ArabicCommentaryPhase.INACTIVE && !state.adjusting,
-            onClick = onReturnToOriginal,
-            focusRequester = returnFocus,
-        )
-        CommentaryDirectRow(
-            text = "تغيير قناة التعليق",
-            icon = Icons.Rounded.Search,
-            enabled = !state.adjusting,
-            onClick = onChangeChannel,
-            focusRequester = changeChannelFocus,
-        )
     }
 }
 
 @Composable
-private fun ChannelPickerContent(
-    channels: List<ContentItem>,
-    selectedChannelId: Int?,
-    searchQuery: String,
-    onSearchQueryChange: (String) -> Unit,
-    searchFocus: FocusRequester,
-    firstChannelFocus: FocusRequester,
-    onSelectChannel: (ContentItem) -> Unit,
-    expanded: Boolean,
-    modifier: Modifier = Modifier,
+private fun CommentaryChannelPicker(
+    catalog: Catalog?,
+    currentStreamId: Int,
+    state: ArabicCommentaryState,
+    focusPending: Boolean,
+    onFocusPlaced: () -> Unit,
+    modifier: Modifier,
+    onSelect: (ArabicCommentaryFeed) -> Unit,
 ) {
-    val colors = LocalHulkColors.current
-    Column(modifier = modifier.fillMaxWidth()) {
-        Text(
-            text = "اختر قناة التعليق من قنوات الحساب",
-            color = colors.text,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        Spacer(Modifier.height(7.dp))
+    val projection by produceState<List<ArabicCommentaryFeed>?>(null, catalog, currentStreamId) {
+        value = null
+        value = withContext(Dispatchers.Default) { arabicCommentaryFeeds(catalog, currentStreamId) }
+    }
+    var query by remember { mutableStateOf("") }
+    val feeds = remember(projection, query) {
+        val search = arabicCommentarySearchWords(query)
+        projection.orEmpty().filter { it.matches(search) }
+    }
+    val focus = arabicCommentaryFocusTarget(
+        sessionAvailable = true,
+        pickerVisible = true,
+        channelsAvailable = feeds.isNotEmpty(),
+        phase = state.phase,
+        deliberatePickerEntry = query.isEmpty(),
+    )
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         HulkTextField(
-            value = searchQuery,
-            onValueChange = onSearchQueryChange,
+            value = query,
+            onValueChange = {
+                query = it
+                onFocusPlaced()
+            },
             label = "بحث عن قناة",
-            modifier = Modifier
-                .fillMaxWidth()
-                .focusRequester(searchFocus),
+            modifier = Modifier.fillMaxWidth().commentaryEntryFocus(
+                focusPending && projection != null && focus == ArabicCommentaryFocusTarget.SEARCH,
+                onFocusPlaced,
+            ),
             leadingIcon = Icons.Rounded.Search,
         )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = "${channels.size} قناة",
-            color = colors.textMuted,
-            fontSize = 10.sp,
-        )
-        Spacer(Modifier.height(5.dp))
+        if (state.feed == null && state.alignment.hasPictureAdjustment) {
+            CommentaryAlignmentStatus(state.alignment)
+        }
         when {
-            channels.isEmpty() -> Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "لا توجد قناة مطابقة",
-                    color = colors.textMuted,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.Center,
-                )
-            }
+            projection == null -> CommentarySecondaryText("جاري تجهيز القنوات")
+            feeds.isEmpty() -> CommentarySecondaryText(
+                if (query.isBlank()) "لا توجد قنوات beIN SPORTS عربية" else "لا توجد قناة مطابقة",
+            )
             else -> LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(5.dp),
-                contentPadding = PaddingValues(bottom = 8.dp),
+                modifier = Modifier.fillMaxWidth().weight(1f, fill = false).focusGroup(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                items(channels, key = ContentItem::id) { channel ->
-                    CommentaryChannelRow(
-                        channel = channel,
-                        selected = channel.id == selectedChannelId,
-                        onClick = { onSelectChannel(channel) },
-                        focusRequester = if (channel == channels.first()) firstChannelFocus else null,
-                        expanded = expanded,
+                items(feeds, key = { it.key.rowKey }) { feed ->
+                    CommentaryRow(
+                        title = feed.key.label,
+                        icon = Icons.Rounded.LiveTv,
+                        selectedOption = feed.key == state.feed?.key,
+                        modifier = Modifier.commentaryEntryFocus(
+                            focusPending && focus == ArabicCommentaryFocusTarget.FIRST_CHANNEL &&
+                                feed.key == feeds.first().key,
+                            onFocusPlaced,
+                        ),
+                        onClick = { onSelect(feed) },
                     )
                 }
             }
@@ -664,76 +494,34 @@ private fun ChannelPickerContent(
 }
 
 @Composable
-private fun CommentaryChannelRow(
-    channel: ContentItem,
-    selected: Boolean,
-    onClick: () -> Unit,
-    focusRequester: FocusRequester?,
-    expanded: Boolean,
+private fun CommentarySourcePicker(
+    feed: ArabicCommentaryFeed,
+    selected: ArabicCommentaryCatalogSource?,
+    focusPending: Boolean,
+    onFocusPlaced: () -> Unit,
+    modifier: Modifier,
+    onSelect: (ArabicCommentaryCatalogSource) -> Unit,
 ) {
     val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    var focused by remember(channel.id) { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
-    val shape = RoundedCornerShape(10.dp)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = if (expanded) 48.dp else 46.dp)
-            .clip(shape)
-            .background(
-                when {
-                    showFocused -> colors.gold.copy(alpha = .14f)
-                    selected -> colors.gold.copy(alpha = .16f)
-                    else -> Color(0xFF14150F)
-                },
-            )
-            .border(
-                width = if (showFocused) 1.5.dp else 1.dp,
-                color = when {
-                    showFocused -> colors.gold
-                    selected -> colors.gold.copy(alpha = .55f)
-                    else -> Color.White.copy(alpha = .08f)
-                },
-                shape = shape,
-            )
-            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics(mergeDescendants = true) { contentDescription = channel.name }
-            .padding(horizontal = 11.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(9.dp),
-    ) {
-        Icon(
-            imageVector = Icons.Rounded.LiveTv,
-            contentDescription = null,
-            tint = if (showFocused) colors.goldBright else colors.gold,
-            modifier = Modifier.size(18.dp),
-        )
-        Text(
-            text = channel.name,
-            color = colors.text,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
-            if (selected) {
-                Icon(
-                    imageVector = Icons.Rounded.Check,
-                    contentDescription = null,
-                    tint = colors.goldBright,
-                    modifier = Modifier.size(17.dp),
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Rounded.ChevronLeft,
-                    contentDescription = null,
-                    tint = if (showFocused) colors.goldBright else colors.textMuted,
-                    modifier = Modifier.size(18.dp),
+    val initialIndex = remember(feed.key) { feed.sources.indexOfFirst { it.key == selected?.key }.coerceAtLeast(0) }
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(feed.key.label, style = MaterialTheme.typography.titleSmall, color = colors.text)
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxWidth().weight(1f, fill = false).focusGroup(),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            items(feed.sources, key = { it.key }) { source ->
+                CommentaryRow(
+                    title = source.item.name,
+                    subtitle = source.categoryName,
+                    selectedOption = source.key == selected?.key,
+                    modifier = Modifier.commentaryEntryFocus(
+                        focusPending && source.key == feed.sources[initialIndex].key,
+                        onFocusPlaced,
+                    ),
+                    onClick = { onSelect(source) },
                 )
             }
         }
@@ -741,153 +529,121 @@ private fun CommentaryChannelRow(
 }
 
 @Composable
-private fun StepChip(
-    label: String,
-    selected: Boolean,
-    enabled: Boolean,
+private fun CommentaryRow(
+    title: String,
     onClick: () -> Unit,
-    focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    icon: ImageVector? = null,
+    openChild: Boolean = false,
+    selectedOption: Boolean? = null,
+    numeric: Boolean = false,
 ) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    var focused by remember { mutableStateOf(false) }
+    val showFocus = focused && adaptiveUi.showFocusHighlights
+    val shape = RoundedCornerShape(11.dp)
+    val selectable = selectedOption != null
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = if (adaptiveUi.isTelevision) 44.dp else 48.dp)
+            .clip(shape)
+            .background(
+                when {
+                    showFocus -> colors.gold.copy(alpha = .14f)
+                    selectedOption == true -> colors.gold.copy(alpha = .16f)
+                    else -> Color.Transparent
+                },
+            )
+            .then(if (showFocus) Modifier.border(1.5.dp, colors.gold, shape) else Modifier)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(role = Role.Button, onClick = onClick)
+            .then(if (selectable) Modifier.semantics { selected = selectedOption == true } else Modifier)
+            .padding(horizontal = 11.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        val glyphColor = if (showFocus) colors.goldBright else colors.gold
+        if (icon != null && (openChild || selectable)) {
+            Icon(icon, contentDescription = null, tint = glyphColor, modifier = Modifier.size(19.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            val textStyle = MaterialTheme.typography.bodyMedium
+            Text(
+                text = title,
+                color = colors.text,
+                style = if (numeric) textStyle.copy(textDirection = TextDirection.Ltr) else textStyle,
+                fontWeight = FontWeight.SemiBold,
+            )
+            subtitle?.let { CommentarySecondaryText(it) }
+        }
+        when {
+            openChild -> Icon(Icons.Rounded.ChevronLeft, null, Modifier.size(18.dp), tint = colors.textMuted)
+            selectable -> Box(Modifier.size(18.dp)) {
+                if (selectedOption == true) Icon(Icons.Rounded.Check, null, tint = glyphColor)
+            }
+            icon != null -> Icon(icon, contentDescription = null, tint = glyphColor, modifier = Modifier.size(19.dp))
+        }
+    }
+}
+
+@Composable
+private fun Modifier.commentaryEntryFocus(request: Boolean, onPlaced: () -> Unit): Modifier {
+    val requester = remember { FocusRequester() }
+    var attached by remember { mutableStateOf(false) }
+    LaunchedEffect(request, attached) {
+        if (request && attached && requester.requestFocus()) onPlaced()
+    }
+    return focusRequester(requester).onGloballyPositioned { attached = it.isAttached }
+}
+
+@Composable
+private fun CommentaryFooterButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     FocusButton(
-        text = label,
+        text = text,
         onClick = onClick,
-        enabled = enabled,
-        primary = selected,
-        outlined = !selected,
+        modifier = modifier.heightIn(min = 44.dp),
+        primary = false,
+        outlined = true,
         compact = true,
         scaleOnFocus = false,
-        trailingIcon = if (selected) Icons.Rounded.Check else null,
-        modifier = modifier.focusRequester(focusRequester),
+        textMaxLines = Int.MAX_VALUE,
     )
 }
 
 @Composable
-private fun CommentaryActionRow(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    focusRequester: FocusRequester,
-) {
-    val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    var focused by remember { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
-    val shape = RoundedCornerShape(11.dp)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(
-                when {
-                    showFocused -> colors.gold.copy(alpha = .14f)
-                    else -> Color(0xFF181914)
-                },
-            )
-            .border(
-                width = if (showFocused) 1.5.dp else 1.dp,
-                color = if (showFocused) colors.gold else Color.White.copy(alpha = .09f),
-                shape = shape,
-            )
-            .focusRequester(focusRequester)
-            .focusProperties {
-                canFocus = enabled
-                left = FocusRequester.Cancel
-                right = FocusRequester.Cancel
-            }
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .semantics(mergeDescendants = true) { contentDescription = title }
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (enabled) {
-                if (showFocused) colors.goldBright else colors.gold
-            } else {
-                colors.textMuted.copy(alpha = .45f)
-            },
-            modifier = Modifier.size(21.dp),
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                color = if (enabled) colors.text else colors.textMuted.copy(alpha = .55f),
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = subtitle,
-                color = colors.textMuted.copy(alpha = if (enabled) 1f else .55f),
-                fontSize = 10.sp,
-                lineHeight = 15.sp,
-            )
-        }
+private fun CommentarySourceName(source: ArabicCommentaryCatalogSource) {
+    CommentarySecondaryText(source.item.name)
+    source.categoryName?.let { CommentarySecondaryText(it) }
+}
+
+private val delayNumber = Regex("[0-9]+(?:\\.[0-9]+)?")
+
+@Composable
+private fun CommentaryAlignmentStatus(alignment: ArabicCommentaryAlignment) {
+    val summary = arabicCommentaryDelaySummary(
+        delays = alignment.delays,
+        pictureRetained = alignment.needsReadjustment,
+    )
+    if (alignment.delays.hasDelay || !alignment.pictureHoldIncomplete) {
+        CommentarySecondaryText(delayNumber.replace(summary) { match -> "\u2066${match.value}\u2069" })
+    }
+    if (alignment.pictureHoldIncomplete) {
+        CommentarySecondaryText("قد يبقى جزء من تأخير الصورة بعد قطع الضبط")
+    }
+    if (alignment.needsReadjustment) {
+        CommentarySecondaryText("اعد ضبط التزامن عند الحاجة")
     }
 }
 
 @Composable
-private fun CommentaryDirectRow(
-    text: String,
-    icon: ImageVector,
-    onClick: () -> Unit,
-    focusRequester: FocusRequester,
-    enabled: Boolean = true,
-    showChevron: Boolean = false,
-) {
-    val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    var focused by remember { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
-    val shape = RoundedCornerShape(11.dp)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(if (showFocused) colors.gold.copy(alpha = .12f) else Color.Transparent)
-            .border(
-                width = if (showFocused) 1.5.dp else 0.dp,
-                color = if (showFocused) colors.gold else Color.Transparent,
-                shape = shape,
-            )
-            .focusRequester(focusRequester)
-            .focusProperties {
-                canFocus = enabled
-                left = FocusRequester.Cancel
-                right = FocusRequester.Cancel
-            }
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .semantics(mergeDescendants = true) { contentDescription = text }
-            .padding(horizontal = 11.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(9.dp),
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (enabled) colors.gold else colors.textMuted.copy(alpha = .45f),
-            modifier = Modifier.size(18.dp),
-        )
-        Text(
-            text = text,
-            color = if (enabled) colors.text else colors.textMuted.copy(alpha = .5f),
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f),
-        )
-        if (showChevron) {
-            Icon(
-                imageVector = Icons.Rounded.ChevronLeft,
-                contentDescription = null,
-                tint = if (enabled) colors.textMuted else colors.textMuted.copy(alpha = .45f),
-                modifier = Modifier.size(18.dp),
-            )
-        }
-    }
+private fun CommentarySecondaryText(text: String) {
+    Text(text, style = MaterialTheme.typography.bodySmall, color = LocalHulkColors.current.textMuted)
+}
+
+@Composable
+private fun CommentaryDivider() {
+    Box(Modifier.fillMaxWidth().height(1.dp).background(LocalHulkColors.current.line))
 }

@@ -411,6 +411,17 @@ internal data class PlayerReplacementPreparation(
     val playWhenReady: Boolean,
 )
 
+internal fun playerPreparationVolume(
+    isLive: Boolean,
+    userMuted: Boolean,
+    commentaryAudible: Boolean,
+    capturedReplacementVolume: Float?,
+): Float? = when {
+    !isLive -> capturedReplacementVolume
+    userMuted || commentaryAudible -> 0f
+    else -> 1f
+}
+
 /**
  * Final start policy for an already-prepared replacement player. A pending Resume/Restart
  * decision owns the start state at this point, not only when Retry was pressed: preparation must
@@ -899,6 +910,10 @@ fun PlayerScreen(
             videoPlayer = player,
             scope = commentaryScope,
             expectedOwner = commentaryExpectedOwner,
+            onVideoHeld = {
+                // Sample the deliberate pause even when a 100 ms hold fits between health ticks.
+                playerSession.observeHealth(player, appForeground = appForeground, muted = latestMutedForCommentary)
+            },
             onAudioRouteChanged = { commentaryAudible ->
                 // Exactly one audible source: mute the foreign picture before raising commentary
                 // audio, and restore it only after the commentary output is muted.
@@ -909,17 +924,9 @@ fun PlayerScreen(
     DisposableEffect(commentaryOwner) {
         onDispose { commentaryOwner.release() }
     }
-    LaunchedEffect(commentaryOwner, isMuted, commentaryOwner.state.commentaryAudible) {
+    LaunchedEffect(commentaryOwner, isMuted) {
         commentaryOwner.setOutputMuted(isMuted)
         player.volume = if (isMuted || commentaryOwner.state.commentaryAudible) 0f else 1f
-    }
-    val commentaryAccountNotice = remember(request) {
-        AuthenticatedSessionRegistry.currentOwner()?.session?.account?.let { account ->
-            arabicCommentaryConnectionNotice(
-                activeConnections = account.activeConnections,
-                maxConnections = account.maxConnections,
-            )
-        }
     }
     // Track options are bound to the exact player instance that produced them. A stale option from
     // another title, episode or recreated player can therefore never address this player's groups.
@@ -1037,7 +1044,7 @@ fun PlayerScreen(
             playerSession.onNetworkUnavailable()
             enterOfflineState(
                 positionMs = positionMs,
-                currentPlayingIntent = player.playWhenReady || player.isPlaying,
+                currentPlayingIntent = commentaryOwner.videoPlaybackIntended,
             )
         }
         pendingOfflineConfirmation = null
@@ -1571,7 +1578,7 @@ fun PlayerScreen(
     BackHandler(enabled = browserVisible) {
         closeBrowserAndRestoreError()
     }
-    BackHandler(enabled = !browserVisible) {
+    BackHandler(enabled = !browserVisible && !commentaryDialogVisible) {
         handleBackAction()
     }
 
@@ -1646,12 +1653,13 @@ fun PlayerScreen(
         commentaryOwner.state.error,
         finalError,
         offlineFailure,
+        confirmedOutage,
         browserVisible,
         appForeground,
     ) {
         val commentaryError = commentaryOwner.state.phase == ArabicCommentaryPhase.ERROR
         val canOpen = finalError == null && !offlineFailure && request.isLive &&
-            !browserVisible && appForeground
+            !browserVisible && !confirmedOutage && appForeground
         if (commentaryError && !commentaryErrorSurfaceHandled && canOpen) {
             commentaryErrorSurfaceHandled = true
             commentaryDialogVisible = true
@@ -1880,7 +1888,7 @@ fun PlayerScreen(
                 onRecoveryCommand = attachedRecoveryCommandHandler,
                 onFinalError = { failureClass ->
                     val terminalPositionMs = player.currentPosition.coerceAtLeast(0L)
-                    val terminalPlayingIntent = player.playWhenReady || player.isPlaying
+                    val terminalPlayingIntent = commentaryOwner.videoPlaybackIntended
                     player.stop()
                     val preservedPositionMs = if (request.isLive) {
                         0L
@@ -1935,7 +1943,7 @@ fun PlayerScreen(
                         } else {
                             maxOf(pendingSeekMs, currentPositionMs, positionMs)
                         },
-                        currentPlayingIntent = player.playWhenReady || player.isPlaying,
+                        currentPlayingIntent = commentaryOwner.videoPlaybackIntended,
                     )
                 },
             ),
@@ -2082,6 +2090,7 @@ fun PlayerScreen(
             // presenting a stale synchronization value.
             commentaryOwner.onPlaybackInterrupted(
                 "اعيد تحميل القناة؛ تم ايقاف التعليق. اعد المحاولة بعد استقرار التشغيل.",
+                pictureReloaded = true,
             )
             commentaryDialogVisible = false
         }
@@ -2095,6 +2104,12 @@ fun PlayerScreen(
         val replacement = pendingPlayerReplacement?.takeIf { pending ->
             pending.candidateIndex == candidateIndex && pending.outputMode == audioOutputMode
         }
+        playerPreparationVolume(
+            isLive = request.isLive,
+            userMuted = isMuted,
+            commentaryAudible = commentaryOwner.state.commentaryAudible,
+            capturedReplacementVolume = replacement?.volume,
+        )?.let { player.volume = it }
         if (replacement != null) {
             player.trackSelectionParameters = replacement.trackSelectionParameters
             val preparation = playerReplacementPreparation(
@@ -2108,7 +2123,6 @@ fun PlayerScreen(
             )
             preparation.seekTargetMs?.let(player::seekTo)
             player.setPlaybackSpeed(replacement.speed)
-            player.volume = if (commentaryOwner.state.commentaryAudible) 0f else replacement.volume
             // Apply the start decision before prepare so a pending Resume/Restart decision never
             // starts playback in the gap between prepare() and the post-prepare state write.
             player.playWhenReady = preparation.playWhenReady
@@ -2167,7 +2181,7 @@ fun PlayerScreen(
             } else {
                 maxOf(pendingSeekMs, currentPositionMs, player.currentPosition.coerceAtLeast(0L))
             }
-            val currentPlayingIntent = player.playWhenReady || player.isPlaying
+            val currentPlayingIntent = commentaryOwner.videoPlaybackIntended
             playerSession.onNetworkUnavailable()
             player.pause()
             enterOfflineState(
@@ -2303,6 +2317,7 @@ fun PlayerScreen(
         browserVisible,
         activePanel,
         liveMorePanel,
+        commentaryDialogVisible,
         vodMorePanel,
         vodGoToTimeVisible,
         vodSeekPreviewMs,
@@ -2373,7 +2388,7 @@ fun PlayerScreen(
             movieErrorActive -> offlineRetryFocus
             liveErrorForegroundActive -> null
             browserVisible || activePanel != null -> null
-            commentaryDialogVisible -> null
+            commentaryDialogVisible || liveMorePanel != null -> null
             vodMorePanel != null -> null
             resumePromptVisible -> resumeFocus
             nextCountdown >= 0 -> nextEpisodePlayFocus
@@ -2489,6 +2504,7 @@ fun PlayerScreen(
             .focusable()
             .onPreviewKeyEvent { event ->
                 val keyCode = event.nativeKeyEvent.keyCode
+                if (commentaryDialogVisible) return@onPreviewKeyEvent true
                 if (liveErrorForegroundActive) {
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     return@onPreviewKeyEvent when (
@@ -2813,6 +2829,7 @@ fun PlayerScreen(
                                     resizeModeIndex = resizeModeIndex,
                                     commentaryValue = arabicCommentaryMenuValue(
                                         commentaryOwner.state.phase,
+                                        commentaryOwner.state.commentaryAudible,
                                     ),
                                     menuFocusRow = liveMoreMenuFocusRow,
                                     onClose = ::closeLiveMorePanelToTrigger,
@@ -2842,6 +2859,7 @@ fun PlayerScreen(
                                         liveMorePanel = PlayerLiveMorePanelView.RESIZE
                                     },
                                     onOpenCommentary = {
+                                        commentaryOwner.ensureAuthenticatedSession()
                                         liveMoreMenuFocusRow = PlayerLiveMoreRow.COMMENTARY
                                         liveMorePanel = null
                                         commentaryDialogVisible = true
@@ -3251,30 +3269,30 @@ fun PlayerScreen(
         }
 
         if (commentaryDialogVisible && request.isLive) {
-            ArabicCommentaryDialog(
-                catalog = liveCatalog,
-                currentStreamId = request.streamId,
-                state = commentaryOwner.state,
-                accountNotice = commentaryAccountNotice,
-                onSelectChannel = commentaryOwner::start,
-                onStepSelected = commentaryOwner::setStep,
-                onAdjust = commentaryOwner::adjust,
-                onReset = commentaryOwner::reset,
-                onReturnToOriginal = {
-                    commentaryOwner.returnToOriginalAudio()
-                    commentaryDialogVisible = false
-                    liveMoreMenuFocusRow = PlayerLiveMoreRow.COMMENTARY
-                    liveMorePanel = PlayerLiveMorePanelView.MENU
-                },
-                onRetry = commentaryOwner::retry,
-                onDismiss = {
-                    // BACK returns to the originating commentary row; the next BACK closes the
-                    // More panel and restores its trigger.
-                    commentaryDialogVisible = false
-                    liveMoreMenuFocusRow = PlayerLiveMoreRow.COMMENTARY
-                    liveMorePanel = PlayerLiveMorePanelView.MENU
-                },
-            )
+            fun closeCommentaryToMore() {
+                commentaryDialogVisible = false
+                controlsVisible = true
+                liveMoreMenuFocusRow = PlayerLiveMoreRow.COMMENTARY
+                liveMorePanel = PlayerLiveMorePanelView.MENU
+            }
+            key(commentaryOwner) {
+                ArabicCommentaryDialog(
+                    catalog = liveCatalog,
+                    currentStreamId = request.streamId,
+                    state = commentaryOwner.state,
+                    onSelectChannel = commentaryOwner::selectChannel,
+                    onSelectSource = commentaryOwner::selectSource,
+                    onStepSelected = commentaryOwner::setStep,
+                    onAdjust = commentaryOwner::adjust,
+                    onReset = commentaryOwner::reset,
+                    onReturnToOriginal = {
+                        commentaryOwner.returnToOriginalAudio()
+                        closeCommentaryToMore()
+                    },
+                    onRetry = commentaryOwner::retry,
+                    onDismiss = ::closeCommentaryToMore,
+                )
+            }
         }
 
         activePanel?.let { panel ->

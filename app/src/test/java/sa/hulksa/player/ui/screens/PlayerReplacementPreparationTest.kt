@@ -2,6 +2,7 @@ package sa.hulksa.player.ui.screens
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import sa.hulksa.player.playback.RecoveryCommand
@@ -12,6 +13,47 @@ import sa.hulksa.player.playback.RecoveryTrigger
 import sa.hulksa.player.playback.ownsRecoveryCommand
 
 class PlayerReplacementPreparationTest {
+
+    @Test
+    fun liveReplacementRestoresOriginalAudioAfterRetiringCommentary() {
+        assertEquals(
+            1f,
+            playerPreparationVolume(
+                isLive = true, userMuted = false, commentaryAudible = false, capturedReplacementVolume = 0f,
+            ),
+        )
+    }
+
+    @Test
+    fun livePreparationHonorsCurrentMuteAndCommentaryRoute() {
+        assertEquals(
+            0f,
+            playerPreparationVolume(
+                isLive = true, userMuted = true, commentaryAudible = false, capturedReplacementVolume = 1f,
+            ),
+        )
+        assertEquals(
+            0f,
+            playerPreparationVolume(
+                isLive = true, userMuted = false, commentaryAudible = true, capturedReplacementVolume = null,
+            ),
+        )
+    }
+
+    @Test
+    fun vodPreparationRestoresOnlyCapturedReplacementVolume() {
+        assertEquals(
+            0.35f,
+            playerPreparationVolume(
+                isLive = false, userMuted = false, commentaryAudible = false, capturedReplacementVolume = 0.35f,
+            ),
+        )
+        assertNull(
+            playerPreparationVolume(
+                isLive = false, userMuted = false, commentaryAudible = false, capturedReplacementVolume = null,
+            ),
+        )
+    }
 
     @Test
     fun pendingResumeOnlineRetryStaysPausedAtZeroEvenWhenRetryCapturedPlayback() {

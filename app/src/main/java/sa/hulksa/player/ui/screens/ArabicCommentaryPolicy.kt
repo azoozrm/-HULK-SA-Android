@@ -19,6 +19,7 @@ import java.util.Locale
 internal const val ARABIC_COMMENTARY_FINE_STEP_MS = 100L
 internal const val ARABIC_COMMENTARY_COARSE_STEP_MS = 1_000L
 internal const val ARABIC_COMMENTARY_MAX_SOURCE_DELAY_MS = 10_000L
+internal const val ARABIC_COMMENTARY_MAX_AUTO_SOURCES = 3
 
 internal enum class ArabicCommentarySymptom {
     /** The Arabic commentary is heard before the matching foreign picture. */
@@ -133,22 +134,71 @@ internal fun applyArabicCommentaryStep(
     )
 }
 
-/**
- * Account metadata is advisory. A provider may count the existing playback plus the commentary
- * source as two connections, but metadata alone never proves simultaneous playback works.
- */
-internal fun arabicCommentaryConnectionNotice(
-    activeConnections: Int,
-    maxConnections: Int,
-): String? {
-    val active = activeConnections.coerceAtLeast(0)
-    val max = maxConnections.coerceAtLeast(0)
-    return when {
-        max <= 0 -> "حد الاتصالات غير متاح من بيانات الحساب."
-        max == 1 -> "تنبيه: باقة الحساب تشير الى اتصال واحد. قد لا يعمل مصدران في الوقت نفسه."
-        active >= max -> "تنبيه: الاتصالات الحالية $active من $max. قد يستهلك التعليق اتصالا اضافيا."
-        else -> "اتصالات الحساب: $active من $max."
+/** One explicitly chosen feed, with a finite queue and a new callback identity per player. */
+internal class ArabicCommentaryFallback(
+    feed: ArabicCommentaryFeed,
+    preferred: ArabicCommentaryCatalogSource,
+) {
+    private val sources = (listOfNotNull(feed.sources.find { it.key == preferred.key }) + feed.sources)
+        .distinctBy { it.item.id }
+        .take(ARABIC_COMMENTARY_MAX_AUTO_SOURCES)
+        .iterator()
+    var currentAttempt: Any? = null
+        private set
+
+    fun nextSource(): ArabicCommentaryCatalogSource? = if (sources.hasNext()) sources.next() else null
+
+    fun beginAttempt(): Any = Any().also { currentAttempt = it }
+
+    fun accepts(token: Any): Boolean = token === currentAttempt
+
+    fun endAttempt() {
+        currentAttempt = null
     }
+}
+
+internal enum class ArabicCommentaryBufferingTransition { START, CANCEL, KEEP }
+
+internal fun arabicCommentaryBufferingTransition(
+    wasBuffering: Boolean,
+    videoPlaying: Boolean,
+    commentaryBuffering: Boolean,
+    adjusting: Boolean,
+): ArabicCommentaryBufferingTransition {
+    val shouldWatch = videoPlaying && commentaryBuffering && !adjusting
+    return when {
+        shouldWatch == wasBuffering -> ArabicCommentaryBufferingTransition.KEEP
+        shouldWatch -> ArabicCommentaryBufferingTransition.START
+        else -> ArabicCommentaryBufferingTransition.CANCEL
+    }
+}
+
+/** Completed hold steps for the current players. A replacement discards only its own steps. */
+internal data class ArabicCommentaryAlignment(
+    val delays: ArabicCommentaryDelays = ArabicCommentaryDelays(),
+    val needsReadjustment: Boolean = false,
+    val pictureHoldIncomplete: Boolean = false,
+) {
+    val hasPictureAdjustment: Boolean get() = delays.videoMs > 0 || pictureHoldIncomplete
+
+    fun holdInterrupted(source: ArabicCommentaryDelayedSource): ArabicCommentaryAlignment = copy(
+        needsReadjustment = true,
+        pictureHoldIncomplete = pictureHoldIncomplete || source == ArabicCommentaryDelayedSource.VIDEO,
+    )
+
+    fun canResetPicture(isLive: Boolean, seekable: Boolean, defaultSeekAvailable: Boolean): Boolean =
+        hasPictureAdjustment && isLive && seekable && defaultSeekAvailable
+
+    fun sourceReplaced(recheck: Boolean): ArabicCommentaryAlignment = copy(
+        delays = delays.copy(commentaryMs = 0L),
+        needsReadjustment = needsReadjustment || recheck,
+    )
+
+    fun pictureRepositioned(): ArabicCommentaryAlignment = copy(
+        delays = delays.copy(videoMs = 0L),
+        needsReadjustment = true,
+        pictureHoldIncomplete = false,
+    )
 }
 
 internal enum class ArabicCommentaryFocusTarget {
@@ -174,13 +224,14 @@ internal fun arabicCommentaryFocusTarget(
     channelsAvailable: Boolean,
     phase: ArabicCommentaryPhase,
     deliberatePickerEntry: Boolean,
+    canRetry: Boolean = true,
 ): ArabicCommentaryFocusTarget = when {
     !sessionAvailable -> ArabicCommentaryFocusTarget.CLOSE
     pickerVisible && deliberatePickerEntry && channelsAvailable ->
         ArabicCommentaryFocusTarget.FIRST_CHANNEL
     pickerVisible -> ArabicCommentaryFocusTarget.SEARCH
-    phase == ArabicCommentaryPhase.ERROR ||
-        phase == ArabicCommentaryPhase.INTERRUPTED -> ArabicCommentaryFocusTarget.RETRY
+    phase == ArabicCommentaryPhase.ERROR || phase == ArabicCommentaryPhase.INTERRUPTED ->
+        if (canRetry) ArabicCommentaryFocusTarget.RETRY else ArabicCommentaryFocusTarget.CLOSE
     phase == ArabicCommentaryPhase.ACTIVE -> ArabicCommentaryFocusTarget.EARLY
     phase == ArabicCommentaryPhase.PREPARING -> ArabicCommentaryFocusTarget.RETURN
     else -> ArabicCommentaryFocusTarget.CLOSE
@@ -202,9 +253,12 @@ internal fun arabicCommentaryShouldResumeAfterAdjustment(
  * The value shown on the Live More row. It reports the actual phase and never implies that the
  * commentary is audible when only the source is prepared.
  */
-internal fun arabicCommentaryMenuValue(phase: ArabicCommentaryPhase): String? = when (phase) {
+internal fun arabicCommentaryMenuValue(
+    phase: ArabicCommentaryPhase,
+    commentaryAudible: Boolean,
+): String? = when (phase) {
     ArabicCommentaryPhase.PREPARING -> "يجهز"
-    ArabicCommentaryPhase.ACTIVE -> "مفعل"
+    ArabicCommentaryPhase.ACTIVE -> if (commentaryAudible) "مفعل" else "جاهز"
     ArabicCommentaryPhase.ERROR,
     ArabicCommentaryPhase.INTERRUPTED,
     -> "متوقف"
@@ -223,13 +277,19 @@ internal fun formatArabicCommentaryDuration(ms: Long): String {
 internal fun arabicCommentaryStepLabel(stepMs: Long): String =
     "${formatArabicCommentaryDuration(stepMs)} ث"
 
-internal fun arabicCommentaryDelaySummary(delays: ArabicCommentaryDelays): String = when {
-    delays.commentaryMs > 0L && delays.videoMs > 0L ->
-        "تأخير التعليق: ${formatArabicCommentaryDuration(delays.commentaryMs)} ث" +
-            " · تأخير الصورة: ${formatArabicCommentaryDuration(delays.videoMs)} ث"
-    delays.commentaryMs > 0L ->
-        "تأخير التعليق: ${formatArabicCommentaryDuration(delays.commentaryMs)} ث"
-    delays.videoMs > 0L ->
-        "تأخير الصورة: ${formatArabicCommentaryDuration(delays.videoMs)} ث"
-    else -> "لا يوجد تأخير"
+internal fun arabicCommentaryDelaySummary(
+    delays: ArabicCommentaryDelays,
+    pictureRetained: Boolean = false,
+): String {
+    val pictureLabel = if (pictureRetained) "تأخير الصورة المحتفظ به" else "تأخير الصورة"
+    return when {
+        delays.commentaryMs > 0L && delays.videoMs > 0L ->
+            "تأخير التعليق: ${formatArabicCommentaryDuration(delays.commentaryMs)} ث" +
+                " · $pictureLabel: ${formatArabicCommentaryDuration(delays.videoMs)} ث"
+        delays.commentaryMs > 0L ->
+            "تأخير التعليق: ${formatArabicCommentaryDuration(delays.commentaryMs)} ث"
+        delays.videoMs > 0L ->
+            "$pictureLabel: ${formatArabicCommentaryDuration(delays.videoMs)} ث"
+        else -> "لا توجد خطوات تأخير مطبقة"
+    }
 }

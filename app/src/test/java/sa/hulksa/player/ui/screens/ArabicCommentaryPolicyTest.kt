@@ -8,6 +8,47 @@ import org.junit.Test
 
 class ArabicCommentaryPolicyTest {
     @Test
+    fun `picture-only resume restarts the watchdog while the secondary remains buffering`() {
+        var watching = false
+        fun pictureEvent(playing: Boolean): ArabicCommentaryBufferingTransition {
+            val change = arabicCommentaryBufferingTransition(
+                wasBuffering = watching,
+                videoPlaying = playing,
+                commentaryBuffering = true,
+                adjusting = false,
+            )
+            when (change) {
+                ArabicCommentaryBufferingTransition.START -> watching = true
+                ArabicCommentaryBufferingTransition.CANCEL -> watching = false
+                ArabicCommentaryBufferingTransition.KEEP -> Unit
+            }
+            return change
+        }
+
+        assertEquals(ArabicCommentaryBufferingTransition.START, pictureEvent(playing = true))
+        assertEquals(ArabicCommentaryBufferingTransition.CANCEL, pictureEvent(playing = false))
+        assertEquals(ArabicCommentaryBufferingTransition.KEEP, pictureEvent(playing = false))
+        assertEquals(ArabicCommentaryBufferingTransition.START, pictureEvent(playing = true))
+        assertEquals(ArabicCommentaryBufferingTransition.KEEP, pictureEvent(playing = true))
+    }
+
+    @Test
+    fun `secondary readiness or a deliberate hold cancels the active stall timer`() {
+        assertEquals(
+            ArabicCommentaryBufferingTransition.CANCEL,
+            arabicCommentaryBufferingTransition(
+                wasBuffering = true, videoPlaying = true, commentaryBuffering = false, adjusting = false,
+            ),
+        )
+        assertEquals(
+            ArabicCommentaryBufferingTransition.CANCEL,
+            arabicCommentaryBufferingTransition(
+                wasBuffering = true, videoPlaying = true, commentaryBuffering = true, adjusting = true,
+            ),
+        )
+    }
+
+    @Test
     fun `early commentary symptom delays the commentary source`() {
         val result = applyArabicCommentaryStep(
             delays = ArabicCommentaryDelays(),
@@ -126,26 +167,6 @@ class ArabicCommentaryPolicyTest {
     }
 
     @Test
-    fun `connection metadata produces an explicit advisory not a proof`() {
-        assertEquals(
-            "تنبيه: باقة الحساب تشير الى اتصال واحد. قد لا يعمل مصدران في الوقت نفسه.",
-            arabicCommentaryConnectionNotice(activeConnections = 0, maxConnections = 1),
-        )
-        assertEquals(
-            "تنبيه: الاتصالات الحالية 2 من 2. قد يستهلك التعليق اتصالا اضافيا.",
-            arabicCommentaryConnectionNotice(activeConnections = 2, maxConnections = 2),
-        )
-        assertEquals(
-            "اتصالات الحساب: 1 من 4.",
-            arabicCommentaryConnectionNotice(activeConnections = 1, maxConnections = 4),
-        )
-        assertEquals(
-            "حد الاتصالات غير متاح من بيانات الحساب.",
-            arabicCommentaryConnectionNotice(activeConnections = 0, maxConnections = 0),
-        )
-    }
-
-    @Test
     fun `duration labels preserve fine steps without fake precision`() {
         assertEquals("0.1", formatArabicCommentaryDuration(100L))
         assertEquals("1", formatArabicCommentaryDuration(1_000L))
@@ -157,7 +178,7 @@ class ArabicCommentaryPolicyTest {
     @Test
     fun `delay summary names the actually delayed source`() {
         assertEquals(
-            "لا يوجد تأخير",
+            "لا توجد خطوات تأخير مطبقة",
             arabicCommentaryDelaySummary(ArabicCommentaryDelays()),
         )
         assertEquals(
@@ -302,12 +323,46 @@ class ArabicCommentaryPolicyTest {
     }
 
     @Test
-    fun `more row reports the actual phase and never claims inactive commentary`() {
-        assertNull(arabicCommentaryMenuValue(ArabicCommentaryPhase.INACTIVE))
-        assertEquals("يجهز", arabicCommentaryMenuValue(ArabicCommentaryPhase.PREPARING))
-        assertEquals("مفعل", arabicCommentaryMenuValue(ArabicCommentaryPhase.ACTIVE))
-        assertEquals("متوقف", arabicCommentaryMenuValue(ArabicCommentaryPhase.ERROR))
-        assertEquals("متوقف", arabicCommentaryMenuValue(ArabicCommentaryPhase.INTERRUPTED))
+    fun `source replacement clears only its audio steps and requires readjustment`() {
+        val applied = ArabicCommentaryAlignment(ArabicCommentaryDelays(commentaryMs = 1_000L, videoMs = 100L))
+        val replacement = applied.sourceReplaced(recheck = true)
+
+        assertEquals(ArabicCommentaryDelays(videoMs = 100L), replacement.delays)
+        assertTrue(replacement.needsReadjustment)
+        assertTrue(replacement.hasPictureAdjustment)
+        val afterSeek = replacement.pictureRepositioned()
+        assertFalse(afterSeek.hasPictureAdjustment)
+        assertTrue(afterSeek.needsReadjustment)
+    }
+
+    @Test
+    fun `an incomplete picture hold is not cleared by audio recovery`() {
+        val interrupted = ArabicCommentaryAlignment().holdInterrupted(ArabicCommentaryDelayedSource.VIDEO)
+        val recovery = interrupted.sourceReplaced(recheck = true)
+        assertEquals(0L, recovery.delays.videoMs)
+        assertTrue(recovery.hasPictureAdjustment)
+        assertTrue(recovery.needsReadjustment)
+        assertFalse(recovery.pictureRepositioned().hasPictureAdjustment)
+    }
+
+    @Test
+    fun `explicit picture reset requires a live seekable window with a default-position command`() {
+        val heldPicture = ArabicCommentaryAlignment(ArabicCommentaryDelays(videoMs = 100L))
+        assertTrue(heldPicture.canResetPicture(isLive = true, seekable = true, defaultSeekAvailable = true))
+        assertFalse(heldPicture.canResetPicture(isLive = true, seekable = false, defaultSeekAvailable = true))
+        assertFalse(heldPicture.canResetPicture(isLive = false, seekable = true, defaultSeekAvailable = true))
+        assertFalse(heldPicture.canResetPicture(isLive = true, seekable = true, defaultSeekAvailable = false))
+        assertFalse(heldPicture.pictureRepositioned().canResetPicture(true, true, true))
+    }
+
+    @Test
+    fun `more row distinguishes original audio from prepared and routed commentary`() {
+        assertNull(arabicCommentaryMenuValue(ArabicCommentaryPhase.INACTIVE, false))
+        assertEquals("يجهز", arabicCommentaryMenuValue(ArabicCommentaryPhase.PREPARING, false))
+        assertEquals("جاهز", arabicCommentaryMenuValue(ArabicCommentaryPhase.ACTIVE, false))
+        assertEquals("مفعل", arabicCommentaryMenuValue(ArabicCommentaryPhase.ACTIVE, true))
+        assertEquals("متوقف", arabicCommentaryMenuValue(ArabicCommentaryPhase.ERROR, false))
+        assertEquals("متوقف", arabicCommentaryMenuValue(ArabicCommentaryPhase.INTERRUPTED, false))
     }
 
     @Test
