@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -280,13 +281,15 @@ private fun LiveEpgGuidePanel(
                 withFrameNanos { }
                 if (runCatching { initialFocus.requestFocus() }.getOrDefault(false)) {
                     initialFocusApplied = true
+                } else {
+                    initialFocusApplied = true
+                    runCatching { closeFocus.requestFocus() }
                 }
             }
         } else {
             withFrameNanos { }
-            if (runCatching { closeFocus.requestFocus() }.getOrDefault(true)) {
-                initialFocusApplied = true
-            }
+            initialFocusApplied = true
+            runCatching { closeFocus.requestFocus() }
         }
     }
 
@@ -331,7 +334,8 @@ private fun LiveEpgGuidePanel(
                 modifier = Modifier
                     .width(88.dp)
                     .height(40.dp)
-                    .focusRequester(closeFocus),
+                    .focusRequester(closeFocus)
+                    .focusProperties { canFocus = initialFocusApplied },
                 primary = false,
                 outlined = true,
                 compact = true,
