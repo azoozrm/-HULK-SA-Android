@@ -67,6 +67,7 @@ class HulkRepository internal constructor(
     private val kidsContentFilterStore = KidsContentFilterStore(appContext)
     private val movieCardMetadataClient = MovieCardMetadataClient()
     private val seriesCardMetadataClient = SeriesCardMetadataClient()
+    private val epgXmltvClient = EpgXmltvClient()
     private val diagnostics = ServerDiagnosticsEngine(appContext)
 
     suspend fun login(credentials: Credentials, remember: Boolean): AuthenticatedSession =
@@ -419,6 +420,12 @@ class HulkRepository internal constructor(
 
     suspend fun catalog(session: AuthenticatedSession, type: ContentType): Catalog =
         client.catalog(session, type)
+
+    /** Optional NEO XMLTV load; callers gate the session/provider identity before this point. */
+    internal suspend fun epgSnapshot(
+        session: AuthenticatedSession,
+        requestedChannelIds: Set<String>,
+    ): EpgSnapshot = epgXmltvClient.load(session, requestedChannelIds)
 
     internal suspend fun cachedCatalog(key: CatalogSnapshotKey): CatalogSnapshot? =
         catalogSnapshotCache.restore(key)

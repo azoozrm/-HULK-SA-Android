@@ -47,6 +47,11 @@ import sa.hulksa.player.data.DownloadPrimaryActionDispatcher
 import sa.hulksa.player.data.DownloadRepository
 import sa.hulksa.player.data.EpisodeNotificationPopup
 import sa.hulksa.player.data.EpisodeNotificationSubscription
+import sa.hulksa.player.data.EpgLoadGate
+import sa.hulksa.player.data.EpgScope
+import sa.hulksa.player.data.LiveEpgUiState
+import sa.hulksa.player.data.epgChannelId
+import sa.hulksa.player.data.epgRequestAllowed
 import sa.hulksa.player.data.SessionOwnershipCleanupGate
 import sa.hulksa.player.data.SessionOwnershipCleanupResult
 import sa.hulksa.player.data.SessionPublicationGate
@@ -206,6 +211,9 @@ private data class SeriesNotificationToggleOwner(
     val seriesId: Int,
 )
 
+private const val EPG_REFRESH_INTERVAL_SECONDS: Long = 6L * 60L * 60L
+private const val EPG_FAILURE_RETRY_SECONDS: Long = 10L * 60L
+
 /** One typed catalog failure. A healthy destination keeps this scoped instead of a global error. */
 data class CatalogFailure(
     val message: String,
@@ -229,6 +237,7 @@ data class HulkUiState(
     val selectedType: ContentType = ContentType.MOVIE,
     val catalogs: Map<ContentType, Catalog> = emptyMap(),
     val liveForeignSports: LiveForeignSportsCategory? = null,
+    val liveEpg: LiveEpgUiState = LiveEpgUiState(),
     val selectedCategoryId: String? = null,
     val searchQuery: String = "",
     val favorites: Set<String> = emptySet(),
@@ -681,6 +690,12 @@ class HulkViewModel internal constructor(
     private var liveForeignSportsResolutionCatalog: Catalog? = null
     private var liveForeignSportsResolutionAliases: List<String>? = null
     private var liveForeignSportsResolution: LiveForeignSportsCategory? = null
+    // Optional NEO EPG owner. It is independent of Live catalog/startup and is cancelled or
+    // invalidated at the exact account/source ownership boundary.
+    private val epgLoadGate = EpgLoadGate()
+    private var epgJob: Job? = null
+    private var epgScope: EpgScope? = null
+    private var epgLastAttemptEpochSeconds = 0L
     // Home bootstrap is a small profile-owned first frame read from disk. It never stands in for
     // a complete catalog on Movies/Series/Live, and it is never used for Kids profiles.
     private val homeBootstrapCatalogs = java.util.EnumMap<ContentType, Catalog>(ContentType::class.java)
@@ -834,6 +849,7 @@ class HulkViewModel internal constructor(
                 // main thread instead of publishing membership derived from stale aliases.
                 viewModelScope.launch { refreshLiveForeignSportsPresentation() }
             }
+            if (type == ContentType.LIVE) ensureEpgLoaded()
             refreshHomePreparationState()
             resolvePendingTvDeepLink()
             scheduleTvPlatformSync(immediate = false)
@@ -1287,6 +1303,115 @@ class HulkViewModel internal constructor(
         return projected + (ContentType.LIVE to decorateLiveCatalogForPresentation(live))
     }
 
+    private fun currentEpgScope(): EpgScope? {
+        val owner = AuthenticatedSessionRegistry.currentOwner() ?: return null
+        return EpgScope(accountId = owner.accountId, providerId = owner.providerId)
+    }
+
+    /**
+     * Establishes the optional EPG owner after a real session publication. HULK/unidentified
+     * sessions clear the feature and can never reach the request path.
+     */
+    private fun prepareEpgForCurrentSession() {
+        val owner = AuthenticatedSessionRegistry.currentOwner()
+        if (owner == null || !epgRequestAllowed(owner.session)) {
+            clearEpgForSessionChange()
+            return
+        }
+        val scope = EpgScope(accountId = owner.accountId, providerId = owner.providerId)
+        if (epgScope == scope) return
+        epgLoadGate.invalidate()
+        epgJob?.cancel()
+        epgJob = null
+        epgScope = scope
+        epgLastAttemptEpochSeconds = 0L
+        mutableState.update { it.copy(liveEpg = LiveEpgUiState()) }
+    }
+
+    private fun clearEpgForSessionChange() {
+        epgLoadGate.invalidate()
+        epgJob?.cancel()
+        epgJob = null
+        epgScope = null
+        epgLastAttemptEpochSeconds = 0L
+        mutableState.update { state ->
+            if (state.liveEpg == LiveEpgUiState()) state else state.copy(liveEpg = LiveEpgUiState())
+        }
+    }
+
+    /**
+     * Loads or refreshes the optional schedule only after a verified NEO session has a usable Live
+     * catalog. It never blocks Live startup, catalog restore, channel selection or playback. A
+     * failed refresh keeps the last verified snapshot; repeated failures are retried no faster than
+     * the bounded interval.
+     */
+    private fun ensureEpgLoaded(force: Boolean = false) {
+        val activeSession = session ?: return
+        if (!epgRequestAllowed(activeSession)) return
+        if (mutableState.value.destination != MainDestination.LIVE) return
+        val owner = AuthenticatedSessionRegistry.currentOwner()
+            ?.takeIf { it.session === activeSession } ?: return
+        val scope = EpgScope(accountId = owner.accountId, providerId = owner.providerId)
+        if (epgScope != scope) {
+            prepareEpgForCurrentSession()
+            if (epgScope != scope) return
+        }
+        val catalog = loadedCatalogs[ContentType.LIVE]
+            ?: mutableState.value.catalogs[ContentType.LIVE]
+            ?: return
+        val channelIds = catalog.items.asSequence()
+            .mapNotNull { it.epgChannelId() }
+            .toSet()
+        if (channelIds.isEmpty()) return
+        val now = System.currentTimeMillis() / 1_000L
+        val currentState = mutableState.value.liveEpg
+        if (!force) {
+            if (epgJob?.isActive == true) return
+            val snapshotFresh = currentState.verified &&
+                currentState.fetchedAtEpochSeconds > 0L &&
+                now - currentState.fetchedAtEpochSeconds in 0 until EPG_REFRESH_INTERVAL_SECONDS
+            if (snapshotFresh) return
+            val failedRecently = !currentState.verified &&
+                epgLastAttemptEpochSeconds > 0L &&
+                now - epgLastAttemptEpochSeconds in 0 until EPG_FAILURE_RETRY_SECONDS
+            if (failedRecently) return
+        }
+        epgJob?.cancel()
+        val token = epgLoadGate.begin(scope)
+        epgLastAttemptEpochSeconds = now
+        epgJob = viewModelScope.launch {
+            mutableState.update { state ->
+                state.copy(liveEpg = state.liveEpg.copy(loading = true, failed = false))
+            }
+            try {
+                val snapshot = repository.epgSnapshot(activeSession, channelIds)
+                if (!epgLoadGate.isCurrent(token, currentEpgScope())) return@launch
+                mutableState.update { state ->
+                    state.copy(
+                        liveEpg = LiveEpgUiState(
+                            verified = true,
+                            loading = false,
+                            failed = false,
+                            fetchedAtEpochSeconds = snapshot.fetchedAtEpochSeconds,
+                            schedule = snapshot.schedule,
+                        ),
+                    )
+                }
+                epgLastAttemptEpochSeconds = snapshot.fetchedAtEpochSeconds
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                if (!epgLoadGate.isCurrent(token, currentEpgScope())) return@launch
+                mutableState.update { state ->
+                    state.copy(liveEpg = state.liveEpg.copy(loading = false, failed = true))
+                }
+                epgLastAttemptEpochSeconds = System.currentTimeMillis() / 1_000L
+            } finally {
+                if (epgLoadGate.isCurrent(token, currentEpgScope())) epgJob = null
+            }
+        }
+    }
+
     private fun ensureDestinationCatalogs(
         destination: MainDestination,
         foreground: Boolean = false,
@@ -1297,6 +1422,7 @@ class HulkViewModel internal constructor(
         }
         hulkPerfLog { "catalogEnsure destination=$destination types=$types foreground=$foreground" }
         types.forEach(::ensureCatalog)
+        if (destination == MainDestination.LIVE) ensureEpgLoaded()
         refreshHomePreparationState()
     }
 
@@ -1364,6 +1490,7 @@ class HulkViewModel internal constructor(
         catalogRequestOwner.prioritize(destination.catalogTypeOrNull())
         mutableState.update { it.copy(errorMessage = null) }
         types.forEach { ensureCatalog(it, force = true) }
+        if (destination == MainDestination.LIVE) ensureEpgLoaded(force = true)
         scanSubscribedSeries(NotificationScanTrigger.MANUAL_REFRESH)
     }
 
@@ -3623,6 +3750,8 @@ class HulkViewModel internal constructor(
                                 foregroundType = mutableState.value.destination.catalogTypeOrNull(),
                             )
                             publishPresenceOwnership(refreshed)
+                            prepareEpgForCurrentSession()
+                            ensureEpgLoaded()
                             onResult("تم تحديث بيانات الاشتراك من السيرفر.")
                         }
                         SessionPublicationResult.Expired -> {
@@ -3858,6 +3987,7 @@ class HulkViewModel internal constructor(
         wakeForegroundNotificationScheduler()
         invalidateCatalogRequests()
         clearCatalogMemory()
+        clearEpgForSessionChange()
         invalidateDiagnosticsForSessionChange()
         invalidatePlayerProgressPersistence()
         downloadSettingsMutationGate.invalidate()
@@ -4050,6 +4180,7 @@ class HulkViewModel internal constructor(
         downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
         downloadPriorityMutationQueues.clear()
         clearCatalogMemory()
+        clearEpgForSessionChange()
         val downloads = loadDownloadUiSnapshot(downloadRepository::snapshot)
         val downloadSettings = withContext(Dispatchers.IO) {
             downloadRepository.settings()
@@ -4070,6 +4201,7 @@ class HulkViewModel internal constructor(
                     account = authenticated.account,
                     isAccountRefreshing = false,
                     catalogs = emptyMap(),
+                    liveEpg = LiveEpgUiState(),
                     selectedCategoryId = null,
                     searchQuery = "",
                     favorites = emptySet(),
@@ -4096,6 +4228,7 @@ class HulkViewModel internal constructor(
             SessionPublicationResult.Stale -> return
         }
         publishPresenceOwnership(authenticated)
+        prepareEpgForCurrentSession()
         ensureDestinationCatalogs(MainDestination.HOME)
         refreshOperations(force = false)
         refreshNotificationState(clearPopup = true)
@@ -4123,6 +4256,7 @@ class HulkViewModel internal constructor(
             invalidateAccountRefresh()
             invalidateCatalogRequests()
             clearCatalogMemory()
+            clearEpgForSessionChange()
             invalidateDetailsRequest()
             invalidateDiagnosticsForSessionChange()
             invalidatePlayerProgressPersistence()
@@ -4557,6 +4691,7 @@ class HulkViewModel internal constructor(
             "catalogCachePublished type=$type items=${catalog.items.size} " +
                 "homeItems=${home.items.size}"
         }
+        if (type == ContentType.LIVE) ensureEpgLoaded()
         return true
     }
 

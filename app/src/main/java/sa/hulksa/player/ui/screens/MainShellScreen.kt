@@ -209,6 +209,8 @@ import sa.hulksa.player.homePlaceholderMode
 import sa.hulksa.player.homePresentationTransitionPending
 import sa.hulksa.player.HomePlaceholderMode
 import sa.hulksa.player.data.HomeHeroTechnicalMetadata
+import sa.hulksa.player.data.LiveEpgUiState
+import sa.hulksa.player.data.epgChannelId
 import sa.hulksa.player.data.OperationsAnnouncement
 import sa.hulksa.player.data.OperationsAnnouncementSeverity
 import sa.hulksa.player.data.OperationsDownloadStatus
@@ -5517,6 +5519,23 @@ private fun LiveCatalogScreen(
     val channelRequester = remember { FocusRequester() }
     val playRequester = remember { FocusRequester() }
     val favoriteRequester = remember { FocusRequester() }
+    val guideRequester = remember { FocusRequester() }
+    var guideChannel by remember { mutableStateOf<ContentItem?>(null) }
+    var guideReturnFocusPending by remember { mutableStateOf(false) }
+    LaunchedEffect(state.liveEpg.guideEnabled) {
+        if (!state.liveEpg.guideEnabled) guideChannel = null
+    }
+    LaunchedEffect(guideChannel) {
+        if (guideChannel == null && guideReturnFocusPending) {
+            withFrameNanos { }
+            runCatching { guideRequester.requestFocus() }
+            guideReturnFocusPending = false
+        }
+    }
+    LaunchedEffect(guideChannel?.id, catalog) {
+        val guideId = guideChannel?.id ?: return@LaunchedEffect
+        if (catalog?.items?.none { it.id == guideId } == true) guideChannel = null
+    }
     var liveFavoriteMutation by remember { mutableStateOf(LiveFavoriteMutationState()) }
     LaunchedEffect(state.selectedCategoryId, catalog) {
         liveFavoriteMutation = liveFavoriteMutation.clear()
@@ -5976,9 +5995,15 @@ private fun LiveCatalogScreen(
                     LivePreviewStage(
                         previewState = previewState,
                         favorites = favorites,
+                        liveEpg = state.liveEpg,
                         channelRequester = channelRequester,
                         playRequester = playRequester,
                         favoriteRequester = favoriteRequester,
+                        guideRequester = guideRequester,
+                        onOpenGuide = { channel ->
+                            guideReturnFocusPending = true
+                            guideChannel = channel
+                        },
                         onOpen = onOpen,
                         onToggleFavorite = { channel ->
                             if (
@@ -6046,15 +6071,26 @@ private fun LiveCatalogScreen(
             },
         )
     }
+    guideChannel?.let { channel ->
+        LiveEpgGuideDialog(
+            channelName = channel.name,
+            channelId = channel.epgChannelId(),
+            state = state.liveEpg,
+            onDismiss = { guideChannel = null },
+        )
+    }
 }
 
 @Composable
 private fun LivePreviewStage(
     previewState: State<ContentItem?>,
     favorites: CatalogFavoriteSnapshot,
+    liveEpg: LiveEpgUiState,
     channelRequester: FocusRequester,
     playRequester: FocusRequester,
     favoriteRequester: FocusRequester,
+    guideRequester: FocusRequester,
+    onOpenGuide: (ContentItem) -> Unit,
     onOpen: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onUserFocus: () -> Unit,
@@ -6064,10 +6100,13 @@ private fun LivePreviewStage(
     LiveStage(
         item = preview,
         isFavorite = preview?.let(favorites::contains) == true,
+        liveEpg = liveEpg,
         channelRequester = channelRequester,
         playRequester = playRequester,
         favoriteRequester = favoriteRequester,
+        guideRequester = guideRequester,
         onWatch = { previewState.value?.let(onOpen) },
+        onOpenGuide = { previewState.value?.let(onOpenGuide) },
         onToggleFavorite = { previewState.value?.let(onToggleFavorite) },
         onUserFocus = onUserFocus,
         modifier = modifier,
@@ -6078,15 +6117,20 @@ private fun LivePreviewStage(
 private fun LiveStage(
     item: ContentItem?,
     isFavorite: Boolean,
+    liveEpg: LiveEpgUiState,
     channelRequester: FocusRequester,
     playRequester: FocusRequester,
     favoriteRequester: FocusRequester,
+    guideRequester: FocusRequester,
     onWatch: () -> Unit,
+    onOpenGuide: () -> Unit,
     onToggleFavorite: () -> Unit,
     onUserFocus: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
+    val epgNowEpochSeconds = rememberEpgNowEpochSeconds()
+    val nowNext = liveEpg.nowNext(item?.epgChannelId(), epgNowEpochSeconds)
     Column(
         modifier = modifier.onFocusChanged { if (it.hasFocus) onUserFocus() },
         verticalArrangement = Arrangement.spacedBy(15.dp),
@@ -6139,31 +6183,65 @@ private fun LiveStage(
                     Box(Modifier.size(7.dp).clip(CircleShape).background(Color(0xFFD3262E)))
                     Text("بث مباشر", color = colors.textMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 }
+                if (!nowNext.isEmpty) {
+                    Spacer(Modifier.height(8.dp))
+                    LiveEpgNowNextBlock(
+                        nowNext = nowNext,
+                        modifier = Modifier.padding(horizontal = 2.dp),
+                    )
+                }
                 Spacer(Modifier.height(12.dp))
                 Box(
                     Modifier
                         .fillMaxWidth()
                         .padding(bottom = TV_LIVE_ACTION_INSET),
                 ) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        FocusButton(
-                            "تشغيل القناة", onWatch,
-                            modifier = Modifier.weight(1f).height(50.dp).focusRequester(playRequester).focusProperties {
-                                left = favoriteRequester; right = channelRequester
-                            }, compact = true,
-                            trailingIcon = Icons.Rounded.PlayArrow,
-                        )
-                        FocusButton(
-                            "المفضلة", onToggleFavorite,
-                            modifier = Modifier.weight(1f).height(50.dp).focusRequester(favoriteRequester).focusProperties {
-                                left = channelRequester; right = playRequester
-                            }, primary = false, outlined = true, compact = true,
-                            trailingIcon = if (isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
-                            trailingIconTint = if (isFavorite) colors.gold else null,
-                        )
+                    Column(Modifier.fillMaxWidth()) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            val guideDownTarget = guideRequester.takeIf { liveEpg.guideEnabled }
+                            FocusButton(
+                                "تشغيل القناة", onWatch,
+                                modifier = Modifier.weight(1f).height(50.dp).focusRequester(playRequester)
+                                    .focusProperties {
+                                        left = favoriteRequester; right = channelRequester
+                                        if (guideDownTarget != null) down = guideDownTarget
+                                    }, compact = true,
+                                trailingIcon = Icons.Rounded.PlayArrow,
+                            )
+                            FocusButton(
+                                "المفضلة", onToggleFavorite,
+                                modifier = Modifier.weight(1f).height(50.dp).focusRequester(favoriteRequester)
+                                    .focusProperties {
+                                        left = channelRequester; right = playRequester
+                                        if (guideDownTarget != null) down = guideDownTarget
+                                    }, primary = false, outlined = true, compact = true,
+                                trailingIcon = if (isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
+                                trailingIconTint = if (isFavorite) colors.gold else null,
+                            )
+                        }
+                        if (liveEpg.guideEnabled) {
+                            Spacer(Modifier.height(8.dp))
+                            FocusButton(
+                                EPG_GUIDE_ACTION_LABEL,
+                                onOpenGuide,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(46.dp)
+                                    .focusRequester(guideRequester)
+                                    .focusProperties {
+                                        up = playRequester
+                                        right = channelRequester
+                                        left = favoriteRequester
+                                    },
+                                primary = false,
+                                outlined = true,
+                                compact = true,
+                                trailingIcon = Icons.Outlined.Schedule,
+                            )
+                        }
                     }
                 }
             }
