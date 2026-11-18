@@ -35,6 +35,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +56,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import sa.hulksa.player.data.EpgNowNext
 import sa.hulksa.player.data.EpgProgramme
 import sa.hulksa.player.data.LiveEpgUiState
@@ -273,6 +275,11 @@ private fun LiveEpgGuidePanel(
         val index = programmes.indexOfFirst { it.startEpochSeconds == focusStart }
         if (index >= 0) {
             listState.scrollToItem(index)
+            // The Dialog's first layout is not the list's first layout. Wait until the target row
+            // actually exists in the laid-out list before attaching the focus request.
+            snapshotFlow {
+                listState.layoutInfo.visibleItemsInfo.any { it.index == index }
+            }.first { it }
             withFrameNanos { }
             val focused = runCatching { initialFocus.requestFocus() }.getOrDefault(false)
             if (focused) {
