@@ -6,7 +6,6 @@ import android.net.Uri
 import android.os.StatFs
 import android.util.Log
 import android.view.KeyEvent as AndroidKeyEvent
-import android.view.ViewTreeObserver
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -161,7 +160,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.onClick
@@ -5524,35 +5522,16 @@ private fun LiveCatalogScreen(
     val guideRequester = remember { FocusRequester() }
     var guideChannel by remember { mutableStateOf<ContentItem?>(null) }
     var guideReturnFocusPending by remember { mutableStateOf(false) }
-    val hostView = LocalView.current
-    var hostWindowFocused by remember(hostView) {
-        mutableStateOf(hostView.hasWindowFocus())
-    }
-    DisposableEffect(hostView) {
-        val listener = ViewTreeObserver.OnWindowFocusChangeListener { focused ->
-            hostWindowFocused = focused
-        }
-        hostView.viewTreeObserver.addOnWindowFocusChangeListener(listener)
-        onDispose {
-            hostView.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
-        }
-    }
     LaunchedEffect(state.liveEpg.guideEnabled) {
         if (!state.liveEpg.guideEnabled) guideChannel = null
     }
-    // The guide is a Dialog window. Restore focus only after the host window owns focus again,
-    // instead of requesting against a still-transitioning window and silently losing the request.
-    LaunchedEffect(guideChannel, hostWindowFocused) {
-        if (guideChannel == null && guideReturnFocusPending && hostWindowFocused) {
+    LaunchedEffect(guideChannel) {
+        if (guideChannel == null && guideReturnFocusPending) {
             withFrameNanos { }
             val firstAttempt = runCatching { guideRequester.requestFocus() }.getOrDefault(false)
-            // A Dialog window can still be releasing focus on the first frame. The second request is
-            // one more composition-frame synchronization, never a timed retry loop.
-            withFrameNanos { }
-            val secondAttempt = runCatching { guideRequester.requestFocus() }.getOrDefault(false)
-            hulkPerfLog {
-                "epgGuideFocusRestore first=$firstAttempt second=$secondAttempt " +
-                    "windowFocused=$hostWindowFocused"
+            if (!firstAttempt) {
+                withFrameNanos { }
+                runCatching { guideRequester.requestFocus() }
             }
             guideReturnFocusPending = false
         }
@@ -6097,9 +6076,8 @@ private fun LiveCatalogScreen(
         )
     }
     guideChannel?.let { channel ->
-        LiveEpgGuideDialog(
-            channelName = channel.name,
-            channelId = channel.epgChannelId(),
+        LiveEpgGuideOverlay(
+            channel = channel,
             state = state.liveEpg,
             onDismiss = { guideChannel = null },
         )
@@ -6202,38 +6180,60 @@ private fun LiveStage(
                 )
                 Spacer(Modifier.height(6.dp))
                 Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(
+                            if (liveEpg.enabled) Modifier.height(30.dp) else Modifier,
+                        ),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.Center,
                 ) {
                     Box(Modifier.size(7.dp).clip(CircleShape).background(Color(0xFFD3262E)))
+                    Spacer(Modifier.width(6.dp))
                     Text("بث مباشر", color = colors.textMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    if (liveEpg.enabled) {
+                        Spacer(Modifier.width(10.dp))
+                        if (liveEpg.guideEnabled) {
+                            FocusButton(
+                                EPG_GUIDE_ACTION_LABEL,
+                                onOpenGuide,
+                                modifier = Modifier
+                                    .width(132.dp)
+                                    .height(30.dp)
+                                    .focusRequester(guideRequester)
+                                    .focusProperties {
+                                        down = playRequester
+                                        right = channelRequester
+                                        left = favoriteRequester
+                                    },
+                                primary = false,
+                                outlined = true,
+                                compact = true,
+                                textSizeSp = 10,
+                                textLineHeightSp = 14,
+                                trailingIcon = Icons.Outlined.Schedule,
+                            )
+                        } else {
+                            // Reserve the stable action slot while the optional NEO schedule is
+                            // loading or unavailable, so artwork never jumps on an EPG transition.
+                            Spacer(Modifier.width(132.dp).height(30.dp))
+                        }
+                    }
                 }
-                if (!nowNext.isEmpty) {
-                    Spacer(Modifier.height(8.dp))
-                    LiveEpgNowNextBlock(
-                        nowNext = nowNext,
-                        modifier = Modifier.padding(horizontal = 2.dp),
-                    )
-                }
-                if (liveEpg.guideEnabled) {
-                    Spacer(Modifier.height(8.dp))
-                    FocusButton(
-                        EPG_GUIDE_ACTION_LABEL,
-                        onOpenGuide,
-                        modifier = Modifier
+                if (liveEpg.enabled) {
+                    Spacer(Modifier.height(4.dp))
+                    Box(
+                        Modifier
                             .fillMaxWidth()
-                            .height(46.dp)
-                            .focusRequester(guideRequester)
-                            .focusProperties {
-                                down = playRequester
-                                right = channelRequester
-                                left = favoriteRequester
-                            },
-                        primary = false,
-                        outlined = true,
-                        compact = true,
-                        trailingIcon = Icons.Outlined.Schedule,
-                    )
+                            .height(58.dp),
+                    ) {
+                        if (!nowNext.isEmpty) {
+                            LiveEpgNowNextRows(
+                                nowNext = nowNext,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
                 }
                 Spacer(Modifier.height(12.dp))
                 Box(

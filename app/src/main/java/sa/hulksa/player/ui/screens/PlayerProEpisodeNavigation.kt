@@ -22,6 +22,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
 import sa.hulksa.player.data.VIRTUAL_FOREIGN_SPORTS_CATEGORY_ID
+import sa.hulksa.player.data.LiveEpgUiState
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.Episode
@@ -215,6 +216,7 @@ fun PlayerProScreen(
     virtualChannelIds: List<Int> = emptyList(),
     isFavorite: (ContentItem) -> Boolean,
     favoriteKeys: Set<String>,
+    liveEpg: LiveEpgUiState = LiveEpgUiState(),
     vodItem: ContentItem? = null,
     onSelectLiveChannel: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem, (sa.hulksa.player.data.FavoriteMutationOutcome) -> Unit) -> Unit,
@@ -665,6 +667,7 @@ fun PlayerProScreen(
             virtualChannelIds = virtualChannelIds,
             isFavorite = isFavorite,
             favoriteKeys = favoriteKeys,
+            liveEpg = liveEpg,
             vodItem = vodItem,
             onSelectLiveChannel = ::queuePlayerRequestedLiveChannel,
             onToggleFavorite = onToggleFavorite,

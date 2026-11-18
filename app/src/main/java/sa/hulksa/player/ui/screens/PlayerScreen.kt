@@ -69,6 +69,7 @@ import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.Audiotrack
 import androidx.compose.material.icons.rounded.Check
@@ -183,6 +184,7 @@ import kotlinx.coroutines.launch
 import sa.hulksa.player.data.SettingsProStore
 import sa.hulksa.player.data.AuthenticatedSessionOwner
 import sa.hulksa.player.data.HomeHeroMetadataStore
+import sa.hulksa.player.data.LiveEpgUiState
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.PlaybackRequest
@@ -591,6 +593,7 @@ fun PlayerScreen(
     virtualChannelIds: List<Int> = emptyList(),
     isFavorite: (ContentItem) -> Boolean,
     favoriteKeys: Set<String> = emptySet(),
+    liveEpg: LiveEpgUiState = LiveEpgUiState(),
     vodItem: ContentItem? = null,
     onSelectLiveChannel: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem, (sa.hulksa.player.data.FavoriteMutationOutcome) -> Unit) -> Unit,
@@ -711,6 +714,7 @@ fun PlayerScreen(
     var activePanel by remember(request) { mutableStateOf<PlayerPanel?>(null) }
     var liveMorePanel by remember(request) { mutableStateOf<PlayerLiveMorePanelView?>(null) }
     var liveMoreMenuFocusRow by remember(request) { mutableStateOf(PlayerLiveMoreRow.MUTE) }
+    var liveEpgGuideVisible by remember(request) { mutableStateOf(false) }
     var vodMorePanel by remember(request) { mutableStateOf<VodMorePanelView?>(null) }
     var vodMoreMenuFocusRow by remember(request) { mutableStateOf(VodMoreRow.GO_TO_TIME) }
     var vodGoToTimeVisible by remember(request) { mutableStateOf(false) }
@@ -819,6 +823,13 @@ fun PlayerScreen(
         found
     }
     val liveFavoriteChannel = currentChannel.takeIf { request.isLive }
+    val liveEpgGuideChannel = currentChannel.takeIf {
+        playerLiveEpgGuideAvailable(
+            isLive = request.isLive,
+            hasCurrentChannel = currentChannel != null,
+            epgVerified = liveEpg.guideEnabled,
+        )
+    }
     // The observed favorites snapshot is an explicit reactive input. The authoritative predicate
     // reads the view model's StateFlow, so keying the derived control on the snapshot guarantees
     // the HUD repaints on the same state publication instead of waiting for the player-health tick.
@@ -1347,6 +1358,20 @@ fun PlayerScreen(
     fun openLiveMorePanel() {
         liveMoreMenuFocusRow = PlayerLiveMoreRow.MUTE
         liveMorePanel = PlayerLiveMorePanelView.MENU
+    }
+
+    fun openLiveEpgGuide() {
+        if (liveEpgGuideChannel == null) return
+        liveMoreMenuFocusRow = PlayerLiveMoreRow.GUIDE
+        liveEpgGuideVisible = true
+        controlsVisible = true
+    }
+
+    fun closeLiveEpgGuide() {
+        liveEpgGuideVisible = false
+        if (liveMorePanel != null) {
+            liveMoreMenuFocusRow = PlayerLiveMoreRow.GUIDE
+        }
     }
 
     fun closeLiveMorePanelToTrigger() {
@@ -2319,7 +2344,8 @@ fun PlayerScreen(
 
     val panelInputActive = playerChildPanelInputActive(
         activePanel != null,
-        liveMorePanel != null || vodMorePanel != null || vodGoToTimeVisible,
+        liveMorePanel != null || vodMorePanel != null || vodGoToTimeVisible ||
+            liveEpgGuideVisible,
     )
     val latestOnPanelActiveChanged by rememberUpdatedState(onPanelActiveChanged)
     DisposableEffect(panelInputActive) {
@@ -2631,7 +2657,7 @@ fun PlayerScreen(
             Box(Modifier.fillMaxSize().background(Color.Black))
         }
 
-        if (controlsVisible && nextCountdown < 0 && finalError == null && !movieModalActive && !browserVisible && activePanel == null && !controlsLocked) {
+        if (controlsVisible && nextCountdown < 0 && finalError == null && !movieModalActive && !browserVisible && activePanel == null && !controlsLocked && !liveEpgGuideVisible) {
             PlayerTopBar(
                 title = playerDisplayTitle,
                 isLive = request.isLive,
@@ -2644,7 +2670,7 @@ fun PlayerScreen(
             )
         }
 
-        if (controlsVisible && nextCountdown < 0 && finalError == null && !movieModalActive && !browserVisible && activePanel == null && !controlsLocked) {
+        if (controlsVisible && nextCountdown < 0 && finalError == null && !movieModalActive && !browserVisible && activePanel == null && !controlsLocked && !liveEpgGuideVisible) {
             if (request.isLive) {
                 val liveDensity = LocalDensity.current
                 val minimumMorePanelHeight = remember(
@@ -2660,7 +2686,7 @@ fun PlayerScreen(
                 // arrangement or a bounded full-height fallback when the complete strip plus a
                 // usable panel body cannot coexist. The strip is never overlapped or compressed.
                 LiveBottomOverlay(
-                    showPanel = liveMorePanel != null,
+                    showPanel = liveMorePanel != null && !liveEpgGuideVisible,
                     gap = 10.dp,
                     minimumPanelHeight = minimumMorePanelHeight,
                     topPadding = liveControlsLayout.outerTopPaddingDp.dp,
@@ -2714,6 +2740,8 @@ fun PlayerScreen(
                                     candidateIndex = candidateIndex,
                                     resizeModeIndex = resizeModeIndex,
                                     menuFocusRow = liveMoreMenuFocusRow,
+                                    guideAvailable = liveEpgGuideChannel != null,
+                                    onOpenGuide = ::openLiveEpgGuide,
                                     onClose = ::closeLiveMorePanelToTrigger,
                                     onBackToMenu = ::handleLiveMoreBack,
                                     onToggleMute = {
@@ -3272,6 +3300,22 @@ fun PlayerScreen(
                         metrics = liveControlMetrics,
                         maxHeight = liveErrorSourcePanelMaxHeight,
                     )
+                }
+            }
+        }
+
+        if (liveEpgGuideVisible && request.isLive) {
+            val guideChannel = liveEpgGuideChannel
+            if (guideChannel != null) {
+                LiveEpgGuideOverlay(
+                    channel = guideChannel,
+                    state = liveEpg,
+                    onDismiss = ::closeLiveEpgGuide,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                LaunchedEffect(request.historyKey) {
+                    liveEpgGuideVisible = false
                 }
             }
         }
@@ -4402,6 +4446,8 @@ private fun LiveMorePanel(
     candidateIndex: Int,
     resizeModeIndex: Int,
     menuFocusRow: PlayerLiveMoreRow,
+    guideAvailable: Boolean = false,
+    onOpenGuide: () -> Unit = {},
     onClose: () -> Unit,
     onBackToMenu: () -> Unit,
     onToggleMute: () -> Unit,
@@ -4418,15 +4464,17 @@ private fun LiveMorePanel(
     val shape = RoundedCornerShape(16.dp)
     val muteFocus = remember { FocusRequester() }
     val reloadFocus = remember { FocusRequester() }
+    val guideFocus = remember { FocusRequester() }
     val sourceFocus = remember { FocusRequester() }
     val resizeFocus = remember { FocusRequester() }
     val selectedOptionFocus = remember { FocusRequester() }
 
-    LaunchedEffect(view, menuFocusRow, candidateIndex, resizeModeIndex, sourceCount) {
+    LaunchedEffect(view, menuFocusRow, candidateIndex, resizeModeIndex, sourceCount, guideAvailable) {
         val target = when (view) {
             PlayerLiveMorePanelView.MENU -> when (menuFocusRow) {
                 PlayerLiveMoreRow.MUTE -> muteFocus
                 PlayerLiveMoreRow.RELOAD -> reloadFocus
+                PlayerLiveMoreRow.GUIDE -> if (guideAvailable) guideFocus else muteFocus
                 PlayerLiveMoreRow.SOURCE -> sourceFocus
                 PlayerLiveMoreRow.RESIZE -> resizeFocus
             }
@@ -4435,7 +4483,13 @@ private fun LiveMorePanel(
             -> selectedOptionFocus
         }
         withFrameNanos { }
-        runCatching { target.requestFocus() }
+        val firstAttempt = runCatching { target.requestFocus() }.getOrDefault(false)
+        if (!firstAttempt) {
+            // The guide Dialog may still be releasing window focus when the More panel returns.
+            // One additional composition-frame attempt is bounded; it is not a timed retry loop.
+            withFrameNanos { }
+            runCatching { target.requestFocus() }
+        }
     }
 
     Column(
@@ -4506,6 +4560,16 @@ private fun LiveMorePanel(
                         focusRequester = reloadFocus,
                         directAction = true,
                     )
+                    if (guideAvailable) {
+                        VodPanelDivider()
+                        LiveMoreRow(
+                            text = EPG_GUIDE_ACTION_LABEL,
+                            icon = Icons.Outlined.Schedule,
+                            onClick = onOpenGuide,
+                            focusRequester = guideFocus,
+                            directAction = true,
+                        )
+                    }
                     if (canOfferPlayerLiveSourcePicker(sourceCount)) {
                         VodPanelDivider()
                         LiveMoreRow(

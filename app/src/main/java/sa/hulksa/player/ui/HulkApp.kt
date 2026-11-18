@@ -718,6 +718,7 @@ fun HulkApp(
                                 virtualChannelIds = state.liveForeignSports?.channelIds.orEmpty(),
                                 isFavorite = viewModel::isFavorite,
                                 favoriteKeys = state.favorites,
+                                liveEpg = state.liveEpg,
                                 vodItem = vodFavoriteItem,
                                 onSelectLiveChannel = viewModel::switchLiveChannel,
                                 onToggleFavorite = { item, result ->

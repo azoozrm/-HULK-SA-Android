@@ -41,6 +41,14 @@ class LivePlayerControlsPolicyTest {
     }
 
     @Test
+    fun `guide action requires live playback, a current channel and verified NEO EPG`() {
+        assertTrue(playerLiveEpgGuideAvailable(true, true, true))
+        assertFalse(playerLiveEpgGuideAvailable(true, false, true))
+        assertFalse(playerLiveEpgGuideAvailable(true, true, false))
+        assertFalse(playerLiveEpgGuideAvailable(false, true, true))
+    }
+
+    @Test
     fun `favorite control is disabled without the authoritative catalog channel`() {
         val channel = channel(id = 7)
 

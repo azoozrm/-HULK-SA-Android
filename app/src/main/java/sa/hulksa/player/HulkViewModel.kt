@@ -1325,7 +1325,7 @@ class HulkViewModel internal constructor(
         epgJob = null
         epgScope = scope
         epgLastAttemptEpochSeconds = 0L
-        mutableState.update { it.copy(liveEpg = LiveEpgUiState()) }
+        mutableState.update { it.copy(liveEpg = LiveEpgUiState(enabled = true)) }
     }
 
     private fun clearEpgForSessionChange() {
@@ -1348,7 +1348,6 @@ class HulkViewModel internal constructor(
     private fun ensureEpgLoaded(force: Boolean = false) {
         val activeSession = session ?: return
         if (!epgRequestAllowed(activeSession)) return
-        if (mutableState.value.destination != MainDestination.LIVE) return
         val owner = AuthenticatedSessionRegistry.currentOwner()
             ?.takeIf { it.session === activeSession } ?: return
         val scope = EpgScope(accountId = owner.accountId, providerId = owner.providerId)
@@ -1381,7 +1380,13 @@ class HulkViewModel internal constructor(
         epgLastAttemptEpochSeconds = now
         epgJob = viewModelScope.launch {
             mutableState.update { state ->
-                state.copy(liveEpg = state.liveEpg.copy(loading = true, failed = false))
+                state.copy(
+                    liveEpg = state.liveEpg.copy(
+                        enabled = true,
+                        loading = true,
+                        failed = false,
+                    ),
+                )
             }
             try {
                 val snapshot = repository.epgSnapshot(activeSession, channelIds)
@@ -1389,6 +1394,7 @@ class HulkViewModel internal constructor(
                 mutableState.update { state ->
                     state.copy(
                         liveEpg = LiveEpgUiState(
+                            enabled = true,
                             verified = true,
                             loading = false,
                             failed = false,

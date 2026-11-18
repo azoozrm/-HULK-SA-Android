@@ -141,6 +141,7 @@ internal data class EpgSnapshot(
  * sessions: no controls, no schedule and no EPG request.
  */
 data class LiveEpgUiState(
+    val enabled: Boolean = false,
     val verified: Boolean = false,
     val loading: Boolean = false,
     val failed: Boolean = false,

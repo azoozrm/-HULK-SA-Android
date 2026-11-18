@@ -20,6 +20,7 @@ internal enum class PlayerLiveMorePanelView {
 internal enum class PlayerLiveMoreRow {
     MUTE,
     RELOAD,
+    GUIDE,
     SOURCE,
     RESIZE,
 }
@@ -63,6 +64,16 @@ internal data class LivePlayerFavoriteControl(
     val enabled: Boolean,
     val favorite: Boolean,
 )
+
+/**
+ * The optional Live player guide is available only for the currently playing catalog channel
+ * inside a verified NEO EPG session. VOD/Series and HULK/unidentified sessions never get the row.
+ */
+internal fun playerLiveEpgGuideAvailable(
+    isLive: Boolean,
+    hasCurrentChannel: Boolean,
+    epgVerified: Boolean,
+): Boolean = isLive && hasCurrentChannel && epgVerified
 
 /**
  * Favorite action wiring for the current Live catalog channel.
