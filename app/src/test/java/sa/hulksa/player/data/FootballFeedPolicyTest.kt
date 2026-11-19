@@ -58,18 +58,12 @@ class FootballFeedPolicyTest {
         val dayStart = checkNotNull(footballRiyadhDayStartEpochMs(day))
         val live = match(id = "1", kickoff = dayStart - 60_000L, status = FootballMatchStatus.LIVE)
         val finished = match(id = "2", kickoff = dayStart - 30_000L, status = FootballMatchStatus.FINISHED)
-        val oldFinished = match(
-            id = "3",
-            kickoff = dayStart - FOOTBALL_RESULT_CARRY_OVER_MS - 60_000L,
-            status = FootballMatchStatus.FINISHED,
-        )
         val nextDay = match(id = "4", kickoff = dayStart + 60_000L, status = FootballMatchStatus.UPCOMING)
 
-        val selected = footballMatchesForDay(listOf(live, finished, oldFinished, nextDay), day)
+        val selected = footballMatchesForDay(listOf(live, finished, nextDay), day)
 
-        assertEquals(setOf("1", "2", "4"), selected.mapTo(linkedSetOf(), FootballMatch::providerEventId))
+        assertEquals(setOf("1", "4"), selected.mapTo(linkedSetOf(), FootballMatch::providerEventId))
         assertTrue(selected.first { it.providerEventId == "1" }.carriedOver)
-        assertTrue(selected.first { it.providerEventId == "2" }.carriedOver)
         assertFalse(selected.first { it.providerEventId == "4" }.carriedOver)
     }
 
@@ -125,6 +119,95 @@ class FootballFeedPolicyTest {
     }
 
     @Test
+    fun `schedule and live rows merge by provider id and keep fixture metadata`() {
+        val schedule = match(
+            id = "202",
+            kickoff = 1_795_100_000_000L,
+            status = FootballMatchStatus.UPCOMING,
+            homeId = "266",
+            awayId = "271",
+        )
+        val live = match(
+            id = "202",
+            kickoff = 1_795_200_000_000L,
+            status = FootballMatchStatus.LIVE,
+            homeId = "266",
+            awayId = "271",
+            homeScore = 1,
+            awayScore = 0,
+            minute = 31,
+        )
+
+        val merged = mergeFootballMatchRows(listOf(schedule, live))
+
+        assertEquals(1, merged.size)
+        assertEquals(FootballMatchStatus.LIVE, merged.single().status)
+        assertEquals(31, merged.single().minute)
+        assertEquals(1, merged.single().homeScore)
+        assertEquals(0, merged.single().awayScore)
+        assertEquals(schedule.kickoffEpochMs, merged.single().kickoffEpochMs)
+        assertEquals(schedule.competition, merged.single().competition)
+    }
+
+    @Test
+    fun `newer live score replaces a previous 0-0 row`() {
+        val zero = match(id = "52", kickoff = 1L, status = FootballMatchStatus.LIVE, minute = 10)
+        val one = match(id = "52", kickoff = 1L, status = FootballMatchStatus.LIVE, minute = 10, homeScore = 1, awayScore = 0)
+
+        val merged = mergeFootballMatchRows(listOf(zero, one))
+        assertEquals(1, merged.size)
+        assertEquals(1, merged.single().homeScore)
+        assertEquals(0, merged.single().awayScore)
+    }
+
+    @Test
+    fun `confirmed final result survives an older live row in both orders`() {
+        val final = match(id = "53", kickoff = 1L, status = FootballMatchStatus.FINISHED, homeScore = 2, awayScore = 1)
+        val live = match(id = "53", kickoff = 1L, status = FootballMatchStatus.LIVE, minute = 60, homeScore = 0, awayScore = 0)
+
+        for (rows in listOf(listOf(final, live), listOf(live, final))) {
+            val merged = mergeFootballMatchRows(rows)
+            assertEquals(FootballMatchStatus.FINISHED, merged.single().status)
+            assertEquals(2, merged.single().homeScore)
+            assertEquals(1, merged.single().awayScore)
+        }
+    }
+
+    @Test
+    fun `a team beyond position 500 remains searchable and survives cache reload`() {
+        val many = (1..700).map { index ->
+            FootballTeam("team-$index", "Team ${index.toString().padStart(3, '0')}")
+        }
+        val merged = mergeFootballTeamLists(many)
+        assertEquals(700, merged.size)
+        assertEquals("team-699", filterFootballTeams(merged, "Team 699").single().id)
+
+        val reloaded = decodeFootballTeams(encodeFootballTeams(merged))
+        assertEquals(700, reloaded.size)
+        val selected = filterFootballTeams(reloaded, "Team 699").single()
+        assertEquals("team-699", selected.id)
+        val favorite = FootballFavoriteTeam(selected.id, selected.name, 1L)
+        assertEquals(favorite, decodeFootballFavoriteTeam(encodeFootballFavoriteTeam(favorite)))
+    }
+
+    @Test
+    fun `team catalog parser returns stable searchable teams`() {
+        val teams = checkNotNull(
+            parseFootballTeamCatalog(
+                """{"schemaVersion":1,"generatedAt":1795040000,"stale":false,"complete":true,"teams":[{"id":17,"name":"Al Hilal"},{"id":20,"name":"Al Nassr"},{"id":17,"name":"Al Hilal"}]}""",
+            ),
+        )
+
+        assertEquals(listOf("17", "20"), teams.map(FootballTeam::id))
+        assertEquals(listOf("Al Hilal", "Al Nassr"), teams.map(FootballTeam::name))
+        assertNull(
+            parseFootballTeamCatalog(
+                """{"schemaVersion":1,"complete":false,"teams":[{"id":17,"name":"Al Hilal"}]}""",
+            ),
+        )
+    }
+
+    @Test
     fun `feed parser preserves nullable scores aliases stale state and Riyadh metadata`() {
         val raw = """
             {
@@ -172,6 +255,41 @@ class FootballFeedPolicyTest {
     }
 
     @Test
+    fun `feed parser keeps the separate kickoff history and started timestamp`() {
+        val raw = """
+            {
+              "schemaVersion":1,
+              "day":"2026-11-19",
+              "generatedAt":1795122000,
+              "cachedAt":1795122000,
+              "stale":false,
+              "refreshSeconds":60,
+              "matches":[],
+              "kickoffHistory":[
+                {
+                  "providerEventId":"61",
+                  "aliases":[],
+                  "competition":{"id":"17","name":"Saudi Pro League","country":"Saudi Arabia"},
+                  "homeTeam":{"id":"266","name":"Al-Taawoun"},
+                  "awayTeam":{"id":"271","name":"Al-Ittihad"},
+                  "kickoffAt":1795119000,
+                  "status":"finished",
+                  "homeScore":2,
+                  "awayScore":1,
+                  "startedAt":1795119000
+                }
+              ],
+              "teams":[]
+            }
+        """.trimIndent()
+
+        val parsed = checkNotNull(parseFootballFeed(raw, "2026-11-19"))
+        assertTrue(parsed.matches.isEmpty())
+        assertEquals(1, parsed.kickoffHistory.size)
+        assertEquals(1795119000_000L, parsed.kickoffHistory.single().startedAtEpochMs)
+    }
+
+    @Test
     fun `feed parser rejects a different day or malformed score object`() {
         assertNull(parseFootballFeed("""{"schemaVersion":1,"day":"2026-11-20","generatedAt":1,"matches":[]}""", "2026-11-19"))
         assertNull(parseFootballFeed("not-json", "2026-11-19"))
@@ -216,6 +334,8 @@ class FootballFeedPolicyTest {
         homeScore: Int? = null,
         awayScore: Int? = null,
         replacedBy: String? = null,
+        minute: Int? = null,
+        startedAtEpochMs: Long? = null,
     ): FootballMatch = FootballMatch(
         providerEventId = id,
         replacedBy = replacedBy,
@@ -226,5 +346,7 @@ class FootballFeedPolicyTest {
         status = status,
         homeScore = homeScore,
         awayScore = awayScore,
+        minute = minute,
+        startedAtEpochMs = startedAtEpochMs,
     )
 }

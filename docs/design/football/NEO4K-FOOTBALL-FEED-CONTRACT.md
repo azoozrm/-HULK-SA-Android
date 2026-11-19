@@ -1,8 +1,11 @@
 # NEO 4K Football Feed Contract — R01 qualification
 
-Status: LOCAL_ROUND R01 source candidate. This document records provider qualification, the
-first-party feed contract and the honest gaps. It grants no purchase, credential, deployment,
-capture or release authority.
+Status: LOCAL_ROUND R01 source candidate. This document is retained as R01 history; for R02+
+provider schema, IDs, budget and response-shape corrections read
+`NEO4K-FOOTBALL-FEED-R02-CORRECTION.md`, `NEO4K-FOOTBALL-FEED-R02.1-CORRECTION.md` and
+`NEO4K-FOOTBALL-R03-SECTION.md` and `NEO4K-FOOTBALL-R03.1-CORRECTION.md`. This
+document records provider qualification and the first-party feed contract and the honest gaps.
+It grants no purchase, credential, deployment, capture or release authority.
 
 ## 1. Authority and scope
 

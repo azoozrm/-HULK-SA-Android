@@ -776,6 +776,7 @@ fun LocalNotificationCenterScreen(
     notifications: List<LocalNotificationItem>,
     unreadCount: Int,
     isTv: Boolean,
+    hideFootballScores: Boolean = false,
     onBack: () -> Unit,
     onOpen: (LocalNotificationItem) -> Unit,
     onMarkRead: (LocalNotificationItem) -> Unit,
@@ -828,6 +829,7 @@ fun LocalNotificationCenterScreen(
                             notifications = notifications,
                             unreadCount = unreadCount,
                             metrics = metrics,
+                            hideFootballScores = hideFootballScores,
                             onBack = onBack,
                             onOpen = onOpen,
                             onMarkRead = onMarkRead,
@@ -842,6 +844,7 @@ fun LocalNotificationCenterScreen(
                             notifications = notifications,
                             unreadCount = unreadCount,
                             metrics = metrics,
+                            hideFootballScores = hideFootballScores,
                             onBack = onBack,
                             onOpen = onOpen,
                             onMarkRead = onMarkRead,
@@ -863,6 +866,7 @@ internal fun TvLocalNotificationCenter(
     notifications: List<LocalNotificationItem>,
     unreadCount: Int,
     metrics: LocalNotificationCenterMetrics,
+    hideFootballScores: Boolean,
     onBack: () -> Unit,
     onOpen: (LocalNotificationItem) -> Unit,
     onMarkRead: (LocalNotificationItem) -> Unit,
@@ -1234,6 +1238,7 @@ internal fun TvLocalNotificationCenter(
                     TvLocalNotificationCard(
                         notification = notification,
                         metrics = metrics,
+                        hideFootballScores = hideFootballScores,
                         graph = graph,
                         focusDestinations = ::focusDestinationsFor,
                         focus = checkNotNull(cardFocusRegistry[notification.id]),
@@ -1338,6 +1343,7 @@ private fun MobileLocalNotificationCenter(
     notifications: List<LocalNotificationItem>,
     unreadCount: Int,
     metrics: LocalNotificationCenterMetrics,
+    hideFootballScores: Boolean,
     onBack: () -> Unit,
     onOpen: (LocalNotificationItem) -> Unit,
     onMarkRead: (LocalNotificationItem) -> Unit,
@@ -1461,6 +1467,7 @@ private fun MobileLocalNotificationCenter(
                         MobileLocalNotificationCard(
                             notification = notification,
                             metrics = metrics,
+                            hideFootballScores = hideFootballScores,
                             onOpen = { onOpen(notification) },
                             onMarkRead = { onMarkRead(notification) },
                             onDelete = { onDelete(notification) },
@@ -1574,6 +1581,7 @@ private fun NotificationCenterEmptyState(
 private fun TvLocalNotificationCard(
     notification: LocalNotificationItem,
     metrics: LocalNotificationCenterMetrics,
+    hideFootballScores: Boolean,
     graph: NotificationTvFocusGraph,
     focusDestinations: (
         NotificationTvFocusTarget,
@@ -1596,7 +1604,7 @@ private fun TvLocalNotificationCard(
     }
     val detail = when {
         episode != null -> "الموسم ${episode.seasonNumber} • الحلقة ${episode.episodeNumber}"
-        kickoff != null -> footballKickoffDetail(kickoff)
+        kickoff != null -> footballKickoffDetail(kickoff, hideFootballScores)
         else -> system?.message.orEmpty()
     }
     val openTarget = NotificationTvFocusTarget.CardAction(
@@ -1761,6 +1769,7 @@ private fun TvLocalNotificationCard(
 private fun MobileLocalNotificationCard(
     notification: LocalNotificationItem,
     metrics: LocalNotificationCenterMetrics,
+    hideFootballScores: Boolean,
     onOpen: () -> Unit,
     onMarkRead: () -> Unit,
     onDelete: () -> Unit,
@@ -1777,7 +1786,7 @@ private fun MobileLocalNotificationCard(
     }
     val detail = when {
         episode != null -> "الموسم ${episode.seasonNumber} • الحلقة ${episode.episodeNumber}"
-        kickoff != null -> footballKickoffDetail(kickoff)
+        kickoff != null -> footballKickoffDetail(kickoff, hideFootballScores)
         else -> system?.message.orEmpty()
     }
     Row(

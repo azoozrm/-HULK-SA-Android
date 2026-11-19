@@ -506,6 +506,11 @@ fun HulkApp(
                                     onSelectFootballTeam = viewModel::selectFootballFavoriteTeam,
                                     onClearFootballTeam = viewModel::clearFootballFavoriteTeam,
                                     onRefreshFootballFeed = { viewModel.refreshFootballFeed(force = true) },
+                                    onLoadFootballTeams = { viewModel.ensureFootballTeamCatalog() },
+                                    onSetFootballTeams = viewModel::setFootballFavoriteTeams,
+                                    onToggleFootballHideScores = viewModel::setFootballHideScores,
+                                    onSaveFootballMatchAlerts = viewModel::saveFootballMatchAlerts,
+                                    onRefreshFootballDay = { day -> viewModel.refreshFootballDay(day) },
                                     onRefreshAccount = { viewModel.refreshAccount { message ->
                                         postActionNotice(
                                             scopedNoticeDisplayText(message),
@@ -673,6 +678,7 @@ fun HulkApp(
                         notifications = state.localNotifications,
                         unreadCount = state.unreadNotificationCount,
                         isTv = isTv,
+                        hideFootballScores = state.footballFeed.hideScores,
                         onBack = {
                             notificationOpenError = null
                             viewModel.back()

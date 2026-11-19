@@ -15,8 +15,11 @@ const OPS_FOOTBALL_TIMEZONE = 'Asia/Riyadh';
 const OPS_FOOTBALL_DEFAULT_REFRESH_SECONDS = 60;
 const OPS_FOOTBALL_MIN_REFRESH_SECONDS = 30;
 const OPS_FOOTBALL_MAX_REFRESH_SECONDS = 300;
-const OPS_FOOTBALL_DEFAULT_MAX_REQUESTS_PER_DAY = 500;
+const OPS_FOOTBALL_DEFAULT_MAX_REQUESTS_PER_DAY = 6000;
 const OPS_FOOTBALL_MAX_REQUESTS_PER_DAY = 7500;
+const OPS_FOOTBALL_DEFAULT_CATALOG_LEAGUES = [17, 53, 47, 1, 3, 4, 5, 6, 7, 8, 83, 31, 27, 61, 64, 68];
+const OPS_FOOTBALL_NATIONAL_LEAGUE_IDS = [31, 27, 61, 58, 64, 68];
+const OPS_FOOTBALL_DEFAULT_CATALOG_MAX_PER_DAY = 200;
 const OPS_FOOTBALL_CARRY_OVER_SECONDS = 6 * 60 * 60;
 const OPS_FOOTBALL_MAX_EVENTS = 400;
 
@@ -88,6 +91,187 @@ function ops_football_string_id(mixed $value): ?string
     return null;
 }
 
+function ops_football_arabic_team_names(): array
+{
+    return [
+        '2415' => 'ابها', '3807' => 'العدالة', '258' => 'الاهلي', '6283' => 'العين',
+        '7467' => 'الانصار', '3393' => 'الباطن', '260' => 'الاتفاق', '4909' => 'الفيصلي',
+        '268' => 'الفتح', '269' => 'الفيحاء', '257' => 'الحزم', '262' => 'الهلال',
+        '271' => 'الاتحاد', '6718' => 'الكوكب', '265' => 'الخليج', '261' => 'الخلود',
+        '7240' => 'النهضة', '273' => 'النجمة', '267' => 'النصر', '270' => 'الاخدود',
+        '3182' => 'العروبة', '272' => 'القادسية', '3255' => 'الرائد', '263' => 'الرياض',
+        '264' => 'الشباب', '7076' => 'الشعلة', '266' => 'التعاون', '3357' => 'الطائي',
+        '5424' => 'الوحدة', '256' => 'ضمك', '3256' => 'الدرعية', '6932' => 'هجر',
+        '6815' => 'نجران', '259' => 'نيوم', '6628' => 'احد',
+        // Verified provider IDs for major teams used by the approved Home/Match Center boards.
+        '44' => 'برشلونة', '57' => 'ريال مدريد', '54' => 'اتلتيكو مدريد',
+        '1' => 'ليفربول', '12' => 'مانشستر سيتي', '18' => 'ارسنال', '13' => 'تشيلسي',
+        '17' => 'مانشستر يونايتد', '9' => 'توتنهام',
+        '79' => 'بايرن ميونخ', '92' => 'بوروسيا دورتموند',
+        '114' => 'باريس سان جيرمان', '73' => 'يوفنتوس', '77' => 'انتر ميلان', '63' => 'ميلان',
+        // Verified national-team IDs from the World Cup catalog.
+        '479' => 'السعودية', '478' => 'مصر', '490' => 'الجزائر', '464' => 'المغرب',
+        '474' => 'تونس', '484' => 'الاردن', '933' => 'العراق', '461' => 'قطر',
+        '489' => 'الارجنتين', '463' => 'البرازيل', '493' => 'انجلترا', '485' => 'فرنسا',
+        '467' => 'المانيا', '475' => 'اسبانيا', '491' => 'البرتغال', '469' => 'هولندا',
+        '453' => 'كوريا الجنوبية', '470' => 'اليابان', '481' => 'ايران', '451' => 'المكسيك',
+        '457' => 'الولايات المتحدة', '459' => 'استراليا',
+    ];
+}
+
+function ops_football_arabic_league_names(): array
+{
+    return [
+        '17' => 'دوري روشن السعودي', '53' => 'البطولة المغربية', '47' => 'الرابطة التونسية',
+        '1' => 'الدوري الإنجليزي', '3' => 'الدوري الإسباني', '4' => 'الدوري الإيطالي',
+        '5' => 'الدوري الألماني', '6' => 'الدوري الفرنسي', '7' => 'دوري أبطال أوروبا',
+        '8' => 'الدوري الأوروبي', '83' => 'دوري المؤتمر الأوروبي',
+        '31' => 'مباريات دولية ودية', '27' => 'كأس العالم',
+        '61' => 'تصفيات كأس العالم - آسيا', '58' => 'تصفيات كأس العالم - أوروبا',
+        '64' => 'دوري الأمم الأوروبية', '68' => 'كأس آسيا',
+    ];
+}
+
+/**
+ * Deterministic ID-bound Arabic transliteration used only when no verified Arabic name exists.
+ * Original provider names remain untouched and searchable; this produces a readable Arabic
+ * display value for the exposed catalog instead of leaking a Latin name into the Arabic UI.
+ */
+function ops_football_arabic_transliteration(string $name): string
+{
+    $value = trim($name);
+    if ($value === '') {
+        return '';
+    }
+    $value = strtr($value, [
+        'á' => 'a', 'à' => 'a', 'â' => 'a', 'ä' => 'a', 'å' => 'a', 'ã' => 'a',
+        'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e',
+        'í' => 'i', 'ì' => 'i', 'î' => 'i', 'ï' => 'i',
+        'ó' => 'o', 'ò' => 'o', 'ô' => 'o', 'ö' => 'o', 'õ' => 'o',
+        'ú' => 'u', 'ù' => 'u', 'û' => 'u', 'ü' => 'u',
+        'ç' => 'c', 'ñ' => 'n', 'ø' => 'o', 'ß' => 'ss',
+    ]);
+    $value = preg_replace('/\b(FC|CF|AFC|SC|AC|CD|UD|CA|SS|AS|US|Club|Football Club|Calcio)\b/iu', ' ', $value) ?? $value;
+    $value = preg_replace('/[^a-zA-Z0-9 ]+/', ' ', $value) ?? $value;
+    $words = preg_split('/\s+/', trim($value)) ?: [];
+    $words = array_values(array_filter($words, static fn(string $word): bool => $word !== ''));
+    if ($words === []) {
+        return '';
+    }
+    $wordMap = [
+        'al' => 'ال', 'el' => 'ال', 'real' => 'ريال', 'atletico' => 'اتلتيكو',
+        'athletic' => 'اتلتيك', 'deportivo' => 'ديبورتيفو', 'sporting' => 'سبورتينغ',
+        'united' => 'يونايتد', 'city' => 'سيتي', 'town' => 'تاون', 'rovers' => 'روفيرز',
+        'wanderers' => 'واندررز', 'county' => 'كونتي', 'club' => 'كلوب',
+    ];
+    $noise = ['fc', 'cf', 'afc', 'sc', 'ac', 'cd', 'ud', 'ca', 'ss', 'as', 'us', 'de', 'la', 'le'];
+    $translitWord = static function (string $word) use ($wordMap, $noise): string {
+        $lower = strtolower($word);
+        if (isset($wordMap[$lower])) {
+            return $wordMap[$lower];
+        }
+        if (in_array($lower, $noise, true)) {
+            return '';
+        }
+        $digraphs = [
+            'tch' => 'تش', 'sch' => 'ش', 'sh' => 'ش', 'ch' => 'تش', 'kh' => 'خ',
+            'gh' => 'غ', 'ph' => 'ف', 'th' => 'ث', 'dh' => 'ذ', 'ck' => 'ك',
+            'qu' => 'ك', 'oo' => 'و', 'ou' => 'و', 'ee' => 'ي', 'ea' => 'ي',
+            'ai' => 'اي', 'ay' => 'اي', 'ei' => 'اي', 'ey' => 'ي', 'oa' => 'و',
+            'ue' => 'و', 'ui' => 'وي',
+        ];
+        $letters = [
+            'a' => 'ا', 'b' => 'ب', 'c' => 'ك', 'd' => 'د', 'e' => '', 'f' => 'ف',
+            'g' => 'غ', 'h' => 'ه', 'i' => 'ي', 'j' => 'ج', 'k' => 'ك', 'l' => 'ل',
+            'm' => 'م', 'n' => 'ن', 'o' => 'و', 'p' => 'ب', 'q' => 'ق', 'r' => 'ر',
+            's' => 'س', 't' => 'ت', 'u' => 'و', 'v' => 'ف', 'w' => 'و', 'x' => 'كس',
+            'y' => 'ي', 'z' => 'ز',
+        ];
+        $result = '';
+        $length = strlen($lower);
+        for ($index = 0; $index < $length; $index++) {
+            $remaining = substr($lower, $index);
+            $matched = false;
+            foreach ($digraphs as $digraph => $arabic) {
+                if (str_starts_with($remaining, $digraph)) {
+                    $result .= $arabic;
+                    $index += strlen($digraph) - 1;
+                    $matched = true;
+                    break;
+                }
+            }
+            if ($matched) {
+                continue;
+            }
+            $char = $lower[$index];
+            if ($char === 'c') {
+                $next = $lower[$index + 1] ?? '';
+                $result .= in_array($next, ['e', 'i', 'y'], true) ? 'س' : 'ك';
+            } else {
+                $result .= $letters[$char] ?? '';
+            }
+        }
+        $result = preg_replace('/(.)\1+/u', '$1', $result) ?? $result;
+        return trim($result);
+    };
+    $translated = [];
+    $definite = false;
+    foreach ($words as $word) {
+        $lower = strtolower($word);
+        if (!$definite && $translated === [] && in_array($lower, ['al', 'el'], true)) {
+            $definite = true;
+            continue;
+        }
+        $part = $translitWord($word);
+        if ($part !== '') {
+            $translated[] = $part;
+        }
+    }
+    if ($translated === []) {
+        return '';
+    }
+    if ($definite) {
+        $translated[0] = 'ال' . $translated[0];
+    }
+    return implode(' ', $translated);
+}
+
+function ops_football_arabic_team_name(string $id, string $name): ?string
+{
+    $mapped = ops_football_arabic_team_names()[$id] ?? null;
+    if ($mapped !== null && $mapped !== '') {
+        return $mapped;
+    }
+    $transliterated = ops_football_arabic_transliteration($name);
+    return $transliterated !== '' ? $transliterated : null;
+}
+
+function ops_football_arabic_competition_name(string $id, string $name): ?string
+{
+    $mapped = ops_football_arabic_league_names()[$id] ?? null;
+    if ($mapped !== null && $mapped !== '') {
+        return $mapped;
+    }
+    $transliterated = ops_football_arabic_transliteration($name);
+    return $transliterated !== '' ? $transliterated : null;
+}
+
+function ops_football_league_priority(string $leagueId): int
+{
+    return match ($leagueId) {
+        '17' => 10,
+        '53', '47' => 30,
+        '1', '3', '4', '5', '6', '7', '8', '83' => 40,
+        '31', '27', '61', '58', '64', '68' => 35,
+        default => 50,
+    };
+}
+
+function ops_football_is_national_league(string $leagueId): bool
+{
+    return in_array($leagueId, array_map('strval', OPS_FOOTBALL_NATIONAL_LEAGUE_IDS), true);
+}
+
 function ops_football_team_payload(mixed $team, mixed $fallbackId, mixed $fallbackName): ?array
 {
     if (is_array($team)) {
@@ -103,7 +287,19 @@ function ops_football_team_payload(mixed $team, mixed $fallbackId, mixed $fallba
     if ($id === null) {
         $id = 'name:' . strtolower(preg_replace('/\s+/u', ' ', $name) ?? $name);
     }
-    return ['id' => $id, 'name' => $name];
+    $numericId = ctype_digit($id) ? $id : null;
+    return [
+        'id' => $id,
+        'name' => $name,
+        'arabicName' => ops_football_arabic_team_name($id, $name),
+        'logoUrl' => $numericId !== null
+            ? 'https://sports.bzzoiro.com/img/team/' . $numericId . '/'
+            : null,
+        'country' => null,
+        'competitionIds' => [],
+        'nationalTeam' => false,
+        'aliases' => [$name],
+    ];
 }
 
 function ops_football_normalize_status(mixed $status): string
@@ -123,7 +319,7 @@ function ops_football_normalize_status(mixed $status): string
  * Normalize one Bzzoiro football event. Missing identity/teams/kickoff is rejected rather than
  * invented. Scores remain null when the provider has no confirmed score.
  */
-function ops_football_normalize_event(mixed $raw): ?array
+function ops_football_normalize_event(mixed $raw, array $leagueNames = []): ?array
 {
     if (!is_array($raw)) {
         return null;
@@ -166,6 +362,15 @@ function ops_football_normalize_event(mixed $raw): ?array
             ? 'name:' . strtolower(preg_replace('/\s+/u', ' ', $competitionName) ?? $competitionName)
             : 'unknown';
     }
+    if ($competitionName === '' && isset($leagueNames[$competitionId])) {
+        $competitionName = trim((string) $leagueNames[$competitionId]);
+    }
+
+    $national = ops_football_is_national_league($competitionId);
+    $home['competitionIds'] = [$competitionId];
+    $away['competitionIds'] = [$competitionId];
+    $home['nationalTeam'] = $national;
+    $away['nationalTeam'] = $national;
 
     $score = is_array($raw['score'] ?? null) ? $raw['score'] : [];
     $homeScore = ops_football_nullable_int(
@@ -178,6 +383,9 @@ function ops_football_normalize_event(mixed $raw): ?array
         $raw['current_minute'] ?? $raw['minute'] ?? $raw['elapsed'] ?? null
     );
     $replacedBy = ops_football_string_id($raw['replaced_by'] ?? $raw['replacedBy'] ?? null);
+    $providerUpdatedAt = ops_football_parse_time(
+        $raw['last_updated'] ?? $raw['updated_at'] ?? $raw['updatedAt'] ?? null
+    );
 
     return [
         'providerEventId' => $eventId,
@@ -186,6 +394,11 @@ function ops_football_normalize_event(mixed $raw): ?array
             'id' => $competitionId,
             'name' => $competitionName !== '' ? $competitionName : 'مسابقة',
             'country' => $competitionCountry !== '' ? $competitionCountry : null,
+            'arabicName' => ops_football_arabic_competition_name($competitionId, $competitionName !== '' ? $competitionName : 'مسابقة'),
+            'logoUrl' => ctype_digit($competitionId)
+                ? 'https://sports.bzzoiro.com/img/league/' . $competitionId . '/'
+                : null,
+            'priority' => ops_football_league_priority($competitionId),
         ],
         'homeTeam' => $home,
         'awayTeam' => $away,
@@ -194,7 +407,118 @@ function ops_football_normalize_event(mixed $raw): ?array
         'homeScore' => $homeScore,
         'awayScore' => $awayScore,
         'minute' => $minute !== null && $minute >= 0 ? $minute : null,
+        'providerUpdatedAt' => $providerUpdatedAt,
     ];
+}
+
+function ops_football_status_rank(string $status): int
+{
+    // A confirmed final result outranks an older live row. Live outranks scheduled.
+    return match ($status) {
+        'finished' => 4,
+        'live' => 3,
+        'upcoming' => 1,
+        default => 0,
+    };
+}
+
+/**
+ * Merge duplicate schedule/live rows by verified provider event id.
+ *
+ * The schedule row owns fixture metadata (competition, teams, kickoff, replacement link). A live
+ * or later row supplies only the fresher status/score/minute fields. This keeps a kickoff time
+ * that a lightweight live payload might omit while never leaving an unresolved day status over a
+ * confirmed live score.
+ */
+function ops_football_merge_event_rows(array $events): array
+{
+    $merged = [];
+    $order = [];
+    foreach ($events as $row) {
+        $id = (string) ($row['providerEventId'] ?? '');
+        if ($id === '') {
+            continue;
+        }
+        if (!isset($merged[$id])) {
+            $merged[$id] = $row;
+            $order[] = $id;
+            continue;
+        }
+        $base = $merged[$id];
+        $baseRank = ops_football_status_rank((string) ($base['status'] ?? 'unresolved'));
+        $rowRank = ops_football_status_rank((string) ($row['status'] ?? 'unresolved'));
+        $rowHasDetail = ($row['minute'] ?? null) !== null
+            || ($row['homeScore'] ?? null) !== null
+            || ($row['awayScore'] ?? null) !== null;
+        $baseHasDetail = ($base['minute'] ?? null) !== null
+            || ($base['homeScore'] ?? null) !== null
+            || ($base['awayScore'] ?? null) !== null;
+        $baseUpdated = is_int($base['providerUpdatedAt'] ?? null) ? $base['providerUpdatedAt'] : 0;
+        $rowUpdated = is_int($row['providerUpdatedAt'] ?? null) ? $row['providerUpdatedAt'] : 0;
+        $newerCancellation = $rowUpdated > $baseUpdated && $rowUpdated > 0
+            && in_array($row['status'], ['cancelled', 'postponed'], true);
+        $newerFinalScore = $rowUpdated > $baseUpdated && $rowUpdated > 0
+            && $row['status'] === 'finished' && $base['status'] === 'finished'
+            && $rowHasDetail;
+        $existingNewerCancellation = $baseUpdated > $rowUpdated && $baseUpdated > 0
+            && in_array($base['status'], ['cancelled', 'postponed'], true);
+        $takeRow = false;
+        if ($newerCancellation || $newerFinalScore) {
+            $takeRow = true;
+        } elseif ($existingNewerCancellation) {
+            $takeRow = false;
+        } elseif ($rowRank > $baseRank) {
+            $takeRow = true;
+        } elseif ($rowRank === $baseRank && $row['status'] === 'live' && $base['status'] === 'live') {
+            // The live endpoint is appended after the schedule list, so a later row is the fresher
+            // observation. Higher elapsed minutes also win; equal-minute scores use the later row.
+            $baseMinute = is_int($base['minute'] ?? null) ? $base['minute'] : -1;
+            $rowMinute = is_int($row['minute'] ?? null) ? $row['minute'] : -1;
+            $takeRow = $rowMinute > $baseMinute
+                || ($rowMinute === $baseMinute && ($rowHasDetail || $baseHasDetail));
+        } elseif ($rowRank === $baseRank && $row['status'] === 'finished' && $base['status'] === 'finished') {
+            // Protect the first confirmed final result unless it lacks a score and the later row
+            // carries the confirmed score.
+            $takeRow = (!$baseHasDetail && $rowHasDetail);
+        }
+        if ($takeRow) {
+            $base['status'] = $row['status'];
+            // A fresher status row may omit a field that the previous row already verified.
+            // Preserve the known score/minute instead of replacing it with null.
+            $base['homeScore'] = $row['homeScore'] ?? $base['homeScore'] ?? null;
+            $base['awayScore'] = $row['awayScore'] ?? $base['awayScore'] ?? null;
+            $base['minute'] = $row['minute'] ?? $base['minute'] ?? null;
+            $base['replacedBy'] = $row['replacedBy'] ?? $base['replacedBy'] ?? null;
+        }
+        if (!$takeRow && in_array($base['status'], ['finished', 'cancelled', 'postponed'], true)) {
+            $base['homeScore'] = $base['homeScore'] ?? $row['homeScore'] ?? null;
+            $base['awayScore'] = $base['awayScore'] ?? $row['awayScore'] ?? null;
+        }
+        $base['providerUpdatedAt'] = max(
+            is_int($base['providerUpdatedAt'] ?? null) ? $base['providerUpdatedAt'] : 0,
+            is_int($row['providerUpdatedAt'] ?? null) ? $row['providerUpdatedAt'] : 0,
+        ) ?: null;
+        if (
+            (($base['competition']['name'] ?? '') === 'مسابقة' || ($base['competition']['name'] ?? '') === '')
+            && ($row['competition']['name'] ?? '') !== ''
+            && ($row['competition']['name'] ?? '') !== 'مسابقة'
+        ) {
+            $base['competition']['name'] = $row['competition']['name'];
+            if (($base['competition']['country'] ?? null) === null) {
+                $base['competition']['country'] = $row['competition']['country'] ?? null;
+            }
+        }
+        $base['aliases'] = array_values(array_unique(array_merge(
+            $base['aliases'] ?? [],
+            $row['aliases'] ?? [],
+        )));
+        $merged[$id] = $base;
+    }
+    $result = [];
+    foreach ($order as $id) {
+        $result[] = $merged[$id];
+    }
+    return $result;
 }
 
 /**
@@ -230,7 +554,10 @@ function ops_football_reconcile_replaced(array $events): array
     $result = [];
     $seen = [];
     foreach ($events as $event) {
-        $canonical = $event;
+        // The aggregate intentionally appends the live endpoint after the day list. Use the
+        // latest normalized row for the same provider id, otherwise an unresolved day row would
+        // keep its status while the live row only supplied a score.
+        $canonical = $byId[$event['providerEventId']] ?? $event;
         $visited = [];
         while (true) {
             $replacement = $canonical['replacedBy'] ?? null;
@@ -258,8 +585,8 @@ function ops_football_reconcile_replaced(array $events): array
 }
 
 /**
- * Keep the requested Riyadh day plus matches that were already live at midnight. A finished
- * match that kicked off before midnight is retained for a short bounded result window.
+ * Keep the requested Riyadh day plus matches that were already live at midnight. Finished
+ * results from the previous day belong to the separate 24-hour kickoff history, not this rail.
  */
 function ops_football_select_day(array $events, string $day): array
 {
@@ -277,12 +604,8 @@ function ops_football_select_day(array $events, string $day): array
         $carried = false;
         if (!$sameDay) {
             $earliestCarry = $bounds['start'] - OPS_FOOTBALL_CARRY_OVER_SECONDS;
-            $isStarted = in_array($event['status'], ['live', 'finished'], true);
-            $isResultWindow = $event['status'] === 'finished'
-                && $kickoff >= $bounds['start'] - 3 * 60 * 60;
-            $carried = $isStarted
-                && $kickoff >= $earliestCarry
-                && ($event['status'] === 'live' || $isResultWindow);
+            $carried = $event['status'] === 'live'
+                && $kickoff >= $earliestCarry;
         }
         if (!$sameDay && !$carried) {
             continue;
@@ -293,6 +616,45 @@ function ops_football_select_day(array $events, string $day): array
     return $selected;
 }
 
+/**
+ * Provider-confirmed start estimate. Kickoff is the provider `event_date`; a live/finished row
+ * confirms that timestamp only once it is no later than the server clock. The frozen minute is
+ * never used to invent a start.
+ */
+function ops_football_started_at(array $event, int $now): ?int
+{
+    $kickoff = (int) ($event['kickoffAt'] ?? 0);
+    if ($kickoff <= 0) {
+        return null;
+    }
+    if ($event['status'] === 'live' || $event['status'] === 'finished') {
+        // Provider event_date is the only stable kickoff evidence in the list/live schema. The
+        // elapsed minute freezes at halftime and must never be used to invent a start time.
+        return $kickoff <= $now ? $kickoff : null;
+    }
+    return null;
+}
+
+function ops_football_match_payload(array $event, int $now): array
+{
+    return [
+        'id' => 'evt:' . $event['providerEventId'],
+        'providerEventId' => $event['providerEventId'],
+        'aliases' => $event['aliases'] ?? [],
+        'competition' => $event['competition'],
+        'homeTeam' => $event['homeTeam'],
+        'awayTeam' => $event['awayTeam'],
+        'kickoffAt' => $event['kickoffAt'],
+        'status' => $event['status'],
+        'homeScore' => $event['homeScore'],
+        'awayScore' => $event['awayScore'],
+        'minute' => $event['minute'],
+        'carriedOver' => $event['carriedOver'] ?? false,
+        'startedAt' => ops_football_started_at($event, $now),
+        'providerUpdatedAt' => $event['providerUpdatedAt'] ?? null,
+    ];
+}
+
 function ops_football_build_payload(
     array $events,
     string $day,
@@ -301,15 +663,44 @@ function ops_football_build_payload(
     ?int $cachedAt,
     ?int $retryAfterSeconds,
     int $refreshSeconds,
+    array $leagueNames = [],
+    ?string $reminderDay = null,
 ): array {
     $normalized = [];
     foreach ($events as $raw) {
-        $event = ops_football_normalize_event($raw);
+        $event = ops_football_normalize_event($raw, $leagueNames);
         if ($event !== null) {
             $normalized[] = $event;
         }
     }
-    $selected = ops_football_select_day(ops_football_reconcile_replaced($normalized), $day);
+    $reconciled = ops_football_reconcile_replaced(ops_football_merge_event_rows($normalized));
+    $selected = ops_football_select_day($reconciled, $day);
+    $reminderEvents = $reminderDay !== null
+        ? ops_football_select_day($reconciled, $reminderDay)
+        : [];
+    $reminderEvents = array_values(array_filter(
+        $reminderEvents,
+        static fn(array $event): bool => $event['status'] === 'upcoming'
+            && (int) ($event['kickoffAt'] ?? 0) > $now
+    ));
+    usort($reminderEvents, static fn(array $left, array $right): int =>
+        (int) ($left['kickoffAt'] ?? 0) <=> (int) ($right['kickoffAt'] ?? 0)
+    );
+    $reminderEvents = array_slice($reminderEvents, 0, 50);
+    $historyEvents = array_values(array_filter(
+        $reconciled,
+        static function (array $event) use ($now): bool {
+            $startedAt = ops_football_started_at($event, $now);
+            return $startedAt !== null
+                && $startedAt >= $now - 24 * 60 * 60
+                && $startedAt <= $now;
+        }
+    ));
+    usort($historyEvents, static function (array $left, array $right) use ($now): int {
+        return (ops_football_started_at($right, $now) ?? 0)
+            <=> (ops_football_started_at($left, $now) ?? 0);
+    });
+    $historyEvents = array_slice($historyEvents, 0, 200);
     usort($selected, static function (array $left, array $right): int {
         $statusOrder = ['live' => 0, 'upcoming' => 1, 'finished' => 2, 'postponed' => 3, 'cancelled' => 4, 'unresolved' => 5];
         $leftStatus = $statusOrder[$left['status']] ?? 5;
@@ -320,30 +711,38 @@ function ops_football_build_payload(
     $selected = array_slice($selected, 0, OPS_FOOTBALL_MAX_EVENTS);
 
     $teams = [];
-    foreach ($selected as $event) {
+    foreach (array_merge($selected, $historyEvents, $reminderEvents) as $event) {
         foreach ([$event['homeTeam'], $event['awayTeam']] as $team) {
-            $teams[$team['id']] = ['id' => $team['id'], 'name' => $team['name']];
+            $existing = $teams[$team['id']] ?? [];
+            $mergedTeam = array_merge($existing, $team);
+            $mergedTeam['competitionIds'] = array_values(array_unique(array_merge(
+                $existing['competitionIds'] ?? [],
+                $team['competitionIds'] ?? [],
+            )));
+            $mergedTeam['aliases'] = array_values(array_unique(array_filter(array_merge(
+                $existing['aliases'] ?? [],
+                $team['aliases'] ?? [],
+            ))));
+            $mergedTeam['nationalTeam'] = ($existing['nationalTeam'] ?? false) === true
+                || ($team['nationalTeam'] ?? false) === true;
+            $teams[$team['id']] = $mergedTeam;
         }
     }
     $teamList = array_values($teams);
     usort($teamList, static fn(array $left, array $right): int => strcmp($left['name'], $right['name']));
 
-    $matches = array_map(static function (array $event): array {
-        return [
-            'id' => 'evt:' . $event['providerEventId'],
-            'providerEventId' => $event['providerEventId'],
-            'aliases' => $event['aliases'] ?? [],
-            'competition' => $event['competition'],
-            'homeTeam' => $event['homeTeam'],
-            'awayTeam' => $event['awayTeam'],
-            'kickoffAt' => $event['kickoffAt'],
-            'status' => $event['status'],
-            'homeScore' => $event['homeScore'],
-            'awayScore' => $event['awayScore'],
-            'minute' => $event['minute'],
-            'carriedOver' => $event['carriedOver'] ?? false,
-        ];
-    }, $selected);
+    $matches = array_map(
+        static fn(array $event): array => ops_football_match_payload($event, $now),
+        $selected,
+    );
+    $kickoffHistory = array_map(
+        static fn(array $event): array => ops_football_match_payload($event, $now),
+        $historyEvents,
+    );
+    $reminderCandidates = array_map(
+        static fn(array $event): array => ops_football_match_payload($event, $now),
+        $reminderEvents,
+    );
 
     return [
         'schemaVersion' => OPS_FOOTBALL_SCHEMA_VERSION,
@@ -357,6 +756,8 @@ function ops_football_build_payload(
         'refreshSeconds' => $refreshSeconds,
         'provider' => 'bzzoiro',
         'matches' => $matches,
+        'kickoffHistory' => $kickoffHistory,
+        'reminderCandidates' => $reminderCandidates,
         'teams' => $teamList,
     ];
 }
@@ -508,6 +909,322 @@ function ops_football_cached_payload(array $cache, int $refreshSeconds): array
 }
 
 /**
+ * Bzzoiro list responses use `results`; the live endpoint uses `events`. Accept both plus a raw
+ * list without weakening the shape check.
+ */
+function ops_football_provider_rows(mixed $decoded): ?array
+{
+    if (!is_array($decoded)) {
+        return null;
+    }
+    if (isset($decoded['results']) && is_array($decoded['results'])) {
+        return array_values(array_filter($decoded['results'], 'is_array'));
+    }
+    if (isset($decoded['events']) && is_array($decoded['events'])) {
+        return array_values(array_filter($decoded['events'], 'is_array'));
+    }
+    if (array_is_list($decoded)) {
+        return array_values(array_filter($decoded, 'is_array'));
+    }
+    return null;
+}
+
+function ops_football_provider_count(mixed $decoded, array $rows): int
+{
+    if (is_array($decoded) && isset($decoded['count']) && is_numeric($decoded['count'])) {
+        return max(0, (int) $decoded['count']);
+    }
+    return count($rows);
+}
+
+/**
+ * One provider GET with the shared error/Retry-After contract.
+ *
+ * @return array{ok:bool,status:int,retryAfter:?int,rows:array,count:int,error:?string}
+ */
+function ops_football_provider_get(
+    callable $transport,
+    string $url,
+    array $headers,
+    int $timeoutSeconds,
+    int $clock,
+): array {
+    $response = $transport($url, $headers, $timeoutSeconds);
+    $status = (int) ($response['status'] ?? 0);
+    $retryAfter = ops_football_parse_retry_after(
+        $response['headers']['retry-after'] ?? null,
+        $clock
+    );
+    if ($status === 429 || $status === 503) {
+        return [
+            'ok' => false,
+            'status' => $status,
+            'retryAfter' => $retryAfter ?? ($status === 429 ? 60 : 30),
+            'rows' => [],
+            'count' => 0,
+            'error' => 'provider_unavailable',
+        ];
+    }
+    if ($status < 200 || $status >= 300 || ($response['error'] ?? null) !== null) {
+        return [
+            'ok' => false,
+            'status' => $status,
+            'retryAfter' => $retryAfter,
+            'rows' => [],
+            'count' => 0,
+            'error' => 'provider_unavailable',
+        ];
+    }
+    $decoded = json_decode((string) ($response['body'] ?? ''), true);
+    $rows = ops_football_provider_rows($decoded);
+    if ($rows === null) {
+        return [
+            'ok' => false,
+            'status' => $status,
+            'retryAfter' => $retryAfter,
+            'rows' => [],
+            'count' => 0,
+            'error' => 'provider_invalid_response',
+        ];
+    }
+    return [
+        'ok' => true,
+        'status' => $status,
+        'retryAfter' => $retryAfter,
+        'rows' => $rows,
+        'count' => ops_football_provider_count($decoded, $rows),
+        'error' => null,
+    ];
+}
+
+/**
+ * Daily verified team catalog for the favorite-team picker. Teams are resolved by stable provider
+ * IDs from configured competitions so an empty match day still has a searchable catalog.
+ *
+ * @return array{httpStatus:int,payload:array,retryAfter:?int}
+ */
+function ops_football_build_team_catalog(
+    array $settings,
+    ?int $now = null,
+    ?callable $transport = null,
+): array {
+    $clock = $now ?? time();
+    $refreshSeconds = 86_400;
+    $directory = ops_football_cache_directory($settings);
+    $cachePath = $directory . DIRECTORY_SEPARATOR . 'teams.json';
+    $lockPath = $directory . DIRECTORY_SEPARATOR . 'teams.lock';
+    $quotaPath = $directory . DIRECTORY_SEPARATOR . 'quota-teams-' . gmdate('Y-m-d', $clock) . '.json';
+    $cache = ops_football_read_json($cachePath);
+    if ($cache !== null && (($cache['payload']['complete'] ?? false) !== true)) {
+        $cache = null;
+    }
+    $cacheAge = $cache !== null ? $clock - (int) ($cache['cachedAt'] ?? 0) : PHP_INT_MAX;
+    if ($cache !== null && $cacheAge >= 0 && $cacheAge < $refreshSeconds) {
+        $payload = is_array($cache['payload'] ?? null) ? $cache['payload'] : [];
+        $payload['stale'] = false;
+        $payload['complete'] = true;
+        $payload['cachedAt'] = (int) ($cache['cachedAt'] ?? 0);
+        return ['httpStatus' => 200, 'payload' => $payload, 'retryAfter' => null];
+    }
+
+    $baseUrl = rtrim(trim((string) ($settings['bzzoiro']['base_url'] ?? '')), '/');
+    $apiKey = trim((string) ($settings['bzzoiro']['api_key'] ?? ''));
+    if ($apiKey === '') {
+        if ($cache !== null) {
+            $payload = is_array($cache['payload'] ?? null) ? $cache['payload'] : [];
+            $payload['stale'] = true;
+            return ['httpStatus' => 200, 'payload' => $payload, 'retryAfter' => null];
+        }
+        return ['httpStatus' => 503, 'payload' => ['error' => 'provider_not_configured'], 'retryAfter' => null];
+    }
+    $parts = parse_url($baseUrl);
+    if (!is_array($parts) || ($parts['scheme'] ?? '') !== 'https' || ($parts['host'] ?? '') !== 'sports.bzzoiro.com') {
+        return ['httpStatus' => 503, 'payload' => ['error' => 'provider_not_configured'], 'retryAfter' => null];
+    }
+
+    $lock = @fopen($lockPath, 'c');
+    if ($lock === false) {
+        return $cache !== null
+            ? ['httpStatus' => 200, 'payload' => array_merge($cache['payload'] ?? [], ['stale' => true]), 'retryAfter' => null]
+            : ['httpStatus' => 503, 'payload' => ['error' => 'cache_unavailable'], 'retryAfter' => null];
+    }
+    if (!flock($lock, LOCK_EX | LOCK_NB)) {
+        fclose($lock);
+        return $cache !== null
+            ? ['httpStatus' => 200, 'payload' => array_merge($cache['payload'] ?? [], ['stale' => true]), 'retryAfter' => null]
+            : ['httpStatus' => 503, 'payload' => ['error' => 'refresh_busy'], 'retryAfter' => null];
+    }
+
+    try {
+        $cache = ops_football_read_json($cachePath);
+        if ($cache !== null && (($cache['payload']['complete'] ?? false) !== true)) {
+            $cache = null;
+        }
+        $cacheAge = $cache !== null ? $clock - (int) ($cache['cachedAt'] ?? 0) : PHP_INT_MAX;
+        if ($cache !== null && $cacheAge >= 0 && $cacheAge < $refreshSeconds) {
+            $payload = is_array($cache['payload'] ?? null) ? $cache['payload'] : [];
+            $payload['stale'] = false;
+            $payload['complete'] = true;
+            return ['httpStatus' => 200, 'payload' => $payload, 'retryAfter' => null];
+        }
+        $retryPath = $directory . DIRECTORY_SEPARATOR . 'retry.json';
+        $retryState = ops_football_read_json($retryPath) ?? [];
+        $retryUntil = (int) ($retryState['until'] ?? 0);
+        if ($retryUntil > $clock) {
+            $retryAfter = $retryUntil - $clock;
+            if ($cache !== null) {
+                $payload = is_array($cache['payload'] ?? null) ? $cache['payload'] : [];
+                $payload['stale'] = true;
+                $payload['complete'] = true;
+                return ['httpStatus' => 200, 'payload' => $payload, 'retryAfter' => $retryAfter];
+            }
+            return ['httpStatus' => 503, 'payload' => ['error' => 'provider_rate_limited', 'complete' => false], 'retryAfter' => $retryAfter];
+        }
+        $quota = ops_football_read_json($quotaPath) ?? [];
+        $used = max(0, (int) ($quota['count'] ?? 0));
+        $maxPerDay = max(1, min(200, (int) ($settings['catalog_max_requests_per_day'] ?? OPS_FOOTBALL_DEFAULT_CATALOG_MAX_PER_DAY)));
+        if ($used >= $maxPerDay) {
+            return $cache !== null
+                ? ['httpStatus' => 200, 'payload' => array_merge($cache['payload'] ?? [], ['stale' => true]), 'retryAfter' => null]
+                : ['httpStatus' => 503, 'payload' => ['error' => 'provider_quota_exhausted'], 'retryAfter' => null];
+        }
+        $leagueIds = $settings['catalog_league_ids'] ?? OPS_FOOTBALL_DEFAULT_CATALOG_LEAGUES;
+        if (!is_array($leagueIds)) {
+            $leagueIds = OPS_FOOTBALL_DEFAULT_CATALOG_LEAGUES;
+        }
+        $leagueIds = array_values(array_filter(array_map('intval', $leagueIds), static fn(int $id): bool => $id > 0));
+        $leagueIds = array_slice(array_unique($leagueIds), 0, 16);
+        $headers = [
+            'Authorization' => 'Token ' . $apiKey,
+            'Accept' => 'application/json',
+            'User-Agent' => 'NEO4K-Football-Catalog/1.0',
+        ];
+        $transport = $transport ?? 'ops_football_http_get';
+        $timeoutSeconds = max(3, min(15, (int) ($settings['timeout_seconds'] ?? 8)));
+        $teams = [];
+        $usedRequests = 0;
+        $successful = 0;
+        $retryAfter = null;
+        $complete = true;
+        foreach ($leagueIds as $leagueId) {
+            $offset = 0;
+            $leagueReceived = 0;
+            $leagueCount = 0;
+            for ($page = 0; $page < 8; $page++) {
+                if ($used + $usedRequests >= $maxPerDay) {
+                    $complete = false;
+                    break 2;
+                }
+                $retryState = ops_football_read_json($retryPath) ?? [];
+                if ((int) ($retryState['until'] ?? 0) > $clock) {
+                    $retryAfter = (int) $retryState['until'] - $clock;
+                    $complete = false;
+                    break 2;
+                }
+                $usedRequests++;
+                $response = ops_football_provider_get(
+                    $transport,
+                    $baseUrl . '/teams/?league_id=' . $leagueId . '&limit=200&offset=' . $offset,
+                    $headers,
+                    $timeoutSeconds,
+                    $clock,
+                );
+                if (!$response['ok']) {
+                    $retryAfter = $response['retryAfter'] ?? $retryAfter;
+                    $complete = false;
+                    break 2;
+                }
+                $successful++;
+                $leagueReceived += count($response['rows']);
+                $leagueCount = max($leagueCount, $response['count']);
+                foreach ($response['rows'] as $team) {
+                    $id = ops_football_string_id($team['id'] ?? null);
+                    $name = trim((string) ($team['name'] ?? ''));
+                    if ($id !== null && $name !== '') {
+                        $country = trim((string) ($team['country'] ?? '')) ?: null;
+                        $national = ops_football_is_national_league((string) $leagueId);
+                        $existing = $teams[$id] ?? null;
+                        $competitionIds = array_values(array_unique(array_merge(
+                            $existing['competitionIds'] ?? [],
+                            [$leagueId],
+                        )));
+                        $aliases = array_values(array_unique(array_filter([
+                            $name,
+                            trim((string) ($team['short_name'] ?? '')),
+                            $existing['name'] ?? '',
+                        ])));
+                        $teams[$id] = [
+                            'id' => $id,
+                            'name' => $name,
+                            'arabicName' => $existing['arabicName'] ?? ops_football_arabic_team_name($id, $name),
+                            'logoUrl' => ctype_digit($id)
+                                ? 'https://sports.bzzoiro.com/img/team/' . $id . '/'
+                                : null,
+                            'country' => $country ?? ($existing['country'] ?? null),
+                            'competitionIds' => $competitionIds,
+                            'nationalTeam' => $national || (($existing['nationalTeam'] ?? false) === true),
+                            'aliases' => $aliases,
+                        ];
+                    }
+                }
+                if (count($response['rows']) < 200) {
+                    // A short page is complete only when the provider count agrees with what was
+                    // returned. A short page that leaves counted rows behind is an incomplete
+                    // refresh and must not become a fresh complete cache.
+                    if ($offset + count($response['rows']) < $response['count']) {
+                        $complete = false;
+                        break 2;
+                    }
+                    break;
+                }
+                $offset += 200;
+            }
+            // Two full pages can still leave provider-counted rows behind. Never publish such a
+            // catalog as complete, even though every requested page succeeded.
+            if ($leagueCount > 0 && $leagueReceived < $leagueCount) {
+                $complete = false;
+                break;
+            }
+        }
+        $quota['count'] = $used + $usedRequests;
+        $quota['day'] = gmdate('Y-m-d', $clock);
+        ops_football_write_json($quotaPath, $quota);
+        if ($retryAfter !== null) {
+            ops_football_write_json($directory . DIRECTORY_SEPARATOR . 'retry.json', ['until' => $clock + $retryAfter]);
+        }
+        if (!$complete || $successful === 0) {
+            if ($cache !== null) {
+                $payload = is_array($cache['payload'] ?? null) ? $cache['payload'] : [];
+                $payload['stale'] = true;
+                $payload['complete'] = true;
+                return ['httpStatus' => 200, 'payload' => $payload, 'retryAfter' => $retryAfter];
+            }
+            return [
+                'httpStatus' => 503,
+                'payload' => ['error' => 'provider_unavailable', 'complete' => false],
+                'retryAfter' => $retryAfter,
+            ];
+        }
+        $teamList = array_values($teams);
+        usort($teamList, static fn(array $left, array $right): int => strcmp($left['name'], $right['name']));
+        $payload = [
+            'schemaVersion' => OPS_FOOTBALL_SCHEMA_VERSION,
+            'generatedAt' => $clock,
+            'cachedAt' => $clock,
+            'stale' => false,
+            'complete' => true,
+            'provider' => 'bzzoiro',
+            'teams' => $teamList,
+        ];
+        ops_football_write_json($cachePath, ['cachedAt' => $clock, 'payload' => $payload]);
+        return ['httpStatus' => 200, 'payload' => $payload, 'retryAfter' => $retryAfter];
+    } finally {
+        flock($lock, LOCK_UN);
+        fclose($lock);
+    }
+}
+
+/**
  * Build one server-owned feed snapshot.
  *
  * @return array{httpStatus:int,payload:array,retryAfter:?int,refreshSeconds:int}
@@ -544,8 +1261,8 @@ function ops_football_build_feed(
     );
     $maxPerDay = (int) ($settings['max_requests_per_day'] ?? OPS_FOOTBALL_DEFAULT_MAX_REQUESTS_PER_DAY);
     $maxPerDay = max(1, min(OPS_FOOTBALL_MAX_REQUESTS_PER_DAY, $maxPerDay));
-    $maxPerRefresh = (int) ($settings['max_requests_per_refresh'] ?? 2);
-    $maxPerRefresh = max(1, min(2, $maxPerRefresh));
+    $maxPerRefresh = (int) ($settings['max_requests_per_refresh'] ?? 4);
+    $maxPerRefresh = max(1, min(4, $maxPerRefresh));
     $timeoutSeconds = max(3, min(15, (int) ($settings['timeout_seconds'] ?? 8)));
 
     $directory = ops_football_cache_directory($settings);
@@ -658,49 +1375,144 @@ function ops_football_build_feed(
             'Accept' => 'application/json',
             'User-Agent' => 'NEO4K-Football-Feed/1.0',
         ];
-        $requests = [[
-            'url' => $baseUrl . '/events/?date_from=' . rawurlencode($previousDay)
-                . '&date_to=' . rawurlencode($requestedDay) . '&limit=200',
-        ]];
-        if ($requestedDay === ops_football_riyadh_day_key($clock) && $budgetForRefresh >= 2) {
-            $requests[] = ['url' => $baseUrl . '/events/live/'];
-        }
-        $requests = array_slice($requests, 0, $budgetForRefresh);
-
+        $transport = $transport ?? 'ops_football_http_get';
         $events = [];
+        $reminderEvents = [];
+        $leagueNames = [];
         $usedRequests = 0;
+        $remaining = $budgetForRefresh;
         $failure = null;
         $rateLimitedFor = null;
-        $transport = $transport ?? 'ops_football_http_get';
-        foreach ($requests as $request) {
+
+        // League names are not embedded in the list event rows. Cache the provider league list for
+        // one day; a failure here degrades names only and never blocks match rows.
+        $leagueCachePath = $directory . DIRECTORY_SEPARATOR . 'leagues.json';
+        $leagueCache = ops_football_read_json($leagueCachePath);
+        $leagueCacheAge = $leagueCache !== null ? $clock - (int) ($leagueCache['cachedAt'] ?? 0) : PHP_INT_MAX;
+        if ($leagueCache !== null && $leagueCacheAge >= 0 && $leagueCacheAge < 86_400) {
+            foreach (($leagueCache['leagues'] ?? []) as $league) {
+                if (is_array($league) && isset($league['id'], $league['name'])) {
+                    $leagueNames[(string) $league['id']] = (string) $league['name'];
+                }
+            }
+        } elseif ($remaining > 0) {
+            $remaining--;
             $usedRequests++;
-            $response = $transport($request['url'], $headers, $timeoutSeconds);
-            $status = (int) ($response['status'] ?? 0);
-            $retryAfter = ops_football_parse_retry_after(
-                $response['headers']['retry-after'] ?? null,
-                $clock
+            $leagueResponse = ops_football_provider_get(
+                $transport,
+                $baseUrl . '/leagues/?limit=200',
+                $headers,
+                $timeoutSeconds,
+                $clock,
             );
-            if ($status === 429 || $status === 503) {
-                $rateLimitedFor = $retryAfter ?? ($status === 429 ? 60 : 30);
-                $failure = 'provider_unavailable';
+            if ($leagueResponse['ok']) {
+                $cachedLeagues = [];
+                foreach ($leagueResponse['rows'] as $league) {
+                    if (isset($league['id'], $league['name'])) {
+                        $leagueNames[(string) $league['id']] = (string) $league['name'];
+                        $cachedLeagues[] = [
+                            'id' => (string) $league['id'],
+                            'name' => (string) $league['name'],
+                        ];
+                    }
+                }
+                if ($cachedLeagues !== []) {
+                    ops_football_write_json($leagueCachePath, [
+                        'cachedAt' => $clock,
+                        'leagues' => $cachedLeagues,
+                    ]);
+                }
+            } elseif ($leagueResponse['retryAfter'] !== null) {
+                // A rate-limited league request means the shared provider window is closed for
+                // every remaining fixture/catalog call in this refresh.
+                $rateLimitedFor = $leagueResponse['retryAfter'];
+                $failure = $leagueResponse['error'] ?? 'provider_unavailable';
+            }
+        }
+
+        $dayBase = $baseUrl . '/events/?date_from=' . rawurlencode($previousDay)
+            . '&date_to=' . rawurlencode($requestedDay) . '&limit=200';
+        $dayOffset = 0;
+        $dayTotal = 0;
+        while ($failure === null && $remaining > 0) {
+            $remaining--;
+            $usedRequests++;
+            $dayResponse = ops_football_provider_get(
+                $transport,
+                $dayBase . '&offset=' . $dayOffset,
+                $headers,
+                $timeoutSeconds,
+                $clock,
+            );
+            if (!$dayResponse['ok']) {
+                $failure = $dayResponse['error'];
+                if ($dayResponse['retryAfter'] !== null) {
+                    $rateLimitedFor = $dayResponse['retryAfter'];
+                }
                 break;
             }
-            if ($status < 200 || $status >= 300 || ($response['error'] ?? null) !== null) {
-                $failure = 'provider_unavailable';
+            foreach ($dayResponse['rows'] as $row) {
+                $events[] = $row;
+            }
+            $dayTotal = $dayResponse['count'];
+            $returned = count($dayResponse['rows']);
+            if ($returned === 0 || $returned < 200 || $dayOffset + $returned >= $dayTotal || $dayOffset >= 200) {
                 break;
             }
-            $decoded = json_decode((string) ($response['body'] ?? ''), true);
-            $rows = is_array($decoded)
-                ? (isset($decoded['results']) && is_array($decoded['results']) ? $decoded['results'] : $decoded)
-                : null;
-            if (!is_array($rows)) {
-                $failure = 'provider_invalid_response';
-                break;
-            }
-            foreach ($rows as $row) {
-                if (is_array($row)) {
+            $dayOffset += 200;
+        }
+        $dayCollected = count($events);
+        if ($failure === null && $dayTotal > $dayCollected) {
+            // Never publish a truncated fixture page set as a complete fresh feed.
+            $failure = 'provider_truncated';
+        }
+
+        if ($failure === null && $requestedDay === ops_football_riyadh_day_key($clock) && $remaining > 0) {
+            $remaining--;
+            $usedRequests++;
+            $liveResponse = ops_football_provider_get(
+                $transport,
+                $baseUrl . '/events/live/',
+                $headers,
+                $timeoutSeconds,
+                $clock,
+            );
+            if (!$liveResponse['ok']) {
+                $failure = $liveResponse['error'];
+                if ($liveResponse['retryAfter'] !== null) {
+                    $rateLimitedFor = $liveResponse['retryAfter'];
+                }
+            } else {
+                foreach ($liveResponse['rows'] as $row) {
                     $events[] = $row;
                 }
+            }
+        }
+
+        $todayKey = ops_football_riyadh_day_key($clock);
+        $reminderDay = $requestedDay === $todayKey
+            ? ops_football_riyadh_day_key($bounds['end'])
+            : null;
+        if ($failure === null && $reminderDay !== null && $remaining > 0) {
+            $remaining--;
+            $usedRequests++;
+            $reminderResponse = ops_football_provider_get(
+                $transport,
+                $baseUrl . '/events/?date_from=' . rawurlencode($reminderDay)
+                    . '&date_to=' . rawurlencode($reminderDay) . '&limit=200&offset=0',
+                $headers,
+                $timeoutSeconds,
+                $clock,
+            );
+            if ($reminderResponse['ok']) {
+                foreach ($reminderResponse['rows'] as $row) {
+                    $reminderEvents[] = $row;
+                }
+            } elseif ($reminderResponse['retryAfter'] !== null) {
+                // Reminder prefetch is optional: keep today's already-fetched data but record the
+                // shared provider cooldown for the next request.
+                $rateLimitedFor = $reminderResponse['retryAfter'];
+                $reminderDay = null;
             }
         }
 
@@ -708,10 +1520,10 @@ function ops_football_build_feed(
         $quota['day'] = gmdate('Y-m-d', $clock);
         ops_football_write_json($quotaPath, $quota);
 
+        if ($rateLimitedFor !== null) {
+            ops_football_write_json($retryPath, ['until' => $clock + $rateLimitedFor]);
+        }
         if ($failure !== null) {
-            if ($rateLimitedFor !== null) {
-                ops_football_write_json($retryPath, ['until' => $clock + $rateLimitedFor]);
-            }
             if ($cache !== null) {
                 $stale = ops_football_cached_payload($cache, $refreshSeconds);
                 $stale['stale'] = true;
@@ -732,13 +1544,15 @@ function ops_football_build_feed(
         }
 
         $payload = ops_football_build_payload(
-            events: $events,
+            events: array_merge($events, $reminderEvents),
             day: $requestedDay,
             now: $clock,
             stale: false,
             cachedAt: $clock,
             retryAfterSeconds: null,
             refreshSeconds: $refreshSeconds,
+            leagueNames: $leagueNames,
+            reminderDay: $reminderDay,
         );
         ops_football_write_json($cachePath, ['cachedAt' => $clock, 'payload' => $payload]);
         return ['httpStatus' => 200, 'payload' => $payload, 'retryAfter' => null, 'refreshSeconds' => $refreshSeconds];

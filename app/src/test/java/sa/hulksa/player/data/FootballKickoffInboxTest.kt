@@ -155,17 +155,196 @@ class FootballKickoffInboxTest {
             ),
             inbox = cleared,
         )
+        val laterAt = now + 3 * 60_000L
         val later = generate(
             current = snapshot(
                 match(id = "3", kickoff = now + 60_000L, status = FootballMatchStatus.LIVE),
-            ),
+            ).copy(cachedAtEpochMs = laterAt, generatedAtEpochMs = laterAt),
             inbox = oldResync.inbox,
-            now = now + 3 * 60_000L,
+            now = laterAt,
         )
 
         assertTrue(oldResync.added.isEmpty())
         assertEquals(1, later.added.size)
         assertEquals("3", later.added.single().eventId)
+    }
+
+    @Test
+    fun `a genuine delayed kickoff is eligible when provider kickoff follows selection`() {
+        val selectedAt = now - 4 * 60 * 60_000L
+        val delayed = match(
+            id = "delayed",
+            kickoff = now - 3 * 60 * 60_000L,
+            status = FootballMatchStatus.LIVE,
+            minute = 5,
+        )
+        val result = generate(
+            current = snapshot(delayed),
+            favorite = FootballFavoriteTeam("home", "Home", selectedAt),
+        )
+
+        assertEquals(listOf("delayed"), result.added.map(FootballKickoffNotification::eventId))
+        assertTrue(result.added.single().startedAtEpochMs >= selectedAt)
+    }
+
+    @Test
+    fun `following after kickoff cannot use app reopen time as a start`() {
+        val selectedAt = now - 60 * 60_000L
+        val alreadyStarted = match(
+            id = "started",
+            kickoff = now - 3 * 60 * 60_000L,
+            status = FootballMatchStatus.LIVE,
+            minute = 45,
+        )
+        val result = generate(
+            current = snapshot(alreadyStarted),
+            favorite = FootballFavoriteTeam("home", "Home", selectedAt),
+        )
+
+        assertTrue(result.added.isEmpty())
+    }
+
+    @Test
+    fun `a cold-start cached previous snapshot is not a recorded transition`() {
+        val selectedAt = now - 60 * 60_000L
+        val previous = snapshot(
+            match(id = "cold", kickoff = now - 3 * 60 * 60_000L, status = FootballMatchStatus.UPCOMING),
+        )
+        val current = snapshot(
+            match(id = "cold", kickoff = now - 3 * 60 * 60_000L, status = FootballMatchStatus.LIVE, minute = 10),
+        )
+
+        val cold = generateFootballKickoffNotifications(
+            accountId = "account-1",
+            profileId = "profile-1",
+            favoriteTeam = FootballFavoriteTeam("home", "Home", selectedAt),
+            previous = previous,
+            current = current,
+            inbox = FootballInboxState(),
+            nowEpochMs = now,
+            previousObservedInSession = false,
+            previousObservedAtEpochMs = now - 5 * 60_000L,
+        )
+        val observed = generateFootballKickoffNotifications(
+            accountId = "account-1",
+            profileId = "profile-1",
+            favoriteTeam = FootballFavoriteTeam("home", "Home", selectedAt),
+            previous = previous,
+            current = current,
+            inbox = FootballInboxState(),
+            nowEpochMs = now,
+            previousObservedInSession = true,
+            previousObservedAtEpochMs = now - 5 * 60_000L,
+        )
+
+        assertTrue(cold.added.isEmpty())
+        assertEquals(1, observed.added.size)
+    }
+
+    @Test
+    fun `selection after the observed snapshot cannot claim an earlier transition`() {
+        val previousObservedAt = now - 10 * 60_000L
+        val selectedAt = now - 5 * 60_000L
+        val previous = snapshot(
+            match(id = "late-select", kickoff = now - 3 * 60 * 60_000L, status = FootballMatchStatus.UPCOMING),
+        )
+        val current = snapshot(
+            match(id = "late-select", kickoff = now - 3 * 60 * 60_000L, status = FootballMatchStatus.LIVE),
+        )
+        val result = generateFootballKickoffNotifications(
+            accountId = "account-1",
+            profileId = "profile-1",
+            favoriteTeam = FootballFavoriteTeam("home", "Home", selectedAt),
+            previous = previous,
+            current = current,
+            inbox = FootballInboxState(),
+            nowEpochMs = now,
+            previousObservedInSession = true,
+            previousObservedAtEpochMs = previousObservedAt,
+        )
+
+        assertTrue(result.added.isEmpty())
+    }
+
+    @Test
+    fun `halftime frozen minute does not establish kickoff but a recorded transition does`() {
+        val selectedAt = now - 30 * 60_000L
+        val previous = snapshot(
+            match(id = "half", kickoff = now - 3 * 60 * 60_000L, status = FootballMatchStatus.UPCOMING),
+        )
+        val current = snapshot(
+            match(id = "half", kickoff = now - 3 * 60 * 60_000L, status = FootballMatchStatus.LIVE, minute = 45),
+        )
+        val result = generate(
+            previous = previous,
+            current = current,
+            favorite = FootballFavoriteTeam("home", "Home", selectedAt),
+        )
+
+        assertEquals(1, result.added.size)
+        assertTrue(result.added.single().startedAtEpochMs >= now - 5_000L)
+    }
+
+    @Test
+    fun `returning next morning uses the separate 24-hour history while today is empty`() {
+        val selectedAt = now - 12 * 60 * 60_000L
+        val previousNight = match(
+            id = "night",
+            kickoff = now - 10 * 60 * 60_000L,
+            status = FootballMatchStatus.FINISHED,
+            homeScore = 2,
+            awayScore = 1,
+        )
+        val current = snapshotWithHistory(
+            matches = emptyList(),
+            history = listOf(previousNight),
+        )
+        val result = generate(
+            current = current,
+            favorite = FootballFavoriteTeam("home", "Home", selectedAt),
+            catchUpOnly = true,
+        )
+
+        assertEquals(1, result.added.size)
+        assertEquals("night", result.added.single().eventId)
+        assertTrue(current.matches.isEmpty())
+    }
+
+    @Test
+    fun `stale history cannot create a new kickoff while existing items survive`() {
+        val existing = generate(
+            current = snapshot(
+                match(id = "existing", kickoff = now - 5 * 60_000L, status = FootballMatchStatus.LIVE),
+            ),
+        ).inbox
+        val stale = snapshotWithHistory(
+            matches = emptyList(),
+            history = listOf(
+                match(id = "stale-new", kickoff = now - 10 * 60_000L, status = FootballMatchStatus.FINISHED),
+            ),
+        ).copy(stale = true)
+        val result = generate(current = stale, inbox = existing, catchUpOnly = true)
+
+        assertTrue(result.added.isEmpty())
+        assertEquals(listOf("existing"), result.inbox.notifications.map(FootballKickoffNotification::eventId))
+    }
+
+    @Test
+    fun `kickoff history older than 24 hours is pruned`() {
+        val old = footballKickoffNotificationFor(
+            accountId = "account-1",
+            profileId = "profile-1",
+            match = match(id = "old", kickoff = now - 25 * 60 * 60_000L, status = FootballMatchStatus.FINISHED),
+            detectedAtEpochMs = now - 25 * 60 * 60_000L,
+            startedAtEpochMs = now - 25 * 60 * 60_000L,
+        )
+        val result = generate(
+            current = snapshot(),
+            inbox = FootballInboxState(notifications = listOf(old)),
+            now = now,
+        )
+
+        assertTrue(result.inbox.notifications.isEmpty())
     }
 
     @Test
@@ -182,6 +361,7 @@ class FootballKickoffInboxTest {
                     homeTeamName = "Al Hilal",
                     awayTeamName = "Al Nassr",
                     kickoffEpochMs = now,
+                    startedAtEpochMs = now - 30_000L,
                     detectedAtEpochMs = now + 1_000L,
                     read = true,
                     homeScore = null,
@@ -258,6 +438,8 @@ class FootballKickoffInboxTest {
         favorite: FootballFavoriteTeam = FootballFavoriteTeam("home", "Home", 0L),
         now: Long = this.now,
         catchUpOnly: Boolean = false,
+        previousObservedInSession: Boolean = previous != null,
+        previousObservedAtEpochMs: Long = if (previous != null) now else 0L,
     ): FootballKickoffGeneration = generateFootballKickoffNotifications(
         accountId = "account-1",
         profileId = "profile-1",
@@ -267,17 +449,26 @@ class FootballKickoffInboxTest {
         inbox = inbox,
         nowEpochMs = now,
         catchUpOnly = catchUpOnly,
+        previousObservedInSession = previousObservedInSession,
+        previousObservedAtEpochMs = previousObservedAtEpochMs,
     )
 
-    private fun snapshot(vararg matches: FootballMatch): FootballFeedSnapshot = FootballFeedSnapshot(
+    private fun snapshot(vararg matches: FootballMatch): FootballFeedSnapshot =
+        snapshotWithHistory(matches.toList())
+
+    private fun snapshotWithHistory(
+        matches: List<FootballMatch>,
+        history: List<FootballMatch> = emptyList(),
+    ): FootballFeedSnapshot = FootballFeedSnapshot(
         dayKey = footballRiyadhDayKey(now),
         generatedAtEpochMs = now,
         cachedAtEpochMs = now,
         stale = false,
         retryAfterSeconds = null,
         refreshSeconds = 60,
-        matches = matches.toList(),
+        matches = matches,
         teams = emptyList(),
+        kickoffHistory = history,
     )
 
     private fun match(
@@ -289,6 +480,8 @@ class FootballKickoffInboxTest {
         aliases: List<String> = emptyList(),
         homeScore: Int? = null,
         awayScore: Int? = null,
+        minute: Int? = null,
+        startedAtEpochMs: Long? = null,
     ): FootballMatch = FootballMatch(
         providerEventId = id,
         aliases = aliases,
@@ -299,5 +492,7 @@ class FootballKickoffInboxTest {
         status = status,
         homeScore = homeScore,
         awayScore = awayScore,
+        minute = minute,
+        startedAtEpochMs = startedAtEpochMs,
     )
 }

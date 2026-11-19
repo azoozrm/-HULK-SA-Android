@@ -66,10 +66,45 @@ class FootballFeedCacheStore(context: Context) {
     }
 }
 
+data class FootballTeamCatalogCache(
+    val teams: List<FootballTeam>,
+    val fetchedAtEpochMs: Long,
+)
+
+class FootballTeamCatalogStore(context: Context) {
+    private val preferences = context.applicationContext.getSharedPreferences(
+        PREFERENCES_NAME,
+        Context.MODE_PRIVATE,
+    )
+
+    @Synchronized
+    fun load(): FootballTeamCatalogCache? {
+        val fetchedAt = preferences.getLong(KEY_FETCHED_AT, 0L)
+        val raw = preferences.getString(KEY_RAW, null) ?: return null
+        val teams = parseFootballTeamCatalog(raw) ?: return null
+        return FootballTeamCatalogCache(teams, fetchedAt)
+    }
+
+    @Synchronized
+    fun save(rawJson: String, fetchedAtEpochMs: Long) {
+        if (fetchedAtEpochMs <= 0L || parseFootballTeamCatalog(rawJson) == null) return
+        preferences.edit()
+            .putString(KEY_RAW, rawJson)
+            .putLong(KEY_FETCHED_AT, fetchedAtEpochMs)
+            .commit()
+    }
+
+    private companion object {
+        const val PREFERENCES_NAME = "hulk_football_team_catalog_v1"
+        const val KEY_RAW = "raw"
+        const val KEY_FETCHED_AT = "fetched_at"
+    }
+}
+
 /**
- * One favorite team and one kickoff inbox per resolved account/profile. Reads fail closed until
- * both owners exist; writes use the exact scope captured by the caller so a stale response cannot
- * land in another profile.
+ * Multiple favorite teams, score visibility, per-fixture alert preferences and one kickoff inbox
+ * per resolved account/profile. Reads fail closed until both owners exist; writes use the exact
+ * scope captured by the caller so a stale response cannot land in another profile.
  */
 internal class FootballProfileStateStore(context: Context) {
     private val state = AccountProfileStateStore(
@@ -80,26 +115,61 @@ internal class FootballProfileStateStore(context: Context) {
 
     fun activeScope(): AccountProfileStateScope? = state.activeScope()
 
-    fun favoriteTeam(): FootballFavoriteTeam? =
-        state.read(KEY_FAVORITE_TEAM)?.let(::decodeFootballFavoriteTeam)
+    fun favoriteTeam(): FootballFavoriteTeam? = activeScope()?.let(::favoriteTeams)?.firstOrNull()
 
     fun favoriteTeam(scope: AccountProfileStateScope): FootballFavoriteTeam? =
-        state.read(scope, KEY_FAVORITE_TEAM)?.let(::decodeFootballFavoriteTeam)
+        favoriteTeams(scope).firstOrNull()
+
+    fun favoriteTeams(scope: AccountProfileStateScope): List<FootballFavoriteTeam> {
+        val encoded = state.read(scope, KEY_FAVORITE_TEAMS)
+        if (encoded != null) return decodeFootballFavoriteTeams(encoded)
+        val legacyRaw = state.read(scope, KEY_FAVORITE_TEAM) ?: return emptyList()
+        val migrated = migratedFootballFavoriteTeams(null, legacyRaw)
+        if (migrated.isEmpty()) return emptyList()
+        state.write(scope, KEY_FAVORITE_TEAMS, encodeFootballFavoriteTeams(migrated))
+        state.remove(scope.accountId, scope.profileId, KEY_FAVORITE_TEAM)
+        return migrated
+    }
+
+    fun saveFavoriteTeams(teams: List<FootballFavoriteTeam>) {
+        activeScope()?.let { saveFavoriteTeams(it, teams) }
+    }
+
+    fun saveFavoriteTeams(scope: AccountProfileStateScope, teams: List<FootballFavoriteTeam>) {
+        state.write(scope, KEY_FAVORITE_TEAMS, encodeFootballFavoriteTeams(teams))
+    }
 
     fun saveFavoriteTeam(team: FootballFavoriteTeam) {
-        state.write(KEY_FAVORITE_TEAM, encodeFootballFavoriteTeam(team))
+        activeScope()?.let { saveFavoriteTeams(it, listOf(team)) }
     }
 
     fun saveFavoriteTeam(scope: AccountProfileStateScope, team: FootballFavoriteTeam) {
-        state.write(scope, KEY_FAVORITE_TEAM, encodeFootballFavoriteTeam(team))
+        saveFavoriteTeams(scope, listOf(team))
     }
 
-    fun clearFavoriteTeam() {
-        state.remove(KEY_FAVORITE_TEAM)
+    fun clearFavoriteTeams() {
+        activeScope()?.let { clearFavoriteTeams(it) }
     }
 
-    fun clearFavoriteTeam(scope: AccountProfileStateScope) {
-        state.remove(scope.accountId, scope.profileId, KEY_FAVORITE_TEAM)
+    fun clearFavoriteTeams(scope: AccountProfileStateScope) {
+        state.remove(scope.accountId, scope.profileId, KEY_FAVORITE_TEAMS, KEY_FAVORITE_TEAM)
+    }
+
+    fun hideScores(scope: AccountProfileStateScope): Boolean =
+        state.read(scope, KEY_HIDE_SCORES) == "1"
+
+    fun setHideScores(scope: AccountProfileStateScope, hide: Boolean) {
+        state.write(scope, KEY_HIDE_SCORES, if (hide) "1" else "0")
+    }
+
+    fun matchAlerts(scope: AccountProfileStateScope): Map<String, FootballMatchAlertPreferences> =
+        state.read(scope, KEY_MATCH_ALERTS)?.let(::decodeFootballMatchAlerts).orEmpty()
+
+    fun saveMatchAlerts(
+        scope: AccountProfileStateScope,
+        alerts: Map<String, FootballMatchAlertPreferences>,
+    ) {
+        state.write(scope, KEY_MATCH_ALERTS, encodeFootballMatchAlerts(alerts))
     }
 
     fun inboxState(): FootballInboxState =
@@ -124,12 +194,23 @@ internal class FootballProfileStateStore(context: Context) {
     }
 
     fun removeProfile(accountId: String, profileId: String) {
-        state.remove(accountId, profileId, KEY_FAVORITE_TEAM, KEY_INBOX)
+        state.remove(
+            accountId,
+            profileId,
+            KEY_FAVORITE_TEAM,
+            KEY_FAVORITE_TEAMS,
+            KEY_HIDE_SCORES,
+            KEY_MATCH_ALERTS,
+            KEY_INBOX,
+        )
     }
 
     private companion object {
         const val PREFERENCES_NAME = "hulk_football_profile_state_v1"
         const val KEY_FAVORITE_TEAM = "favorite_team"
+        const val KEY_FAVORITE_TEAMS = "favorite_teams"
+        const val KEY_HIDE_SCORES = "hide_scores"
+        const val KEY_MATCH_ALERTS = "match_alerts"
         const val KEY_INBOX = "inbox"
         const val KEY_KNOWN_TEAMS = "known_teams"
     }
@@ -171,6 +252,76 @@ internal fun decodeFootballFavoriteTeam(raw: String?): FootballFavoriteTeam? = r
     )
 }.getOrNull()
 
+/**
+ * Plural favorites win. When absent, the legacy single-favorite value is adopted exactly once with
+ * its original selection timestamp so a later migration cannot reset kickoff eligibility.
+ */
+internal fun migratedFootballFavoriteTeams(
+    pluralRaw: String?,
+    legacyRaw: String?,
+): List<FootballFavoriteTeam> {
+    if (pluralRaw != null) return decodeFootballFavoriteTeams(pluralRaw)
+    val legacy = legacyRaw?.let(::decodeFootballFavoriteTeam) ?: return emptyList()
+    return listOf(legacy)
+}
+
+internal fun encodeFootballFavoriteTeams(teams: List<FootballFavoriteTeam>): String =
+    JSONArray().apply {
+        teams.distinctBy(FootballFavoriteTeam::teamId).forEach { team ->
+            put(JSONObject()
+                .put("teamId", team.teamId)
+                .put("teamName", team.teamName)
+                .put("selectedAtEpochMs", team.selectedAtEpochMs))
+        }
+    }.toString()
+
+internal fun decodeFootballFavoriteTeams(raw: String?): List<FootballFavoriteTeam> = runCatching {
+    val array = JSONArray(raw ?: return@runCatching emptyList<FootballFavoriteTeam>())
+    buildList {
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index) ?: continue
+            val teamId = item.optString("teamId").trim()
+            val teamName = item.optString("teamName").trim()
+            if (teamId.isEmpty() || teamName.isEmpty()) continue
+            add(
+                FootballFavoriteTeam(
+                    teamId = teamId,
+                    teamName = teamName,
+                    selectedAtEpochMs = item.optLong("selectedAtEpochMs", 0L).coerceAtLeast(0L),
+                ),
+            )
+        }
+    }.distinctBy(FootballFavoriteTeam::teamId)
+}.getOrElse { emptyList() }
+
+internal fun encodeFootballMatchAlerts(
+    alerts: Map<String, FootballMatchAlertPreferences>,
+): String = JSONObject().apply {
+    alerts.forEach { (eventId, preferences) ->
+        put(eventId, JSONObject()
+            .put("kickoff", preferences.kickoff)
+            .put("reminder15", preferences.reminder15)
+            .put("manuallyTracked", preferences.manuallyTracked)
+            .put("trackedAtEpochMs", preferences.trackedAtEpochMs))
+    }
+}.toString()
+
+internal fun decodeFootballMatchAlerts(raw: String?): Map<String, FootballMatchAlertPreferences> =
+    runCatching {
+        val root = JSONObject(raw ?: return@runCatching emptyMap<String, FootballMatchAlertPreferences>())
+        buildMap {
+            root.keys().forEach { eventId ->
+                val item = root.optJSONObject(eventId) ?: return@forEach
+                put(eventId, FootballMatchAlertPreferences(
+                    kickoff = item.optBoolean("kickoff", false),
+                    reminder15 = item.optBoolean("reminder15", false),
+                    manuallyTracked = item.optBoolean("manuallyTracked", false),
+                    trackedAtEpochMs = item.optLong("trackedAtEpochMs", 0L).coerceAtLeast(0L),
+                ))
+            }
+        }
+    }.getOrElse { emptyMap() }
+
 internal fun encodeFootballInboxState(inbox: FootballInboxState): String = JSONObject()
     .put("notifications", JSONArray().apply {
         inbox.notifications.forEach { notification ->
@@ -184,7 +335,9 @@ internal fun encodeFootballInboxState(inbox: FootballInboxState): String = JSONO
                 .put("homeTeamName", notification.homeTeamName)
                 .put("awayTeamName", notification.awayTeamName)
                 .put("kickoffEpochMs", notification.kickoffEpochMs)
+                .put("startedAtEpochMs", notification.startedAtEpochMs)
                 .put("detectedAtEpochMs", notification.detectedAtEpochMs)
+                .put("alertType", notification.alertType.wireName)
                 .put("read", notification.read)
                 .put("homeScore", notification.homeScore ?: JSONObject.NULL)
                 .put("awayScore", notification.awayScore ?: JSONObject.NULL)
@@ -192,6 +345,7 @@ internal fun encodeFootballInboxState(inbox: FootballInboxState): String = JSONO
         }
     })
     .put("suppressedEventIds", JSONArray(inbox.suppressedEventIds.toList()))
+    .put("suppressedAlerts", JSONArray(inbox.suppressedAlerts.toList()))
     .put("clearedThroughEpochMs", inbox.clearedThroughEpochMs)
     .toString()
 
@@ -217,7 +371,14 @@ internal fun decodeFootballInboxState(raw: String?): FootballInboxState = runCat
                     homeTeamName = item.optString("homeTeamName").trim(),
                     awayTeamName = item.optString("awayTeamName").trim(),
                     kickoffEpochMs = item.optLong("kickoffEpochMs", 0L),
+                    startedAtEpochMs = item.optLong("startedAtEpochMs", 0L)
+                        .takeIf { it > 0L }
+                        ?: item.optLong("kickoffEpochMs", 0L),
                     detectedAtEpochMs = item.optLong("detectedAtEpochMs", 0L),
+                    alertType = when (item.optString("alertType")) {
+                        FootballAlertType.REMINDER_15.wireName -> FootballAlertType.REMINDER_15
+                        else -> FootballAlertType.KICKOFF
+                    },
                     read = item.optBoolean("read", false),
                     homeScore = item.nullableInt("homeScore"),
                     awayScore = item.nullableInt("awayScore"),
@@ -227,6 +388,7 @@ internal fun decodeFootballInboxState(raw: String?): FootballInboxState = runCat
         }
     }
     val suppressed = root.optJSONArray("suppressedEventIds").strings().toSet()
+    val suppressedAlerts = root.optJSONArray("suppressedAlerts").strings().toSet()
     FootballInboxState(
         notifications = notifications
             .filter { it.kickoffEpochMs > 0L }
@@ -234,6 +396,7 @@ internal fun decodeFootballInboxState(raw: String?): FootballInboxState = runCat
             .sortedByDescending(FootballKickoffNotification::detectedAtEpochMs)
             .take(FOOTBALL_MAX_KICKOFF_NOTIFICATIONS_PER_PROFILE),
         suppressedEventIds = suppressed,
+        suppressedAlerts = suppressedAlerts,
         clearedThroughEpochMs = root.optLong("clearedThroughEpochMs", 0L).coerceAtLeast(0L),
     )
 }.getOrNull() ?: FootballInboxState()

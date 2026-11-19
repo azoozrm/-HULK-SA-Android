@@ -14,6 +14,26 @@ import org.json.JSONArray
 import org.json.JSONObject
 import sa.hulksa.player.BuildConfig
 
+sealed interface FootballTeamCatalogFetchResult {
+    data class Success(
+        val teams: List<FootballTeam>,
+        val rawJson: String,
+        val stale: Boolean = false,
+        val cachedAtEpochMs: Long = 0L,
+        val retryAfterSeconds: Long? = null,
+    ) : FootballTeamCatalogFetchResult
+
+    data class Failure(
+        val retryAfterSeconds: Long? = null,
+    ) : FootballTeamCatalogFetchResult
+}
+
+data class FootballTeamCatalogPayload(
+    val teams: List<FootballTeam>,
+    val stale: Boolean,
+    val cachedAtEpochMs: Long,
+)
+
 sealed interface FootballFetchResult {
     data class Success(
         val snapshot: FootballFeedSnapshot,
@@ -109,7 +129,58 @@ open class FootballFeedClient(
         }
     }
 
+    open suspend fun fetchTeams(discovery: FootballFeedDiscovery): FootballTeamCatalogFetchResult =
+        withContext(Dispatchers.IO) {
+            val endpoint = runCatching { URI(discovery.feedUrl + TEAM_CATALOG_PATH) }.getOrNull()
+            if (
+                endpoint == null ||
+                !endpoint.scheme.equals("https", ignoreCase = true) ||
+                endpoint.host.isNullOrBlank() ||
+                endpoint.userInfo != null ||
+                endpoint.rawPath != FOOTBALL_TEAM_CATALOG_REQUEST_PATH
+            ) {
+                return@withContext FootballTeamCatalogFetchResult.Failure()
+            }
+            runCatching {
+                val request = Request.Builder()
+                    .url(endpoint.toASCIIString())
+                    .get()
+                    .header("Accept", "application/json")
+                    .header("User-Agent", "NEO4K/${BuildConfig.VERSION_NAME} Football")
+                    .build()
+                effectiveClient.executeCancellable(request) { response ->
+                    val retryAfter = parseFootballRetryAfterHeader(
+                        response.header("Retry-After"),
+                        System.currentTimeMillis(),
+                    )
+                    if (response.code == 429 || response.code == 503 || !response.isSuccessful) {
+                        return@executeCancellable FootballTeamCatalogFetchResult.Failure(retryAfter)
+                    }
+                    val body = response.body
+                        ?: return@executeCancellable FootballTeamCatalogFetchResult.Failure(retryAfter)
+                    if (body.contentLength() > MAX_FEED_BYTES) {
+                        return@executeCancellable FootballTeamCatalogFetchResult.Failure(retryAfter)
+                    }
+                    val raw = readBounded(body)
+                        ?: return@executeCancellable FootballTeamCatalogFetchResult.Failure(retryAfter)
+                    val payload = parseFootballTeamCatalogPayload(raw)
+                        ?: return@executeCancellable FootballTeamCatalogFetchResult.Failure(retryAfter)
+                    FootballTeamCatalogFetchResult.Success(
+                        teams = payload.teams,
+                        rawJson = raw,
+                        stale = payload.stale,
+                        cachedAtEpochMs = payload.cachedAtEpochMs,
+                        retryAfterSeconds = retryAfter,
+                    )
+                }
+            }.getOrElse { error ->
+                if (error is CancellationException) throw error
+                FootballTeamCatalogFetchResult.Failure()
+            }
+        }
+
     companion object {
+        private const val TEAM_CATALOG_PATH = "teams/"
         private const val MAX_FEED_BYTES = 512L * 1_024L
 
         fun defaultFootballHttpClient(): OkHttpClient = OkHttpClient.Builder()
@@ -155,6 +226,46 @@ fun parseFootballRetryAfterHeader(value: String?, nowEpochMs: Long): Long? {
     return ((parsed.time - nowEpochMs + 999L) / 1_000L).coerceIn(1L, 86_400L)
 }
 
+private const val FOOTBALL_TEAM_CATALOG_REQUEST_PATH = "/hulk-operations/api/app/v1/sports/teams/"
+
+fun parseFootballTeamCatalog(rawJson: String): List<FootballTeam>? =
+    parseFootballTeamCatalogPayload(rawJson)?.teams
+
+fun parseFootballTeamCatalogPayload(rawJson: String): FootballTeamCatalogPayload? = runCatching {
+    val root = JSONObject(rawJson)
+    require(root.getInt("schemaVersion") == FOOTBALL_FEED_SCHEMA_VERSION)
+    require(root.has("complete") && root.get("complete") is Boolean && root.getBoolean("complete"))
+    val array = root.optJSONArray("teams") ?: JSONArray()
+    val teams = buildList {
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index) ?: continue
+            val id = item.optString("id").trim()
+            val name = item.optString("name").trim()
+            if (id.isNotEmpty() && name.isNotEmpty()) {
+                add(FootballTeam(
+                    id = id,
+                    name = name,
+                    arabicName = item.optNullableString("arabicName"),
+                    logoUrl = item.optNullableString("logoUrl"),
+                    country = item.optNullableString("country"),
+                    competitionIds = item.optJSONArray("competitionIds").strings().toSet(),
+                    nationalTeam = item.optBoolean("nationalTeam", false),
+                    aliases = item.optJSONArray("aliases").strings(),
+                ))
+            }
+        }
+    }.distinctBy(FootballTeam::id)
+        .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.displayName })
+    val cachedAt = root.optNullableLong("cachedAt")?.times(1_000L)
+        ?: root.optNullableLong("generatedAt")?.times(1_000L)
+        ?: 0L
+    FootballTeamCatalogPayload(
+        teams = teams,
+        stale = root.optBoolean("stale", false),
+        cachedAtEpochMs = cachedAt,
+    )
+}.getOrNull()
+
 fun parseFootballFeed(
     rawJson: String,
     requestedDay: String,
@@ -178,18 +289,46 @@ fun parseFootballFeed(
             parseFootballMatch(array.optJSONObject(index))?.let(::add)
         }
     }
-    val reconciled = reconcileFootballMatches(matches)
+    val reconciled = reconcileFootballMatches(mergeFootballMatchRows(matches))
+    val kickoffHistory = buildList {
+        val array = root.optJSONArray("kickoffHistory") ?: JSONArray()
+        for (index in 0 until array.length()) {
+            parseFootballMatch(array.optJSONObject(index))?.let(::add)
+        }
+    }.let { history ->
+        reconcileFootballMatches(mergeFootballMatchRows(history))
+    }
+    val reminderCandidates = buildList {
+        val array = root.optJSONArray("reminderCandidates") ?: JSONArray()
+        for (index in 0 until array.length()) {
+            parseFootballMatch(array.optJSONObject(index))?.let(::add)
+        }
+    }.let { reminders ->
+        reconcileFootballMatches(mergeFootballMatchRows(reminders))
+    }
     val teams = buildList {
         val array = root.optJSONArray("teams") ?: JSONArray()
         for (index in 0 until array.length()) {
             val item = array.optJSONObject(index) ?: continue
             val id = item.optString("id").trim()
             val name = item.optString("name").trim()
-            if (id.isNotEmpty() && name.isNotEmpty()) add(FootballTeam(id, name))
+            if (id.isNotEmpty() && name.isNotEmpty()) {
+                add(FootballTeam(
+                    id = id,
+                    name = name,
+                    arabicName = item.optNullableString("arabicName"),
+                    logoUrl = item.optNullableString("logoUrl"),
+                    country = item.optNullableString("country"),
+                    competitionIds = item.optJSONArray("competitionIds").strings().toSet(),
+                    nationalTeam = item.optBoolean("nationalTeam", false),
+                    aliases = item.optJSONArray("aliases").strings(),
+                ))
+            }
         }
         addAll(reconciled.flatMap { listOf(it.homeTeam, it.awayTeam) })
+        addAll(reminderCandidates.flatMap { listOf(it.homeTeam, it.awayTeam) })
     }.distinctBy(FootballTeam::id)
-        .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+        .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.displayName })
 
     FootballFeedSnapshot(
         dayKey = day,
@@ -200,6 +339,8 @@ fun parseFootballFeed(
         refreshSeconds = refreshSeconds,
         matches = reconciled,
         teams = teams,
+        kickoffHistory = kickoffHistory,
+        reminderCandidates = reminderCandidates,
     )
 }.getOrNull()
 
@@ -216,6 +357,9 @@ private fun parseFootballMatch(value: JSONObject?): FootballMatch? = runCatching
         id = competitionObject?.optString("id")?.trim().orEmpty().ifBlank { "unknown" },
         name = competitionObject?.optString("name")?.trim().orEmpty().ifBlank { "مسابقة" },
         country = competitionObject?.optNullableString("country"),
+        arabicName = competitionObject?.optNullableString("arabicName"),
+        logoUrl = competitionObject?.optNullableString("logoUrl"),
+        priority = competitionObject?.optInt("priority", 50) ?: 50,
     )
     val home = parseFootballTeam(value.optJSONObject("homeTeam")) ?: return@runCatching null
     val away = parseFootballTeam(value.optJSONObject("awayTeam")) ?: return@runCatching null
@@ -236,6 +380,12 @@ private fun parseFootballMatch(value: JSONObject?): FootballMatch? = runCatching
         awayScore = value.optNullableInt("awayScore"),
         minute = value.optNullableInt("minute")?.takeIf { it >= 0 },
         carriedOver = value.optBoolean("carriedOver", false),
+        startedAtEpochMs = value.optNullableLong("startedAt")?.let { seconds ->
+            if (seconds < 10_000_000_000L) seconds * 1_000L else seconds
+        },
+        providerUpdatedAtEpochMs = value.optNullableLong("providerUpdatedAt")?.let { seconds ->
+            if (seconds < 10_000_000_000L) seconds * 1_000L else seconds
+        },
     )
 }.getOrNull()
 
@@ -244,7 +394,17 @@ private fun parseFootballTeam(value: JSONObject?): FootballTeam? = runCatching {
     val id = value.optString("id").trim()
     val name = value.optString("name").trim()
     require(id.isNotEmpty() && name.isNotEmpty())
-    FootballTeam(id, name)
+    val competitionIds = value.optJSONArray("competitionIds").strings().toSet()
+    FootballTeam(
+        id = id,
+        name = name,
+        arabicName = value.optNullableString("arabicName"),
+        logoUrl = value.optNullableString("logoUrl"),
+        country = value.optNullableString("country"),
+        competitionIds = competitionIds,
+        nationalTeam = value.optBoolean("nationalTeam", false),
+        aliases = value.optJSONArray("aliases").strings(),
+    )
 }.getOrNull()
 
 private fun JSONArray?.strings(): List<String> {
