@@ -361,6 +361,7 @@ class TvNotificationCenterFocusTest {
                         .testTag(TEST_CONTAINER_TAG),
                 ) {
                     TvLocalNotificationCenter(
+                        hideFootballScores = false,
                         notifications = notifications,
                         unreadCount = notifications.count { !it.read },
                         metrics = metrics,

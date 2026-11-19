@@ -56,6 +56,7 @@ class TvNotificationCenterLayoutTest {
                         actionWidthDp = 52,
                     )
                     TvLocalNotificationCenter(
+                        hideFootballScores = false,
                         notifications = episodeNotifications(1),
                         unreadCount = 1,
                         metrics = metrics,
