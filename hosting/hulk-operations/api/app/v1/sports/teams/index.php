@@ -9,8 +9,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
 }
 
 try {
-    require_once dirname(__DIR__, 4) . '/bootstrap.php';
-    require_once dirname(__DIR__, 4) . '/lib/football-feed.php';
+    require_once dirname(__DIR__, 5) . '/bootstrap.php';
+    require_once dirname(__DIR__, 5) . '/lib/football-feed.php';
 
     $config = ops_load_config();
     $football = is_array($config['football'] ?? null) ? $config['football'] : [];

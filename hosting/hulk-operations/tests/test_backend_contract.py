@@ -46,6 +46,13 @@ class OperationsBackendContractTest(unittest.TestCase):
         self.assertIn("PDO::ATTR_EMULATE_PREPARES", bootstrap)
         self.assertGreaterEqual(actions.count("->prepare("), 12)
 
+    def test_football_catalog_route_reaches_operations_bootstrap(self) -> None:
+        teams = self.read("api/app/v1/sports/teams/index.php")
+        feed = self.read("api/app/v1/sports/index.php")
+        self.assertIn("dirname(__DIR__, 5) . '/bootstrap.php'", teams)
+        self.assertIn("dirname(__DIR__, 5) . '/lib/football-feed.php'", teams)
+        self.assertIn("dirname(__DIR__, 4) . '/bootstrap.php'", feed)
+
     def test_apk_upload_is_server_verified(self) -> None:
         actions = self.read("admin/actions.php")
         releases_rules = self.read("releases/.htaccess")
