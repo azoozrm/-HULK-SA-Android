@@ -3,34 +3,89 @@ package sa.hulksa.player.data
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.MessageDigest
 
 /**
  * Public last-good football feed cache. The feed is account-independent; the favorite team and
  * kickoff inbox are account/profile-scoped in [FootballProfileStateStore].
  */
-class FootballFeedCacheStore(context: Context) {
+class FootballFeedCacheStore(
+    context: Context,
+    private val now: () -> Long = System::currentTimeMillis,
+) {
     private val appContext = context.applicationContext
     private val preferences = appContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
-    @Synchronized
-    fun load(requestedDay: String): FootballFeedSnapshot? {
-        val exact = readDay(requestedDay)
-        if (exact != null) return exact
-        val lastDay = preferences.getString(KEY_LAST_DAY, null)?.trim().orEmpty()
-        if (lastDay.isBlank() || lastDay == requestedDay) return null
-        return readDay(lastDay)?.let { snapshot ->
-            snapshot.copy(stale = true, dayKey = lastDay)
+    fun loadExact(requestedDay: String, sourceKey: String): FootballFeedSnapshot? =
+        synchronized(sharedPreferencesLock) {
+            if (sourceKey.isBlank()) return@synchronized null
+            readDay(requestedDay, sourceKey) ?: migrateLegacyDay(requestedDay, sourceKey)
         }
-    }
 
-    @Synchronized
-    fun save(dayKey: String, rawJson: String) {
-        if (dayKey.isBlank() || rawJson.isBlank()) return
-        val editor = preferences.edit()
-            .putString(dayKeyKey(dayKey), rawJson)
-            .putString(KEY_LAST_DAY, dayKey)
-        prune(editor, dayKey)
-        editor.commit()
+    fun load(requestedDay: String, sourceKey: String): FootballFeedSnapshot? =
+        synchronized(sharedPreferencesLock) {
+            if (sourceKey.isBlank()) return@synchronized null
+            val exact = readDay(requestedDay, sourceKey)
+                ?: migrateLegacyDay(requestedDay, sourceKey)
+            if (exact != null) return@synchronized exact
+
+            val candidates = linkedSetOf<String>().apply {
+                addAll(
+                    preferences.getStringSet(knownDaysKey(sourceKey), emptySet()).orEmpty()
+                        .filter { it < requestedDay },
+                )
+                preferences.getString(lastDayKey(sourceKey), null)?.trim()?.takeIf {
+                    it.isNotBlank() && it < requestedDay
+                }?.let(::add)
+                preferences.getString(KEY_LAST_DAY, null)?.trim()?.takeIf {
+                    it.isNotBlank() && it < requestedDay
+                }?.let(::add)
+            }
+            candidates.sortedDescending().forEach { fallbackDay ->
+                val snapshot = readDay(fallbackDay, sourceKey)
+                    ?: migrateLegacyDay(fallbackDay, sourceKey)
+                if (snapshot != null) {
+                    return@synchronized snapshot.copy(stale = true, dayKey = fallbackDay)
+                }
+            }
+            null
+        }
+
+    fun save(
+        dayKey: String,
+        rawJson: String,
+        sourceKey: String,
+        fetchedAtEpochMs: Long,
+    ) {
+        if (dayKey.isBlank() || rawJson.isBlank() || sourceKey.isBlank()) return
+        if (fetchedAtEpochMs <= 0L) return
+        synchronized(sharedPreferencesLock) {
+            val candidate = parseFootballFeed(
+                rawJson = rawJson,
+                requestedDay = dayKey,
+                enforceAllowlist = true,
+            )?.copy(fetchedAtEpochMs = fetchedAtEpochMs) ?: return@synchronized
+            val existing = readDay(dayKey, sourceKey) ?: migrateLegacyDay(dayKey, sourceKey)
+            val accepted = footballAcceptedDaySnapshot(existing, candidate, now())
+            if (existing != null && accepted === existing) return@synchronized
+            val existingRaw = readRaw(dayKey, sourceKey)
+            // Equal-time unchanged revalidation renews receipt time only; accepted content wins.
+            val rawToWrite = if (
+                existing != null &&
+                existingRaw != null &&
+                accepted.copy(fetchedAtEpochMs = existing.fetchedAtEpochMs) == existing
+            ) {
+                existingRaw
+            } else {
+                rawJson
+            }
+            val editor = preferences.edit()
+                .putString(dayKeyKey(sourceKey, dayKey), rawToWrite)
+                .putLong(fetchedAtKey(sourceKey, dayKey), accepted.fetchedAtEpochMs)
+                .putString(lastDayKey(sourceKey), dayKey)
+            prune(editor, sourceKey, dayKey)
+            editor.commit()
+        }
     }
 
     @Synchronized
@@ -41,26 +96,75 @@ class FootballFeedCacheStore(context: Context) {
         preferences.edit().putLong(KEY_LAST_ATTEMPT, epochMs).apply()
     }
 
-    private fun readDay(dayKey: String): FootballFeedSnapshot? {
-        val raw = preferences.getString(dayKeyKey(dayKey), null) ?: return null
-        return parseFootballFeed(raw, dayKey, enforceAllowlist = true)
+    private fun readRaw(dayKey: String, sourceKey: String): String? =
+        preferences.getString(dayKeyKey(sourceKey, dayKey), null)
+
+    private fun readDay(dayKey: String, sourceKey: String): FootballFeedSnapshot? {
+        val raw = readRaw(dayKey, sourceKey) ?: return null
+        return parseFootballFeed(raw, dayKey, enforceAllowlist = true)?.copy(
+            fetchedAtEpochMs = preferences.getLong(fetchedAtKey(sourceKey, dayKey), 0L),
+        )
     }
 
-    private fun prune(editor: android.content.SharedPreferences.Editor, keepDay: String) {
-        val known = preferences.getStringSet(KEY_KNOWN_DAYS, emptySet()).orEmpty()
+    /**
+     * R05.9B v1 records stored a source beside the day key. Only that documented source may be
+     * migrated; a source-less legacy record is left untouched because neo4ksa.com and hulksa.com
+     * are both allowed and the original host cannot be proven.
+     */
+    private fun migrateLegacyDay(dayKey: String, sourceKey: String): FootballFeedSnapshot? {
+        val raw = preferences.getString(legacyDayKey(dayKey), null) ?: return null
+        val storedSource = preferences.getString(legacySourceKey(dayKey), null)?.trim().orEmpty()
+        val established = storedSource.substringAfterLast('\u0000').trim()
+        if (established.isBlank() || established != sourceKey) return null
+        val fetchedAt = preferences.getLong(legacyFetchedKey(dayKey), 0L)
+        val snapshot = parseFootballFeed(raw, dayKey, enforceAllowlist = true)?.copy(
+            fetchedAtEpochMs = fetchedAt,
+        ) ?: return null
+        val editor = preferences.edit()
+            .putString(dayKeyKey(sourceKey, dayKey), raw)
+            .putLong(fetchedAtKey(sourceKey, dayKey), fetchedAt)
+            .putString(lastDayKey(sourceKey), dayKey)
+        prune(editor, sourceKey, dayKey)
+        editor.commit()
+        return snapshot
+    }
+
+    private fun prune(
+        editor: android.content.SharedPreferences.Editor,
+        sourceKey: String,
+        keepDay: String,
+    ) {
+        val known = preferences.getStringSet(knownDaysKey(sourceKey), emptySet()).orEmpty()
             .toMutableSet()
         known += keepDay
         val retained = known.sortedDescending().take(MAX_CACHED_DAYS).toMutableSet()
-        known.filterNot { it in retained }.forEach { editor.remove(dayKeyKey(it)) }
-        editor.putStringSet(KEY_KNOWN_DAYS, retained)
+        known.filterNot { it in retained }.forEach {
+            editor.remove(dayKeyKey(sourceKey, it))
+            editor.remove(fetchedAtKey(sourceKey, it))
+        }
+        editor.putStringSet(knownDaysKey(sourceKey), retained)
     }
 
-    private fun dayKeyKey(dayKey: String): String = "day:$dayKey"
+    private fun sourceNamespace(sourceKey: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(sourceKey.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+            .take(32)
+
+    private fun dayKeyKey(sourceKey: String, dayKey: String): String =
+        "day:${sourceNamespace(sourceKey)}:$dayKey"
+    private fun fetchedAtKey(sourceKey: String, dayKey: String): String =
+        "fetched:${sourceNamespace(sourceKey)}:$dayKey"
+    private fun lastDayKey(sourceKey: String): String = "last:${sourceNamespace(sourceKey)}"
+    private fun knownDaysKey(sourceKey: String): String = "known:${sourceNamespace(sourceKey)}"
+    private fun legacyDayKey(dayKey: String): String = "day:$dayKey"
+    private fun legacyFetchedKey(dayKey: String): String = "fetched:$dayKey"
+    private fun legacySourceKey(dayKey: String): String = "source:$dayKey"
 
     private companion object {
+        val sharedPreferencesLock = Any()
         const val PREFERENCES_NAME = "hulk_football_feed_cache_v1"
         const val KEY_LAST_DAY = "last_day"
-        const val KEY_KNOWN_DAYS = "known_days"
         const val KEY_LAST_ATTEMPT = "last_attempt"
         const val MAX_CACHED_DAYS = 3
     }

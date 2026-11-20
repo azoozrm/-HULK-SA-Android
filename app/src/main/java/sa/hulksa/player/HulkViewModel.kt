@@ -56,6 +56,7 @@ import sa.hulksa.player.data.FootballFeedError
 import sa.hulksa.player.data.FootballFeedSnapshot
 import sa.hulksa.player.data.FootballFeedUiState
 import sa.hulksa.player.data.FootballDayFailure
+import sa.hulksa.player.data.FootballRetryDeadline
 import sa.hulksa.player.data.FootballCatalogAuthority
 import sa.hulksa.player.data.FOOTBALL_DEFAULT_REFRESH_SECONDS
 import sa.hulksa.player.data.FootballForegroundRefreshDecision
@@ -80,10 +81,15 @@ import sa.hulksa.player.data.footballTeamsFromMatches
 import sa.hulksa.player.data.reconcileFootballCatalogTeams
 import sa.hulksa.player.data.reconcileFootballKnownTeams
 import sa.hulksa.player.data.footballSnapshotCacheFresh
-import sa.hulksa.player.data.footballSnapshotForDisplay
 import sa.hulksa.player.data.footballPublishedFeedState
-import sa.hulksa.player.data.footballRetryAtAfterSuccess
-import sa.hulksa.player.data.footballRetryAtAfterFailure
+import sa.hulksa.player.data.footballFailureOwnsResult
+import sa.hulksa.player.data.footballDisplaySnapshotForDay
+import sa.hulksa.player.data.footballWithDayFailure
+import sa.hulksa.player.data.footballDayAcceptance
+import sa.hulksa.player.data.footballEffectiveDayFailure
+import sa.hulksa.player.data.footballWithClearedDayFailure
+import sa.hulksa.player.data.footballClearedForDiscoveryChange
+import sa.hulksa.player.data.footballShouldStartDayRefresh
 import sa.hulksa.player.data.generateFootballMatchAlerts
 import sa.hulksa.player.data.markAllFootballKickoffsRead
 import sa.hulksa.player.data.mergeFootballTeamLists
@@ -927,7 +933,7 @@ class HulkViewModel internal constructor(
     private var footballOwnerGeneration = 0L
     private var footballInbox = FootballInboxState()
     private var footballInboxScope: AccountProfileStateScope? = null
-    private var footballRetryAtEpochMs = 0L
+    private val footballRetryDeadline = FootballRetryDeadline()
     private var footballCatalogRetryAtEpochMs = 0L
     private var footballCatchUpPending = false
     private val footballInboxMutex = Mutex()
@@ -2589,13 +2595,18 @@ class HulkViewModel internal constructor(
             try {
                 val now = System.currentTimeMillis()
                 val day = footballRiyadhDayKey(now)
-                val cached = withContext(Dispatchers.IO) { footballFeedCacheStore.load(day) }
+                val catalogOwnerKey = footballCatalogOwnerKey(scope, discovery.feedUrl)
+                val exactCached = withContext(Dispatchers.IO) {
+                    footballFeedCacheStore.loadExact(day, discovery.feedUrl)
+                }
+                val cached = exactCached ?: withContext(Dispatchers.IO) {
+                    footballFeedCacheStore.load(day, discovery.feedUrl)
+                }
                 val favorites = withContext(Dispatchers.IO) { footballProfileStore.favoriteTeams(scope) }
                 val hideScores = withContext(Dispatchers.IO) { footballProfileStore.hideScores(scope) }
                 val matchAlerts = withContext(Dispatchers.IO) { footballProfileStore.matchAlerts(scope) }
                 val loadedInbox = withContext(Dispatchers.IO) { footballProfileStore.inboxState(scope) }
                 var knownTeams = withContext(Dispatchers.IO) { footballProfileStore.knownTeams(scope) }
-                val catalogOwnerKey = footballCatalogOwnerKey(scope, discovery.feedUrl)
                 val catalogCache = withContext(Dispatchers.IO) { footballTeamCatalogStore.load(discovery.feedUrl) }
                 // The disk catalog may seed this owner only while no authority exists. It never
                 // replaces an established catalog, including a valid authoritative empty one.
@@ -2624,14 +2635,14 @@ class HulkViewModel internal constructor(
 
                 footballInboxMutex.withLock {
                     var current = if (footballInboxScope == scope) footballInbox else loadedInbox
-                    if (cached != null) {
+                    if (exactCached != null) {
                         val catchUp = generateFootballMatchAlerts(
                             accountId = scope.accountId,
                             profileId = scope.profileId,
                             favoriteTeams = favorites,
                             preferences = matchAlerts,
-                            previous = cached,
-                            current = cached,
+                            previous = exactCached,
+                            current = exactCached,
                             inbox = current,
                             nowEpochMs = now,
                             catchUpOnly = true,
@@ -2648,11 +2659,8 @@ class HulkViewModel internal constructor(
                     footballInboxScope = scope
                     current
                 }
-                val displayCached = cached?.let {
-                    footballSnapshotForDisplay(it, now, discovery.refreshSeconds)
-                }
                 publishFootballState(
-                    snapshot = displayCached,
+                    snapshot = cached,
                     favorites = favorites,
                     hideScores = hideScores,
                     matchAlerts = matchAlerts,
@@ -2661,13 +2669,14 @@ class HulkViewModel internal constructor(
                     error = null,
                     loading = true,
                     lastAttemptEpochMs = now,
+                    requestedDayKey = day,
                 )
 
-                val cacheFresh = cached?.dayKey == day &&
-                    footballSnapshotCacheFresh(cached, now, discovery.refreshSeconds)
+                val cacheFresh = exactCached?.dayKey == day &&
+                    footballSnapshotCacheFresh(exactCached, now, discovery.refreshSeconds)
                 if (!force && cacheFresh) {
                     publishFootballState(
-                        snapshot = displayCached,
+                        snapshot = cached,
                         favorites = favorites,
                         hideScores = hideScores,
                         matchAlerts = matchAlerts,
@@ -2676,12 +2685,22 @@ class HulkViewModel internal constructor(
                         error = null,
                         loading = false,
                         lastAttemptEpochMs = now,
+                        requestedDayKey = day,
                     )
                     return@launch
                 }
-                if (now < footballRetryAtEpochMs) {
+                if (!footballRetryDeadline.canAttempt()) {
+                    markFootballDayStale(
+                        day,
+                        FootballDayFailure(
+                            error = FootballFeedError.RATE_LIMITED,
+                            attemptedAtEpochMs = now,
+                            retryAtEpochMs = footballRetryDeadline.retryAtEpochMs,
+                            startedAtEpochMs = now,
+                        ),
+                    )
                     publishFootballState(
-                        snapshot = displayCached,
+                        snapshot = cached,
                         favorites = favorites,
                         hideScores = hideScores,
                         matchAlerts = matchAlerts,
@@ -2690,6 +2709,7 @@ class HulkViewModel internal constructor(
                         error = null,
                         loading = false,
                         lastAttemptEpochMs = now,
+                        requestedDayKey = day,
                     )
                     return@launch
                 }
@@ -2698,13 +2718,10 @@ class HulkViewModel internal constructor(
                     is FootballFetchResult.Success -> {
                         if (!isFootballOwnerCurrent(scope, generation, discovery)) return@launch
                         val attemptedAt = System.currentTimeMillis()
-                        footballRetryAtEpochMs = footballRetryAtAfterSuccess(
-                            attemptedAt,
-                            result.snapshot.retryAfterSeconds,
-                            footballRetryAtEpochMs,
-                        )
+                        footballRetryDeadline.onSuccess(result.snapshot.retryAfterSeconds)
+                        val acceptedSnapshot = result.snapshot.copy(fetchedAtEpochMs = attemptedAt)
                         withContext(Dispatchers.IO) {
-                            footballFeedCacheStore.save(day, result.rawJson)
+                            footballFeedCacheStore.save(day, result.rawJson, discovery.feedUrl, attemptedAt)
                             footballFeedCacheStore.recordAttempt(attemptedAt)
                         }
                         val previous = footballObservedNetworkSnapshot.takeIf { observed ->
@@ -2747,7 +2764,7 @@ class HulkViewModel internal constructor(
                             footballObservedNetworkSnapshotAtEpochMs = attemptedAt
                         }
                         publishFootballState(
-                            snapshot = result.snapshot,
+                            snapshot = acceptedSnapshot,
                             favorites = favorites,
                             hideScores = hideScores,
                             matchAlerts = matchAlerts,
@@ -2756,17 +2773,15 @@ class HulkViewModel internal constructor(
                             error = null,
                             loading = false,
                             lastAttemptEpochMs = attemptedAt,
+                            successfulDayKey = day.takeIf { !acceptedSnapshot.stale },
+                            requestedDayKey = day,
                         )
                     }
 
                     is FootballFetchResult.Failure -> {
                         if (!isFootballOwnerCurrent(scope, generation, discovery)) return@launch
                         val attemptedAt = System.currentTimeMillis()
-                        footballRetryAtEpochMs = footballRetryAtAfterFailure(
-                            attemptedAt,
-                            result.retryAfterSeconds,
-                            footballRetryAtEpochMs,
-                        )
+                        footballRetryDeadline.onFailure(result.retryAfterSeconds)
                         withContext(Dispatchers.IO) { footballFeedCacheStore.recordAttempt(attemptedAt) }
                         publishFootballState(
                             snapshot = cached?.copy(stale = true),
@@ -2778,6 +2793,16 @@ class HulkViewModel internal constructor(
                             error = result.error,
                             loading = false,
                             lastAttemptEpochMs = attemptedAt,
+                            requestedDayKey = day,
+                        )
+                        markFootballDayStale(
+                            day,
+                            FootballDayFailure(
+                                error = result.error,
+                                attemptedAtEpochMs = attemptedAt,
+                                retryAtEpochMs = footballRetryDeadline.retryAtEpochMs,
+                                startedAtEpochMs = now,
+                            ),
                         )
                     }
                 }
@@ -2908,12 +2933,37 @@ class HulkViewModel internal constructor(
             System.currentTimeMillis(),
             discovery.refreshSeconds,
         )
-        if (!force && existingFresh) return
-        val active = footballDayJobs[dayKey]
-        if (active?.isActive == true) {
-            if (!force) return
-            active.cancel()
-            footballDayJobs.remove(dayKey)
+        val active = footballDayJobs[dayKey]?.isActive == true
+        val hasFailure = mutableState.value.let { state ->
+            footballEffectiveDayFailure(
+                state.footballFeed.daySnapshots,
+                state.footballFeed.dayFailures,
+                dayKey,
+            ) != null
+        }
+        val cacheFresh = existingFresh && !hasFailure
+        val canAttempt = footballRetryDeadline.canAttempt()
+        if (!active && (force || !cacheFresh) && !canAttempt) {
+            // Make a blocked explicit retry truthful instead of an actionable no-op.
+            markFootballDayStale(
+                dayKey,
+                FootballDayFailure(
+                    error = FootballFeedError.RATE_LIMITED,
+                    attemptedAtEpochMs = System.currentTimeMillis(),
+                    retryAtEpochMs = footballRetryDeadline.retryAtEpochMs,
+                    startedAtEpochMs = System.currentTimeMillis(),
+                ),
+            )
+            return
+        }
+        if (!footballShouldStartDayRefresh(
+                force = force,
+                active = active,
+                cacheFresh = cacheFresh,
+                canAttempt = canAttempt,
+            )
+        ) {
+            return
         }
         val generation = footballDayOwnerGeneration
         lateinit var job: Job
@@ -2921,30 +2971,35 @@ class HulkViewModel internal constructor(
             setFootballDayLoading(dayKey, true)
             try {
                 val local = withContext(Dispatchers.IO) {
-                    footballFeedCacheStore.load(dayKey)?.takeIf { it.dayKey == dayKey }
+                    footballFeedCacheStore.loadExact(dayKey, discovery.feedUrl)?.takeIf { it.dayKey == dayKey }
                 }
                 if (!footballDayRequestCurrent(dayKey, generation, scope, discovery)) return@launch
                 val now = System.currentTimeMillis()
+                val hasFailure = mutableState.value.let { state ->
+            footballEffectiveDayFailure(
+                state.footballFeed.daySnapshots,
+                state.footballFeed.dayFailures,
+                dayKey,
+            ) != null
+        }
                 if (local != null) {
-                    // A disk record past its refresh window is last-good data, not fresh data.
-                    publishFootballDay(
-                        footballSnapshotForDisplay(local, now, discovery.refreshSeconds),
-                        scope,
-                        catalogOwnerKey,
-                    )
+                    // Insert the raw accepted record. Age and current failure are display-only
+                    // derivations, never mutations of provider/receipt authority.
+                    publishFootballDay(local, scope, catalogOwnerKey)
                 }
-                val fresh = footballSnapshotCacheFresh(local, now, discovery.refreshSeconds)
+                val fresh = !hasFailure &&
+                    footballSnapshotCacheFresh(local, now, discovery.refreshSeconds)
                 if (!force && fresh) {
-                    clearFootballDayFailure(dayKey)
                     return@launch
                 }
-                if (now < footballRetryAtEpochMs) {
+                if (!footballRetryDeadline.canAttempt()) {
                     markFootballDayStale(
                         dayKey,
                         FootballDayFailure(
                             error = FootballFeedError.RATE_LIMITED,
                             attemptedAtEpochMs = now,
-                            retryAtEpochMs = footballRetryAtEpochMs,
+                            retryAtEpochMs = footballRetryDeadline.retryAtEpochMs,
+                            startedAtEpochMs = now,
                         ),
                     )
                     return@launch
@@ -2956,26 +3011,31 @@ class HulkViewModel internal constructor(
                         }
                         val attemptedAt = System.currentTimeMillis()
                         // A stale 200 still owns its Retry-After; a fresh 200 clears an old one.
-                        footballRetryAtEpochMs = footballRetryAtAfterSuccess(
-                            attemptedAt,
-                            result.snapshot.retryAfterSeconds,
-                            footballRetryAtEpochMs,
-                        )
+                        footballRetryDeadline.onSuccess(result.snapshot.retryAfterSeconds)
+                        val acceptedSnapshot = result.snapshot.copy(fetchedAtEpochMs = attemptedAt)
                         withContext(Dispatchers.IO) {
-                            footballFeedCacheStore.save(dayKey, result.rawJson)
+                            footballFeedCacheStore.save(
+                                dayKey,
+                                result.rawJson,
+                                discovery.feedUrl,
+                                attemptedAt,
+                            )
                         }
-                        publishFootballDay(result.snapshot, scope, catalogOwnerKey)
-                        if (result.snapshot.stale && footballRetryAtEpochMs > attemptedAt) {
+                        val accepted = publishFootballDay(acceptedSnapshot, scope, catalogOwnerKey)
+                        if (!acceptedSnapshot.stale && accepted) {
+                            clearFootballDayFailure(dayKey)
+                        } else if (acceptedSnapshot.stale &&
+                            footballRetryDeadline.retryAtEpochMs > attemptedAt
+                        ) {
                             markFootballDayStale(
                                 dayKey,
                                 FootballDayFailure(
                                     error = FootballFeedError.RATE_LIMITED,
                                     attemptedAtEpochMs = attemptedAt,
-                                    retryAtEpochMs = footballRetryAtEpochMs,
+                                    retryAtEpochMs = footballRetryDeadline.retryAtEpochMs,
+                                    startedAtEpochMs = now,
                                 ),
                             )
-                        } else {
-                            clearFootballDayFailure(dayKey)
                         }
                     }
                     is FootballFetchResult.Failure -> {
@@ -2983,17 +3043,14 @@ class HulkViewModel internal constructor(
                             return@launch
                         }
                         val attemptedAt = System.currentTimeMillis()
-                        footballRetryAtEpochMs = footballRetryAtAfterFailure(
-                            attemptedAt,
-                            result.retryAfterSeconds,
-                            footballRetryAtEpochMs,
-                        )
+                        footballRetryDeadline.onFailure(result.retryAfterSeconds)
                         markFootballDayStale(
                             dayKey,
                             FootballDayFailure(
                                 error = result.error,
                                 attemptedAtEpochMs = attemptedAt,
-                                retryAtEpochMs = footballRetryAtEpochMs,
+                                retryAtEpochMs = footballRetryDeadline.retryAtEpochMs,
+                                startedAtEpochMs = now,
                             ),
                         )
                     }
@@ -3020,18 +3077,16 @@ class HulkViewModel internal constructor(
         footballFeedAllowedForProfile(profileStore.activeProfile().kind)
 
     private fun markFootballDayStale(dayKey: String, failure: FootballDayFailure? = null) {
+        if (failure == null) return
+        val now = System.currentTimeMillis()
         mutableState.update { state ->
-            val snapshot = state.footballFeed.daySnapshots[dayKey]
-            val staleSnapshot = snapshot?.takeIf { !it.stale }?.copy(stale = true)
-            if (staleSnapshot == null && failure == null) return@update state
             state.copy(
-                footballFeed = state.footballFeed.copy(
-                    daySnapshots = staleSnapshot?.let {
-                        state.footballFeed.daySnapshots + (dayKey to it)
-                    } ?: state.footballFeed.daySnapshots,
-                    dayFailures = failure?.let {
-                        state.footballFeed.dayFailures + (dayKey to it)
-                    } ?: state.footballFeed.dayFailures,
+                footballFeed = footballWithDayFailure(
+                    state = state.footballFeed,
+                    dayKey = dayKey,
+                    failure = failure,
+                    nowEpochMs = now,
+                    retryAtEpochMs = footballRetryDeadline.retryAtEpochMs,
                 ),
             )
         }
@@ -3039,10 +3094,11 @@ class HulkViewModel internal constructor(
 
     private fun clearFootballDayFailure(dayKey: String) {
         mutableState.update { state ->
-            if (dayKey !in state.footballFeed.dayFailures) return@update state
             state.copy(
-                footballFeed = state.footballFeed.copy(
-                    dayFailures = state.footballFeed.dayFailures - dayKey,
+                footballFeed = footballWithClearedDayFailure(
+                    state.footballFeed,
+                    dayKey,
+                    System.currentTimeMillis(),
                 ),
             )
         }
@@ -3066,7 +3122,8 @@ class HulkViewModel internal constructor(
         snapshot: FootballFeedSnapshot,
         scope: AccountProfileStateScope,
         catalogOwnerKey: String,
-    ) {
+    ): Boolean {
+        var accepted = false
         val favorites = mutableState.value.footballFeed.favoriteTeams
         val ordered = snapshot.copy(
             matches = orderFootballMatches(
@@ -3080,9 +3137,25 @@ class HulkViewModel internal constructor(
                 catalogOwnerKey,
             )
             val matches = base.allMatches + ordered.matches
+            val acceptance = footballDayAcceptance(
+                existing = base.daySnapshots[snapshot.dayKey],
+                candidate = ordered,
+                nowEpochMs = System.currentTimeMillis(),
+            )
+            val acceptedDay = acceptance.snapshot
+            accepted = acceptance.accepted
+            val daySnapshots = base.daySnapshots + (snapshot.dayKey to acceptedDay)
             state.copy(
                 footballFeed = base.copy(
-                    daySnapshots = base.daySnapshots + (snapshot.dayKey to ordered),
+                    snapshot = footballDisplaySnapshotForDay(
+                        daySnapshots = daySnapshots,
+                        dayFailures = base.dayFailures,
+                        dayKey = footballRiyadhDayKey(System.currentTimeMillis()),
+                        nowEpochMs = System.currentTimeMillis(),
+                        allowOtherDayFallback = true,
+                    ),
+                    daySnapshots = daySnapshots,
+                    nextRetryAtEpochMs = footballRetryDeadline.retryAtEpochMs,
                     knownTeams = reconcileFootballKnownTeams(
                         authoritativeCatalog = base.authoritativeCatalog,
                         currentKnownTeams = base.knownTeams,
@@ -3093,6 +3166,7 @@ class HulkViewModel internal constructor(
                 ),
             )
         }
+        return accepted
     }
 
     /**
@@ -3220,7 +3294,7 @@ class HulkViewModel internal constructor(
         footballObservedNetworkSnapshotAtEpochMs = 0L
         footballTeamCatalogJob?.cancel()
         footballTeamCatalogJob = null
-        footballRetryAtEpochMs = 0L
+        footballRetryDeadline.reset()
         footballCatalogRetryAtEpochMs = 0L
         footballCatchUpPending = false
     }
@@ -3250,6 +3324,8 @@ class HulkViewModel internal constructor(
         error: FootballFeedError?,
         loading: Boolean,
         lastAttemptEpochMs: Long,
+        successfulDayKey: String? = null,
+        requestedDayKey: String? = null,
     ) {
         val favoriteIds = favorites.mapTo(linkedSetOf(), FootballFavoriteTeam::teamId)
         val ordered = snapshot?.copy(matches = orderFootballMatches(snapshot.matches, favoriteIds))
@@ -3300,7 +3376,11 @@ class HulkViewModel internal constructor(
                         },
                         error = error,
                         lastAttemptEpochMs = lastAttemptEpochMs,
+                        nextRetryAtEpochMs = footballRetryDeadline.retryAtEpochMs,
                     ),
+                    successfulDayKey = successfulDayKey,
+                    nowEpochMs = lastAttemptEpochMs,
+                    requestedDayKey = requestedDayKey,
                 ),
             )
         }
@@ -3725,7 +3805,7 @@ class HulkViewModel internal constructor(
                     footballFeedCacheStore.lastAttemptEpochMs(),
                     footballForegroundLastAttemptEpochMs,
                 ),
-                retryAfterEpochMs = footballRetryAtEpochMs,
+                retryAfterEpochMs = footballRetryDeadline.retryAtEpochMs,
             )
             when (decision) {
                 FootballForegroundRefreshDecision.WaitForWake -> awaitFootballForegroundWake()
@@ -4107,10 +4187,7 @@ class HulkViewModel internal constructor(
             invalidateFootballOwner()
             footballCatalogAuthority.reset()
             mutableState.update { state ->
-                state.copy(
-                    footballFeed = state.footballFeed.withCatalogSourceCleared()
-                        .copy(dayFailures = emptyMap()),
-                )
+                state.copy(footballFeed = footballClearedForDiscoveryChange(state.footballFeed))
             }
         }
         wakeFootballForegroundScheduler()

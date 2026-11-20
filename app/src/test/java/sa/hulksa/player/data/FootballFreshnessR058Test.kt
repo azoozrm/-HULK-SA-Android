@@ -101,7 +101,7 @@ class FootballFreshnessR058Test {
             snapshot = snapshot(cachedAtEpochMs = 2_000L, stale = false),
         )
 
-        val merged = footballPublishedFeedState(previous, published)
+        val merged = footballPublishedFeedState(previous, published, nowEpochMs = 2_000L)
 
         assertEquals(previous.dayFailures, merged.dayFailures)
         assertEquals(published.snapshot, merged.snapshot)

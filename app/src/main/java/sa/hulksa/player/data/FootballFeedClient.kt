@@ -313,10 +313,14 @@ fun parseFootballFeed(
     val payloadRetryAfter = root.optNullableLong("retryAfterSeconds")
 
     val matches = buildList {
-        val array = root.optJSONArray("matches") ?: JSONArray()
+        // A missing or wrong-typed matches field is not an authoritative empty day. A non-empty
+        // array whose every row is malformed is equally invalid; only a real array (including an
+        // explicitly empty one) may produce a snapshot.
+        val array = root.optJSONArray("matches") ?: return@runCatching null
         for (index in 0 until array.length()) {
             parseFootballMatch(array.optJSONObject(index))?.let(::add)
         }
+        if (array.length() > 0 && isEmpty()) return@runCatching null
     }
     val reconciled = reconcileFootballMatches(mergeFootballMatchRows(matches))
     val kickoffHistory = buildList {

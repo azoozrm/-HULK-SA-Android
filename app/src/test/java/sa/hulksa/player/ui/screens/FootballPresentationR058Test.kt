@@ -12,6 +12,7 @@ import sa.hulksa.player.data.FootballMatch
 import sa.hulksa.player.data.FootballCompetition
 import sa.hulksa.player.data.FootballMatchStatus
 import sa.hulksa.player.data.FootballTeam
+import sa.hulksa.player.data.footballDisplaySnapshotForDay
 
 class FootballPresentationR058Test {
 
@@ -42,32 +43,28 @@ class FootballPresentationR058Test {
     )
 
     @Test
-    fun `expired non-stale home snapshot cannot hide a newer stale day snapshot`() {
+    fun `an expired exact day is displayed stale`() {
         val now = 10_000_000L
-        val daySnapshot = snapshot(cachedAtEpochMs = now - 10_000L, stale = true)
-        val homeSnapshot = snapshot(cachedAtEpochMs = now - 120_000L, stale = false)
-
-        val chosen = footballCenterSnapshotForDay(daySnapshot, homeSnapshot, day, now)
-
-        assertEquals(daySnapshot, chosen)
+        val expired = snapshot(cachedAtEpochMs = now - 61_000L, stale = false)
+        val chosen = footballDisplaySnapshotForDay(mapOf(day to expired), emptyMap(), day, now)
+        assertTrue(chosen!!.stale)
     }
 
     @Test
-    fun `actually fresh home snapshot wins over a stale day snapshot`() {
+    fun `a fresh exact day remains fresh`() {
         val now = 10_000_000L
-        val daySnapshot = snapshot(cachedAtEpochMs = now - 5_000L, stale = true)
-        val homeSnapshot = snapshot(cachedAtEpochMs = now - 10_000L, stale = false)
-
-        val chosen = footballCenterSnapshotForDay(daySnapshot, homeSnapshot, day, now)
-
-        assertEquals(homeSnapshot, chosen)
+        val fresh = snapshot(cachedAtEpochMs = now - 5_000L, stale = false)
+        val chosen = footballDisplaySnapshotForDay(mapOf(day to fresh), emptyMap(), day, now)
+        assertEquals(fresh, chosen)
     }
 
     @Test
-    fun `another day is never used`() {
+    fun `another day is only a stale fallback when the exact day is absent`() {
         val now = 10_000_000L
         val other = snapshot(cachedAtEpochMs = now, stale = false).copy(dayKey = "2026-11-19")
-        assertNull(footballCenterSnapshotForDay(other, other, day, now))
+        val chosen = footballDisplaySnapshotForDay(mapOf("2026-11-19" to other), emptyMap(), day, now, allowOtherDayFallback = true)
+        assertTrue(chosen!!.stale)
+        assertEquals("2026-11-19", chosen.dayKey)
     }
 
     @Test

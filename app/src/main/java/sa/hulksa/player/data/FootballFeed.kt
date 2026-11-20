@@ -217,6 +217,8 @@ data class FootballFeedSnapshot(
     val teams: List<FootballTeam>,
     val kickoffHistory: List<FootballMatch> = emptyList(),
     val reminderCandidates: List<FootballMatch> = emptyList(),
+    /** Device receipt time of this accepted record; provider [cachedAtEpochMs] stays separate. */
+    val fetchedAtEpochMs: Long = 0L,
 ) {
     val isEmptyDay: Boolean get() = matches.isEmpty() && !stale
 }
@@ -279,6 +281,8 @@ data class FootballDayFailure(
     val error: FootballFeedError,
     val attemptedAtEpochMs: Long,
     val retryAtEpochMs: Long = 0L,
+    /** Request start; a same-day success accepted after this point owns the result. */
+    val startedAtEpochMs: Long = 0L,
 )
 
 data class FootballFeedUiState(
@@ -298,6 +302,8 @@ data class FootballFeedUiState(
     val dayFailures: Map<String, FootballDayFailure> = emptyMap(),
     val error: FootballFeedError? = null,
     val lastAttemptEpochMs: Long = 0L,
+    /** One shared Home/day Retry-After deadline; UI eligibility must use this value. */
+    val nextRetryAtEpochMs: Long = 0L,
 ) {
     val favoriteTeam: FootballFavoriteTeam? get() = favoriteTeams.firstOrNull()
     val favoriteTeamIds: Set<String> get() = favoriteTeams.mapTo(linkedSetOf(), FootballFavoriteTeam::teamId)
@@ -760,6 +766,22 @@ internal fun FootballFeedUiState.withCatalogSourceCleared(): FootballFeedUiState
     knownTeams = footballTeamsFromMatches(allMatches, favoriteTeams),
 )
 
+/**
+ * A discovery URL change invalidates every public result from the old source in memory. Private
+ * favorites/hide-scores/alerts stay owned by their profile store.
+ */
+fun footballClearedForDiscoveryChange(state: FootballFeedUiState): FootballFeedUiState =
+    state.withCatalogSourceCleared().copy(
+        snapshot = null,
+        daySnapshots = emptyMap(),
+        dayFailures = emptyMap(),
+        knownTeams = emptyList(),
+        error = null,
+        loading = false,
+        lastAttemptEpochMs = 0L,
+        nextRetryAtEpochMs = 0L,
+    )
+
 fun footballKickoffNotificationId(
     accountId: String,
     profileId: String,
@@ -887,7 +909,8 @@ fun footballSnapshotCacheFresh(
 ): Boolean {
     if (snapshot == null || snapshot.stale) return false
     val ttlMs = refreshSeconds.coerceAtLeast(1) * 1_000L
-    return nowEpochMs - snapshot.cachedAtEpochMs in 0 until ttlMs
+    val observedAt = snapshot.fetchedAtEpochMs.takeIf { it > 0L } ?: snapshot.cachedAtEpochMs
+    return nowEpochMs - observedAt in 0 until ttlMs
 }
 
 /**
@@ -938,13 +961,257 @@ fun footballRetryAtAfterFailure(
 }
 
 /**
+ * One shared retry deadline used by Home and per-day refresh. Time is injectable so the exact
+ * backoff/transport eligibility can be tested without sleeping.
+ */
+class FootballRetryDeadline(
+    private val now: () -> Long = System::currentTimeMillis,
+) {
+    var retryAtEpochMs: Long = 0L
+        private set
+
+    fun canAttempt(): Boolean = now() >= retryAtEpochMs
+
+    fun onSuccess(retryAfterSeconds: Long?) {
+        retryAtEpochMs = footballRetryAtAfterSuccess(now(), retryAfterSeconds, retryAtEpochMs)
+    }
+
+    fun onFailure(retryAfterSeconds: Long?) {
+        retryAtEpochMs = footballRetryAtAfterFailure(now(), retryAfterSeconds, retryAtEpochMs)
+    }
+
+    fun reset() {
+        retryAtEpochMs = 0L
+    }
+}
+
+/**
+ * One start decision for a day request. An in-flight job owns the day, a passive selection may use
+ * a fresh cache, and an active shared cooldown blocks even an explicit retry from duplicating
+ * transport. Only one press can pass this gate into a real fetch.
+ */
+internal fun footballShouldStartDayRefresh(
+    force: Boolean,
+    active: Boolean,
+    cacheFresh: Boolean,
+    canAttempt: Boolean,
+): Boolean = when {
+    active -> false
+    !force && cacheFresh -> false
+    !canAttempt -> false
+    else -> true
+}
+
+/**
  * A Home publication replaces today's feed fields but owns no other day's failure. Only a real
- * success for that day may clear its entry.
+ * success for that day may clear its entry, and an older/stale Home row must not replace a newer
+ * or fresher day authority.
  */
 fun footballPublishedFeedState(
     previous: FootballFeedUiState,
     published: FootballFeedUiState,
-): FootballFeedUiState = published.copy(dayFailures = previous.dayFailures)
+    successfulDayKey: String? = null,
+    nowEpochMs: Long = System.currentTimeMillis(),
+    requestedDayKey: String? = null,
+    publicDayKey: String? = null,
+): FootballFeedUiState {
+    val publishedSnapshot = published.snapshot
+    val dayKey = publishedSnapshot?.dayKey ?: requestedDayKey
+    val effectivePublicDayKey = publicDayKey ?: requestedDayKey ?: publishedSnapshot?.dayKey
+        ?: footballRiyadhDayKey(nowEpochMs)
+    val existing = dayKey?.let { previous.daySnapshots[it] }
+    val accepted = publishedSnapshot != null &&
+        publishedSnapshot.dayKey == dayKey &&
+        footballDayCandidateAccepted(existing, publishedSnapshot, nowEpochMs)
+    val acceptedSnapshot = if (accepted) {
+        footballAcceptedDaySnapshot(existing, publishedSnapshot!!, nowEpochMs)
+    } else {
+        null
+    }
+    val mergedDays = when {
+        dayKey == null -> previous.daySnapshots
+        acceptedSnapshot != null -> previous.daySnapshots + (dayKey to acceptedSnapshot)
+        else -> previous.daySnapshots
+    }
+    val mergedFailures = if (successfulDayKey == null || !accepted) {
+        previous.dayFailures
+    } else {
+        previous.dayFailures - successfulDayKey
+    }
+    return published.copy(
+        snapshot = footballDisplaySnapshotForDay(
+            daySnapshots = mergedDays,
+            dayFailures = mergedFailures,
+            dayKey = effectivePublicDayKey,
+            nowEpochMs = nowEpochMs,
+            allowOtherDayFallback = true,
+        ),
+        daySnapshots = mergedDays,
+        dayFailures = mergedFailures,
+    )
+}
+
+/**
+ * The one public projection for a requested day. Today/exact accepted data wins, including valid
+ * empty; another day is only a disclosed stale fallback when the requested day has no record.
+ * Failure/age changes the display copy; raw provider/receipt freshness is never mutated.
+ */
+fun footballWithDayFailure(
+    state: FootballFeedUiState,
+    dayKey: String,
+    failure: FootballDayFailure,
+    nowEpochMs: Long,
+    retryAtEpochMs: Long,
+): FootballFeedUiState {
+    val snapshot = state.daySnapshots[dayKey]
+    if (!footballFailureOwnsResult(snapshot, failure)) {
+        return state.copy(nextRetryAtEpochMs = retryAtEpochMs)
+    }
+    val failures = state.dayFailures + (dayKey to failure)
+    return state.copy(
+        snapshot = footballDisplaySnapshotForDay(
+            daySnapshots = state.daySnapshots,
+            dayFailures = failures,
+            dayKey = state.snapshot?.dayKey ?: footballRiyadhDayKey(nowEpochMs),
+            nowEpochMs = nowEpochMs,
+            allowOtherDayFallback = true,
+        ),
+        dayFailures = failures,
+        nextRetryAtEpochMs = retryAtEpochMs,
+    )
+}
+
+fun footballEffectiveDayFailure(
+    daySnapshots: Map<String, FootballFeedSnapshot>,
+    dayFailures: Map<String, FootballDayFailure>,
+    dayKey: String,
+): FootballDayFailure? {
+    val failure = dayFailures[dayKey] ?: return null
+    val snapshot = daySnapshots[dayKey]
+    return failure.takeIf {
+        snapshot == null || footballFailureOwnsResult(snapshot, failure)
+    }
+}
+
+fun footballDisplaySnapshotForDay(
+    daySnapshots: Map<String, FootballFeedSnapshot>,
+    dayFailures: Map<String, FootballDayFailure>,
+    dayKey: String,
+    nowEpochMs: Long,
+    allowOtherDayFallback: Boolean = false,
+): FootballFeedSnapshot? {
+    val exact = daySnapshots[dayKey]
+    val fallback = if (allowOtherDayFallback && exact == null) {
+        daySnapshots.values
+            .filter { it.dayKey < dayKey }
+            .maxByOrNull { it.cachedAtEpochMs }
+            ?.copy(stale = true)
+    } else {
+        null
+    }
+    val chosen = exact ?: fallback ?: return null
+    val failure = dayFailures[dayKey]
+    return if (failure != null && footballFailureOwnsResult(chosen, failure)) {
+        chosen.copy(stale = true)
+    } else {
+        footballSnapshotForDisplay(chosen, nowEpochMs, chosen.refreshSeconds)
+    }
+}
+
+/** True when a failure is newer than the current accepted same-day row (or owns no row). */
+fun footballFailureOwnsResult(
+    snapshot: FootballFeedSnapshot?,
+    failure: FootballDayFailure,
+): Boolean {
+    if (failure.startedAtEpochMs <= 0L || snapshot == null) return true
+    if (snapshot.stale) return true
+    return snapshot.fetchedAtEpochMs < failure.startedAtEpochMs
+}
+
+/**
+ * One same-day acceptance rule for memory and durable cache. A fresh accepted record beats an older
+ * stale observation; an expired record yields to a newer last-good row. Equal/newer provider time
+ * wins within the same freshness class.
+ */
+fun footballDayCandidateAccepted(
+    existing: FootballFeedSnapshot?,
+    candidate: FootballFeedSnapshot,
+    nowEpochMs: Long,
+): Boolean {
+    if (existing == null) return true
+    val existingFresh = footballSnapshotCacheFresh(existing, nowEpochMs, existing.refreshSeconds)
+    val candidateFresh = !candidate.stale &&
+        footballSnapshotCacheFresh(candidate, nowEpochMs, candidate.refreshSeconds)
+    return when {
+        candidate.cachedAtEpochMs > existing.cachedAtEpochMs ->
+            !(existingFresh && candidate.stale)
+        candidate.cachedAtEpochMs < existing.cachedAtEpochMs -> false
+        else -> {
+            // Equal provider time: only an unchanged fresh network revalidation may renew receipt.
+            // A different or older payload never replaces accepted content on a tie.
+            val sameContent = candidate.copy(
+                fetchedAtEpochMs = existing.fetchedAtEpochMs,
+            ) == existing
+            sameContent &&
+                candidateFresh &&
+                candidate.fetchedAtEpochMs > existing.fetchedAtEpochMs
+        }
+    }
+}
+
+data class FootballDayAcceptance(
+    val accepted: Boolean,
+    val snapshot: FootballFeedSnapshot,
+)
+
+/** Shared acceptance result, including an unchanged fresh revalidation that renews receipt. */
+fun footballDayAcceptance(
+    existing: FootballFeedSnapshot?,
+    candidate: FootballFeedSnapshot,
+    nowEpochMs: Long,
+): FootballDayAcceptance {
+    val accepted = footballDayCandidateAccepted(existing, candidate, nowEpochMs)
+    return FootballDayAcceptance(
+        accepted = accepted,
+        snapshot = if (accepted) {
+            footballAcceptedDaySnapshot(existing, candidate, nowEpochMs)
+        } else {
+            checkNotNull(existing)
+        },
+    )
+}
+
+fun footballWithClearedDayFailure(
+    state: FootballFeedUiState,
+    dayKey: String,
+    nowEpochMs: Long,
+): FootballFeedUiState {
+    if (dayKey !in state.dayFailures) return state
+    val failures = state.dayFailures - dayKey
+    return state.copy(
+        snapshot = footballDisplaySnapshotForDay(
+            daySnapshots = state.daySnapshots,
+            dayFailures = failures,
+            dayKey = state.snapshot?.dayKey ?: footballRiyadhDayKey(nowEpochMs),
+            nowEpochMs = nowEpochMs,
+            allowOtherDayFallback = true,
+        ),
+        dayFailures = failures,
+    )
+}
+
+fun footballAcceptedDaySnapshot(
+    existing: FootballFeedSnapshot?,
+    candidate: FootballFeedSnapshot,
+    nowEpochMs: Long,
+): FootballFeedSnapshot = when {
+    !footballDayCandidateAccepted(existing, candidate, nowEpochMs) -> checkNotNull(existing)
+    existing != null &&
+        candidate.cachedAtEpochMs == existing.cachedAtEpochMs &&
+        candidate.copy(fetchedAtEpochMs = existing.fetchedAtEpochMs) == existing ->
+        existing.copy(fetchedAtEpochMs = candidate.fetchedAtEpochMs)
+    else -> candidate
+}
 
 /** Provider/server observation freshness; app receipt time alone is not an observation. */
 fun footballSnapshotObservationFresh(

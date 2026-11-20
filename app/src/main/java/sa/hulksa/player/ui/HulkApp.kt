@@ -511,6 +511,7 @@ fun HulkApp(
                                     onToggleFootballHideScores = viewModel::setFootballHideScores,
                                     onSaveFootballMatchAlerts = viewModel::saveFootballMatchAlerts,
                                     onRefreshFootballDay = { day -> viewModel.refreshFootballDay(day) },
+                                    onRetryFootballDay = { day -> viewModel.refreshFootballDay(day, force = true) },
                                     onRefreshAccount = { viewModel.refreshAccount { message ->
                                         postActionNotice(
                                             scopedNoticeDisplayText(message),

@@ -82,10 +82,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import sa.hulksa.player.data.FootballAlertType
 import sa.hulksa.player.data.FootballCompetition
 import sa.hulksa.player.data.FootballDayFailure
@@ -103,6 +105,8 @@ import sa.hulksa.player.data.footballRiyadhDayStartEpochMs
 import sa.hulksa.player.data.footballRiyadhDayLabel
 import sa.hulksa.player.data.footballRiyadhTimeLabel
 import sa.hulksa.player.data.footballSnapshotCacheFresh
+import sa.hulksa.player.data.footballDisplaySnapshotForDay
+import sa.hulksa.player.data.footballEffectiveDayFailure
 import sa.hulksa.player.data.footballTeamsFromMatches
 import sa.hulksa.player.data.mergeFootballTeamLists
 import sa.hulksa.player.data.resolveFootballAlertPreferences
@@ -174,24 +178,7 @@ internal fun footballCenterGroups(matches: List<FootballMatch>): List<Pair<Footb
  * The selected day's own snapshot owns the center. A Home snapshot is only a fallback for today,
  * and a non-stale flag is not enough: an expired cache must not hide a newer stale/unavailable day.
  */
-internal fun footballCenterSnapshotForDay(
-    daySnapshot: FootballFeedSnapshot?,
-    homeSnapshot: FootballFeedSnapshot?,
-    selectedDay: String,
-    nowEpochMs: Long,
-): FootballFeedSnapshot? {
-    val candidates = buildList {
-        daySnapshot?.takeIf { it.dayKey == selectedDay }?.let(::add)
-        homeSnapshot?.takeIf { it.dayKey == selectedDay }?.let(::add)
-    }
-    return candidates.maxWithOrNull(
-        compareBy<FootballFeedSnapshot> { snapshot ->
-            if (!snapshot.stale &&
-                footballSnapshotCacheFresh(snapshot, nowEpochMs, snapshot.refreshSeconds)
-            ) 1 else 0
-        }.thenBy { it.cachedAtEpochMs },
-    )
-}
+
 
 internal data class FootballCenterFailureCopy(
     val title: String,
@@ -272,6 +259,37 @@ internal fun footballLastSuccessLabel(
  * Minimal extra scroll that keeps a focused row a real margin inside the list viewport. Positive
  * means scroll forward. Returns zero when the row already has the requested top and bottom margin.
  */
+internal fun footballRetryTickDelayMs(nowEpochMs: Long, retryAtEpochMs: Long): Long =
+    (retryAtEpochMs - nowEpochMs).coerceIn(0L, 1_000L)
+
+@Composable
+internal fun rememberFootballClock(deadlineEpochMs: Long): Long {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(deadlineEpochMs, lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                val current = System.currentTimeMillis()
+                now = current
+                delay(footballCenterClockTickMs(current, deadlineEpochMs))
+            }
+        }
+    }
+    return now
+}
+
+internal fun footballCenterClockTickMs(nowEpochMs: Long, retryAtEpochMs: Long): Long =
+    if (retryAtEpochMs > nowEpochMs) {
+        footballRetryTickDelayMs(nowEpochMs, retryAtEpochMs)
+    } else {
+        15_000L
+    }
+
+internal fun footballFocusedIndex(
+    focusedKey: String?,
+    keyToIndex: Map<String, Int>,
+): Int? = focusedKey?.let(keyToIndex::get)
+
 internal fun footballFocusScrollDelta(
     itemOffset: Int,
     itemSize: Int,
@@ -471,6 +489,7 @@ internal fun FootballHomeCard(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
     onFocused: () -> Unit = {},
+    onFocusLost: () -> Unit = {},
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -490,7 +509,7 @@ internal fun FootballHomeCard(
             )
             .onFocusChanged {
                 focused = it.isFocused
-                if (it.isFocused) onFocused()
+                if (it.isFocused) onFocused() else onFocusLost()
             }
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -625,6 +644,7 @@ internal fun FootballCenterScreen(
     onBack: () -> Unit,
     onToggleHideScores: () -> Unit,
     onSelectDay: (String) -> Unit,
+    onRetryDay: (String) -> Unit,
     onRefresh: () -> Unit,
     onSaveMatchAlerts: (FootballMatch, FootballMatchAlertPreferences) -> Unit,
     onSetTeams: (List<FootballTeam>) -> Unit,
@@ -656,6 +676,20 @@ internal fun FootballCenterScreen(
         footballRiyadhDayKey(currentTimeMs + 24 * 60 * 60 * 1_000L) to "غدا",
     )
     var selectedDay by rememberSaveable(today) { mutableStateOf(today) }
+    val retryDeadline = maxOf(
+        feed.dayFailures[selectedDay]?.retryAtEpochMs ?: 0L,
+        feed.nextRetryAtEpochMs,
+    )
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(retryDeadline, lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                val now = System.currentTimeMillis()
+                currentTimeMs = now
+                delay(footballCenterClockTickMs(now, retryDeadline))
+            }
+        }
+    }
     var managerVisible by remember { mutableStateOf(false) }
     var managerWasVisible by remember { mutableStateOf(false) }
     val manageRequester = remember { FocusRequester() }
@@ -675,13 +709,19 @@ internal fun FootballCenterScreen(
     }
     var filter by rememberSaveable { mutableStateOf(FootballCenterFilter.ALL.name) }
     val activeFilter = FootballCenterFilter.entries.firstOrNull { it.name == filter } ?: FootballCenterFilter.ALL
-    val snapshot = footballCenterSnapshotForDay(
-        daySnapshot = feed.daySnapshots[selectedDay],
-        homeSnapshot = if (selectedDay == today) feed.snapshot else null,
-        selectedDay = selectedDay,
+    val dayFailure = footballEffectiveDayFailure(
+        daySnapshots = feed.daySnapshots,
+        dayFailures = feed.dayFailures,
+        dayKey = selectedDay,
+    )
+    val effectiveRetryAt = maxOf(dayFailure?.retryAtEpochMs ?: 0L, feed.nextRetryAtEpochMs)
+    val effectiveFailure = dayFailure?.copy(retryAtEpochMs = effectiveRetryAt)
+    val snapshot = footballDisplaySnapshotForDay(
+        daySnapshots = feed.daySnapshots,
+        dayFailures = feed.dayFailures,
+        dayKey = selectedDay,
         nowEpochMs = currentTimeMs,
     )
-    val dayFailure = feed.dayFailures[selectedDay]
     val favoriteIds = feed.favoriteTeamIds
     val matches = remember(snapshot, activeFilter, favoriteIds) {
         footballMatchesForFilter(snapshot?.matches.orEmpty(), activeFilter, favoriteIds)
@@ -690,7 +730,7 @@ internal fun FootballCenterScreen(
     val listState = rememberLazyListState()
     val density = LocalDensity.current
     val focusMarginPx = with(density) { 6.dp.roundToPx() }
-    var focusedMatchIndex by remember { mutableStateOf<Int?>(null) }
+    var focusedMatchKey by remember { mutableStateOf<String?>(null) }
     val matchLazyIndices = remember(groups) {
         buildMap<String, Int> {
             var index = 0
@@ -703,19 +743,23 @@ internal fun FootballCenterScreen(
             }
         }
     }
-    LaunchedEffect(focusedMatchIndex) {
-        val index = focusedMatchIndex ?: return@LaunchedEffect
-        val info = snapshotFlow {
+    LaunchedEffect(focusedMatchKey, groups) {
+        val key = focusedMatchKey ?: return@LaunchedEffect
+        val index = footballFocusedIndex(key, matchLazyIndices) ?: return@LaunchedEffect
+        snapshotFlow {
             listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
-        }.first { it != null } ?: return@LaunchedEffect
-        val delta = footballFocusScrollDelta(
-            itemOffset = info.offset,
-            itemSize = info.size,
-            viewportStart = listState.layoutInfo.viewportStartOffset,
-            viewportEnd = listState.layoutInfo.viewportEndOffset,
-            marginPx = focusMarginPx,
-        )
-        if (delta != 0) listState.scrollBy(delta.toFloat())
+        }.collect { info ->
+            if (info != null) {
+                val delta = footballFocusScrollDelta(
+                    itemOffset = info.offset,
+                    itemSize = info.size,
+                    viewportStart = listState.layoutInfo.viewportStartOffset,
+                    viewportEnd = listState.layoutInfo.viewportEndOffset,
+                    marginPx = focusMarginPx,
+                )
+                if (delta != 0) listState.scrollBy(delta.toFloat())
+            }
+        }
     }
     val rowRequesters = remember { mutableMapOf<String, FocusRequester>() }
     var detailsMatch by remember { mutableStateOf<FootballMatch?>(null) }
@@ -867,18 +911,18 @@ internal fun FootballCenterScreen(
             if (selectedDay in feed.loadingDays) {
                 FootballCenterState("جاري تحميل المباريات", true)
             } else {
-                val failureCopy = footballCenterFailureCopy(dayFailure, currentTimeMs)
+                val failureCopy = footballCenterFailureCopy(effectiveFailure, currentTimeMs)
                 FootballCenterState(
                     failureCopy.title,
                     false,
                     detail = failureCopy.detail,
-                    onRetry = { onSelectDay(selectedDay) },
-                    retryEnabled = failureCopy.retryEnabled,
+                    onRetry = { onRetryDay(selectedDay) },
+                    retryEnabled = failureCopy.retryEnabled && feed.nextRetryAtEpochMs <= currentTimeMs,
                 )
             }
         } else if (matches.isEmpty()) {
             val emptyCopy = footballCenterEmptyCopy(snapshot, activeFilter)
-            val failureCopy = dayFailure?.let { footballCenterFailureCopy(it, currentTimeMs) }
+            val failureCopy = effectiveFailure?.let { footballCenterFailureCopy(it, currentTimeMs) }
             val detail = listOfNotNull(
                 emptyCopy.detail ?: if (snapshot.stale) {
                     footballLastSuccessLabel(snapshot, currentTimeMs)
@@ -892,23 +936,25 @@ internal fun FootballCenterScreen(
                 false,
                 detail = detail.takeIf { it.isNotBlank() },
                 onRetry = if (snapshot.stale) {
-                    { onSelectDay(selectedDay) }
+                    { onRetryDay(selectedDay) }
                 } else {
                     null
                 },
-                retryEnabled = failureCopy?.retryEnabled ?: true,
+                retryEnabled = (failureCopy?.retryEnabled ?: true) &&
+                    feed.nextRetryAtEpochMs <= currentTimeMs,
             )
         } else {
             Column(Modifier.fillMaxSize()) {
                 if (snapshot.stale) {
-                    val failureCopy = dayFailure?.let { footballCenterFailureCopy(it, currentTimeMs) }
+                    val failureCopy = effectiveFailure?.let { footballCenterFailureCopy(it, currentTimeMs) }
                     FootballStaleDayRow(
                         detail = listOfNotNull(
                             footballLastSuccessLabel(snapshot, currentTimeMs),
                             failureCopy?.detail,
                         ).joinToString(" • "),
-                        retryEnabled = failureCopy?.retryEnabled ?: true,
-                        onRetry = { onSelectDay(selectedDay) },
+                        retryEnabled = (failureCopy?.retryEnabled ?: true) &&
+                            feed.nextRetryAtEpochMs <= currentTimeMs,
+                        onRetry = { onRetryDay(selectedDay) },
                     )
                 }
                 LazyColumn(
@@ -946,7 +992,12 @@ internal fun FootballCenterScreen(
                                 favoriteIds = favoriteIds,
                                 modifier = Modifier.focusRequester(requesterFor(match)),
                                 onFocused = {
-                                    focusedMatchIndex = matchLazyIndices[match.stableIdentity]
+                                    focusedMatchKey = match.stableIdentity
+                                },
+                                onFocusLost = {
+                                    if (focusedMatchKey == match.stableIdentity) {
+                                        focusedMatchKey = null
+                                    }
                                 },
                                 onClick = {
                                     returnFocusKey = match.stableIdentity
@@ -1034,6 +1085,7 @@ private fun FootballCenterRow(
     favoriteIds: Set<String>,
     modifier: Modifier = Modifier,
     onFocused: () -> Unit = {},
+    onFocusLost: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
@@ -1054,7 +1106,7 @@ private fun FootballCenterRow(
             )
             .onFocusChanged {
                 focused = it.isFocused
-                if (it.isFocused) onFocused()
+                if (it.isFocused) onFocused() else onFocusLost()
             }
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -1250,20 +1302,27 @@ internal fun FootballTeamManagerDialog(
     val gridState = rememberLazyGridState()
     val density = LocalDensity.current
     val focusMarginPx = with(density) { 6.dp.roundToPx() }
-    var focusedTeamIndex by remember { mutableStateOf<Int?>(null) }
-    LaunchedEffect(focusedTeamIndex) {
-        val index = focusedTeamIndex ?: return@LaunchedEffect
-        val info = snapshotFlow {
+    var focusedTeamKey by remember { mutableStateOf<String?>(null) }
+    val teamIndices = remember(filtered) {
+        filtered.mapIndexed { index, team -> team.id to index }.toMap()
+    }
+    LaunchedEffect(focusedTeamKey, filtered) {
+        val key = focusedTeamKey ?: return@LaunchedEffect
+        val index = footballFocusedIndex(key, teamIndices) ?: return@LaunchedEffect
+        snapshotFlow {
             gridState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
-        }.first { it != null } ?: return@LaunchedEffect
-        val delta = footballFocusScrollDelta(
-            itemOffset = info.offset.y,
-            itemSize = info.size.height,
-            viewportStart = gridState.layoutInfo.viewportStartOffset,
-            viewportEnd = gridState.layoutInfo.viewportEndOffset,
-            marginPx = focusMarginPx,
-        )
-        if (delta != 0) gridState.scrollBy(delta.toFloat())
+        }.collect { info ->
+            if (info != null) {
+                val delta = footballFocusScrollDelta(
+                    itemOffset = info.offset.y,
+                    itemSize = info.size.height,
+                    viewportStart = gridState.layoutInfo.viewportStartOffset,
+                    viewportEnd = gridState.layoutInfo.viewportEndOffset,
+                    marginPx = focusMarginPx,
+                )
+                if (delta != 0) gridState.scrollBy(delta.toFloat())
+            }
+        }
     }
 
     BackHandler(onBack = onDismiss)
@@ -1409,12 +1468,15 @@ internal fun FootballTeamManagerDialog(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        itemsIndexed(filtered, key = { _, team -> team.id }) { index, team ->
+                        itemsIndexed(filtered, key = { _, team -> team.id }) { _, team ->
                             val selected = team.id in selectedIds
                             FootballTeamTile(
                                 team = team,
                                 selected = selected,
-                                onFocused = { focusedTeamIndex = index },
+                                onFocused = { focusedTeamKey = team.id },
+                                onFocusLost = {
+                                    if (focusedTeamKey == team.id) focusedTeamKey = null
+                                },
                                 onClick = {
                                     selectedIds = if (selected) {
                                         selectedIds - team.id
@@ -1461,6 +1523,7 @@ private fun FootballTeamTile(
     selected: Boolean,
     modifier: Modifier = Modifier,
     onFocused: () -> Unit = {},
+    onFocusLost: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
@@ -1480,7 +1543,7 @@ private fun FootballTeamTile(
             )
             .onFocusChanged {
                 focused = it.isFocused
-                if (it.isFocused) onFocused()
+                if (it.isFocused) onFocused() else onFocusLost()
             }
             .selectable(selected = selected, role = Role.Checkbox, onClick = onClick)
             .padding(9.dp),

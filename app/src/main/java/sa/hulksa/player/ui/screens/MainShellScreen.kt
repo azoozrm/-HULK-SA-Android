@@ -227,6 +227,9 @@ import sa.hulksa.player.data.FootballMatchAlertPreferences
 import sa.hulksa.player.data.FootballMatchStatus
 import sa.hulksa.player.data.FootballTeam
 import sa.hulksa.player.data.filterFootballTeams
+import sa.hulksa.player.data.footballDisplaySnapshotForDay
+import sa.hulksa.player.data.footballEffectiveDayFailure
+import sa.hulksa.player.data.footballRiyadhDayKey
 import sa.hulksa.player.data.footballRiyadhDayLabel
 import sa.hulksa.player.data.footballTeamsFromMatches
 import sa.hulksa.player.data.mergeFootballTeamLists
@@ -1247,6 +1250,7 @@ internal fun MainShellScreen(
     onToggleFootballHideScores: (Boolean) -> Unit = {},
     onSaveFootballMatchAlerts: (FootballMatch, FootballMatchAlertPreferences) -> Unit = { _, _ -> },
     onRefreshFootballDay: (String) -> Unit = {},
+    onRetryFootballDay: (String) -> Unit = {},
     mobileHomeFocusRequester: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
@@ -1493,6 +1497,7 @@ internal fun MainShellScreen(
                                 onToggleFootballHideScores(!state.footballFeed.hideScores)
                             },
                             onSelectDay = onRefreshFootballDay,
+                            onRetryDay = onRetryFootballDay,
                             onRefresh = onRefreshFootballFeed,
                             onSaveMatchAlerts = onSaveFootballMatchAlerts,
                             onSetTeams = onSetFootballTeams,
@@ -1583,6 +1588,7 @@ internal fun MainShellScreen(
                                 onToggleFootballHideScores(!state.footballFeed.hideScores)
                             },
                             onSelectDay = onRefreshFootballDay,
+                            onRetryDay = onRetryFootballDay,
                             onRefresh = onRefreshFootballFeed,
                             onSaveMatchAlerts = onSaveFootballMatchAlerts,
                             onSetTeams = onSetFootballTeams,
@@ -2971,6 +2977,23 @@ private fun HomeFootballSection(
     onRefresh: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val homeRetryNow = rememberFootballClock(feed.nextRetryAtEpochMs)
+    val homeRetryEnabled = feed.nextRetryAtEpochMs <= homeRetryNow
+    val homeTodayKey = footballRiyadhDayKey(System.currentTimeMillis())
+    val homeSnapshot = footballDisplaySnapshotForDay(
+        daySnapshots = feed.daySnapshots,
+        dayFailures = feed.dayFailures,
+        dayKey = homeTodayKey,
+        nowEpochMs = homeRetryNow,
+        allowOtherDayFallback = true,
+    )
+    val homeStale = homeSnapshot?.stale == true
+    val homeFailure = footballEffectiveDayFailure(
+        daySnapshots = feed.daySnapshots,
+        dayFailures = feed.dayFailures,
+        dayKey = homeTodayKey,
+    )
+    val matches = homeSnapshot?.matches.orEmpty()
     val remembered = navigationMemory.position(MainDestination.HOME)
     val currentRailFocusRevision by rememberUpdatedState(railFocusRevision)
     var managerVisible by remember { mutableStateOf(false) }
@@ -2979,7 +3002,6 @@ private fun HomeFootballSection(
     val centerButtonRequester = remember { FocusRequester() }
     val managerButtonRequester = remember { FocusRequester() }
     var detailsReturnRevision by remember { mutableLongStateOf(0L) }
-    val matches = feed.matches
     val itemKeys = remember(matches) { matches.map(FootballMatch::stableIdentity) }
     val restoredIndex = remember(
         remembered.rowKey,
@@ -2996,6 +3018,25 @@ private fun HomeFootballSection(
         )
     }
     val rowState = rememberLazyListState(initialFirstVisibleItemIndex = restoredIndex ?: 0)
+    val homeFocusMarginPx = with(LocalDensity.current) { 6.dp.roundToPx() }
+    var focusedCardKey by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(focusedCardKey, matches) {
+        val key = focusedCardKey ?: return@LaunchedEffect
+        snapshotFlow {
+            rowState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }
+        }.collect { info ->
+            if (info != null) {
+                val delta = footballFocusScrollDelta(
+                    itemOffset = info.offset,
+                    itemSize = info.size,
+                    viewportStart = rowState.layoutInfo.viewportStartOffset,
+                    viewportEnd = rowState.layoutInfo.viewportEndOffset,
+                    marginPx = homeFocusMarginPx,
+                )
+                if (delta != 0) rowState.scrollBy(delta.toFloat())
+            }
+        }
+    }
     val targetRequester = remember { FocusRequester() }
     val emptyRequester = remember { FocusRequester() }
     val rowSaveFocusRequester = remember { FocusRequester() }
@@ -3014,8 +3055,8 @@ private fun HomeFootballSection(
         matches.isEmpty(),
         feed.loading,
         feed.error,
-        feed.stale,
-        feed.snapshot?.dayKey,
+        homeStale,
+        homeSnapshot?.dayKey,
     ) {
         emptyPlaced = false
         emptyFocused = false
@@ -3205,7 +3246,7 @@ private fun HomeFootballSection(
             }
         }
         Spacer(Modifier.height(10.dp))
-        if (feed.stale) {
+        if (homeStale) {
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -3213,7 +3254,7 @@ private fun HomeFootballSection(
             ) {
                 Icon(Icons.Outlined.Schedule, null, tint = colors.gold, modifier = Modifier.size(16.dp))
                 Text(
-                    feed.snapshot?.let { footballLastSuccessLabel(it, System.currentTimeMillis()) }
+                    homeSnapshot?.let { footballLastSuccessLabel(it, System.currentTimeMillis()) }
                         ?: "لا يوجد تحديث ناجح بعد",
                     color = colors.textMuted,
                     fontSize = 11.sp,
@@ -3223,6 +3264,7 @@ private fun HomeFootballSection(
                 FocusButton(
                     "تحديث",
                     onRefresh,
+                    enabled = homeRetryEnabled,
                     compact = true,
                     primary = false,
                     scaleOnFocus = false,
@@ -3233,35 +3275,55 @@ private fun HomeFootballSection(
             }
         }
         when {
-            feed.snapshot == null && feed.loading -> FootballFeedStatusCard(
+            homeSnapshot == null && feed.loading -> FootballFeedStatusCard(
                 isTv = isTv,
                 title = "جاري تحميل مباريات اليوم",
                 icon = Icons.Rounded.SportsSoccer,
                 action = "تحديث",
                 onAction = onRefresh,
+                actionEnabled = homeRetryEnabled,
                 showLoading = true,
                 buttonRequester = emptyRequester,
                 onButtonPlaced = { emptyPlaced = true },
                 onButtonFocused = { emptyFocused = true },
             )
-            feed.snapshot == null && feed.error != null -> FootballFeedStatusCard(
+            homeSnapshot == null && feed.error != null -> FootballFeedStatusCard(
                 isTv = isTv,
                 title = "تعذر تحميل مباريات اليوم",
                 body = footballFeedErrorCopy(feed.error),
                 icon = Icons.Outlined.ErrorOutline,
                 action = "اعادة المحاولة",
                 onAction = onRefresh,
+                actionEnabled = homeRetryEnabled,
                 buttonRequester = emptyRequester,
                 onButtonPlaced = { emptyPlaced = true },
                 onButtonFocused = { emptyFocused = true },
             )
-            feed.stale && matches.isEmpty() -> FootballFeedStatusCard(
+            homeStale && matches.isEmpty() -> FootballFeedStatusCard(
                 isTv = isTv,
                 title = "تعذر تحديث مباريات اليوم",
                 body = "لا توجد بيانات محفوظة لهذا اليوم بعد اخر تحديث ناجح",
                 icon = Icons.Outlined.ErrorOutline,
                 action = "اعادة المحاولة",
                 onAction = onRefresh,
+                actionEnabled = homeRetryEnabled,
+                buttonRequester = emptyRequester,
+                onButtonPlaced = { emptyPlaced = true },
+                onButtonFocused = { emptyFocused = true },
+            )
+            homeSnapshot == null -> FootballFeedStatusCard(
+                isTv = isTv,
+                title = if (homeFailure != null) {
+                    "تعذر تحميل مباريات اليوم"
+                } else {
+                    "لا توجد بيانات محفوظة"
+                },
+                body = homeFailure?.let { footballCenterFailureCopy(it, homeRetryNow).detail }
+                    ?: "لم يصل تحديث ناجح لهذا اليوم بعد",
+                icon = Icons.Outlined.ErrorOutline,
+                action = "اعادة المحاولة",
+                onAction = onRefresh,
+                actionEnabled = homeRetryEnabled,
                 buttonRequester = emptyRequester,
                 onButtonPlaced = { emptyPlaced = true },
                 onButtonFocused = { emptyFocused = true },
@@ -3300,8 +3362,12 @@ private fun HomeFootballSection(
                         },
                         onFocused = {
                             firstCardFocused = index == 0
+                            focusedCardKey = matchKey
                             navigationMemory.save(MainDestination.HOME, matchKey, index, "football-matches", rowIndex)
                             homeRestoreOwner.onContentFocused(navigationMemory.position(MainDestination.HOME))
+                        },
+                        onFocusLost = {
+                            if (focusedCardKey == matchKey) focusedCardKey = null
                         },
                     )
                 }
@@ -3409,6 +3475,7 @@ private fun FootballFeedStatusCard(
     body: String? = null,
     action: String? = null,
     onAction: (() -> Unit)? = null,
+    actionEnabled: Boolean = true,
     showLoading: Boolean = false,
     buttonRequester: FocusRequester? = null,
     onButtonPlaced: () -> Unit = {},
@@ -3453,6 +3520,7 @@ private fun FootballFeedStatusCard(
             FocusButton(
                 action,
                 onAction,
+                enabled = actionEnabled,
                 compact = true,
                 primary = false,
                 scaleOnFocus = false,
