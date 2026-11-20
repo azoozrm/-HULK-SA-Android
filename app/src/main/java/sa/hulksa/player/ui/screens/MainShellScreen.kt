@@ -230,7 +230,7 @@ import sa.hulksa.player.data.filterFootballTeams
 import sa.hulksa.player.data.footballDisplaySnapshotForDay
 import sa.hulksa.player.data.footballEffectiveDayFailure
 import sa.hulksa.player.data.footballRiyadhDayKey
-import sa.hulksa.player.data.footballRiyadhDayLabel
+import sa.hulksa.player.data.footballFavoritesFirstSnapshot
 import sa.hulksa.player.data.footballTeamsFromMatches
 import sa.hulksa.player.data.mergeFootballTeamLists
 import sa.hulksa.player.data.resolveFootballAlertPreferences
@@ -1498,7 +1498,7 @@ internal fun MainShellScreen(
                             },
                             onSelectDay = onRefreshFootballDay,
                             onRetryDay = onRetryFootballDay,
-                            onRefresh = onRefreshFootballFeed,
+                            discovery = state.operations.football,
                             onSaveMatchAlerts = onSaveFootballMatchAlerts,
                             onSetTeams = onSetFootballTeams,
                             onLoadTeams = onLoadFootballTeams,
@@ -1589,7 +1589,7 @@ internal fun MainShellScreen(
                             },
                             onSelectDay = onRefreshFootballDay,
                             onRetryDay = onRetryFootballDay,
-                            onRefresh = onRefreshFootballFeed,
+                            discovery = state.operations.football,
                             onSaveMatchAlerts = onSaveFootballMatchAlerts,
                             onSetTeams = onSetFootballTeams,
                             onLoadTeams = onLoadFootballTeams,
@@ -2599,7 +2599,6 @@ private fun CinemaHomeScreen(
                         onLoadTeams = onLoadFootballTeams,
                         onOpenCenter = onOpenFootballCenter,
                         centerCloseRevision = footballCenterCloseRevision,
-                        onRefresh = onRefreshFootballFeed,
                     )
                 }
             }
@@ -2956,6 +2955,8 @@ private fun homeUpdateCardBody(
     OperationsDownloadStatus.IDLE -> "الإصدار ${update.latestVersionName}"
 }
 
+private const val HOME_FOOTBALL_RAIL_EDGE_PADDING_DP = 5
+
 @Composable
 private fun HomeFootballSection(
     feed: FootballFeedUiState,
@@ -2974,20 +2975,21 @@ private fun HomeFootballSection(
     onLoadTeams: () -> Unit,
     onOpenCenter: () -> Unit,
     centerCloseRevision: Long,
-    onRefresh: () -> Unit,
 ) {
-    val colors = LocalHulkColors.current
     val homeRetryNow = rememberFootballClock(feed.nextRetryAtEpochMs)
-    val homeRetryEnabled = feed.nextRetryAtEpochMs <= homeRetryNow
     val homeTodayKey = footballRiyadhDayKey(System.currentTimeMillis())
-    val homeSnapshot = footballDisplaySnapshotForDay(
-        daySnapshots = feed.daySnapshots,
-        dayFailures = feed.dayFailures,
-        dayKey = homeTodayKey,
-        nowEpochMs = homeRetryNow,
-        allowOtherDayFallback = true,
+    val homeSnapshot = footballFavoritesFirstSnapshot(
+        footballDisplaySnapshotForDay(
+            daySnapshots = feed.daySnapshots,
+            dayFailures = feed.dayFailures,
+            dayKey = homeTodayKey,
+            nowEpochMs = homeRetryNow,
+            allowOtherDayFallback = true,
+        ),
+        feed.favoriteTeamIds,
     )
     val homeStale = homeSnapshot?.stale == true
+    val homeSectionTitle = footballHomeSectionTitle(homeSnapshot?.dayKey, homeTodayKey, homeRetryNow)
     val homeFailure = footballEffectiveDayFailure(
         daySnapshots = feed.daySnapshots,
         dayFailures = feed.dayFailures,
@@ -3018,8 +3020,9 @@ private fun HomeFootballSection(
         )
     }
     val rowState = rememberLazyListState(initialFirstVisibleItemIndex = restoredIndex ?: 0)
-    val homeFocusMarginPx = with(LocalDensity.current) { 6.dp.roundToPx() }
+    val homeFocusMarginPx = with(LocalDensity.current) { HOME_FOOTBALL_RAIL_EDGE_PADDING_DP.dp.roundToPx() }
     var focusedCardKey by remember { mutableStateOf<String?>(null) }
+    val railFocusOwner = remember { FootballRailFocusOwner() }
     LaunchedEffect(focusedCardKey, matches) {
         val key = focusedCardKey ?: return@LaunchedEffect
         snapshotFlow {
@@ -3033,15 +3036,23 @@ private fun HomeFootballSection(
                     viewportEnd = rowState.layoutInfo.viewportEndOffset,
                     marginPx = homeFocusMarginPx,
                 )
-                if (delta != 0) rowState.scrollBy(delta.toFloat())
+                val fullyVisible = footballRailFullyVisible(
+                    itemOffset = info.offset,
+                    itemSize = info.size,
+                    viewportStart = rowState.layoutInfo.viewportStartOffset,
+                    viewportEnd = rowState.layoutInfo.viewportEndOffset,
+                    marginPx = homeFocusMarginPx,
+                    canScrollBackward = rowState.canScrollBackward,
+                    canScrollForward = rowState.canScrollForward,
+                )
+                val ownedDelta = railFocusOwner.collectorScrollDelta(delta)
+                if (ownedDelta != 0 && !fullyVisible) rowState.scrollBy(ownedDelta.toFloat())
             }
         }
     }
-    val targetRequester = remember { FocusRequester() }
     val emptyRequester = remember { FocusRequester() }
     val rowSaveFocusRequester = remember { FocusRequester() }
     val cardRequesters = remember { mutableMapOf<String, FocusRequester>() }
-    var firstCardFocused by remember { mutableStateOf(false) }
     var emptyFocused by remember { mutableStateOf(false) }
     var emptyPlaced by remember { mutableStateOf(false) }
     var restoredTargetKey by remember { mutableStateOf<String?>(null) }
@@ -3050,6 +3061,106 @@ private fun HomeFootballSection(
 
     fun cardRequester(match: FootballMatch): FocusRequester =
         cardRequesters.getOrPut(match.stableIdentity) { FocusRequester() }
+
+    val railFocusScope = rememberCoroutineScope()
+    val currentMatches by rememberUpdatedState(matches)
+    val currentItemKeys by rememberUpdatedState(itemKeys)
+    DisposableEffect(Unit) {
+        onDispose { railFocusOwner.cancel() }
+    }
+    LaunchedEffect(detailsMatch, managerVisible) {
+        if (detailsMatch != null || managerVisible) railFocusOwner.cancel()
+    }
+    LaunchedEffect(railFocusRevision) {
+        if (railFocusRevision != homeReturnRailBaseline) railFocusOwner.cancel()
+    }
+
+    fun railPlacement(key: String): FootballRailPlacement? {
+        val index = footballRailTargetIndex(currentItemKeys, key) ?: return null
+        val layout = rowState.layoutInfo
+        val info = layout.visibleItemsInfo.firstOrNull { it.key == key && it.index == index }
+            ?: return FootballRailPlacement(index, scrollDeltaPx = null)
+        val fullyVisible = footballRailFullyVisible(
+            itemOffset = info.offset,
+            itemSize = info.size,
+            viewportStart = layout.viewportStartOffset,
+            viewportEnd = layout.viewportEndOffset,
+            marginPx = homeFocusMarginPx,
+            canScrollBackward = rowState.canScrollBackward,
+            canScrollForward = rowState.canScrollForward,
+        )
+        val delta = if (fullyVisible) 0 else footballFocusScrollDelta(
+            itemOffset = info.offset,
+            itemSize = info.size,
+            viewportStart = layout.viewportStartOffset,
+            viewportEnd = layout.viewportEndOffset,
+            marginPx = homeFocusMarginPx,
+        )
+        return FootballRailPlacement(index, delta)
+    }
+
+    fun requestCardFocus(key: String): Boolean =
+        runCatching { cardRequesters[key]?.requestFocus() == true }.getOrDefault(false)
+
+    suspend fun focusRailCard(
+        targetKey: () -> String?,
+        canMoveFocus: () -> Boolean = { detailsMatch == null && !managerVisible },
+    ): Boolean = focusFootballRailCard(
+        targetKey = targetKey,
+        locate = ::railPlacement,
+        reveal = { placement ->
+            val delta = placement.scrollDeltaPx
+            if (delta == null) rowState.scrollToItem(placement.index)
+            else rowState.scrollBy(delta.toFloat())
+        },
+        awaitFrame = { withFrameNanos { } },
+        isFocused = { focusedCardKey == it },
+        requestFocus = { requestCardFocus(it) },
+        canMoveFocus = canMoveFocus,
+    )
+
+    suspend fun focusRailFallback() {
+        if (focusRailCard({ currentMatches.firstOrNull()?.stableIdentity })) return
+        if (currentMatches.isEmpty() && detailsMatch == null && !managerVisible) {
+            val requester = if (emptyPlaced) emptyRequester else managerButtonRequester
+            runCatching { requester.requestFocus() }
+        }
+    }
+
+    // One transition owns scrolling and focus until the keyed card is revealed. Leaving the
+    // row with another key revokes that intent; detaching the previous card during reveal doesn't.
+    val footballRailKeyHandler = Modifier.onPreviewKeyEvent { event ->
+        if (!isTv || event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+        val forward = when (event.key) {
+            Key.DirectionLeft -> true
+            Key.DirectionRight -> false
+            else -> {
+                railFocusOwner.cancel()
+                return@onPreviewKeyEvent false
+            }
+        }
+        if (railFocusOwner.isActive) return@onPreviewKeyEvent true
+        val previousKey = focusedCardKey ?: return@onPreviewKeyEvent false
+        val keys = currentItemKeys
+        val currentIndex = keys.indexOf(previousKey)
+        val targetIndex = footballRailAdjacentIndex(currentIndex, keys.size, forward)
+            ?: return@onPreviewKeyEvent false
+        val targetKey = keys[targetIndex]
+        when (
+            footballRailVisibleRoute(railPlacement(targetKey)?.scrollDeltaPx == 0) {
+                requestCardFocus(targetKey)
+            }
+        ) {
+            FootballRailVisibleRoute.CONSUMED -> return@onPreviewKeyEvent true
+            FootballRailVisibleRoute.NORMAL_ROUTE -> return@onPreviewKeyEvent false
+            FootballRailVisibleRoute.SLOW_PATH -> Unit
+        }
+        railFocusOwner.start(railFocusScope) {
+            if (!focusRailCard({ targetKey }) && !focusRailCard({ previousKey })) {
+                focusRailFallback()
+            }
+        }
+    }
 
     DisposableEffect(
         matches.isEmpty(),
@@ -3093,7 +3204,10 @@ private fun HomeFootballSection(
                     } ?: false
                 },
                 awaitFocused = {
-                    snapshotFlow { if (matches.isEmpty()) emptyFocused else firstCardFocused }.first { it }
+                    snapshotFlow {
+                        val firstKey = currentItemKeys.firstOrNull()
+                        if (firstKey == null) emptyFocused else focusedCardKey == firstKey
+                    }.first { it }
                 },
             )
         }
@@ -3137,24 +3251,11 @@ private fun HomeFootballSection(
         val item = matches.getOrNull(restoreIndex) ?: return@LaunchedEffect
         val itemKey = item.stableIdentity
         if (restoredTargetKey == itemKey) return@LaunchedEffect
-        val focused = focusHomeRowCard(
-            listState = rowState,
-            targetIndex = restoreIndex,
-            targetKey = itemKey,
-            isFocusOwnershipLost = ::restoreNoLongerOwned,
-            requestFocus = {
-                val requester = if (restoreIndex == 0) {
-                    firstItemFocusRequester ?: targetRequester
-                } else {
-                    cardRequesters[itemKey] ?: targetRequester
-                }
-                runCatching { requester.requestFocus() }.getOrDefault(false)
-            },
-        )
-        if (focused) {
-            restoredTargetKey = itemKey
-            navigationMemory.save(MainDestination.HOME, itemKey, restoreIndex, "football-matches", rowIndex)
-            homeRestoreOwner.onRestored()
+        railFocusOwner.start(this) {
+            if (focusRailCard({ itemKey }) { !restoreNoLongerOwned() }) {
+                restoredTargetKey = itemKey
+                homeRestoreOwner.onRestored()
+            }
         }
     }
     LaunchedEffect(managerVisible) {
@@ -3171,18 +3272,16 @@ private fun HomeFootballSection(
         }
     }
     LaunchedEffect(detailsReturnRevision) {
-        if (lastOpenedMatchId == null && lastOpenedEventIds.isEmpty()) return@LaunchedEffect
-        withFrameNanos { }
-        val restoredMatch = matches.firstOrNull { match ->
-            match.stableIdentity == lastOpenedMatchId ||
-                match.eventIds.any { it in lastOpenedEventIds }
-        } ?: return@LaunchedEffect
-        val requester = if (matches.firstOrNull()?.stableIdentity == restoredMatch.stableIdentity) {
-            firstItemFocusRequester
-        } else {
-            cardRequesters[restoredMatch.stableIdentity]
+        if (detailsReturnRevision == 0L) return@LaunchedEffect
+        railFocusOwner.start(this) {
+            val restored = focusRailCard({
+                currentMatches.firstOrNull { it.stableIdentity == lastOpenedMatchId }?.stableIdentity
+                    ?: currentMatches.firstOrNull { match ->
+                        match.eventIds.any { it in lastOpenedEventIds }
+                    }?.stableIdentity
+            })
+            if (!restored) focusRailFallback()
         }
-        runCatching { requester?.requestFocus() }
     }
 
     Column {
@@ -3191,13 +3290,14 @@ private fun HomeFootballSection(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            HomeSectionHeadingText("مباريات اليوم", isTv)
+            HomeSectionHeadingText(homeSectionTitle, isTv)
             if (isTv) {
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.weight(1f))
                 FocusButton(
                     "ادارة فرقي",
                     { onLoadTeams(); managerVisible = true },
-                    modifier = Modifier.focusRequester(managerButtonRequester),
+                    modifier = Modifier.focusRequester(managerButtonRequester)
+                        .onFocusChanged { if (it.isFocused) railFocusOwner.cancel() },
                     compact = true,
                     primary = false,
                     scaleOnFocus = false,
@@ -3210,20 +3310,21 @@ private fun HomeFootballSection(
                         onLoadTeams()
                         onOpenCenter()
                     },
-                    modifier = Modifier.focusRequester(centerButtonRequester),
+                    modifier = Modifier.focusRequester(centerButtonRequester)
+                        .onFocusChanged { if (it.isFocused) railFocusOwner.cancel() },
                     compact = true,
                     primary = false,
                     scaleOnFocus = false,
                     trailingIcon = Icons.Rounded.ChevronLeft,
                     neutralV5 = true,
                 )
-                Spacer(Modifier.weight(1f))
             } else {
                 Spacer(Modifier.weight(1f))
                 FocusButton(
                     "ادارة فرقي",
                     { onLoadTeams(); managerVisible = true },
-                    modifier = Modifier.focusRequester(managerButtonRequester),
+                    modifier = Modifier.focusRequester(managerButtonRequester)
+                        .onFocusChanged { if (it.isFocused) railFocusOwner.cancel() },
                     compact = true,
                     primary = false,
                     scaleOnFocus = false,
@@ -3236,7 +3337,8 @@ private fun HomeFootballSection(
                         onLoadTeams()
                         onOpenCenter()
                     },
-                    modifier = Modifier.focusRequester(centerButtonRequester),
+                    modifier = Modifier.focusRequester(centerButtonRequester)
+                        .onFocusChanged { if (it.isFocused) railFocusOwner.cancel() },
                     compact = true,
                     primary = false,
                     scaleOnFocus = false,
@@ -3246,42 +3348,11 @@ private fun HomeFootballSection(
             }
         }
         Spacer(Modifier.height(10.dp))
-        if (homeStale) {
-            Row(
-                Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(Icons.Outlined.Schedule, null, tint = colors.gold, modifier = Modifier.size(16.dp))
-                Text(
-                    homeSnapshot?.let { footballLastSuccessLabel(it, System.currentTimeMillis()) }
-                        ?: "لا يوجد تحديث ناجح بعد",
-                    color = colors.textMuted,
-                    fontSize = 11.sp,
-                    maxLines = 2,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                FocusButton(
-                    "تحديث",
-                    onRefresh,
-                    enabled = homeRetryEnabled,
-                    compact = true,
-                    primary = false,
-                    scaleOnFocus = false,
-                    trailingIcon = Icons.Rounded.Refresh,
-                    neutralV5 = true,
-                )
-                Spacer(Modifier.weight(1f))
-            }
-        }
         when {
             homeSnapshot == null && feed.loading -> FootballFeedStatusCard(
                 isTv = isTv,
                 title = "جاري تحميل مباريات اليوم",
                 icon = Icons.Rounded.SportsSoccer,
-                action = "تحديث",
-                onAction = onRefresh,
-                actionEnabled = homeRetryEnabled,
                 showLoading = true,
                 buttonRequester = emptyRequester,
                 onButtonPlaced = { emptyPlaced = true },
@@ -3292,9 +3363,6 @@ private fun HomeFootballSection(
                 title = "تعذر تحميل مباريات اليوم",
                 body = footballFeedErrorCopy(feed.error),
                 icon = Icons.Outlined.ErrorOutline,
-                action = "اعادة المحاولة",
-                onAction = onRefresh,
-                actionEnabled = homeRetryEnabled,
                 buttonRequester = emptyRequester,
                 onButtonPlaced = { emptyPlaced = true },
                 onButtonFocused = { emptyFocused = true },
@@ -3302,11 +3370,8 @@ private fun HomeFootballSection(
             homeStale && matches.isEmpty() -> FootballFeedStatusCard(
                 isTv = isTv,
                 title = "تعذر تحديث مباريات اليوم",
-                body = "لا توجد بيانات محفوظة لهذا اليوم بعد اخر تحديث ناجح",
+                body = "تتم إعادة المحاولة تلقائياً",
                 icon = Icons.Outlined.ErrorOutline,
-                action = "اعادة المحاولة",
-                onAction = onRefresh,
-                actionEnabled = homeRetryEnabled,
                 buttonRequester = emptyRequester,
                 onButtonPlaced = { emptyPlaced = true },
                 onButtonFocused = { emptyFocused = true },
@@ -3319,11 +3384,8 @@ private fun HomeFootballSection(
                     "لا توجد بيانات محفوظة"
                 },
                 body = homeFailure?.let { footballCenterFailureCopy(it, homeRetryNow).detail }
-                    ?: "لم يصل تحديث ناجح لهذا اليوم بعد",
+                    ?: "تتم إعادة المحاولة تلقائياً",
                 icon = Icons.Outlined.ErrorOutline,
-                action = "اعادة المحاولة",
-                onAction = onRefresh,
-                actionEnabled = homeRetryEnabled,
                 buttonRequester = emptyRequester,
                 onButtonPlaced = { emptyPlaced = true },
                 onButtonFocused = { emptyFocused = true },
@@ -3338,16 +3400,17 @@ private fun HomeFootballSection(
             )
             else -> LazyRow(
                 state = rowState,
-                modifier = Modifier.testTag("home-row-football-matches").saveFocusedChildOnExit(rowSaveFocusRequester),
-                contentPadding = PaddingValues(horizontal = 5.dp, vertical = 7.dp),
+                modifier = Modifier.testTag("home-row-football-matches")
+                    .saveFocusedChildOnExit(rowSaveFocusRequester)
+                    .then(footballRailKeyHandler),
+                contentPadding = PaddingValues(horizontal = HOME_FOOTBALL_RAIL_EDGE_PADDING_DP.dp, vertical = 7.dp),
                 horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 9.dp),
             ) {
                 itemsIndexed(matches, key = { _, match -> match.stableIdentity }) { index, match ->
                     val matchKey = match.stableIdentity
-                    val itemModifier = if (index == 0 && firstItemFocusRequester != null) {
-                        Modifier.focusRequester(firstItemFocusRequester)
-                    } else {
-                        Modifier.focusRequester(cardRequester(match))
+                    var itemModifier = Modifier.focusRequester(cardRequester(match))
+                    if (index == 0 && firstItemFocusRequester != null) {
+                        itemModifier = itemModifier.focusRequester(firstItemFocusRequester)
                     }
                     FootballHomeCard(
                         match = match,
@@ -3356,12 +3419,12 @@ private fun HomeFootballSection(
                         isTv = isTv,
                         modifier = itemModifier,
                         onClick = {
+                            railFocusOwner.cancel()
                             lastOpenedMatchId = matchKey
                             lastOpenedEventIds = match.eventIds
                             detailsMatch = match
                         },
                         onFocused = {
-                            firstCardFocused = index == 0
                             focusedCardKey = matchKey
                             navigationMemory.save(MainDestination.HOME, matchKey, index, "football-matches", rowIndex)
                             homeRestoreOwner.onContentFocused(navigationMemory.position(MainDestination.HOME))
@@ -3473,9 +3536,6 @@ private fun FootballFeedStatusCard(
     title: String,
     icon: ImageVector,
     body: String? = null,
-    action: String? = null,
-    onAction: (() -> Unit)? = null,
-    actionEnabled: Boolean = true,
     showLoading: Boolean = false,
     buttonRequester: FocusRequester? = null,
     onButtonPlaced: () -> Unit = {},
@@ -3483,13 +3543,22 @@ private fun FootballFeedStatusCard(
 ) {
     val colors = LocalHulkColors.current
     val shape = RoundedCornerShape(if (isTv) 18.dp else 16.dp)
+    var focused by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = if (isTv) 104.dp else 116.dp)
             .clip(shape)
             .background(NeoNeutralSurfaces.card)
+            .goldFocusEdge(shape = shape, visible = focused)
             .border(1.dp, NeoNeutralSurfaces.stroke, shape)
+            .then(buttonRequester?.let(Modifier::focusRequester) ?: Modifier)
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onButtonFocused()
+            }
+            .onPlaced { onButtonPlaced() }
+            .focusable()
             .padding(horizontal = 16.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(13.dp),
@@ -3515,22 +3584,6 @@ private fun FootballFeedStatusCard(
                 Spacer(Modifier.height(3.dp))
                 Text(body, color = colors.textMuted, fontSize = 11.sp, lineHeight = 15.sp)
             }
-        }
-        if (action != null && onAction != null) {
-            FocusButton(
-                action,
-                onAction,
-                enabled = actionEnabled,
-                compact = true,
-                primary = false,
-                scaleOnFocus = false,
-                trailingIcon = Icons.Rounded.Refresh,
-                neutralV5 = true,
-                modifier = Modifier
-                    .then(buttonRequester?.let(Modifier::focusRequester) ?: Modifier)
-                    .onPlaced { onButtonPlaced() }
-                    .onFocusChanged { if (it.isFocused) onButtonFocused() },
-            )
         }
     }
 }

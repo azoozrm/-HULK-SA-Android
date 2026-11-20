@@ -45,7 +45,6 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Favorite
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SportsSoccer
@@ -59,6 +58,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -88,10 +88,13 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import sa.hulksa.player.data.FootballAlertType
 import sa.hulksa.player.data.FootballCompetition
 import sa.hulksa.player.data.FootballDayFailure
 import sa.hulksa.player.data.FootballFavoriteTeam
+import sa.hulksa.player.data.FootballFeedDiscovery
 import sa.hulksa.player.data.FootballFeedError
 import sa.hulksa.player.data.FootballFeedSnapshot
 import sa.hulksa.player.data.FootballFeedUiState
@@ -100,12 +103,14 @@ import sa.hulksa.player.data.FootballMatchAlertPreferences
 import sa.hulksa.player.data.FootballMatchStatus
 import sa.hulksa.player.data.FootballTeam
 import sa.hulksa.player.data.filterFootballTeams
+import sa.hulksa.player.data.footballFavoritesFirstSnapshot
 import sa.hulksa.player.data.footballRiyadhDayKey
 import sa.hulksa.player.data.footballRiyadhDayStartEpochMs
 import sa.hulksa.player.data.footballRiyadhDayLabel
 import sa.hulksa.player.data.footballRiyadhTimeLabel
 import sa.hulksa.player.data.footballSnapshotCacheFresh
 import sa.hulksa.player.data.footballDisplaySnapshotForDay
+import sa.hulksa.player.data.footballDerivedDaySnapshot
 import sa.hulksa.player.data.footballEffectiveDayFailure
 import sa.hulksa.player.data.footballTeamsFromMatches
 import sa.hulksa.player.data.mergeFootballTeamLists
@@ -228,11 +233,11 @@ internal fun footballCenterEmptyCopy(
 ): FootballCenterEmptyCopy = when {
     snapshot.stale && snapshot.matches.isEmpty() -> FootballCenterEmptyCopy(
         title = "تعذر تحديث مباريات اليوم",
-        detail = "لا توجد بيانات محفوظة لهذا اليوم بعد آخر تحديث ناجح",
+        detail = "لا توجد بيانات محفوظة لهذا اليوم؛ ستتم إعادة المحاولة تلقائياً",
     )
     snapshot.stale -> FootballCenterEmptyCopy(
         title = "لا توجد مباريات مطابقة في آخر بيانات محفوظة",
-        detail = "البيانات قديمة؛ حدّثها لمعرفة المباريات الحالية",
+        detail = "البيانات قديمة؛ ستُحدَّث تلقائياً",
     )
     snapshot.matches.isEmpty() -> FootballCenterEmptyCopy(
         title = "لا توجد مباريات لهذا اليوم",
@@ -247,13 +252,6 @@ internal fun footballCenterEmptyCopy(
         },
     )
 }
-
-internal fun footballLastSuccessLabel(
-    snapshot: FootballFeedSnapshot,
-    nowEpochMs: Long,
-): String = "آخر تحديث ناجح: ${
-    footballRiyadhDayLabel(footballRiyadhDayKey(snapshot.cachedAtEpochMs), nowEpochMs)
-} ${footballRiyadhTimeLabel(snapshot.cachedAtEpochMs)}"
 
 /**
  * Minimal extra scroll that keeps a focused row a real margin inside the list viewport. Positive
@@ -285,10 +283,91 @@ internal fun footballCenterClockTickMs(nowEpochMs: Long, retryAtEpochMs: Long): 
         15_000L
     }
 
+/**
+ * Automatic retry wait for a selected Center day. A provider Retry-After deadline is authoritative;
+ * a plain transport failure without a deadline backs off for one refresh interval instead of
+ * hammering the route or waiting for a manual button.
+ */
+internal fun footballAutomaticRetryDelayMs(nowEpochMs: Long, retryAtEpochMs: Long): Long =
+    (retryAtEpochMs - nowEpochMs).takeIf { it > 0L } ?: 60_000L
+
 internal fun footballFocusedIndex(
     focusedKey: String?,
     keyToIndex: Map<String, Int>,
 ): Int? = focusedKey?.let(keyToIndex::get)
+
+/**
+ * Physical D-pad movement inside the Home football rail. The rail is RTL, so physical left
+ * advances to the next stable card (higher index) and physical right goes back. Returning null at
+ * either end lets the normal focus search leave the rail for the header/adjacent sections.
+ */
+internal fun footballRailAdjacentIndex(
+    currentIndex: Int,
+    itemCount: Int,
+    forward: Boolean,
+): Int? {
+    if (currentIndex !in 0 until itemCount) return null
+    val target = if (forward) currentIndex + 1 else currentIndex - 1
+    return target.takeIf { it in 0 until itemCount }
+}
+
+/**
+ * Re-resolves the transition target by stable identity after a refresh/reorder. A target that
+ * disappeared is not replaced by whatever card now occupies its old index.
+ */
+internal fun footballRailTargetIndex(keys: List<String>, targetKey: String): Int? =
+    keys.indexOf(targetKey).takeIf { it >= 0 }
+
+/**
+ * Route for a physical key when the adjacent card is already fully visible. A refused focus is
+ * not consumed and falls back to the normal focus graph; only a partially visible/offscreen target
+ * enters the bounded reveal transition.
+ */
+internal enum class FootballRailVisibleRoute { SLOW_PATH, CONSUMED, NORMAL_ROUTE }
+
+internal fun footballRailVisibleRoute(
+    fullyVisible: Boolean,
+    requestFocus: () -> Boolean,
+): FootballRailVisibleRoute = when {
+    !fullyVisible -> FootballRailVisibleRoute.SLOW_PATH
+    requestFocus() -> FootballRailVisibleRoute.CONSUMED
+    else -> FootballRailVisibleRoute.NORMAL_ROUTE
+}
+
+/**
+ * Home section title discloses the actual accepted day when the previous-day fallback is shown.
+ * It never restores the removed refresh/freshness/timezone wording.
+ */
+internal fun footballHomeSectionTitle(
+    displayDayKey: String?,
+    todayKey: String,
+    nowEpochMs: Long,
+): String = if (displayDayKey == null || displayDayKey == todayKey) {
+    "مباريات اليوم"
+} else {
+    "مباريات ${footballRiyadhDayLabel(displayDayKey, nowEpochMs)}"
+}
+
+/**
+ * Full-visibility decision for one rail card. The requested focus margin normally applies, but at
+ * a real scroll bound the rail cannot add it; a card that is fully inside the viewport is already
+ * revealed and must not be rejected for a one-pixel margin deficit (row padding 5 dp vs margin).
+ */
+internal fun footballRailFullyVisible(
+    itemOffset: Int,
+    itemSize: Int,
+    viewportStart: Int,
+    viewportEnd: Int,
+    marginPx: Int,
+    canScrollBackward: Boolean,
+    canScrollForward: Boolean,
+): Boolean {
+    val delta = footballFocusScrollDelta(itemOffset, itemSize, viewportStart, viewportEnd, marginPx)
+    if (delta == 0) return true
+    val fullyInside = itemOffset >= viewportStart && itemOffset + itemSize <= viewportEnd
+    if (!fullyInside) return false
+    return (delta < 0 && !canScrollBackward) || (delta > 0 && !canScrollForward)
+}
 
 internal fun footballFocusScrollDelta(
     itemOffset: Int,
@@ -565,47 +644,39 @@ internal fun FootballHomeCard(
                 .background(NeoNeutralSurfaces.stroke.copy(alpha = .72f)),
         )
         Spacer(Modifier.height(6.dp))
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            if (match.status == FootballMatchStatus.LIVE) {
-                Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFE5484D)))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                if (match.status == FootballMatchStatus.LIVE) {
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFE5484D)))
+                    Spacer(Modifier.width(5.dp))
+                }
+                Text(
+                    text = footballSecondaryText(match, hideScores),
+                    color = if (match.status == FootballMatchStatus.LIVE) colors.goldBright else colors.textMuted,
+                    fontSize = 11.sp,
+                    fontWeight = if (match.status == FootballMatchStatus.LIVE) FontWeight.Bold else FontWeight.Normal,
+                    maxLines = 1,
+                    textAlign = TextAlign.Center,
+                )
             }
-            Text(
-                text = footballSecondaryText(match, hideScores),
-                color = if (match.status == FootballMatchStatus.LIVE) colors.goldBright else colors.textMuted,
-                fontSize = 10.sp,
-                fontWeight = if (match.status == FootballMatchStatus.LIVE) FontWeight.Bold else FontWeight.Normal,
-                maxLines = 1,
-                modifier = Modifier.weight(1f, fill = false),
-            )
             val broadcasterSummary = footballBroadcasterSummary(match.broadcasters)
             if (broadcasterSummary != null) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    horizontalAlignment = Alignment.End,
-                ) {
-                    Text(
-                        "القناة الناقلة",
-                        color = colors.gold,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                    )
-                    Text(
-                        broadcasterSummary,
-                        color = colors.textMuted,
-                        fontSize = 10.sp,
-                        lineHeight = 12.sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.End,
-                    )
-                }
-            } else {
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "القناة الناقلة: $broadcasterSummary",
+                    color = colors.textMuted,
+                    fontSize = 9.sp,
+                    lineHeight = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
             }
         }
     }
@@ -645,7 +716,7 @@ internal fun FootballCenterScreen(
     onToggleHideScores: () -> Unit,
     onSelectDay: (String) -> Unit,
     onRetryDay: (String) -> Unit,
-    onRefresh: () -> Unit,
+    discovery: FootballFeedDiscovery?,
     onSaveMatchAlerts: (FootballMatch, FootballMatchAlertPreferences) -> Unit,
     onSetTeams: (List<FootballTeam>) -> Unit,
     onLoadTeams: () -> Unit,
@@ -716,13 +787,78 @@ internal fun FootballCenterScreen(
     )
     val effectiveRetryAt = maxOf(dayFailure?.retryAtEpochMs ?: 0L, feed.nextRetryAtEpochMs)
     val effectiveFailure = dayFailure?.copy(retryAtEpochMs = effectiveRetryAt)
-    val snapshot = footballDisplaySnapshotForDay(
-        daySnapshots = feed.daySnapshots,
-        dayFailures = feed.dayFailures,
-        dayKey = selectedDay,
-        nowEpochMs = currentTimeMs,
-    )
     val favoriteIds = feed.favoriteTeamIds
+    val exactSnapshot = footballFavoritesFirstSnapshot(
+        footballDisplaySnapshotForDay(
+            daySnapshots = feed.daySnapshots,
+            dayFailures = feed.dayFailures,
+            dayKey = selectedDay,
+            nowEpochMs = currentTimeMs,
+        ),
+        favoriteIds,
+    )
+    // Today's accepted payload already carries the provider's prior-day history and next-day
+    // reminder rows. Show only rows whose kickoff belongs to the selected Riyadh day; this is a
+    // provisional projection, never a saved record for that day, and the exact-day fetch replaces
+    // it when available.
+    val derivedSnapshot = remember(feed.snapshot, selectedDay, favoriteIds) {
+        footballDerivedDaySnapshot(feed.snapshot, selectedDay, favoriteIds)
+    }
+    val snapshot = exactSnapshot ?: derivedSnapshot
+    val provisionalDay = exactSnapshot == null && derivedSnapshot != null
+    val currentSelectDay by rememberUpdatedState(onSelectDay)
+    val currentRetryDay by rememberUpdatedState(onRetryDay)
+    val refreshDay = selectedDay
+    val dayLoading = refreshDay in feed.loadingDays
+    // Preserve Today's explicit selection and failure recovery; routine Today refresh belongs
+    // to the foreground scheduler.
+    LaunchedEffect(refreshDay) {
+        if (refreshDay == today) currentSelectDay(refreshDay)
+    }
+    LaunchedEffect(refreshDay, today, effectiveFailure, dayLoading, lifecycleOwner) {
+        if (refreshDay != today || effectiveFailure == null || dayLoading) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            delay(footballAutomaticRetryDelayMs(System.currentTimeMillis(), effectiveRetryAt) + 100L)
+            if (selectedDay == refreshDay) currentRetryDay(refreshDay)
+        }
+    }
+    val currentFeed by rememberUpdatedState(feed)
+    val currentDiscovery by rememberUpdatedState(discovery)
+    val adjacentScheduler = remember(refreshDay, discovery?.feedUrl) {
+        FootballAdjacentDayScheduler(refreshDay)
+    }
+    LaunchedEffect(adjacentScheduler, today, lifecycleOwner) {
+        if (refreshDay == today) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            val readInputs = {
+                val state = currentFeed
+                val enabled = state.available && selectedDay == refreshDay &&
+                    currentDiscovery?.feedUrl == discovery?.feedUrl
+                FootballAdjacentDayInputs(
+                    todayKey = footballRiyadhDayKey(System.currentTimeMillis()),
+                    exactSnapshot = state.daySnapshots[refreshDay],
+                    failure = footballEffectiveDayFailure(state.daySnapshots, state.dayFailures, refreshDay),
+                    loading = refreshDay in state.loadingDays,
+                    retryAtEpochMs = state.nextRetryAtEpochMs,
+                    discoveryRefreshSeconds = currentDiscovery?.refreshSeconds?.takeIf { enabled },
+                )
+            }
+            val changes = snapshotFlow(readInputs)
+            adjacentScheduler.run(
+                readInputs = readInputs,
+                awaitChangeOrTimeout = { previous, waitMs ->
+                    if (waitMs == null) {
+                        changes.first { it != previous }
+                    } else {
+                        withTimeoutOrNull(waitMs) { changes.first { it != previous } }
+                    }
+                },
+                requestRefresh = { force ->
+                    if (force) currentRetryDay(refreshDay) else currentSelectDay(refreshDay)
+                },
+            )
+        }
+    }
     val matches = remember(snapshot, activeFilter, favoriteIds) {
         footballMatchesForFilter(snapshot?.matches.orEmpty(), activeFilter, favoriteIds)
     }
@@ -770,9 +906,6 @@ internal fun FootballCenterScreen(
     fun requesterFor(match: FootballMatch): FocusRequester =
         rowRequesters.getOrPut(match.stableIdentity) { FocusRequester() }
 
-    LaunchedEffect(selectedDay) {
-        onSelectDay(selectedDay)
-    }
     LaunchedEffect(detailsReturnRevision) {
         if (returnFocusKey == null && returnFocusEventIds.isEmpty()) return@LaunchedEffect
         var lazyIndex = 0
@@ -885,8 +1018,6 @@ internal fun FootballCenterScreen(
                         .background(NeoNeutralSurfaces.stroke),
                 )
                 FootballFilterSelector(activeFilter) { filter = it.name }
-                Spacer(Modifier.weight(1f))
-                Text("توقيت السعودية", color = colors.textMuted, fontSize = 10.sp)
             }
         } else {
             Row(
@@ -895,8 +1026,6 @@ internal fun FootballCenterScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 FootballDaySelector(days, selectedDay) { selectedDay = it }
-                Spacer(Modifier.weight(1f))
-                Text("توقيت السعودية", color = colors.textMuted, fontSize = 10.sp)
             }
             Spacer(Modifier.height(8.dp))
             Row(
@@ -916,32 +1045,19 @@ internal fun FootballCenterScreen(
                     failureCopy.title,
                     false,
                     detail = failureCopy.detail,
-                    onRetry = { onRetryDay(selectedDay) },
-                    retryEnabled = failureCopy.retryEnabled && feed.nextRetryAtEpochMs <= currentTimeMs,
                 )
             }
         } else if (matches.isEmpty()) {
             val emptyCopy = footballCenterEmptyCopy(snapshot, activeFilter)
             val failureCopy = effectiveFailure?.let { footballCenterFailureCopy(it, currentTimeMs) }
             val detail = listOfNotNull(
-                emptyCopy.detail ?: if (snapshot.stale) {
-                    footballLastSuccessLabel(snapshot, currentTimeMs)
-                } else {
-                    null
-                },
+                emptyCopy.detail,
                 failureCopy?.detail,
             ).joinToString(" • ")
             FootballCenterState(
                 emptyCopy.title,
                 false,
                 detail = detail.takeIf { it.isNotBlank() },
-                onRetry = if (snapshot.stale) {
-                    { onRetryDay(selectedDay) }
-                } else {
-                    null
-                },
-                retryEnabled = (failureCopy?.retryEnabled ?: true) &&
-                    feed.nextRetryAtEpochMs <= currentTimeMs,
             )
         } else {
             Column(Modifier.fillMaxSize()) {
@@ -949,12 +1065,9 @@ internal fun FootballCenterScreen(
                     val failureCopy = effectiveFailure?.let { footballCenterFailureCopy(it, currentTimeMs) }
                     FootballStaleDayRow(
                         detail = listOfNotNull(
-                            footballLastSuccessLabel(snapshot, currentTimeMs),
+                            "بيانات أولية من تحديث اليوم".takeIf { provisionalDay },
                             failureCopy?.detail,
-                        ).joinToString(" • "),
-                        retryEnabled = (failureCopy?.retryEnabled ?: true) &&
-                            feed.nextRetryAtEpochMs <= currentTimeMs,
-                        onRetry = { onRetryDay(selectedDay) },
+                        ).joinToString(" • ").ifBlank { "بيانات محفوظة" },
                     )
                 }
                 LazyColumn(
@@ -1187,11 +1300,7 @@ private fun FootballTeamCenter(
 }
 
 @Composable
-private fun FootballStaleDayRow(
-    detail: String,
-    retryEnabled: Boolean,
-    onRetry: () -> Unit,
-) {
+private fun FootballStaleDayRow(detail: String) {
     val colors = LocalHulkColors.current
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp),
@@ -1209,18 +1318,7 @@ private fun FootballStaleDayRow(
             color = colors.textMuted,
             fontSize = 11.sp,
             maxLines = 2,
-            modifier = Modifier.weight(1f, fill = false),
         )
-        FocusButton(
-            "تحديث",
-            onRetry,
-            enabled = retryEnabled,
-            compact = true,
-            primary = false,
-            scaleOnFocus = false,
-            neutralV5 = true,
-        )
-        Spacer(Modifier.weight(1f))
     }
 }
 
@@ -1229,8 +1327,6 @@ private fun FootballCenterState(
     text: String,
     loading: Boolean,
     detail: String? = null,
-    onRetry: (() -> Unit)? = null,
-    retryEnabled: Boolean = true,
 ) {
     val colors = LocalHulkColors.current
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1250,17 +1346,6 @@ private fun FootballCenterState(
                     Spacer(Modifier.height(2.dp))
                     Text(detail, color = colors.textMuted, fontSize = 11.sp)
                 }
-            }
-            if (onRetry != null) {
-                FocusButton(
-                    "تحديث",
-                    onRetry,
-                    enabled = retryEnabled,
-                    compact = true,
-                    primary = false,
-                    scaleOnFocus = false,
-                    neutralV5 = true,
-                )
             }
         }
     }
@@ -1626,7 +1711,7 @@ internal fun FootballMatchDetailsDialog(
                         )
                         FootballScoreDisplay(match, hideScores, 28)
                         Text(
-                            "${footballRiyadhDayLabel(footballRiyadhDayKey(match.kickoffEpochMs), System.currentTimeMillis())} بتوقيت السعودية",
+                            footballRiyadhDayLabel(footballRiyadhDayKey(match.kickoffEpochMs), System.currentTimeMillis()),
                             color = colors.textMuted,
                             fontSize = 11.sp,
                             textAlign = TextAlign.Center,

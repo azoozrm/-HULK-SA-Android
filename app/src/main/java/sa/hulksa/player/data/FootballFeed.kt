@@ -464,6 +464,32 @@ fun footballMatchesForDay(matches: List<FootballMatch>, dayKey: String): List<Fo
     }.let(::reconcileFootballMatches)
 }
 
+/**
+ * One accepted today payload also carries the provider's prior-day history and next-day reminder
+ * rows. Project only the rows whose kickoff belongs to [dayKey]; the result is a provisional
+ * display value, never an accepted/persisted record for another day. Empty or absent rows return
+ * null so an unfetched day is not presented as a definitive empty day.
+ */
+fun footballDerivedDaySnapshot(
+    source: FootballFeedSnapshot?,
+    dayKey: String,
+    favoriteTeamIds: Set<String> = emptySet(),
+): FootballFeedSnapshot? {
+    if (source == null || source.dayKey == dayKey) return null
+    val rows = buildList {
+        addAll(source.matches)
+        addAll(source.kickoffHistory)
+        addAll(source.reminderCandidates)
+    }.distinctBy(FootballMatch::stableIdentity)
+    val matches = footballMatchesForDay(rows, dayKey)
+    if (matches.isEmpty()) return null
+    return source.copy(
+        dayKey = dayKey,
+        matches = orderFootballMatches(matches, favoriteTeamIds),
+        stale = true,
+    )
+}
+
 fun footballMatchSortOrder(status: FootballMatchStatus): Int = when (status) {
     FootballMatchStatus.LIVE -> 0
     FootballMatchStatus.UPCOMING -> 1
@@ -493,6 +519,19 @@ fun orderFootballMatches(
 
 fun orderFootballMatches(matches: List<FootballMatch>, favoriteTeamId: String?): List<FootballMatch> =
     orderFootballMatches(matches, favoriteTeamId?.let(::setOf).orEmpty())
+
+/**
+ * Presentation-only favorite order for an accepted day record. The stored snapshot keeps its
+ * source, receipt and provider times; only the rows handed to the Home rail are re-ordered with
+ * the active profile's current favorite IDs. A profile switch therefore changes the rail without
+ * rewriting accepted cache data or weakening a same-provider-time revalidation.
+ */
+fun footballFavoritesFirstSnapshot(
+    snapshot: FootballFeedSnapshot?,
+    favoriteTeamIds: Set<String>,
+): FootballFeedSnapshot? = snapshot?.copy(
+    matches = orderFootballMatches(snapshot.matches, favoriteTeamIds),
+)
 
 /**
  * Merge metadata for one stable provider ID. A later verified row fills missing Arabic/crest/
