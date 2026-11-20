@@ -3,7 +3,8 @@
 Status: LOCAL_ROUND R01 source candidate. This document is retained as R01 history; for R02+
 provider schema, IDs, budget and response-shape corrections read
 `NEO4K-FOOTBALL-FEED-R02-CORRECTION.md`, `NEO4K-FOOTBALL-FEED-R02.1-CORRECTION.md` and
-`NEO4K-FOOTBALL-R03-SECTION.md` and `NEO4K-FOOTBALL-R03.1-CORRECTION.md`. This
+`NEO4K-FOOTBALL-R03-SECTION.md`, `NEO4K-FOOTBALL-R03.1-CORRECTION.md` and
+`NEO4K-FOOTBALL-R04-ALLOWLIST.md`. This
 document records provider qualification and the first-party feed contract and the honest gaps.
 It grants no purchase, credential, deployment, capture or release authority.
 
@@ -112,9 +113,24 @@ Behaviour:
 - The feed sorts live, then upcoming, then finished/other; the app re-sorts the favorite team's
   fixtures first without hiding other matches.
 - `Retry-After` from a provider `429/503` is stored server-side and served as a bounded
-  countdown; the next refresh is skipped until it expires.
-- Quota ledger: default 500 requests/day, hard ceiling 7,500 (the documented free allowance),
-  refresh TTL 30–300 seconds (default 60), maximum two requests per refresh.
+  countdown; the next refresh is skipped until it expires. A numeric `Retry-After` starts when the
+  provider response actually arrives, not when the refresh started, so a late response cannot
+  leave a cooldown that has already expired. Both routes share that one deadline.
+- Quota ledger: default 500 feed requests/day and 200 catalog requests/day, both sharing a
+  2,500-request/day aggregate hard ceiling; refresh TTL 30–300 seconds (default 60), maximum
+  four requests per refresh. Each attempted request (feed, catalog, reminder or broadcaster) is
+  durably reserved in the route quota and the shared aggregate under the existing `provider.lock`
+  before transport. A present ledger must contain an explicit non-negative integer `count`; a
+  missing/invalid count, an unreadable/corrupt file or a failed ledger write fails closed and
+  performs no provider call. Each reservation reads the UTC day of that attempt, so a refresh that
+  crosses midnight charges every request to its actual day. Route usage is compared only with its
+  own route ceiling, and the shared ceiling only with the aggregate ledger; one is never subtracted
+  from the other. A batch that cannot reserve its next attempt fails closed instead of publishing a
+  fresh empty result.
+- Broadcaster assignments are keyed by the exact provider event ID plus the provider `event_date`
+  kickoff instant through fetch, cache and attachment. Both an old and a new kickoff for one
+  provider ID are retained regardless of row order; each fixture receives only its confirmed
+  assignment. A legacy ID-only cache cannot confirm a kickoff and is ignored.
 - Response headers: `Content-Type: application/json`, `Cache-Control: public, max-age=<TTL>`,
   `ETag`, `Retry-After` when applicable.
 - Server errors never include provider keys, raw provider bodies or account data.
@@ -171,6 +187,18 @@ Response shape (schema version 1):
 - Feed cache: account-independent, three recent Riyadh days; the last-good day remains
   available when the new day has no successful fetch. A stale snapshot is labelled as stale,
   separately from an empty day.
+- Team catalog: the on-disk cache is bootstrap-only for the active account/profile + discovery
+  URL and is rejected when its stored source differs. An established verified catalog, including a
+  valid empty one, survives older feed, day and cache publications. Only the latest catalog request
+  for the current owner, non-stale over an existing authority and with a provider cache time not
+  older than the authority, may replace it; stale or obsolete responses are dropped before
+  persistence and publication. Provider `cachedAt` remains distinct from the device receipt time;
+  an unknown provider timestamp is never replaced by the local clock. The device receipt time is
+  freshness metadata only; durable write ordering uses the accepted request/owner generation, which
+  stays monotonic across owner resets and discovery-URL changes. One process-wide lock serializes
+  the generation comparison, coherent record read and commit for every store instance bound to the
+  catalog preferences file, so a phone and TV store cannot interleave an older write over a newer
+  one.
 - Favorite team: one team per resolved account/profile, stored through the existing
   `AccountProfileStateStore` scope. Selecting a team replaces the previous choice; removal is
   explicit. The team picker searches the loaded feed plus a bounded known-team registry so an
@@ -195,10 +223,14 @@ Executed locally:
 
 - PHP fixture tests: normalization, nullable scores, `replaced_by`, Riyadh bounds, midnight
   carry-over, empty vs stale, two-request aggregate, cache reuse, 503 last-good,
-  `Retry-After`, missing credential, invalid day, discovery allowlist.
+  `Retry-After`, missing credential, invalid day, discovery allowlist, receipt-anchored shared
+  cooldown across UTC midnight in both route orders, and per-attempt quota rollover at
+  499/500 feed, 199/200 catalog and 2,499/2,500 aggregate.
 - JVM tests: Riyadh day/time, replacement aliases, carry-over, nullable scores, favorite
   ordering, Arabic search normalization, feed parse/stale, kickoff transitions/catch-up/dedupe,
-  delete/clear resync, codec round-trip, optional discovery parsing.
+  delete/clear resync, codec round-trip, optional discovery parsing, and canceled catalog saves
+  that must not replace a newer same-source or switched-source catalog (including a valid empty
+  one) when the receipt clock is equal or rolled back.
 - `:app:compileDebugKotlin` and focused unit tests.
 
 Not run / blocked:

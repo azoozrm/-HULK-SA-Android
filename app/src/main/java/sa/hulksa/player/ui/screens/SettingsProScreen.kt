@@ -103,6 +103,7 @@ import sa.hulksa.player.ui.components.EntrySwitchVisual
 import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.LocalProfileSwitchRequester
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import sa.hulksa.player.ui.theme.NeoNeutralSurfaces
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -581,6 +582,7 @@ internal fun SettingsProScreen(
                     upRequester = focus.sectionRequester(SettingsSection.ACCOUNT),
                     rightRequester = focus.sectionRequester(SettingsSection.ACCOUNT),
                     downRequester = focus.refreshLibrary,
+                    neutralV5 = true,
                     onClick = profileSwitch,
                 )
                 SettingsDivider()
@@ -1154,8 +1156,8 @@ private fun SettingsConfirmationDialog(
                     .widthIn(max = if (expanded) 620.dp else 460.dp)
                     .fillMaxWidth()
                     .clip(shape)
-                    .background(Color(0xFF13140F))
-                    .border(1.dp, colors.gold.copy(alpha = .38f), shape)
+                    .background(NeoNeutralSurfaces.modal)
+                    .border(1.dp, NeoNeutralSurfaces.stroke, shape)
                     .padding(
                         horizontal = if (expanded) 28.dp else 20.dp,
                         vertical = if (expanded) 26.dp else 20.dp,
@@ -1220,19 +1222,13 @@ private fun SettingsDialogAction(
                 down = FocusRequester.Cancel
             }
             .clip(shape)
-            .background(
-                when {
-                    focused -> colors.gold.copy(alpha = .18f)
-                    primary -> colors.gold.copy(alpha = .10f)
-                    else -> Color.White.copy(alpha = .04f)
-                },
-            )
+            .background(NeoNeutralSurfaces.control)
             .border(
-                width = 1.dp,
+                width = if (focused) 2.dp else 1.dp,
                 color = when {
-                    focused -> colors.goldBright.copy(alpha = .90f)
-                    primary -> colors.gold.copy(alpha = .28f)
-                    else -> Color.White.copy(alpha = .07f)
+                    focused -> colors.goldBright
+                    primary -> colors.gold.copy(alpha = .72f)
+                    else -> NeoNeutralSurfaces.stroke
                 },
                 shape = shape,
             )
@@ -1448,6 +1444,7 @@ private fun SettingsMenuRow(
     leftRequester: FocusRequester? = null,
     rightRequester: FocusRequester? = null,
     onFocused: (() -> Unit)? = null,
+    neutralV5: Boolean = false,
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
@@ -1469,9 +1466,15 @@ private fun SettingsMenuRow(
             .then(focusModifier)
             .graphicsLayer { alpha = if (enabled) 1f else .38f }
             .clip(shape)
-            .background(if (focused) colors.gold.copy(alpha = .13f) else Color.Transparent)
+            .background(
+                when {
+                    focused && neutralV5 -> NeoNeutralSurfaces.control
+                    focused -> colors.gold.copy(alpha = .13f)
+                    else -> Color.Transparent
+                },
+            )
             .border(
-                width = 1.dp,
+                width = if (focused && neutralV5) 2.dp else 1.dp,
                 color = if (focused) colors.goldBright.copy(alpha = .86f) else Color.Transparent,
                 shape = shape,
             )
@@ -1536,7 +1539,11 @@ private fun SettingsMenuRow(
                 modifier = Modifier
                     .clip(RoundedCornerShape(20.dp))
                     .background(
-                        if (focused) colors.gold.copy(alpha = .10f) else Color(0xFF1A1C16),
+                        when {
+                            focused && neutralV5 -> NeoNeutralSurfaces.control
+                            focused -> colors.gold.copy(alpha = .10f)
+                            else -> Color(0xFF1A1C16)
+                        },
                     )
                     .padding(
                         horizontal = if (expanded) 11.dp else 9.dp,

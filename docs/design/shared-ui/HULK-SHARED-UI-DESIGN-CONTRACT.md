@@ -1,13 +1,16 @@
 # HULK SA Android — Shared UI Design Contract
 
-Version 4 · Movies foundation retained; Live categories adopted by the owner on 2026-10-08.
+Version 5 · NEO 4K neutral surfaces and gold accents, owner direction 2026-11-19.
+Movies foundation and the 2026-10-08 Live category adoption remain in force.
 
 This is the single shared UI specification for future section work. It preserves the accepted
 Movies result; Series and Live inherit its visual language while keeping their real functions.
 Category selectors and Category Management use the later Live reference in section 4;
 that scoped supersession does not replace the accepted Movies cards, Details or player.
 It consolidates Shared UI Version 2, the approved player reference and the subsequent owner
-decisions. Its adoption is documentation work, not permission to redesign another section.
+decisions. Section 19 is the later, scoped V5 neutral-surface supersession; it applies to
+confirmed affected ordinary windows/cards/secondary controls and new neutral surfaces.
+Its adoption is documentation work, not permission to redesign unrelated sections.
 
 ## 1. Authority, baseline and adoption
 
@@ -54,6 +57,7 @@ boards and points here; it is not a competing specification.
 Use `LocalHulkColors` and `HulkTheme.kt`. Preserve IBM Plex Sans Arabic regular, medium, semibold
 and bold, existing typography roles, original HS assets, RTL policy, shapes and measured spacing.
 Colors and dimensions come from accepted source, not photographed displays or generated boards.
+For owner-adopted V5 neutral roles only, section 19.2 specifies the new exact source targets.
 
 | Token | Exact value | Role |
 | --- | --- | --- |
@@ -61,18 +65,19 @@ Colors and dimensions come from accepted source, not photographed displays or ge
 | goldBright | #FFF0A8 | Accepted pale focus/highlight and scoped player/Resume accents |
 | goldDeep | #9A7A23 | Existing deeper accent where used |
 | background | #030402 | Main background |
-| surface | #111108 | Base dark surface |
-| surfaceRaised | #1B1A0E | Existing raised surface |
+| surface | #111108 | Legacy base dark surface; use section 19 roles in migrated/new neutral surfaces |
+| surfaceRaised | #1B1A0E | Legacy raised surface; use section 19 roles in migrated/new neutral controls |
 | text | #FFF9EB | Ivory wording, titles, metadata values and Details tab labels |
 | textMuted | #B8B3A4 | Secondary explanation and values where specified |
-| line | ARGB 0x47E6C352 | Existing translucent warm-gold line |
+| line | ARGB 0x47E6C352 | Existing translucent warm-gold line for protected legacy/semantic callers; V5 uses neutral stroke for ordinary borders |
 | danger | #FF746C | Existing semantic danger role; not the old pink Movies error banner |
 | onPrimary | #100E04 | Dark foreground on theme primary gold |
 
 Preserve accepted component surfaces/alpha rather than flattening every surface to one hex.
 Source examples: Movie card #10110C, footer #12130E, notice #11120D, idle download #151711,
 focused download #2A281B, player decision surface ARGB 0xF2141510, More ARGB 0xF20A0B08.
-These are scoped roles, not authorization to recolor all callers.
+These are scoped roles, not authorization to recolor all callers. For section 19 migrated
+ordinary neutral windows and controls, V5 paint supersedes the conflicting legacy role only.
 
 ### State matrix
 
@@ -83,7 +88,7 @@ These are scoped roles, not authorization to recolor all callers.
 | Catalog/Details metadata | Gold semantic icon/field label, ivory real value |
 | Details tabs | All labels ivory; selected short ivory underline |
 | Primary action | Gold fill, accepted dark caption/icon |
-| Secondary action | Accepted dark surface, ivory caption, scoped gold semantic icon |
+| Secondary action | V5 neutral control surface in migrated/new ordinary windows (section 19); otherwise accepted dark surface, ivory caption, scoped gold semantic icon |
 | Compact Movies transport | Normal ivory; selected favorite gold; focused pale accent; primary Play/Pause gold circle with dark glyph |
 | VOD More/option focus | Gold 14% backing and 1.5dp gold edge; ivory label, goldBright glyph |
 | Selected unfocused VOD option | Gold 16% backing and persistent gold check; reserved check slot |
@@ -91,7 +96,7 @@ These are scoped roles, not authorization to recolor all callers.
 | Resume decision | Accepted dark card, pale-gold history/title/progress accents, real title and muted saved-time wording |
 | Movie blocking error | Same bounded dark-card family; warm-gold status glyph, ivory title/body, muted context |
 | Category manager hidden row | Dark surface, muted label/VisibilityOff; remains manageable and reorderable |
-| Category manager moving row | Restrained gold backing/drag indication; draft movement is separate from focus and visibility |
+| Category manager moving row | V5 neutral body with gold drag indication (section 19); draft movement is separate from focus and visibility |
 
 Normal, focus, selection, favorite, disabled and loading are separate states. Focus never commits
 an option or changes playback. Preserve `goldFocusEdge` inside existing bounds: 2dp goldBright
@@ -206,7 +211,8 @@ Scope wording describes the actual affected section/consumers; do not copy chann
 into Movies or Series.
 
 Each real server category has one row: full name at physical RIGHT, visibility glyph and drag handle
-at physical LEFT. Preserve the Live row's dark/gold/ivory treatment and in-bounds focus edge.
+at physical LEFT. Preserve the Live row anatomy and in-bounds focus edge; its ordinary modal,
+row and move-state paint follows the V5 supersession in section 19.
 Hidden rows use muted wording and VisibilityOff; visible rows use Visibility. Keep `مخفية` /
 `ظاهرة` state semantics and meaningful hide/show activation. Do not add separate focus stops for
 the eye and handle or competing pointer/click handlers. Names may wrap in the manager; do not
@@ -424,6 +430,8 @@ work follows its own current task scope, not an automatic sequence imposed by th
 Reuse accepted theme/components rather than copying colors, vectors and focus styles into each
 section. Resolve the active router/caller, not a dead fallback/helper. A necessary shared extension
 must preserve unrelated callers' defaults; no broad refactor is authorized by this document.
+New ordinary neutral surface colors and migrated owners follow section 19; this does not
+replace existing accepted source-role exceptions or authorize a global palette substitution.
 
 An implementation packet identifies component, accepted source reference, target section,
 relevant states and protected neighbors. A functional variant changes only what that function
@@ -1658,3 +1666,220 @@ and aspect-preserving, without launcher Crop, extra graphics scaling or dark Ico
 Actual media/channel images, outer frame geometry, semantic state colours, navigation and
 PR #351 heart/focus corrections remain unchanged. R03 owner acceptance is PENDING; source
 verification and static artwork inspection are not Android runtime or device visual acceptance.
+## 19. Owner-adopted NEO 4K neutral-surface standard — Version 5 (2026-11-19)
+
+### 19.1 Decision, precedence, and scope
+
+On 2026-11-19 (Asia/Riyadh), the owner rejected the yellow/olive wash on football cards,
+football windows and Category Management, identified the existing Home boxed cards as the
+accepted visual reference, and approved the five revised NEO 4K design boards ("ممتاز اعتمد").
+The owner then specifically extended the concern to other windows and backgrounds, including
+the buttons reached through "تغيير المستخدم". V5 is therefore an app-wide **neutral-surface
+design standard**, not a football-only color patch.
+
+This section supersedes **only** conflicting ordinary neutral card, window, row, outline and
+secondary-action paint in the named migrated scopes. Retain historical evidence and all
+non-conflicting sections of this contract. The owner-adopted Movies/Series/Live geometry,
+Home boxed-card presentation, navigation, player behavior, focus/input ownership and protected
+product contracts are not reopened. Old accepted exceptions remain effective outside the
+approved migration scope. V5 is binding for newly created ordinary neutral surfaces and for
+confirmed affected existing neutral surface owners when their bounded implementation is
+authorized. It is not permission to launch unrelated tasks, recolor the entire app through
+a theme override, or change protected product fields.
+
+The five boards in NEO4K-SHARED-UI-V5-APPROVED-DESIGNS.zip are the approved *design* reference:
+01_HOME_MATCHES.png, 02_MATCH_CENTER.png, 03_FAVORITE_TEAMS.png, 04_MATCH_DETAILS.png,
+05_CATEGORY_MANAGER.png. They establish composition only for the named target surfaces,
+not unrelated background pages, real fixtures, names, logo artwork, broadcast rights,
+source dimensions or installed runtime results. Example matches/results/channels are
+illustrative; keep real assets, Arabic labels, true provider/local data and actual
+source-owned geometry. In particular, artwork or copy differences outside the dialog
+on board 04 are not an instruction to change the underlying destination.
+
+Owner design-direction acceptance: **ACCEPTED**. Implementation and exact-candidate owner
+visual acceptance: **PENDING**, until independently verified and actually reviewed.
+Do not turn mockup approval into source, build, device, or release PASS.
+
+### 19.2 One neutral family, one accent identity
+
+Retain the original NEO 4K identity roles in section 2: gold #E6C352, pale focus #FFF0A8,
+ivory #FFF9EB, muted copy #B8B3A4, danger #FF746C, onPrimary #100E04. Preserve original logo
+resources, typeface, metrics, semantic glyphs and the already accepted primary/committed
+controls. Existing Home BoxedCatalogCard and BoxedHistoryCard retain their actual
+#10110C body, #12130E footer, idle white 10% border and accepted focus mechanism.
+
+The following are newly specified V5 design targets, chosen explicitly for the approved
+matte charcoal direction (not values sampled from camera photos or generated pixels).
+Declare these four opaque colors once in the shared theme/component layer, using semantic
+names rather than replacing every occurrence of a legacy token.
+
+| V5 role | Exact ARGB / RGB | Use |
+| --- | --- | --- |
+| card | 0xFF151719 / #151719 | Ordinary content card, football crest backplate/fallback, team tile and match row |
+| modal | 0xFF17191C / #17191C | Opaque ordinary dialog/panel body, not the separate dimming scrim |
+| control | 0xFF202225 / #202225 | Secondary button, neutral modal row, field/raised control surface |
+| stroke | 0xFF383A3D / #383A3D | Quiet ordinary border/divider, not semantic warnings or committed accent |
+
+A single shared source owner for these roles is required. Legacy HulkColors.surface
+(#111108), surfaceRaised (#1B1A0E), line (ARGB 0x47E6C352), background and the Material
+color scheme retain their old declarations/defaults for protected and non-migrated callers.
+Do not globally substitute those tokens, alter gold/color branding, introduce opaque
+overlays above content, or tint the shell/Hero with the new palette. Existing shared
+helpers such as FocusButton and EntryActionButton use an explicit opt-in with their
+unaffected callers unchanged. A new ordinary neutral component must use the V5 roles,
+rather than introducing another warm hardcoded near-black or gold-alpha backing.
+
+| State / role | Required V5 treatment |
+| --- | --- |
+| Normal card/row/modal | Use its role above; opaque neutral fill; subtle 1dp stroke where framed |
+| Focused neutral item | Same neutral role fill, one accepted in-bounds pale edge (2dp goldBright or the existing equivalent focus edge); no yellow/olive backing, no size jump |
+| Selected/favorite item | Neutral body with persistent existing check/heart/selection marker in gold; separate from transient focus |
+| Primary action and committed date/category/filter chip | Preserve existing gold-filled primary/committed controls and their dark caption; do not promote a secondary action or a legacy outlined confirmation to a new full-gold role |
+| Secondary button / outline | V5 control fill and neutral stroke where framed; preserve explicitly transparent/semantic accent variants; pale focus edge |
+| Disabled/loading | Preserve ineligible input and existing disabled/loading logic; use V5 neutral paint, retaining appropriate alpha/contrast |
+| Hidden category | Neutral row, muted name, VisibilityOff; remains reorderable/manageable |
+| Moving category | Neutral row with clear gold drag/active indication separate from focus and visibility; no whole-row gold backing |
+| Live match | Small red live dot and truthful current status; scores remain governed by hideScores |
+| Warning/danger | Preserve real semantic warning/danger glyph, text, action and required prominence; a semantic marker is not the ordinary panel body |
+
+Apply the neutral palette to normal/focused/selected/disabled branches, not only one idle
+state. Remove legacy gold-alpha focus/selection wash from neutral rows in the migrated
+window while keeping their persistent selected markers, original primary fills and
+actual callbacks. Ordinary focus uses the existing adaptive focus visibility policy
+and stays inside the same bounds; no new focus stops, extra scaling/translation,
+navigation behavior or focus timing. Preserve the actual separate modal scrim and input
+exclusion. Preserve existing genuinely semantic red/error/alert treatments.
+When an ordinary confirmation's existing action uses only a warm translucent backing,
+apply the neutral control body and preserve its real emphasis/semantic accent and role;
+do not change that action's meaning or safety.
+
+### 19.3 Football and common Category Management — approved composition
+
+- FootballHomeCard, FootballHomeTeam and FootballCompetitionMark / FootballCrest:
+  maintain the current horizontal adaptive Home rail, stable card identities, widths,
+  safe gutters and rail ownership. Read the live width/height expressions (published
+  reference at adoption was 302dp TV / 274dp narrow and min height 142dp); do not derive
+  dp from the rendered boards. The board authorizes only the card's internal visual
+  hierarchy change: a small competition mark and centered real Arabic competition name,
+  two larger legible real club crests with Arabic names underneath, central bold score
+  or Riyadh kickoff time, and a modest separated footer for the truthful match status
+  and verified broadcaster when available. Home team is physical RIGHT and away team
+  physical LEFT; preserve score association and LTR digits. Keep the existing adaptive
+  text policies; fit the content uniformly within available window constraints, do not
+  shrink type or silently truncate names to force a screenshot proportion. Use existing
+  measured slots/typography and real assets; any newly necessary card-internal size
+  must be explicitly recorded, justified by measured source constraints and reviewed.
+  No gradients with gold/green/club colors across the whole card, no stadium artwork.
+  A restrained neutral tone difference/section divider is sufficient. If a followed
+  team highlight is rendered, use a small persistent gold heart/marker rather than
+  a gold-tinted card or persistent focus-looking border.
+- HomeFootballSection, FootballEmptyDayCard, FootballFeedStatusCard: preserve current
+  Home placement and controls "ادارة فرقي" and "عرض الكل", rail focus/restoration,
+  no-data/loading/stale/error distinctions and actual retry/action. Replace the wide
+  olive status/empty panel with the same quiet neutral card family. Keep real copy,
+  usable compact control slots and current adaptive constraints.
+- FootballCenterScreen, FootballCenterRow, FootballDaySelector, FootballFilterSelector:
+  preserve the existing shell and match center route, date controls, committed filters,
+  league grouping, scoring/clock/state, single row focus and details return. Adopt board 02
+  with neutral rows, subtle separators, original colored league/team marks, reliable centered
+  score/time and existing left chevron. Only the focused row carries the pale edge.
+- FootballTeamManagerDialog, FootballTeamTile: adopt board 03 within the existing adaptive
+  modal, search, region filters, "الكل"/"المختارة (n)", lazy grid, fixed action area, actual
+  names and selections. Use V5 modal, card tiles and controls. A gold check is the selection
+  marker; it survives focus elsewhere. Preserve account/profile ownership, cancel draft,
+  save, scroll and back/return focus, with all content and actions reachable.
+- FootballMatchDetailsDialog, FootballAlertToggle: adopt board 04 for the existing modal.
+  Preserve real league/time/score/status, club crests, "تنبيهات المباراة", "عند بداية المباراة",
+  "قبل المباراة بـ 15 دقيقة", actual "حفظ"/"رجوع" callbacks, focus and preferences. Distinguish
+  selected checkbox from focus. When the current authorized R04 source has verified broadcaster
+  metadata, display the actual name under match info ("القناة الناقلة") and optionally in
+  the Home footer; otherwise omit it. Never invent a channel, score, time, logo or mock data,
+  and do not change provider/network/offline/notification contracts to obtain it.
+- CategoryManagerDialog and LiveCategoryManagerRow: apply board 05 to their shared modal/body/
+  row/secondary-control paint for Live, Movies and Series **once** at the real shared owner.
+  Preserve section 4.2 header/scope wording, row anatomy, real full names, one focus target,
+  independent section/account/profile order and hidden sets, fixed centered "تم", scrolling,
+  TV short/long OK and cancel/commit, phone drag/drop/cancel, no selector reorder and
+  trigger restoration. Physical names RIGHT; visibility/drag glyphs LEFT. No layout,
+  category-order or storage redesign.
+
+### 19.4 Other affected ordinary windows and neutral actions — migration boundary
+
+The owner's further direction includes "تغيير المستخدم", not only football and category
+management. Inspect the current *active route*, not an obsolete screen. At the verified
+published reference both Activities enter ProfileAwareHulkApp; the rail and Settings
+profile-switch action reach ProfilePickerScreen and its ProfilePickerFooter. The actual
+"ادارة الملفات" and "خيارات الدخول" buttons use EntryActionButton's warm hardcoded outlined
+base. ProfileEntryOptionsPanel uses the legacy surface and control rows use raised/gold
+wash. Therefore these are included in V5, even though changing surface globally would not
+fix all their hardcoded colors.
+
+Apply V5 palette-only migration to confirmed affected active ordinary modal/panel and secondary
+control owners, including the following families. Resolve live local caller/paint first and
+record before/after source evidence; naming a family is not permission to change its layout,
+business behavior or accepted identity.
+
+- ProfilePickerScreen: ProfilePickerFooter, ProfileEntryOptionsPanel, EntryToggleRow,
+  EntryPreferenceRow and old neutral picker/avatar backplates where actually rendered.
+  Preserve actual avatars, active badge, "ادارة الملفات", "خيارات الدخول", selection, direct
+  entry and profile-switch logic. Neutralize legacy focus backing on the existing
+  "تغيير المستخدم" Settings action only where applicable; do not restyle the Settings page.
+- Active AdaptiveProfileManagementScreen: AdaptiveProfileEditor, ProfileKindChoice,
+  ManagementProfileCard and their ordinary neutral panel/actions. ProfilePinSecurityScreen:
+  SecurityActionPanel, PinPanel, PinKey, SecurityButton and the actual parental-code/PIN
+  entry callers. Preserve authentication/security, Kids fail-closed, profile isolation,
+  state, keypad geometry, digits, focus and all credential/attempt behavior. The old
+  ProfileManagementScreen is not a target unless active ownership is separately proven.
+- SettingsConfirmationDialog / SettingsDialogAction (actual settings confirmations);
+  ordinary GrowthQrDialog / PairingLoginDialog panels and their neutral buttons;
+  MovieDownloadPanel / MovieDownloadPanelAction for the ordinary quality/download modal.
+  Preserve full copy, actual targets, danger semantics, QR bytes/white quiet zone,
+  data/permission actions, preview and adaptive sizes.
+- OperationsBlockingCard, OptionalUpdateOverlay, OperationsAnnouncementOverlay and their
+  ordinary neutral OperationsActionButton; NewEpisodeAlertOverlay, ordinary
+  NotificationActionButton and neutral notice/empty shells where the old paint is
+  demonstrably used. Preserve the notification/announcement/update severity and routing,
+  dismissal/eligibility/persistence/delivery logic and real content. No backend/config change.
+- Other active app-owned ordinary dialogs, confirmation/error/empty panels, and secondary
+  buttons on these windows: audit their effective rendered body/row/outline source, including
+  explicit old hexadecimal colors and gold-alpha backing (not only colors.surface).
+  Migrate matching neutral roles only. Record every audited candidate as MIGRATE,
+  ALREADY_NEUTRAL/PRESERVE, INACTIVE or BLOCKED with reason. Unknown/new independently owned
+  sections or protected accepted surfaces require explicit further scoping, not a blanket edit.
+
+This is a common paint family, not permission to replace every page's component library.
+Do not change the full Login page, the accepted catalog/Continue Watching cards or content
+artwork, section navigation/rail/Hero, ordinary category selection strip, notification data
+and unread semantics, downloads or Kids content-card composition, player transport or
+accepted player-specific More/Resume/Next Episode/time/error/video overlay bodies
+and their translucent video treatments. Such surfaces may be inventoried, but no silent
+migration of an accepted separately specified appearance follows from V5. If the owner
+identifies an affected protected window, scope a later color-only correction to that window.
+Keep current section/account/profile state and the entire existing football data/notification
+implementation, including the current round's real league/fixture/channel source work.
+
+### 19.5 Acceptance, implementation, and future use
+
+This revision must be integrated into this same canonical file. Do not maintain a competing
+old/new design contract, copy a historic full file over newer local decisions, or globally
+change theme defaults. Re-check current V4/V5 and local task state; merge the scoped documented
+supersession preserving every newer valid owner decision. Reference the approved boards with
+their exact hash identities in the task/evidence record.
+
+Use a verified active-source surface inventory before code changes and retain the minimum scoped
+diff. Verify normal, focused, selected, disabled, loading/content/empty/error, long Arabic names,
+single focus ownership, actual existing callbacks, screen return and adaptive TV/phone/tablet/foldable
+constraints where applicable. Shared button opt-in must preserve all unopted caller behavior
+and paint. Require no old olive/gold-alpha body fill in migrated *neutral* roles, and no
+gold normal border masquerading as focus. Check that the original Home reference-card,
+Hero, nav, brand and protected player source expressions remain unchanged.
+
+Use relevant focused/regression tests, complete candidate/source and applicable build evidence
+under the live execution/evidence contracts. No new capture, signing, deployment, publishing or
+device action follows from this visual approval. Record exact-candidate owner visual review
+separately; captures remain OFF unless authorized. For future ordinary neutral windows,
+cards, grids and secondary buttons, use section 19 by default and record any explicitly
+approved exception; do not reintroduce the old warm surface family.
+
+Status at adoption: design approved, repository implementation/migration, build, device
+and exact-candidate visual acceptance pending.

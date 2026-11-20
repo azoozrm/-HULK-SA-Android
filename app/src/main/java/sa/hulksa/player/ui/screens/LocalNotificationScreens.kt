@@ -95,6 +95,7 @@ import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import sa.hulksa.player.ui.theme.NeoNeutralSurfaces
 import kotlin.math.roundToInt
 
 internal data class LocalNotificationCenterMetrics(
@@ -664,17 +665,16 @@ private fun NotificationActionButton(
         ).compactHeight,
     )
     val background = when {
-        !enabled -> colors.surfaceRaised.copy(alpha = .50f)
+        !enabled -> NeoNeutralSurfaces.control.copy(alpha = .55f)
         primary -> colors.gold
-        focused -> Color(0xFF2A281B)
-        else -> Color(0xFF151711)
+        else -> NeoNeutralSurfaces.control
     }
     val borderColor = when {
-        !enabled -> colors.line.copy(alpha = .36f)
+        !enabled -> NeoNeutralSurfaces.stroke.copy(alpha = .55f)
         focused && primary -> Color.Transparent
         focused -> colors.goldBright
         primary -> colors.goldBright.copy(alpha = .42f)
-        else -> colors.gold.copy(alpha = .42f)
+        else -> NeoNeutralSurfaces.stroke
     }
     val textColor = when {
         !enabled -> colors.textMuted
@@ -1555,8 +1555,8 @@ private fun NotificationCenterEmptyState(
         modifier
             .heightIn(min = if (isTv) 164.dp else 170.dp)
             .clip(shape)
-            .background(colors.surface.copy(alpha = .72f))
-            .border(1.dp, colors.line.copy(alpha = .34f), shape),
+            .background(NeoNeutralSurfaces.card)
+            .border(1.dp, NeoNeutralSurfaces.stroke, shape),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1957,10 +1957,10 @@ fun NewEpisodeAlertOverlay(
                 .align(Alignment.BottomCenter)
                 .width(cardWidth)
                 .clip(shape)
-                .background(colors.surfaceRaised.copy(alpha = .985f))
+                .background(NeoNeutralSurfaces.modal)
                 .border(
                     if (isTv) 1.dp else 2.dp,
-                    colors.gold.copy(alpha = if (isTv) .55f else .68f),
+                    NeoNeutralSurfaces.stroke,
                     shape,
                 )
                 .onPreviewKeyEvent { event ->
@@ -2056,7 +2056,7 @@ fun NewEpisodeAlertOverlay(
                     Modifier
                         .width(1.dp)
                         .height(72.dp)
-                        .background(colors.line.copy(alpha = .45f)),
+                        .background(NeoNeutralSurfaces.stroke),
                 )
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),

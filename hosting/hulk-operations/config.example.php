@@ -46,11 +46,13 @@ return [
         'enabled' => false,
         'feed_url' => 'https://neo4ksa.com/hulk-operations/api/app/v1/sports/',
         'refresh_seconds' => 60,
-        'max_requests_per_day' => 6000,
+        'max_requests_per_day' => 500,
         'max_requests_per_refresh' => 4,
         'timeout_seconds' => 8,
-        // Verified team catalog for the favorite-team picker (16 qualified competitions, daily cache).
-        'catalog_league_ids' => [17, 53, 47, 1, 3, 4, 5, 6, 7, 8, 83, 31, 27, 61, 64, 68],
+        // Strict match allowlist plus bounded catalog sources (major leagues/continental/national).
+        'catalog_scope' => 'allowlist',
+        'catalog_league_ids' => [17, 1, 3, 4, 5, 6, 7, 8, 83, 90, 29, 27, 68, 66, 30, 61, 58, 59, 60, 62, 63],
+        'include_optional_arab_domestic' => false,
         'catalog_max_requests_per_day' => 200,
         // Optional absolute cache directory. Empty uses the system temporary directory.
         'cache_directory' => '',

@@ -29,6 +29,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -67,6 +70,7 @@ import sa.hulksa.player.ui.components.EntryNotice
 import sa.hulksa.player.ui.components.HulkTextField
 import sa.hulksa.player.ui.components.entryPanelMaxWidthDp
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import sa.hulksa.player.ui.theme.NeoNeutralSurfaces
 
 @Composable
 fun AdaptiveProfileManagementScreen(
@@ -480,6 +484,7 @@ private fun AdaptiveProfileEditor(
                                     onClick = onRetryKidsSource,
                                     outlined = true,
                                     minHeightDp = movieActionHeightDp(isTv = isTv, compactHeight = false),
+                                    neutralV5 = true,
                                 )
                             }
                         },
@@ -490,7 +495,13 @@ private fun AdaptiveProfileEditor(
                 Box(
                     Modifier
                         .clip(RoundedCornerShape(50))
-                        .background(if (kind == ProfileKind.KIDS) colors.gold.copy(alpha = .14f) else colors.surfaceRaised)
+                        .background(
+                            if (kind == ProfileKind.KIDS) {
+                                colors.gold.copy(alpha = .14f)
+                            } else {
+                                NeoNeutralSurfaces.control
+                            },
+                        )
                         .border(
                             1.dp,
                             if (kind == ProfileKind.KIDS) colors.gold.copy(alpha = .34f) else Color.White.copy(alpha = .09f),
@@ -513,6 +524,7 @@ private fun AdaptiveProfileEditor(
                 onValueChange = onNameChange,
                 label = "اسم الملف الشخصي",
                 modifier = Modifier.fillMaxWidth().focusRequester(nameFocus),
+                neutralV5 = true,
             )
             Spacer(Modifier.height(if (phoneLandscape) 10.dp else if (isTv) 18.dp else 15.dp))
             Text(
@@ -572,8 +584,8 @@ private fun AdaptiveProfileEditor(
                     .widthIn(max = 900.dp)
                     .fillMaxWidth()
                     .clip(cardShape)
-                    .background(colors.surface.copy(alpha = .98f))
-                    .border(1.dp, colors.gold.copy(alpha = .26f), cardShape)
+                    .background(NeoNeutralSurfaces.modal)
+                    .border(1.dp, NeoNeutralSurfaces.stroke, cardShape)
                     .padding(horizontal = 34.dp, vertical = 25.dp),
             ) {
                 Row(
@@ -584,6 +596,7 @@ private fun AdaptiveProfileEditor(
                     EntryBackAction(
                         onClick = onCancel,
                         minHeightDp = movieActionHeightDp(isTv = isTv, compactHeight = false),
+                        neutralV5 = true,
                     )
                     Text(
                         text = if (creating) "اضافة ملف شخصي" else "تعديل الملف الشخصي",
@@ -594,7 +607,7 @@ private fun AdaptiveProfileEditor(
                     )
                 }
                 Spacer(Modifier.height(14.dp))
-                Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line.copy(alpha = .30f)))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(NeoNeutralSurfaces.stroke))
                 Spacer(Modifier.height(22.dp))
                 Row(
                     modifier = Modifier
@@ -609,7 +622,7 @@ private fun AdaptiveProfileEditor(
                         modifier = Modifier
                             .fillMaxHeight()
                             .width(1.dp)
-                            .background(colors.line.copy(alpha = .25f)),
+                            .background(NeoNeutralSurfaces.stroke),
                     )
                     Column(
                         modifier = Modifier
@@ -648,8 +661,8 @@ private fun AdaptiveProfileEditor(
                     .widthIn(max = cardMax)
                     .fillMaxWidth()
                     .clip(cardShape)
-                    .background(colors.surface.copy(alpha = .98f))
-                    .border(1.dp, colors.gold.copy(alpha = .26f), cardShape)
+                    .background(NeoNeutralSurfaces.modal)
+                    .border(1.dp, NeoNeutralSurfaces.stroke, cardShape)
                     .padding(
                         horizontal = 20.dp,
                         vertical = if (phoneLandscape) 14.dp else 20.dp,
@@ -665,6 +678,7 @@ private fun AdaptiveProfileEditor(
                         EntryBackAction(
                             onClick = onCancel,
                             minHeightDp = movieActionHeightDp(isTv = false, compactHeight = phoneLandscape),
+                            neutralV5 = true,
                         )
                         Text(
                             text = if (creating) "اضافة ملف شخصي" else "تعديل الملف الشخصي",
@@ -735,14 +749,10 @@ private fun ProfileKindChoice(
         modifier = Modifier
             .widthIn(min = if (isTv) 180.dp else 150.dp, max = 260.dp)
             .clip(shape)
-            .background(if (selected) colors.gold.copy(alpha = .14f) else colors.surfaceRaised)
+            .background(NeoNeutralSurfaces.control)
             .border(
                 if (focused) 2.dp else 1.dp,
-                when {
-                    focused -> colors.goldBright
-                    selected -> colors.gold.copy(alpha = .50f)
-                    else -> Color.White.copy(alpha = .09f)
-                },
+                if (focused) colors.goldBright else NeoNeutralSurfaces.stroke,
                 shape,
             )
             .onFocusChanged { focused = it.isFocused }
@@ -751,12 +761,29 @@ private fun ProfileKindChoice(
             .padding(horizontal = if (isTv) 17.dp else 13.dp, vertical = if (isTv) 13.dp else 11.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            title,
-            color = if (!enabled) colors.textMuted.copy(alpha = .45f) else if (selected || focused) colors.goldBright else colors.text,
-            fontWeight = FontWeight.Black,
-            fontSize = if (isTv) 16.sp else 14.sp,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                title,
+                color = if (!enabled) {
+                    colors.textMuted.copy(alpha = .45f)
+                } else if (selected || focused) {
+                    colors.goldBright
+                } else {
+                    colors.text
+                },
+                fontWeight = FontWeight.Black,
+                fontSize = if (isTv) 16.sp else 14.sp,
+            )
+            if (selected) {
+                Spacer(Modifier.width(5.dp))
+                Icon(
+                    imageVector = Icons.Rounded.Check,
+                    contentDescription = "محدد",
+                    tint = colors.gold,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
+        }
         Spacer(Modifier.height(3.dp))
         Text(
             subtitle,
@@ -790,8 +817,8 @@ private fun ManagementProfileCard(
         val card = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(if (active) colors.gold.copy(alpha = .07f) else colors.surface.copy(alpha = .97f))
-            .border(1.dp, if (active) colors.gold.copy(alpha = .46f) else Color.White.copy(alpha = .09f), shape)
+            .background(if (active) NeoNeutralSurfaces.control else NeoNeutralSurfaces.card)
+            .border(1.dp, NeoNeutralSurfaces.stroke, shape)
             .padding(horizontal = if (isTv) 19.dp else 14.dp, vertical = if (isTv) 14.dp else 13.dp)
 
         if (compact) {
@@ -993,6 +1020,7 @@ private fun ManagementAction(
         outlined = secondary,
         danger = danger,
         minHeightDp = movieActionHeightDp(isTv = isTv, compactHeight = false),
+        neutralV5 = true,
         modifier = if (focusRequester != null) {
             modifier.focusRequester(focusRequester)
         } else {

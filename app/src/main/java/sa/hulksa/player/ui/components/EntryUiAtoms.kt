@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import sa.hulksa.player.ui.screens.moviesErrorIcon
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import sa.hulksa.player.ui.theme.NeoNeutralSurfaces
 
 /**
  * Scoped bounded-panel maximum width for the entry section, reusing the already accepted
@@ -164,8 +165,8 @@ internal fun EntryNotice(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(Color(0xFF11120D))
-            .border(1.dp, colors.gold.copy(alpha = .35f), shape)
+            .background(NeoNeutralSurfaces.card)
+            .border(1.dp, NeoNeutralSurfaces.stroke, shape)
             .padding(
                 horizontal = metrics.horizontalPadding,
                 vertical = metrics.verticalPadding,
@@ -290,6 +291,7 @@ internal fun EntryBackAction(
     modifier: Modifier = Modifier,
     minHeightDp: Int = 42,
     captionColor: Color? = null,
+    neutralV5: Boolean = false,
 ) {
     EntryActionButton(
         text = "رجوع",
@@ -299,6 +301,7 @@ internal fun EntryBackAction(
         glyph = Icons.AutoMirrored.Rounded.ArrowBack,
         captionColor = captionColor,
         minHeightDp = minHeightDp,
+        neutralV5 = neutralV5,
     )
 }
 
@@ -328,28 +331,31 @@ internal fun EntryActionButton(
     minHeightDp: Int = 46,
     captionGlyphGap: Dp = 6.dp,
     onFocused: (() -> Unit)? = null,
+    neutralV5: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(12.dp)
     val interactive = enabled && !loading
     val goldFocused = primary && focused
-    val background = when (
-        entryActionSurface(
-            primary = primary,
-            outlined = outlined,
-            danger = danger,
-            enabled = enabled,
-            loading = loading,
-            focused = focused,
-        )
-    ) {
-        EntryActionSurface.DISABLED -> colors.surfaceRaised.copy(alpha = .5f)
-        EntryActionSurface.DANGER -> colors.danger.copy(alpha = if (focused) .22f else .14f)
-        EntryActionSurface.PRIMARY -> colors.gold
-        EntryActionSurface.OUTLINED -> if (accentOutlined) Color.Transparent else Color(0xFF151711)
-        EntryActionSurface.FOCUSED -> Color(0xFF1E2019)
-        EntryActionSurface.IDLE -> Color(0xFF181914)
+    val surfaceRole = entryActionSurface(
+        primary = primary,
+        outlined = outlined,
+        danger = danger,
+        enabled = enabled,
+        loading = loading,
+        focused = focused,
+    )
+    val background = when {
+        neutralV5 && !primary && !danger && !accentOutlined ->
+            NeoNeutralSurfaces.control.copy(alpha = if (enabled) 1f else .55f)
+        surfaceRole == EntryActionSurface.DISABLED -> colors.surfaceRaised.copy(alpha = .5f)
+        surfaceRole == EntryActionSurface.DANGER -> colors.danger.copy(alpha = if (focused) .22f else .14f)
+        surfaceRole == EntryActionSurface.PRIMARY -> colors.gold
+        surfaceRole == EntryActionSurface.OUTLINED ->
+            if (accentOutlined) Color.Transparent else Color(0xFF151711)
+        surfaceRole == EntryActionSurface.FOCUSED -> Color(0xFF1E2019)
+        else -> Color(0xFF181914)
     }
     val foreground = when {
         primary -> Color(0xFF100E04)
@@ -368,12 +374,14 @@ internal fun EntryActionButton(
                 width = when {
                     goldFocused -> 0.dp
                     focused -> 2.dp
+                    neutralV5 && !primary && !danger && !accentOutlined -> 1.dp
                     danger || outlined -> 1.dp
                     else -> 0.dp
                 },
                 color = when {
                     goldFocused -> Color.Transparent
                     focused -> colors.goldBright
+                    neutralV5 && !primary && !danger && !accentOutlined -> NeoNeutralSurfaces.stroke
                     danger -> colors.danger.copy(alpha = .45f)
                     outlined -> if (accentOutlined) colors.gold else colors.gold.copy(alpha = .42f)
                     else -> Color.Transparent

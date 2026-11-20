@@ -108,6 +108,7 @@ import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import sa.hulksa.player.ui.theme.NeoNeutralSurfaces
 import java.util.Locale
 
 private data class VerifiedMovieCardMetadata(
@@ -354,6 +355,7 @@ fun FocusButton(
     textMaxLines: Int = 1,
     textSizeSp: Int? = null,
     textLineHeightSp: Int? = null,
+    neutralV5: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -365,6 +367,11 @@ fun FocusButton(
     )
     val shape = RoundedCornerShape(12.dp)
     val background = when {
+        neutralV5 && !primary -> if (!enabled) {
+            NeoNeutralSurfaces.control.copy(alpha = .55f)
+        } else {
+            NeoNeutralSurfaces.control
+        }
         !enabled -> colors.surfaceRaised.copy(alpha = .5f)
         primary -> colors.gold
         showFocused -> Color(0xFF2A281B)
@@ -391,12 +398,16 @@ fun FocusButton(
                 width = when {
                     showFocused && primary -> 0.dp
                     showFocused -> 2.dp
+                    primary -> 0.dp
+                    neutralV5 -> 1.dp
                     accent -> 1.5.dp
                     outlined -> 1.dp
                     else -> 0.dp
                 },
                 color = when {
                     showFocused -> colors.goldBright
+                    primary -> Color.Transparent
+                    neutralV5 -> NeoNeutralSurfaces.stroke
                     accent -> colors.goldBright.copy(alpha = .88f)
                     outlined -> colors.gold.copy(alpha = .42f)
                     else -> Color.Transparent
@@ -523,6 +534,7 @@ fun HulkTextField(
     leadingIcon: ImageVector? = null,
     leadingIconTint: Color? = null,
     endActionSpace: Dp = 0.dp,
+    neutralV5: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -535,10 +547,16 @@ fun HulkTextField(
         modifier = modifier
             .onFocusChanged { focused = it.isFocused }
             .clip(shape)
-            .background(Color(0xFF12130F))
+            .background(if (neutralV5) NeoNeutralSurfaces.control else Color(0xFF12130F))
             .border(
                 width = if (focused) 2.dp else 1.dp,
-                color = if (focused) colors.gold else colors.line,
+                color = if (focused) {
+                    if (neutralV5) colors.goldBright else colors.gold
+                } else if (neutralV5) {
+                    NeoNeutralSurfaces.stroke
+                } else {
+                    colors.line
+                },
                 shape = shape,
             )
             .padding(horizontal = 15.dp, vertical = 13.dp),

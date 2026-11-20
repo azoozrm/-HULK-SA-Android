@@ -31,10 +31,20 @@ function football_event(
         'home_score' => $homeScore,
         'away_score' => $awayScore,
         'current_minute' => $status === 'live' ? 63 : null,
-        'league' => ['id' => 85, 'name' => 'Saudi Pro League', 'country' => 'Saudi Arabia'],
+        'league' => ['id' => 17, 'name' => 'Saudi Pro League', 'country' => 'Saudi Arabia'],
         'home_team' => ['id' => 10, 'name' => 'Al Hilal'],
         'away_team' => ['id' => 20, 'name' => 'Al Nassr'],
     ];
+}
+
+function football_aggregate_count(string $directory, int $clock): int
+{
+    $path = $directory . '/quota-aggregate-' . gmdate('Y-m-d', $clock) . '.json';
+    if (!is_file($path)) {
+        return 0;
+    }
+    $decoded = json_decode((string) file_get_contents($path), true);
+    return max(0, (int) ($decoded['count'] ?? 0));
 }
 
 $now = strtotime('2026-11-18T18:00:00Z');
@@ -150,6 +160,49 @@ $finalSecond = ops_football_build_payload(
 );
 football_test($finalSecond['matches'][0]['status'] === 'finished', 'final result survives older live row (live first)');
 football_test($finalSecond['matches'][0]['homeScore'] === 2, 'final score survives older live row (live first)');
+
+$allowlistPayload = ops_football_build_payload(
+    [
+        football_event(61, '2026-11-19T17:00:00Z', 'finished', null, 2, 1),
+        array_merge(
+            football_event(62, '2026-11-19T18:00:00Z', 'finished', null, 1, 0),
+            ['league' => ['id' => 18, 'name' => 'MLS', 'country' => 'USA']]
+        ),
+    ],
+    '2026-11-19',
+    strtotime('2026-11-19T20:00:00Z'),
+    false,
+    0,
+    null,
+    60
+);
+football_test(count($allowlistPayload['matches']) === 1, 'non-allowlisted competition is removed from matches');
+football_test(count($allowlistPayload['kickoffHistory']) === 1, 'non-allowlisted competition is removed from history');
+football_test($allowlistPayload['matches'][0]['competition']['id'] === '17', 'allowed competition remains');
+
+$filteredCache = ops_football_filter_payload(
+    [
+        'empty' => false,
+        'matches' => [
+            ['competition' => ['id' => '17'], 'homeTeam' => ['id' => '262'], 'awayTeam' => ['id' => '267']],
+            ['competition' => ['id' => '18'], 'homeTeam' => ['id' => '1'], 'awayTeam' => ['id' => '2']],
+        ],
+        'kickoffHistory' => [],
+        'reminderCandidates' => [
+            ['competition' => ['id' => '53'], 'homeTeam' => ['id' => '3'], 'awayTeam' => ['id' => '4']],
+        ],
+        'teams' => [
+            ['id' => '262', 'competitionIds' => ['17']],
+            ['id' => '1', 'competitionIds' => ['18']],
+            ['id' => '3', 'competitionIds' => ['53']],
+        ],
+    ],
+    ops_football_allowed_league_ids()
+);
+football_test(count($filteredCache['matches']) === 1 && count($filteredCache['reminderCandidates']) === 0, 'cached payload is filtered before presentation');
+football_test(count($filteredCache['teams']) === 1 && $filteredCache['teams'][0]['id'] === '262', 'cached teams are filtered by competition membership');
+football_test(in_array('53', ops_football_allowed_league_ids(['include_optional_arab_domestic' => true]), true), 'optional Arab domestic flag is opt-in');
+football_test(!in_array('53', ops_football_allowed_league_ids(), true), 'optional Arab domestic is disabled by default');
 
 $providerUpdatedShape = ops_football_normalize_event(array_merge(
     football_event(56, '2026-11-19T18:00:00Z', 'inprogress', null, 1, 0),
@@ -444,6 +497,7 @@ $first = ops_football_build_feed($settings, '2026-11-18', $now, $transport);
 football_test($first['httpStatus'] === 200, 'feed fetch succeeds');
 football_test($calls === 2, 'aggregate refresh is bounded to two requests');
 football_test(count($first['payload']['matches']) === 2, 'aggregate results merged');
+football_test(football_aggregate_count($directory, $now) === 2, 'each successful request is counted exactly once');
 $second = ops_football_build_feed($settings, '2026-11-18', $now + 5, $transport);
 football_test($second['httpStatus'] === 200 && $calls === 2, 'fresh cache avoids provider calls');
 football_test($second['payload']['stale'] === false, 'fresh cache is not stale');
@@ -461,6 +515,878 @@ football_test($stale['retryAfter'] === 120, 'Retry-After propagated');
 $blocked = ops_football_build_feed($settings, '2026-11-18', $now + 62, $failing);
 football_test($blocked['payload']['stale'] === true, 'Retry-After window serves cache without a provider call');
 football_test($blocked['retryAfter'] === 119, 'Retry-After countdown retained');
+football_test(football_aggregate_count($directory, $now) === 3, 'failed provider attempt is counted exactly once');
+
+football_test(OPS_FOOTBALL_DEFAULT_MAX_REQUESTS_PER_DAY === 500, 'feed default budget is 500/day');
+football_test(OPS_FOOTBALL_MAX_REQUESTS_PER_DAY === 2500, 'feed hard ceiling is 2500/day');
+football_test(OPS_FOOTBALL_AGGREGATE_MAX_REQUESTS_PER_DAY === 2500, 'aggregate hard ceiling is 2500/day');
+football_test(OPS_FOOTBALL_DEFAULT_CATALOG_MAX_PER_DAY === 200, 'catalog cap is 200/day');
+football_test(count(ops_football_allowed_league_ids()) === 27, 'default allowlist has 27 available IDs');
+
+$broadcastDirectory = sys_get_temp_dir() . '/hulk-football-broadcasts-' . bin2hex(random_bytes(4));
+mkdir($broadcastDirectory);
+$broadcastCalls = 0;
+$broadcastTransport = static function (string $url) use (&$broadcastCalls): array {
+    $broadcastCalls++;
+    football_test(str_contains($url, 'country_code=SA'), 'broadcast request pins Saudi Arabia');
+    return ['status' => 200, 'headers' => [], 'body' => json_encode(['count' => 2, 'results' => [
+        ['event_id' => 7001, 'league_id' => 1, 'channel_name' => 'beIN SPORTS 1', 'event_date' => '2026-11-18T18:00:00Z'],
+        ['event_id' => 7001, 'league_id' => 1, 'channel_name' => 'MBC Shahid', 'event_date' => '2026-11-18T18:00:00Z'],
+        ['event_id' => 7002, 'league_id' => 18, 'channel_name' => 'Apple TV', 'event_date' => '2026-11-18T18:00:00Z'],
+    ]]), 'error' => null];
+};
+$broadcastUsed = 0;
+$broadcastRemaining = 2;
+$broadcastRetry = null;
+$broadcastMap = ops_football_broadcast_map(
+    $settings,
+    $broadcastDirectory,
+    $broadcastTransport,
+    ['Authorization' => 'Token fixture-token'],
+    8,
+    $now,
+    $broadcastUsed,
+    $broadcastRemaining,
+    $broadcastRetry,
+);
+$broadcastKey = ops_football_broadcast_key('7001', strtotime('2026-11-18T18:00:00Z'));
+football_test($broadcastCalls === 1 && $broadcastUsed === 1, 'broadcast refresh is one bounded request');
+football_test(
+    $broadcastMap[$broadcastKey]['kickoffAt'] === strtotime('2026-11-18T18:00:00Z')
+        && $broadcastMap[$broadcastKey]['channels'] === ['beIN SPORTS 1', 'MBC Shahid'],
+    'confirmed multi-channel broadcaster is retained with its provider kickoff'
+);
+football_test(
+    !isset($broadcastMap[ops_football_broadcast_key('7002', strtotime('2026-11-18T18:00:00Z'))]),
+    'non-allowlisted broadcaster row is discarded'
+);
+$broadcastCached = ops_football_broadcast_map(
+    $settings,
+    $broadcastDirectory,
+    $broadcastTransport,
+    ['Authorization' => 'Token fixture-token'],
+    8,
+    $now + 60,
+    $broadcastUsed,
+    $broadcastRemaining,
+    $broadcastRetry,
+);
+football_test($broadcastCalls === 1 && $broadcastCached === $broadcastMap, 'broadcast cache avoids per-request calls');
+$cleanupBroadcast = static function (string $path): void {
+    if (!is_dir($path)) return;
+    foreach (glob($path . '/*') ?: [] as $file) { if (is_file($file)) @unlink($file); }
+    @rmdir($path);
+};
+$cleanupBroadcast($broadcastDirectory);
+
+$broadcastKickoff = strtotime('2026-11-18T18:00:00Z');
+$attached = ops_football_attach_broadcasts(
+    ['matches' => [
+        ['providerEventId' => '7001', 'kickoffAt' => $broadcastKickoff],
+        ['providerEventId' => '7001', 'kickoffAt' => $broadcastKickoff + 86_400],
+    ]],
+    $broadcastMap
+);
+football_test(
+    ($attached['matches'][0]['broadcasters'] ?? []) === ['beIN SPORTS 1', 'MBC Shahid'],
+    'unchanged provider id and kickoff attach the confirmed channels'
+);
+football_test(
+    !isset($attached['matches'][1]['broadcasters']),
+    'same provider id rescheduled to a new kickoff does not inherit channels'
+);
+$aliasAttached = ops_football_attach_broadcasts(
+    ['matches' => [[
+        'providerEventId' => 'new',
+        'aliases' => ['old'],
+        'kickoffAt' => $broadcastKickoff,
+    ]]],
+    [
+        ops_football_broadcast_key('old', $broadcastKickoff) => [
+            'providerEventId' => 'old',
+            'kickoffAt' => $broadcastKickoff,
+            'channels' => ['Old Channel'],
+        ],
+        ops_football_broadcast_key('new', $broadcastKickoff) => [
+            'providerEventId' => 'new',
+            'kickoffAt' => $broadcastKickoff,
+            'channels' => ['New Channel'],
+        ],
+    ]
+);
+football_test(
+    ($aliasAttached['matches'][0]['broadcasters'] ?? []) === ['New Channel'],
+    'replacement alias keeps only its own matching provider assignment'
+);
+
+$bidirectionalOldKickoff = strtotime('2026-11-18T18:00:00Z');
+$bidirectionalNewKickoff = $bidirectionalOldKickoff + 86_400;
+$bidirectionalRows = [
+    ['event_id' => 7100, 'league_id' => 1, 'channel_name' => 'Old Channel', 'event_date' => gmdate('c', $bidirectionalOldKickoff)],
+    ['event_id' => 7100, 'league_id' => 1, 'channel_name' => 'New Channel', 'event_date' => gmdate('c', $bidirectionalNewKickoff)],
+];
+foreach ([$bidirectionalRows, array_reverse($bidirectionalRows)] as $orderIndex => $orderedRows) {
+    $bidirectionalDirectory = sys_get_temp_dir() . '/hulk-football-broadcast-order-' . bin2hex(random_bytes(4));
+    mkdir($bidirectionalDirectory);
+    $bidirectionalUsed = 0;
+    $bidirectionalRemaining = 2;
+    $bidirectionalRetry = null;
+    $bidirectionalMap = ops_football_broadcast_map(
+        $settings,
+        $bidirectionalDirectory,
+        static fn(): array => [
+            'status' => 200,
+            'headers' => [],
+            'body' => json_encode(['count' => 2, 'results' => $orderedRows]),
+            'error' => null,
+        ],
+        [],
+        8,
+        $now,
+        $bidirectionalUsed,
+        $bidirectionalRemaining,
+        $bidirectionalRetry,
+        5
+    );
+    $oldKey = ops_football_broadcast_key('7100', $bidirectionalOldKickoff);
+    $newKey = ops_football_broadcast_key('7100', $bidirectionalNewKickoff);
+    football_test(
+        ($bidirectionalMap[$oldKey]['channels'] ?? []) === ['Old Channel']
+            && ($bidirectionalMap[$newKey]['channels'] ?? []) === ['New Channel'],
+        'both kickoff assignments survive row order ' . $orderIndex
+    );
+    $newAttached = ops_football_attach_broadcasts(
+        ['matches' => [['providerEventId' => '7100', 'kickoffAt' => $bidirectionalNewKickoff]]],
+        $bidirectionalMap
+    );
+    $oldAttached = ops_football_attach_broadcasts(
+        ['matches' => [['providerEventId' => '7100', 'kickoffAt' => $bidirectionalOldKickoff]]],
+        $bidirectionalMap
+    );
+    football_test(
+        ($newAttached['matches'][0]['broadcasters'] ?? []) === ['New Channel'],
+        'new fixture receives only its confirmed channel in order ' . $orderIndex
+    );
+    football_test(
+        ($oldAttached['matches'][0]['broadcasters'] ?? []) === ['Old Channel'],
+        'old fixture keeps only its own channel in order ' . $orderIndex
+    );
+    $bidirectionalCache = json_decode(
+        (string) file_get_contents($bidirectionalDirectory . '/broadcasts.json'),
+        true
+    );
+    football_test(
+        (int) ($bidirectionalCache['schemaVersion'] ?? 0) === 3
+            && count($bidirectionalCache['assignments'] ?? []) === 2,
+        'broadcaster cache retains both kickoff assignments in order ' . $orderIndex
+    );
+    $cleanupBroadcast($bidirectionalDirectory);
+}
+
+$legacyBroadcastDirectory = sys_get_temp_dir() . '/hulk-football-broadcast-legacy-' . bin2hex(random_bytes(4));
+mkdir($legacyBroadcastDirectory);
+file_put_contents(
+    $legacyBroadcastDirectory . '/broadcasts.json',
+    json_encode([
+        'cachedAt' => $now,
+        'countryCode' => 'SA',
+        'assignments' => ['7001' => ['Legacy Channel']],
+    ])
+);
+$legacyBroadcastCalls = 0;
+$legacyUsed = 0;
+$legacyRemaining = 1;
+$legacyRetry = null;
+$legacyMap = ops_football_broadcast_map(
+    $settings,
+    $legacyBroadcastDirectory,
+    static function (string $url) use (&$legacyBroadcastCalls): array {
+        $legacyBroadcastCalls++;
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['count' => 1, 'results' => [
+            ['event_id' => 8001, 'league_id' => 1, 'channel_name' => 'Verified Channel', 'event_date' => '2026-11-18T20:00:00Z'],
+        ]]), 'error' => null];
+    },
+    [],
+    8,
+    $now,
+    $legacyUsed,
+    $legacyRemaining,
+    $legacyRetry,
+    5
+);
+football_test($legacyBroadcastCalls === 1, 'legacy id-only broadcaster cache cannot confirm a kickoff and is refreshed');
+football_test(
+    array_filter(array_keys($legacyMap), static fn(string $key): bool => str_starts_with($key, '7001|')) === [],
+    'legacy id-only assignment is not reused'
+);
+football_test(
+    ($legacyMap[ops_football_broadcast_key('8001', strtotime('2026-11-18T20:00:00Z'))]['channels'] ?? []) === ['Verified Channel'],
+    'kickoff-bound refresh replaces the legacy cache'
+);
+$legacyFailedDirectory = sys_get_temp_dir() . '/hulk-football-broadcast-legacy-fail-' . bin2hex(random_bytes(4));
+mkdir($legacyFailedDirectory);
+file_put_contents(
+    $legacyFailedDirectory . '/broadcasts.json',
+    json_encode([
+        'cachedAt' => $now,
+        'countryCode' => 'SA',
+        'assignments' => ['7001' => ['Legacy Channel']],
+    ])
+);
+$legacyFailedUsed = 0;
+$legacyFailedRemaining = 1;
+$legacyFailedRetry = null;
+$legacyFailedMap = ops_football_broadcast_map(
+    $settings,
+    $legacyFailedDirectory,
+    static fn(): array => ['status' => 503, 'headers' => [], 'body' => '', 'error' => 'unavailable'],
+    [],
+    8,
+    $now,
+    $legacyFailedUsed,
+    $legacyFailedRemaining,
+    $legacyFailedRetry,
+    5
+);
+football_test($legacyFailedMap === [], 'legacy id-only cache cannot fall back to an unconfirmed kickoff');
+$cleanupBroadcast($legacyBroadcastDirectory);
+$cleanupBroadcast($legacyFailedDirectory);
+
+$broadcastPageDirectory = sys_get_temp_dir() . '/hulk-football-broadcast-pages-' . bin2hex(random_bytes(4));
+mkdir($broadcastPageDirectory);
+$broadcastPageCalls = 0;
+$broadcastPageTransport = static function (string $url) use (&$broadcastPageCalls): array {
+    $broadcastPageCalls++;
+    parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+    $offset = (int) ($query['offset'] ?? 0);
+    $rows = [];
+    for ($index = 0; $index < 200; $index++) {
+        $rows[] = ['event_id' => 9000 + $offset + $index, 'league_id' => 1, 'channel_name' => 'Channel'];
+    }
+    return ['status' => 200, 'headers' => [], 'body' => json_encode(['count' => 300, 'results' => $rows]), 'error' => null];
+};
+$broadcastPageUsed = 0;
+$broadcastPageRemaining = 2;
+$broadcastPageRetry = null;
+$broadcastPageMap = ops_football_broadcast_map(
+    $settings,
+    $broadcastPageDirectory,
+    $broadcastPageTransport,
+    [],
+    8,
+    $now,
+    $broadcastPageUsed,
+    $broadcastPageRemaining,
+    $broadcastPageRetry,
+    1,
+);
+football_test($broadcastPageCalls === 1, 'broadcast page limit is bounded');
+football_test(!file_exists($broadcastPageDirectory . '/broadcasts.json'), 'incomplete broadcaster pagination is not cached');
+$broadcastRateUsed = 0;
+$broadcastRateRemaining = 2;
+$broadcastRateRetry = null;
+$broadcastRateCalls = 0;
+$broadcastRateMap = ops_football_broadcast_map(
+    $settings,
+    $broadcastPageDirectory,
+    static function () use (&$broadcastRateCalls): array {
+        $broadcastRateCalls++;
+        return ['status' => 429, 'headers' => ['retry-after' => '60'], 'body' => '', 'error' => null];
+    },
+    [],
+    8,
+    $now,
+    $broadcastRateUsed,
+    $broadcastRateRemaining,
+    $broadcastRateRetry,
+    5,
+);
+football_test($broadcastRateCalls === 1 && $broadcastRateRetry === 60, 'broadcaster Retry-After stops further pages');
+football_test($broadcastRateMap === [], 'failed optional broadcaster metadata leaves match data usable');
+$cleanupBroadcastPages = static function (string $path): void {
+    if (!is_dir($path)) return;
+    foreach (glob($path . '/*') ?: [] as $file) { if (is_file($file)) @unlink($file); }
+    @rmdir($path);
+};
+$cleanupBroadcastPages($broadcastPageDirectory);
+
+$broadcastEmptyDirectory = sys_get_temp_dir() . '/hulk-football-broadcast-empty-' . bin2hex(random_bytes(4));
+mkdir($broadcastEmptyDirectory);
+$broadcastEmptyCalls = 0;
+$broadcastEmptyUsed = 0;
+$broadcastEmptyRemaining = 2;
+$broadcastEmptyRetry = null;
+$broadcastEmptyMap = ops_football_broadcast_map(
+    $settings,
+    $broadcastEmptyDirectory,
+    static function (string $url) use (&$broadcastEmptyCalls): array {
+        $broadcastEmptyCalls++;
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+        $offset = (int) ($query['offset'] ?? 0);
+        $rows = $offset === 0
+            ? array_fill(0, 200, ['event_id' => 9100, 'league_id' => 1, 'channel_name' => 'Channel'])
+            : [];
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['count' => 300, 'results' => $rows]), 'error' => null];
+    },
+    [],
+    8,
+    $now,
+    $broadcastEmptyUsed,
+    $broadcastEmptyRemaining,
+    $broadcastEmptyRetry,
+    2,
+);
+football_test($broadcastEmptyCalls === 2, 'broadcast empty page follows a short page');
+football_test(!file_exists($broadcastEmptyDirectory . '/broadcasts.json'), 'empty short broadcaster page with reported rows is not cached');
+$cleanupBroadcastPages($broadcastEmptyDirectory);
+
+$aggregateDirectory = sys_get_temp_dir() . '/hulk-football-aggregate-' . bin2hex(random_bytes(4));
+mkdir($aggregateDirectory);
+file_put_contents(
+    $aggregateDirectory . '/quota-aggregate-' . gmdate('Y-m-d', $now) . '.json',
+    json_encode(['count' => 2500, 'day' => gmdate('Y-m-d', $now)])
+);
+$aggregateCalls = 0;
+$aggregateFeed = ops_football_build_feed(
+    array_merge($settings, ['cache_directory' => $aggregateDirectory, 'max_requests_per_day' => 500]),
+    '2026-11-19',
+    $now,
+    static function () use (&$aggregateCalls): array {
+        $aggregateCalls++;
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['results' => []]), 'error' => null];
+    }
+);
+football_test($aggregateFeed['httpStatus'] === 503, 'aggregate daily ceiling fails closed');
+football_test($aggregateCalls === 0, 'aggregate ceiling makes no provider call');
+$cleanupAggregate = static function (string $path): void {
+    if (!is_dir($path)) return;
+    foreach (glob($path . '/*') ?: [] as $file) { if (is_file($file)) @unlink($file); }
+    @rmdir($path);
+};
+$cleanupAggregate($aggregateDirectory);
+
+$aggregateCatalogDirectory = sys_get_temp_dir() . '/hulk-football-catalog-aggregate-' . bin2hex(random_bytes(4));
+mkdir($aggregateCatalogDirectory);
+file_put_contents(
+    $aggregateCatalogDirectory . '/quota-aggregate-' . gmdate('Y-m-d', $now) . '.json',
+    json_encode(['count' => 2500, 'day' => gmdate('Y-m-d', $now)])
+);
+$aggregateCatalogCalls = 0;
+$aggregateCatalog = ops_football_build_team_catalog(
+    array_merge($settings, [
+        'cache_directory' => $aggregateCatalogDirectory,
+        'catalog_league_ids' => [1],
+        'catalog_scope' => 'explicit',
+        'catalog_max_requests_per_day' => 200,
+    ]),
+    $now,
+    static function () use (&$aggregateCatalogCalls): array {
+        $aggregateCatalogCalls++;
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['count' => 0, 'results' => []]), 'error' => null];
+    }
+);
+football_test($aggregateCatalog['httpStatus'] === 503, 'catalog aggregate daily ceiling fails closed');
+football_test($aggregateCatalogCalls === 0, 'catalog aggregate ceiling makes no provider call');
+$cleanupAggregateCatalog = static function (string $path): void {
+    if (!is_dir($path)) return;
+    foreach (glob($path . '/*') ?: [] as $file) { if (is_file($file)) @unlink($file); }
+    @rmdir($path);
+};
+$cleanupAggregateCatalog($aggregateCatalogDirectory);
+
+$cooldownDirectory = sys_get_temp_dir() . '/hulk-football-cooldown-' . bin2hex(random_bytes(4));
+mkdir($cooldownDirectory);
+file_put_contents(
+    $cooldownDirectory . '/retry.json',
+    json_encode(['until' => $now + 120])
+);
+$cooldownCalls = 0;
+$cooldownCatalog = ops_football_build_team_catalog(
+    array_merge($settings, ['cache_directory' => $cooldownDirectory, 'catalog_league_ids' => [1], 'catalog_scope' => 'explicit']),
+    $now,
+    static function () use (&$cooldownCalls): array {
+        $cooldownCalls++;
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['count' => 0, 'results' => []]), 'error' => null];
+    }
+);
+football_test($cooldownCatalog['httpStatus'] === 503 && $cooldownCalls === 0, 'catalog respects shared feed cooldown');
+$cooldownFeed = ops_football_build_feed(
+    array_merge($settings, ['cache_directory' => $cooldownDirectory, 'max_requests_per_refresh' => 1]),
+    '2026-11-19',
+    $now,
+    static function () use (&$cooldownCalls): array {
+        $cooldownCalls++;
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['count' => 0, 'results' => []]), 'error' => null];
+    }
+);
+football_test($cooldownFeed['httpStatus'] === 503 && $cooldownCalls === 0, 'feed and catalog share the same cooldown owner');
+$cleanupCooldown = static function (string $path): void {
+    if (!is_dir($path)) return;
+    foreach (glob($path . '/*') ?: [] as $file) { if (is_file($file)) @unlink($file); }
+    @rmdir($path);
+};
+$cleanupCooldown($cooldownDirectory);
+
+$concurrentDirectory = sys_get_temp_dir() . '/hulk-football-concurrent-' . bin2hex(random_bytes(4));
+mkdir($concurrentDirectory);
+$concurrentResults = [];
+if (function_exists('pcntl_fork')) {
+    $concurrentSettings = array_merge($settings, [
+        'cache_directory' => $concurrentDirectory,
+        'max_requests_per_day' => 10,
+        'max_requests_per_refresh' => 1,
+        'catalog_league_ids' => [1],
+        'catalog_scope' => 'explicit',
+        'catalog_max_requests_per_day' => 10,
+    ]);
+    $workers = [
+        ['feed', '2026-11-19'],
+        ['feed', '2026-11-20'],
+        ['catalog', '2026-11-19'],
+    ];
+    $pids = [];
+    foreach ($workers as $index => [$kind, $day]) {
+        $pid = pcntl_fork();
+        if ($pid === 0) {
+            $attempts = 0;
+            $transport = static function (string $url) use (&$attempts): array {
+                $attempts++;
+                usleep(600_000);
+                return ['status' => 200, 'headers' => [], 'body' => json_encode(['count' => 0, 'results' => []]), 'error' => null];
+            };
+            if ($kind === 'catalog') {
+                $result = ops_football_build_team_catalog($concurrentSettings, $now, $transport);
+            } else {
+                $result = ops_football_build_feed($concurrentSettings, $day, $now, $transport);
+            }
+            file_put_contents(
+                $concurrentDirectory . '/worker-' . $index . '.json',
+                json_encode(['attempts' => $attempts, 'status' => $result['httpStatus']])
+            );
+            exit(0);
+        }
+        $pids[] = $pid;
+    }
+    foreach ($pids as $pid) {
+        pcntl_waitpid($pid, $status);
+    }
+    foreach (glob($concurrentDirectory . '/worker-*.json') ?: [] as $file) {
+        $concurrentResults[] = json_decode((string) file_get_contents($file), true);
+    }
+    $aggregate = json_decode(
+        (string) file_get_contents($concurrentDirectory . '/quota-aggregate-' . gmdate('Y-m-d', $now) . '.json'),
+        true
+    );
+    $attempts = array_sum(array_map(static fn(array $row): int => (int) ($row['attempts'] ?? 0), $concurrentResults));
+    football_test(count($concurrentResults) === 3, 'three offline provider workers completed');
+    football_test($attempts === 3, 'each concurrent worker counted its attempted request');
+    football_test((int) ($aggregate['count'] ?? 0) === 3, 'shared provider lock prevents lost aggregate increments');
+}
+$cleanupConcurrent = static function (string $path): void {
+    if (!is_dir($path)) return;
+    foreach (glob($path . '/*') ?: [] as $file) { if (is_file($file)) @unlink($file); }
+    @rmdir($path);
+};
+$cleanupConcurrent($concurrentDirectory);
+
+$interruptDirectory = sys_get_temp_dir() . '/hulk-football-interrupt-' . bin2hex(random_bytes(4));
+mkdir($interruptDirectory);
+if (function_exists('pcntl_fork')) {
+    $interruptPid = pcntl_fork();
+    if ($interruptPid === 0) {
+        ops_football_build_feed(
+            array_merge($settings, ['cache_directory' => $interruptDirectory]),
+            '2026-11-18',
+            $now,
+            static function (string $url, array $headers, int $timeout) use ($interruptDirectory, $now): array {
+                file_put_contents(
+                    $interruptDirectory . '/transport-observed.json',
+                    json_encode(['reserved' => football_aggregate_count($interruptDirectory, $now)])
+                );
+                exit(0);
+            }
+        );
+        exit(2);
+    }
+    pcntl_waitpid($interruptPid, $interruptStatus);
+    $interruptObserved = json_decode(
+        (string) file_get_contents($interruptDirectory . '/transport-observed.json'),
+        true
+    );
+    football_test(
+        (int) ($interruptObserved['reserved'] ?? 0) === 1,
+        'attempt is durably reserved before transport'
+    );
+    football_test(
+        football_aggregate_count($interruptDirectory, $now) === 1,
+        'interrupted process does not lose or double-count its reservation'
+    );
+    football_test(
+        !file_exists($interruptDirectory . '/day-2026-11-18.json'),
+        'interrupted process publishes no partial cache'
+    );
+}
+$cleanupInterrupt = static function (string $path): void {
+    if (!is_dir($path)) return;
+    foreach (glob($path . '/*') ?: [] as $file) { if (is_file($file)) @unlink($file); }
+    @rmdir($path);
+};
+$cleanupInterrupt($interruptDirectory);
+
+$ledgerFailureDirectory = sys_get_temp_dir() . '/hulk-football-ledger-failure-' . bin2hex(random_bytes(4));
+mkdir($ledgerFailureDirectory);
+$ledgerFailureName = 'quota-aggregate-' . gmdate('Y-m-d', $now) . '.json';
+mkdir($ledgerFailureDirectory . '/' . $ledgerFailureName);
+$ledgerFailureCalls = 0;
+$ledgerFailureFeed = ops_football_build_feed(
+    array_merge($settings, ['cache_directory' => $ledgerFailureDirectory]),
+    '2026-11-18',
+    $now,
+    static function () use (&$ledgerFailureCalls): array {
+        $ledgerFailureCalls++;
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['results' => []]), 'error' => null];
+    }
+);
+football_test($ledgerFailureFeed['httpStatus'] === 503, 'unreadable aggregate ledger fails closed');
+football_test(
+    ($ledgerFailureFeed['payload']['error'] ?? '') === 'provider_ledger_unavailable',
+    'ledger failure is explicit'
+);
+football_test($ledgerFailureCalls === 0, 'ledger failure makes no provider transport');
+@rmdir($ledgerFailureDirectory . '/' . $ledgerFailureName);
+$cleanupInterrupt($ledgerFailureDirectory);
+
+$writeFailureDirectory = sys_get_temp_dir() . '/hulk-football-ledger-write-' . bin2hex(random_bytes(4));
+mkdir($writeFailureDirectory);
+file_put_contents($writeFailureDirectory . '/provider.lock', '');
+file_put_contents(
+    $writeFailureDirectory . '/quota-aggregate-' . gmdate('Y-m-d', $now) . '.json',
+    json_encode(['count' => 0, 'day' => gmdate('Y-m-d', $now)])
+);
+chmod($writeFailureDirectory, 0555);
+$writeFailureCalls = 0;
+$writeFailureFeed = ops_football_build_feed(
+    array_merge($settings, ['cache_directory' => $writeFailureDirectory]),
+    '2026-11-18',
+    $now,
+    static function () use (&$writeFailureCalls): array {
+        $writeFailureCalls++;
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['results' => []]), 'error' => null];
+    }
+);
+football_test($writeFailureFeed['httpStatus'] === 503, 'failed ledger write fails closed');
+football_test(
+    ($writeFailureFeed['payload']['error'] ?? '') === 'provider_ledger_unavailable',
+    'ledger write failure is explicit'
+);
+football_test($writeFailureCalls === 0, 'ledger write failure makes no provider transport');
+football_test(
+    football_aggregate_count($writeFailureDirectory, $now) === 0,
+    'failed ledger write does not corrupt the readable aggregate'
+);
+
+$invalidLedgerDay = gmdate('Y-m-d', $now);
+$invalidLedgerCases = [
+    'feed aggregate without count' => [
+        'kind' => 'feed',
+        'aggregate' => ['day' => $invalidLedgerDay],
+        'quota' => ['count' => 0, 'day' => $invalidLedgerDay],
+    ],
+    'feed route quota textual count' => [
+        'kind' => 'feed',
+        'aggregate' => ['count' => 0, 'day' => $invalidLedgerDay],
+        'quota' => ['count' => '0', 'day' => $invalidLedgerDay],
+    ],
+    'catalog aggregate textual count' => [
+        'kind' => 'catalog',
+        'aggregate' => ['count' => '0', 'day' => $invalidLedgerDay],
+        'quota' => ['count' => 0, 'day' => $invalidLedgerDay],
+    ],
+    'catalog route quota without count' => [
+        'kind' => 'catalog',
+        'aggregate' => ['count' => 0, 'day' => $invalidLedgerDay],
+        'quota' => ['day' => $invalidLedgerDay],
+    ],
+    'feed aggregate float count' => [
+        'kind' => 'feed',
+        'aggregate' => ['count' => 1.5, 'day' => $invalidLedgerDay],
+        'quota' => ['count' => 0, 'day' => $invalidLedgerDay],
+    ],
+];
+foreach ($invalidLedgerCases as $label => $case) {
+    $invalidDirectory = sys_get_temp_dir() . '/hulk-football-invalid-ledger-' . bin2hex(random_bytes(4));
+    mkdir($invalidDirectory);
+    $quotaPrefix = $case['kind'] === 'catalog' ? 'quota-teams' : 'quota';
+    file_put_contents(
+        $invalidDirectory . '/quota-aggregate-' . $invalidLedgerDay . '.json',
+        json_encode($case['aggregate'])
+    );
+    file_put_contents(
+        $invalidDirectory . '/' . $quotaPrefix . '-' . $invalidLedgerDay . '.json',
+        json_encode($case['quota'])
+    );
+    $invalidCalls = 0;
+    $invalidTransport = static function () use (&$invalidCalls): array {
+        $invalidCalls++;
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['count' => 0, 'results' => []]), 'error' => null];
+    };
+    if ($case['kind'] === 'catalog') {
+        $invalidResult = ops_football_build_team_catalog(
+            [
+                'cache_directory' => $invalidDirectory,
+                'bzzoiro' => ['base_url' => 'https://sports.bzzoiro.com/api/v2', 'api_key' => 'fixture-token'],
+                'catalog_league_ids' => [1],
+                'catalog_scope' => 'explicit',
+                'catalog_max_requests_per_day' => 10,
+            ],
+            $now,
+            $invalidTransport
+        );
+    } else {
+        $invalidResult = ops_football_build_feed(
+            array_merge($settings, ['cache_directory' => $invalidDirectory]),
+            '2026-11-18',
+            $now,
+            $invalidTransport
+        );
+    }
+    football_test($invalidResult['httpStatus'] === 503, 'invalid ledger count fails closed: ' . $label);
+    football_test(
+        ($invalidResult['payload']['error'] ?? '') === 'provider_ledger_unavailable',
+        'invalid ledger error is explicit: ' . $label
+    );
+    football_test($invalidCalls === 0, 'invalid ledger makes no transport: ' . $label);
+    $cleanupInterrupt($invalidDirectory);
+}
+
+$midnightStart = strtotime('2026-11-18T23:59:59Z');
+$midnightNext = $midnightStart + 2;
+$midnightFeedDirectory = sys_get_temp_dir() . '/hulk-football-midnight-feed-' . bin2hex(random_bytes(4));
+mkdir($midnightFeedDirectory);
+$midnightFeedTimes = [$midnightStart, $midnightNext];
+$midnightFeedIndex = 0;
+$midnightFeedClock = static function () use (&$midnightFeedIndex, $midnightFeedTimes): int {
+    $index = min($midnightFeedIndex, count($midnightFeedTimes) - 1);
+    $midnightFeedIndex++;
+    return $midnightFeedTimes[$index];
+};
+$midnightFeedCalls = 0;
+$midnightFeed = ops_football_build_feed(
+    array_merge($settings, [
+        'cache_directory' => $midnightFeedDirectory,
+        'max_requests_per_refresh' => 2,
+    ]),
+    '2026-11-19',
+    $midnightStart,
+    static function () use (&$midnightFeedCalls): array {
+        $midnightFeedCalls++;
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['count' => 0, 'results' => []]), 'error' => null];
+    },
+    $midnightFeedClock
+);
+$midnightFeedDayOne = gmdate('Y-m-d', $midnightStart);
+$midnightFeedDayTwo = gmdate('Y-m-d', $midnightNext);
+$midnightFeedQuotaOne = json_decode(
+    (string) file_get_contents($midnightFeedDirectory . '/quota-' . $midnightFeedDayOne . '.json'),
+    true
+);
+$midnightFeedQuotaTwo = json_decode(
+    (string) file_get_contents($midnightFeedDirectory . '/quota-' . $midnightFeedDayTwo . '.json'),
+    true
+);
+football_test($midnightFeedCalls === 2, 'midnight feed performs two reserved attempts');
+football_test(
+    (int) ($midnightFeedQuotaOne['count'] ?? 0) === 1
+        && football_aggregate_count($midnightFeedDirectory, $midnightStart) === 1,
+    'feed attempt before UTC midnight is charged to the first day'
+);
+football_test(
+    (int) ($midnightFeedQuotaTwo['count'] ?? 0) === 1
+        && football_aggregate_count($midnightFeedDirectory, $midnightNext) === 1,
+    'feed attempt after UTC midnight is charged to the second day'
+);
+$cleanupInterrupt($midnightFeedDirectory);
+
+$midnightCatalogDirectory = sys_get_temp_dir() . '/hulk-football-midnight-catalog-' . bin2hex(random_bytes(4));
+mkdir($midnightCatalogDirectory);
+$midnightCatalogTimes = [$midnightStart, $midnightNext];
+$midnightCatalogIndex = 0;
+$midnightCatalogClock = static function () use (&$midnightCatalogIndex, $midnightCatalogTimes): int {
+    $index = min($midnightCatalogIndex, count($midnightCatalogTimes) - 1);
+    $midnightCatalogIndex++;
+    return $midnightCatalogTimes[$index];
+};
+$midnightCatalogCalls = 0;
+$midnightCatalog = ops_football_build_team_catalog(
+    [
+        'cache_directory' => $midnightCatalogDirectory,
+        'bzzoiro' => ['base_url' => 'https://sports.bzzoiro.com/api/v2', 'api_key' => 'fixture-token'],
+        'catalog_league_ids' => [1],
+        'catalog_scope' => 'explicit',
+        'catalog_max_requests_per_day' => 10,
+    ],
+    $midnightStart,
+    static function (string $url) use (&$midnightCatalogCalls): array {
+        $midnightCatalogCalls++;
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+        $offset = (int) ($query['offset'] ?? 0);
+        if ($offset === 0) {
+            $rows = [];
+            for ($id = 1; $id <= 200; $id++) {
+                $rows[] = ['id' => $id, 'name' => 'Midnight ' . $id, 'country' => 'England'];
+            }
+            return ['status' => 200, 'headers' => [], 'body' => json_encode(['count' => 201, 'results' => $rows]), 'error' => null];
+        }
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['count' => 201, 'results' => [
+            ['id' => 201, 'name' => 'Midnight 201', 'country' => 'England'],
+        ]]), 'error' => null];
+    },
+    $midnightCatalogClock
+);
+$midnightCatalogQuotaOne = json_decode(
+    (string) file_get_contents($midnightCatalogDirectory . '/quota-teams-' . $midnightFeedDayOne . '.json'),
+    true
+);
+$midnightCatalogQuotaTwo = json_decode(
+    (string) file_get_contents($midnightCatalogDirectory . '/quota-teams-' . $midnightFeedDayTwo . '.json'),
+    true
+);
+football_test($midnightCatalog['httpStatus'] === 200, 'midnight catalog succeeds');
+football_test($midnightCatalogCalls === 2, 'midnight catalog performs two reserved attempts');
+football_test(
+    (int) ($midnightCatalogQuotaOne['count'] ?? 0) === 1
+        && football_aggregate_count($midnightCatalogDirectory, $midnightStart) === 1,
+    'catalog attempt before UTC midnight is charged to the first day'
+);
+football_test(
+    (int) ($midnightCatalogQuotaTwo['count'] ?? 0) === 1
+        && football_aggregate_count($midnightCatalogDirectory, $midnightNext) === 1,
+    'catalog attempt after UTC midnight is charged to the second day'
+);
+$cleanupInterrupt($midnightCatalogDirectory);
+
+$rateFailureDirectory = sys_get_temp_dir() . '/hulk-football-rate-failure-' . bin2hex(random_bytes(4));
+mkdir($rateFailureDirectory);
+ops_football_build_feed(
+    array_merge($settings, ['cache_directory' => $rateFailureDirectory]),
+    '2026-11-18',
+    $now,
+    static fn(): array => [
+        'status' => 200, 'headers' => [], 'body' => json_encode(['results' => []]), 'error' => null,
+    ]
+);
+$rateFailureBefore = football_aggregate_count($rateFailureDirectory, $now);
+$rateFailureFeed = ops_football_build_feed(
+    array_merge($settings, ['cache_directory' => $rateFailureDirectory]),
+    '2026-11-18',
+    $now + 61,
+    static fn(): array => [
+        'status' => 429, 'headers' => ['retry-after' => '45'], 'body' => '', 'error' => null,
+    ]
+);
+football_test($rateFailureFeed['payload']['stale'] === true, '429 keeps the last-good feed usable');
+football_test(
+    football_aggregate_count($rateFailureDirectory, $now) === $rateFailureBefore + 1,
+    'a 429 attempt is reserved and counted exactly once'
+);
+$cleanupInterrupt($rateFailureDirectory);
+
+$capDirectory = sys_get_temp_dir() . '/hulk-football-cap-race-' . bin2hex(random_bytes(4));
+mkdir($capDirectory);
+file_put_contents(
+    $capDirectory . '/quota-aggregate-' . gmdate('Y-m-d', $now) . '.json',
+    json_encode(['count' => 2499, 'day' => gmdate('Y-m-d', $now)])
+);
+if (function_exists('pcntl_fork')) {
+    $capSettings = array_merge($settings, [
+        'cache_directory' => $capDirectory,
+        'max_requests_per_day' => 500,
+        'max_requests_per_refresh' => 4,
+        'catalog_league_ids' => [1],
+        'catalog_scope' => 'explicit',
+        'catalog_max_requests_per_day' => 200,
+    ]);
+    $capPids = [];
+    foreach (['feed', 'catalog'] as $index => $kind) {
+        $pid = pcntl_fork();
+        if ($pid === 0) {
+            $attempts = 0;
+            $transport = static function () use (&$attempts): array {
+                $attempts++;
+                usleep(250_000);
+                return ['status' => 200, 'headers' => [], 'body' => json_encode(['count' => 0, 'results' => []]), 'error' => null];
+            };
+            $result = $kind === 'catalog'
+                ? ops_football_build_team_catalog($capSettings, $now, $transport)
+                : ops_football_build_feed($capSettings, '2026-11-19', $now, $transport);
+            file_put_contents(
+                $capDirectory . '/cap-worker-' . $index . '.json',
+                json_encode(['attempts' => $attempts, 'status' => $result['httpStatus']])
+            );
+            exit(0);
+        }
+        $capPids[] = $pid;
+    }
+    foreach ($capPids as $pid) {
+        pcntl_waitpid($pid, $status);
+    }
+    $capAttempts = 0;
+    foreach (glob($capDirectory . '/cap-worker-*.json') ?: [] as $file) {
+        $worker = json_decode((string) file_get_contents($file), true);
+        $capAttempts += (int) ($worker['attempts'] ?? 0);
+    }
+    football_test($capAttempts === 1, 'concurrent feed and catalog reserve only the last aggregate slot');
+    football_test(
+        football_aggregate_count($capDirectory, $now) === 2500,
+        'concurrent attempts cannot exceed the shared aggregate ceiling'
+    );
+}
+$cleanupInterrupt($capDirectory);
+
+
+$boundaryDirectory = sys_get_temp_dir() . '/hulk-football-boundary-' . bin2hex(random_bytes(4));
+mkdir($boundaryDirectory);
+file_put_contents(
+    $boundaryDirectory . '/quota-aggregate-' . gmdate('Y-m-d', $now) . '.json',
+    json_encode(['count' => 2499, 'day' => gmdate('Y-m-d', $now)])
+);
+$boundaryCalls = 0;
+$boundaryTransport = static function () use (&$boundaryCalls): array {
+    $boundaryCalls++;
+    return ['status' => 200, 'headers' => [], 'body' => json_encode(['count' => 0, 'results' => []]), 'error' => null];
+};
+$boundarySettings = array_merge($settings, [
+    'cache_directory' => $boundaryDirectory,
+    'max_requests_per_refresh' => 4,
+]);
+$boundaryFeed = ops_football_build_feed($boundarySettings, '2026-11-19', $now, $boundaryTransport);
+football_test($boundaryCalls === 1, 'aggregate remaining budget caps requests at one');
+football_test(
+    $boundaryFeed['httpStatus'] === 503,
+    'feed fails closed instead of publishing a fresh empty result after the last shared slot'
+);
+football_test(
+    ($boundaryFeed['payload']['error'] ?? '') === 'provider_quota_exhausted',
+    'shared boundary exhaustion is explicit'
+);
+$boundaryAggregate = json_decode(
+    (string) file_get_contents($boundaryDirectory . '/quota-aggregate-' . gmdate('Y-m-d', $now) . '.json'),
+    true
+);
+football_test((int) ($boundaryAggregate['count'] ?? 0) === 2500, 'aggregate boundary reaches exactly 2500');
+$boundarySecond = ops_football_build_feed($boundarySettings, '2026-11-19', $now + 61, $boundaryTransport);
+football_test($boundaryCalls === 1, 'no provider transport after the aggregate boundary');
+football_test(
+    $boundarySecond['httpStatus'] === 503
+        && ($boundarySecond['payload']['error'] ?? '') === 'provider_quota_exhausted',
+    'boundary exhaustion stays fail-closed without a last-good payload'
+);
+$cleanupBoundary = static function (string $path): void {
+    if (!is_dir($path)) return;
+    foreach (glob($path . '/*') ?: [] as $file) { if (is_file($file)) @unlink($file); }
+    @rmdir($path);
+};
+$cleanupBoundary($boundaryDirectory);
 
 $truncatedDirectory = sys_get_temp_dir() . '/hulk-football-truncated-' . bin2hex(random_bytes(4));
 $truncatedSettings = array_merge($settings, [
@@ -498,7 +1424,9 @@ $reminderSettings = array_merge($settings, [
     'cache_directory' => $reminderDirectory,
     'max_requests_per_refresh' => 4,
 ]);
-$reminderTransport = static function (string $url): array {
+$reminderCalls = [];
+$reminderTransport = static function (string $url) use (&$reminderCalls): array {
+    $reminderCalls[] = $url;
     if (str_contains($url, '/leagues/')) {
         return ['status' => 200, 'headers' => [], 'body' => json_encode(['count' => 0, 'results' => []]), 'error' => null];
     }
@@ -519,6 +1447,10 @@ $reminderTransport = static function (string $url): array {
 $reminderFeed = ops_football_build_feed($reminderSettings, '2026-11-18', $now, $reminderTransport);
 football_test(count($reminderFeed['payload']['matches']) === 1, 'current-day feed keeps only today matches');
 football_test(count($reminderFeed['payload']['reminderCandidates']) === 1, 'next Riyadh day reminder candidate is carried today');
+football_test(
+    array_filter($reminderCalls, static fn(string $url): bool => str_contains($url, '/broadcasts/')) === [],
+    'eligible reminder is prioritized before optional broadcaster requests'
+);
 football_test($reminderFeed['payload']['reminderCandidates'][0]['providerEventId'] === '41001', 'tomorrow fixture is the reminder candidate');
 $cleanupReminder = static function (string $path): void {
     if (!is_dir($path)) return;
@@ -658,6 +1590,7 @@ $catalogSettings = [
     'cache_directory' => $catalogDirectory,
     'bzzoiro' => ['base_url' => 'https://sports.bzzoiro.com/api/v2', 'api_key' => 'fixture-token'],
     'catalog_league_ids' => [1],
+    'catalog_scope' => 'explicit',
     'catalog_max_requests_per_day' => 10,
 ];
 $catalog = ops_football_build_team_catalog($catalogSettings, $now, $catalogTransport);
@@ -721,6 +1654,7 @@ $catalogRetrySettings = [
     'cache_directory' => $catalogRetryDirectory,
     'bzzoiro' => ['base_url' => 'https://sports.bzzoiro.com/api/v2', 'api_key' => 'fixture-token'],
     'catalog_league_ids' => [1],
+    'catalog_scope' => 'explicit',
     'catalog_max_requests_per_day' => 10,
 ];
 $fullCatalogTransport = static function (): array {
@@ -781,6 +1715,7 @@ $quotaSettings = [
     'cache_directory' => $quotaDirectory,
     'bzzoiro' => ['base_url' => 'https://sports.bzzoiro.com/api/v2', 'api_key' => 'fixture-token'],
     'catalog_league_ids' => [1],
+    'catalog_scope' => 'explicit',
     'catalog_max_requests_per_day' => 1,
 ];
 $quotaCalls = 0;
@@ -799,6 +1734,7 @@ $overflowSettings = [
     'cache_directory' => $overflowDirectory,
     'bzzoiro' => ['base_url' => 'https://sports.bzzoiro.com/api/v2', 'api_key' => 'fixture-token'],
     'catalog_league_ids' => [1],
+    'catalog_scope' => 'explicit',
     'catalog_max_requests_per_day' => 10,
 ];
 $overflowTransport = static function (string $url): array {
@@ -825,6 +1761,7 @@ $translitSettings = [
     'cache_directory' => $translitDirectory,
     'bzzoiro' => ['base_url' => 'https://sports.bzzoiro.com/api/v2', 'api_key' => 'fixture-token'],
     'catalog_league_ids' => [1],
+    'catalog_scope' => 'explicit',
     'catalog_max_requests_per_day' => 10,
 ];
 $translitCatalog = ops_football_build_team_catalog($translitSettings, $now, static function (): array {

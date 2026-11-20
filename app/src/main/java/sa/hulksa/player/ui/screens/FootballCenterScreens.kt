@@ -104,6 +104,7 @@ import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import sa.hulksa.player.ui.theme.NeoNeutralSurfaces
 
 internal enum class FootballCenterFilter(val label: String) {
     ALL("الكل"),
@@ -171,7 +172,8 @@ internal fun FootballCrest(
         modifier = modifier
             .size(size)
             .clip(RoundedCornerShape(8.dp))
-            .background(colors.surface),
+            .background(NeoNeutralSurfaces.card)
+            .border(1.dp, NeoNeutralSurfaces.stroke, RoundedCornerShape(8.dp)),
         contentAlignment = Alignment.Center,
     ) {
         val logo = team?.logoUrl
@@ -203,7 +205,11 @@ internal fun FootballCompetitionMark(
 ) {
     val colors = LocalHulkColors.current
     Box(
-        modifier = modifier.size(size).clip(CircleShape).background(colors.surface),
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(NeoNeutralSurfaces.card)
+            .border(1.dp, NeoNeutralSurfaces.stroke, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         val logo = competition?.logoUrl
@@ -328,11 +334,11 @@ internal fun FootballHomeCard(
             .width(if (isTv) 302.dp else 274.dp)
             .heightIn(min = 142.dp)
             .clip(shape)
-            .background(if (focused) colors.surfaceRaised else colors.surface)
+            .background(NeoNeutralSurfaces.card)
             .goldFocusEdge(shape = shape, visible = focused)
             .border(
                 width = if (focused) 0.dp else 1.dp,
-                color = if (isFavorite) colors.gold.copy(alpha = .55f) else colors.line.copy(alpha = .38f),
+                color = NeoNeutralSurfaces.stroke,
                 shape = shape,
             )
             .onFocusChanged {
@@ -342,45 +348,83 @@ internal fun FootballHomeCard(
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
-        Text(
-            text = match.competition.displayName,
-            color = colors.text,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        Box(Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                FootballCompetitionMark(match.competition, 17.dp)
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    text = match.competition.displayName,
+                    color = colors.text,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.widthIn(max = if (isTv) 232.dp else 204.dp),
+                )
+            }
+            if (isFavorite) {
+                Icon(
+                    imageVector = Icons.Rounded.Favorite,
+                    contentDescription = "فريق متابع",
+                    tint = colors.gold,
+                    modifier = Modifier.align(Alignment.CenterEnd).size(13.dp),
+                )
+            }
+        }
         Spacer(Modifier.height(8.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            FootballHomeTeam(match.homeTeam, 38.dp, Modifier.weight(1f), TextAlign.Start)
+            FootballHomeTeam(match.homeTeam, 46.dp, Modifier.weight(1f), TextAlign.Start)
             Column(
-                modifier = Modifier.widthIn(min = 82.dp),
+                modifier = Modifier.widthIn(min = 86.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                FootballScoreDisplay(match, hideScores, 21)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    if (match.status == FootballMatchStatus.LIVE) {
-                        Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFE5484D)))
-                        Spacer(Modifier.width(4.dp))
-                    }
-                    Text(
-                        text = footballSecondaryText(match, hideScores),
-                        color = if (match.status == FootballMatchStatus.LIVE) colors.goldBright else colors.textMuted,
-                        fontSize = 10.sp,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                    )
-                }
+                FootballScoreDisplay(match, hideScores, 22)
             }
-            FootballHomeTeam(match.awayTeam, 38.dp, Modifier.weight(1f), TextAlign.End)
+            FootballHomeTeam(match.awayTeam, 46.dp, Modifier.weight(1f), TextAlign.End)
+        }
+        Spacer(Modifier.height(8.dp))
+        Box(
+            Modifier.fillMaxWidth().height(1.dp)
+                .background(NeoNeutralSurfaces.stroke.copy(alpha = .72f)),
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (match.status == FootballMatchStatus.LIVE) {
+                Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFE5484D)))
+            }
+            Text(
+                text = footballSecondaryText(match, hideScores),
+                color = if (match.status == FootballMatchStatus.LIVE) colors.goldBright else colors.textMuted,
+                fontSize = 10.sp,
+                fontWeight = if (match.status == FootballMatchStatus.LIVE) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 1,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (match.broadcasters.isNotEmpty()) {
+                Text(
+                    text = match.broadcasters.joinToString(" • "),
+                    color = colors.textMuted,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                Spacer(Modifier.weight(1f))
+            }
         }
     }
 }
@@ -540,6 +584,7 @@ internal fun FootballCenterScreen(
                     primary = false,
                     scaleOnFocus = false,
                     trailingIcon = Icons.Rounded.Favorite,
+                    neutralV5 = true,
                 )
                 FocusButton(
                     if (feed.hideScores) "اظهار النتائج" else "اخفاء النتائج",
@@ -548,6 +593,7 @@ internal fun FootballCenterScreen(
                     primary = false,
                     scaleOnFocus = false,
                     trailingIcon = if (feed.hideScores) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                    neutralV5 = true,
                 )
             }
             FocusButton(
@@ -558,6 +604,7 @@ internal fun FootballCenterScreen(
                 primary = false,
                 scaleOnFocus = false,
                 trailingIcon = Icons.AutoMirrored.Rounded.ArrowBack,
+                neutralV5 = true,
             )
         }
         if (!isTv) {
@@ -574,6 +621,7 @@ internal fun FootballCenterScreen(
                     primary = false,
                     scaleOnFocus = false,
                     trailingIcon = Icons.Rounded.Favorite,
+                    neutralV5 = true,
                 )
                 FocusButton(
                     if (feed.hideScores) "اظهار النتائج" else "اخفاء النتائج",
@@ -582,6 +630,7 @@ internal fun FootballCenterScreen(
                     primary = false,
                     scaleOnFocus = false,
                     trailingIcon = if (feed.hideScores) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                    neutralV5 = true,
                 )
             }
         }
@@ -594,7 +643,7 @@ internal fun FootballCenterScreen(
                 FootballDaySelector(days, selectedDay) { selectedDay = it }
                 Box(
                     Modifier.width(1.dp).height(24.dp)
-                        .background(colors.line.copy(alpha = .55f)),
+                        .background(NeoNeutralSurfaces.stroke),
                 )
                 FootballFilterSelector(activeFilter) { filter = it.name }
                 Spacer(Modifier.weight(1f))
@@ -721,6 +770,7 @@ private fun FootballDaySelector(
             compact = true,
             primary = selectedDay == day,
             scaleOnFocus = false,
+            neutralV5 = true,
         )
     }
 }
@@ -737,6 +787,7 @@ private fun FootballFilterSelector(
             compact = true,
             primary = activeFilter == value,
             scaleOnFocus = false,
+            neutralV5 = true,
         )
     }
 }
@@ -758,11 +809,11 @@ private fun FootballCenterRow(
             .fillMaxWidth()
             .heightIn(min = 66.dp)
             .clip(shape)
-            .background(if (focused) colors.surfaceRaised else colors.surface)
+            .background(NeoNeutralSurfaces.card)
             .goldFocusEdge(shape = shape, visible = focused)
             .border(
-                1.dp,
-                if (isFavorite) colors.gold.copy(alpha = .55f) else colors.line.copy(alpha = .32f),
+                if (focused) 0.dp else 1.dp,
+                NeoNeutralSurfaces.stroke,
                 shape,
             )
             .onFocusChanged { focused = it.isFocused }
@@ -794,6 +845,14 @@ private fun FootballCenterRow(
             }
         }
         FootballTeamCenter(match.awayTeam, Modifier.weight(1f), TextAlign.End)
+        if (isFavorite) {
+            Icon(
+                imageVector = Icons.Rounded.Favorite,
+                contentDescription = "فريق متابع",
+                tint = colors.gold,
+                modifier = Modifier.size(13.dp),
+            )
+        }
         Icon(
             Icons.Rounded.ChevronLeft,
             contentDescription = null,
@@ -856,7 +915,14 @@ private fun FootballStaleDayRow(onRetry: () -> Unit) {
             fontSize = 11.sp,
             modifier = Modifier.weight(1f),
         )
-        FocusButton("تحديث", onRetry, compact = true, primary = false, scaleOnFocus = false)
+        FocusButton(
+            "تحديث",
+            onRetry,
+            compact = true,
+            primary = false,
+            scaleOnFocus = false,
+            neutralV5 = true,
+        )
     }
 }
 
@@ -880,7 +946,14 @@ private fun FootballCenterState(
             )
             Text(text, color = colors.textMuted, fontSize = 13.sp)
             if (onRetry != null) {
-                FocusButton("تحديث", onRetry, compact = true, primary = false, scaleOnFocus = false)
+                FocusButton(
+                    "تحديث",
+                    onRetry,
+                    compact = true,
+                    primary = false,
+                    scaleOnFocus = false,
+                    neutralV5 = true,
+                )
             }
         }
     }
@@ -941,8 +1014,8 @@ internal fun FootballTeamManagerDialog(
                     .width(width)
                     .heightIn(max = height)
                     .clip(shape)
-                    .background(colors.surface)
-                    .border(1.dp, colors.line, shape)
+                    .background(NeoNeutralSurfaces.modal)
+                    .border(1.dp, NeoNeutralSurfaces.stroke, shape)
                     .padding(15.dp),
             ) {
                 Row(
@@ -965,6 +1038,7 @@ internal fun FootballTeamManagerDialog(
                             compact = true,
                             primary = !selectedOnly,
                             scaleOnFocus = false,
+                            neutralV5 = true,
                         )
                         FocusButton(
                             "المختارة (${selectedIds.size})",
@@ -972,6 +1046,7 @@ internal fun FootballTeamManagerDialog(
                             compact = true,
                             primary = selectedOnly,
                             scaleOnFocus = false,
+                            neutralV5 = true,
                         )
                     }
                 }
@@ -988,6 +1063,7 @@ internal fun FootballTeamManagerDialog(
                             compact = true,
                             primary = !selectedOnly,
                             scaleOnFocus = false,
+                            neutralV5 = true,
                         )
                         FocusButton(
                             "المختارة (${selectedIds.size})",
@@ -995,6 +1071,7 @@ internal fun FootballTeamManagerDialog(
                             compact = true,
                             primary = selectedOnly,
                             scaleOnFocus = false,
+                            neutralV5 = true,
                         )
                     }
                 }
@@ -1006,6 +1083,7 @@ internal fun FootballTeamManagerDialog(
                     leadingIcon = Icons.Rounded.Search,
                     leadingIconTint = colors.textMuted,
                     modifier = Modifier.fillMaxWidth().focusRequester(searchRequester),
+                    neutralV5 = true,
                 )
                 Spacer(Modifier.height(8.dp))
                 LazyRow(
@@ -1028,6 +1106,7 @@ internal fun FootballTeamManagerDialog(
                             compact = true,
                             primary = region == value,
                             scaleOnFocus = false,
+                            neutralV5 = true,
                         )
                     }
                 }
@@ -1086,7 +1165,14 @@ internal fun FootballTeamManagerDialog(
                         primary = true,
                         scaleOnFocus = false,
                     )
-                    FocusButton("الغاء", onDismiss, compact = true, primary = false, scaleOnFocus = false)
+                    FocusButton(
+                        "الغاء",
+                        onDismiss,
+                        compact = true,
+                        primary = false,
+                        scaleOnFocus = false,
+                        neutralV5 = true,
+                    )
                 }
             }
         }
@@ -1108,11 +1194,11 @@ private fun FootballTeamTile(
             .fillMaxWidth()
             .heightIn(min = 118.dp)
             .clip(shape)
-            .background(if (focused) colors.surfaceRaised else colors.surface)
+            .background(NeoNeutralSurfaces.card)
             .goldFocusEdge(shape = shape, visible = focused)
             .border(
-                1.dp,
-                if (selected) colors.gold.copy(alpha = .62f) else colors.line.copy(alpha = .32f),
+                if (focused) 0.dp else 1.dp,
+                NeoNeutralSurfaces.stroke,
                 shape,
             )
             .onFocusChanged { focused = it.isFocused }
@@ -1170,13 +1256,16 @@ internal fun FootballMatchDetailsDialog(
                     .heightIn(max = height)
                     .verticalScroll(rememberScrollState())
                     .clip(shape)
-                    .background(colors.surface)
-                    .border(1.dp, colors.line, shape)
+                    .background(NeoNeutralSurfaces.modal)
+                    .border(1.dp, NeoNeutralSurfaces.stroke, shape)
                     .padding(16.dp),
             ) {
                 Text("تفاصيل المباراة", color = colors.text, fontSize = 22.sp, fontWeight = FontWeight.Black)
                 Spacer(Modifier.height(10.dp))
-                Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line.copy(alpha = .45f)))
+                Box(
+                    Modifier.fillMaxWidth().height(1.dp)
+                        .background(NeoNeutralSurfaces.stroke.copy(alpha = .72f)),
+                )
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     FootballHomeTeam(match.homeTeam, 54.dp, Modifier.weight(1f), TextAlign.Start)
@@ -1203,8 +1292,22 @@ internal fun FootballMatchDetailsDialog(
                     }
                     FootballHomeTeam(match.awayTeam, 54.dp, Modifier.weight(1f), TextAlign.End)
                 }
+                if (match.broadcasters.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text("القناة الناقلة", color = colors.gold, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        match.broadcasters.joinToString(" • "),
+                        color = colors.text,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                    )
+                }
                 Spacer(Modifier.height(12.dp))
-                Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line.copy(alpha = .45f)))
+                Box(
+                    Modifier.fillMaxWidth().height(1.dp)
+                        .background(NeoNeutralSurfaces.stroke.copy(alpha = .72f)),
+                )
                 Spacer(Modifier.height(10.dp))
                 Text("تنبيهات المباراة", color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(7.dp))
@@ -1230,7 +1333,14 @@ internal fun FootballMatchDetailsDialog(
                         primary = true,
                         scaleOnFocus = false,
                     )
-                    FocusButton("رجوع", onDismiss, compact = true, primary = false, scaleOnFocus = false)
+                    FocusButton(
+                        "رجوع",
+                        onDismiss,
+                        compact = true,
+                        primary = false,
+                        scaleOnFocus = false,
+                        neutralV5 = true,
+                    )
                 }
             }
         }
@@ -1247,9 +1357,13 @@ private fun FootballAlertToggle(text: String, checked: Boolean, onClick: () -> U
             .fillMaxWidth()
             .heightIn(min = 48.dp)
             .clip(shape)
-            .background(if (focused) colors.surfaceRaised else colors.surface)
+            .background(NeoNeutralSurfaces.card)
             .goldFocusEdge(shape = shape, visible = focused)
-            .border(1.dp, if (focused) Color.Transparent else colors.line.copy(alpha = .40f), shape)
+            .border(
+                if (focused) 0.dp else 1.dp,
+                NeoNeutralSurfaces.stroke,
+                shape,
+            )
             .onFocusChanged { focused = it.isFocused }
             .toggleable(value = checked, role = Role.Checkbox, onValueChange = { onClick() })
             .padding(horizontal = 12.dp, vertical = 9.dp),

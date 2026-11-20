@@ -90,6 +90,7 @@ import sa.hulksa.player.ui.screens.ProfileAvatarArtwork
 import sa.hulksa.player.ui.screens.SeriesDetailsScreenV2
 import sa.hulksa.player.ui.screens.downloadPrimaryActionIntent
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import sa.hulksa.player.ui.theme.NeoNeutralSurfaces
 
 @Composable
 fun KidsProfileExperience(
@@ -413,8 +414,8 @@ private fun KidsSourceGate(
                 .fillMaxWidth()
                 .widthIn(max = if (isTv) 620.dp else 480.dp)
                 .clip(RoundedCornerShape(if (isTv) 24.dp else 20.dp))
-                .background(colors.surface.copy(alpha = .97f))
-                .border(1.dp, colors.gold.copy(alpha = .24f), RoundedCornerShape(if (isTv) 24.dp else 20.dp))
+                .background(NeoNeutralSurfaces.modal)
+                .border(1.dp, NeoNeutralSurfaces.stroke, RoundedCornerShape(if (isTv) 24.dp else 20.dp))
                 .padding(horizontal = if (isTv) 38.dp else 22.dp, vertical = if (isTv) 30.dp else 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -1104,11 +1105,17 @@ private fun KidsTextButton(
     Box(
         Modifier
             .clip(shape)
-            .background(if (primary) colors.gold else if (focused) colors.gold.copy(alpha = .15f) else colors.surfaceRaised)
+            .background(if (primary) colors.gold else NeoNeutralSurfaces.control)
             .goldFocusEdge(shape = shape, visible = goldFocused)
             .border(
                 if (goldFocused) 0.dp else if (focused) 2.dp else 1.dp,
-                if (goldFocused) Color.Transparent else if (focused) colors.goldBright else Color.White.copy(alpha = .08f),
+                if (goldFocused) {
+                    Color.Transparent
+                } else if (focused) {
+                    colors.goldBright
+                } else {
+                    NeoNeutralSurfaces.stroke
+                },
                 shape,
             )
             .onFocusChanged { focused = it.isFocused }

@@ -21,6 +21,7 @@ sealed interface FootballTeamCatalogFetchResult {
         val stale: Boolean = false,
         val cachedAtEpochMs: Long = 0L,
         val retryAfterSeconds: Long? = null,
+        val policyVersion: String? = null,
     ) : FootballTeamCatalogFetchResult
 
     data class Failure(
@@ -32,7 +33,28 @@ data class FootballTeamCatalogPayload(
     val teams: List<FootballTeam>,
     val stale: Boolean,
     val cachedAtEpochMs: Long,
+    val policyVersion: String? = null,
+    val allowlistHash: String? = null,
 )
+
+const val FOOTBALL_CATALOG_POLICY_VERSION = "r04-allowlist-27"
+
+/** Verified default-policy catalog published by R04 production before policyVersion existed. */
+const val FOOTBALL_CATALOG_ALLOWLIST_HASH =
+    "76e0f987c6294264cb1a8998a7480adfb4d7d2372def703f7bf3ef144d48f94c"
+
+/** A policy identity is either the exact verified hash or, for older payloads, the current version. */
+fun footballCatalogPolicyIdentityValid(
+    policyVersion: String?,
+    allowlistHash: String?,
+): Boolean = if (allowlistHash != null) {
+    allowlistHash == FOOTBALL_CATALOG_ALLOWLIST_HASH
+} else {
+    policyVersion == FOOTBALL_CATALOG_POLICY_VERSION
+}
+
+fun footballCatalogMembershipValid(teams: List<FootballTeam>): Boolean =
+    teams.all { team -> team.competitionIds.any { it in FOOTBALL_ALLOWED_COMPETITION_IDS } }
 
 sealed interface FootballFetchResult {
     data class Success(
@@ -117,7 +139,7 @@ open class FootballFeedClient(
                 val raw = readBounded(body) ?: return@executeCancellable FootballFetchResult.Failure(
                     FootballFeedError.INVALID_RESPONSE,
                 )
-                val snapshot = parseFootballFeed(raw, dayKey, retryAfter)
+                val snapshot = parseFootballFeed(raw, dayKey, retryAfter, enforceAllowlist = true)
                     ?: return@executeCancellable FootballFetchResult.Failure(
                         FootballFeedError.INVALID_RESPONSE,
                     )
@@ -171,6 +193,7 @@ open class FootballFeedClient(
                         stale = payload.stale,
                         cachedAtEpochMs = payload.cachedAtEpochMs,
                         retryAfterSeconds = retryAfter,
+                        policyVersion = payload.policyVersion,
                     )
                 }
             }.getOrElse { error ->
@@ -235,27 +258,30 @@ fun parseFootballTeamCatalogPayload(rawJson: String): FootballTeamCatalogPayload
     val root = JSONObject(rawJson)
     require(root.getInt("schemaVersion") == FOOTBALL_FEED_SCHEMA_VERSION)
     require(root.has("complete") && root.get("complete") is Boolean && root.getBoolean("complete"))
-    val array = root.optJSONArray("teams") ?: JSONArray()
+    val array = root.optJSONArray("teams") ?: return@runCatching null
     val teams = buildList {
         for (index in 0 until array.length()) {
-            val item = array.optJSONObject(index) ?: continue
+            val item = array.optJSONObject(index) ?: return@runCatching null
             val id = item.optString("id").trim()
             val name = item.optString("name").trim()
-            if (id.isNotEmpty() && name.isNotEmpty()) {
-                add(FootballTeam(
-                    id = id,
-                    name = name,
-                    arabicName = item.optNullableString("arabicName"),
-                    logoUrl = item.optNullableString("logoUrl"),
-                    country = item.optNullableString("country"),
-                    competitionIds = item.optJSONArray("competitionIds").strings().toSet(),
-                    nationalTeam = item.optBoolean("nationalTeam", false),
-                    aliases = item.optJSONArray("aliases").strings(),
-                ))
-            }
+            if (id.isEmpty() || name.isEmpty()) return@runCatching null
+            add(FootballTeam(
+                id = id,
+                name = name,
+                arabicName = item.optNullableString("arabicName"),
+                logoUrl = item.optNullableString("logoUrl"),
+                country = item.optNullableString("country"),
+                competitionIds = item.optJSONArray("competitionIds").strings().toSet(),
+                nationalTeam = item.optBoolean("nationalTeam", false),
+                aliases = item.optJSONArray("aliases").strings(),
+            ))
         }
     }.distinctBy(FootballTeam::id)
         .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.displayName })
+    require(footballCatalogMembershipValid(teams))
+    val policyVersion = root.optNullableString("policyVersion")
+    val allowlistHash = root.optNullableString("allowlistHash")
+    require(footballCatalogPolicyIdentityValid(policyVersion, allowlistHash))
     val cachedAt = root.optNullableLong("cachedAt")?.times(1_000L)
         ?: root.optNullableLong("generatedAt")?.times(1_000L)
         ?: 0L
@@ -263,6 +289,8 @@ fun parseFootballTeamCatalogPayload(rawJson: String): FootballTeamCatalogPayload
         teams = teams,
         stale = root.optBoolean("stale", false),
         cachedAtEpochMs = cachedAt,
+        policyVersion = policyVersion,
+        allowlistHash = allowlistHash,
     )
 }.getOrNull()
 
@@ -270,6 +298,7 @@ fun parseFootballFeed(
     rawJson: String,
     requestedDay: String,
     retryAfterSeconds: Long? = null,
+    enforceAllowlist: Boolean = false,
 ): FootballFeedSnapshot? = runCatching {
     val root = JSONObject(rawJson)
     require(root.getInt("schemaVersion") == FOOTBALL_FEED_SCHEMA_VERSION)
@@ -341,7 +370,9 @@ fun parseFootballFeed(
         teams = teams,
         kickoffHistory = kickoffHistory,
         reminderCandidates = reminderCandidates,
-    )
+    ).let { snapshot ->
+        if (enforceAllowlist) filterFootballSnapshotForAllowlist(snapshot) else snapshot
+    }
 }.getOrNull()
 
 private fun parseFootballMatch(value: JSONObject?): FootballMatch? = runCatching {
@@ -386,6 +417,10 @@ private fun parseFootballMatch(value: JSONObject?): FootballMatch? = runCatching
         providerUpdatedAtEpochMs = value.optNullableLong("providerUpdatedAt")?.let { seconds ->
             if (seconds < 10_000_000_000L) seconds * 1_000L else seconds
         },
+        broadcasters = value.optJSONArray("broadcasters").strings()
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct(),
     )
 }.getOrNull()
 

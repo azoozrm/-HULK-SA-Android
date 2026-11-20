@@ -66,6 +66,7 @@ import sa.hulksa.player.ui.components.EntryActionButton
 import sa.hulksa.player.ui.components.EntryBackAction
 import sa.hulksa.player.ui.components.EntryNotice
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import sa.hulksa.player.ui.theme.NeoNeutralSurfaces
 
 /**
  * TV-only quick-login dialog aligned with the accepted R07 reference: centered copy inside the
@@ -131,8 +132,8 @@ internal fun PairingLoginDialog(
                         .widthIn(max = 720.dp)
                         .fillMaxWidth()
                         .clip(shape)
-                        .background(Color(0xFF11120E))
-                        .border(1.dp, colors.gold.copy(alpha = .42f), shape)
+                        .background(NeoNeutralSurfaces.modal)
+                        .border(1.dp, NeoNeutralSurfaces.stroke, shape)
                         .padding(horizontal = 28.dp, vertical = 20.dp),
                 ) {
                     when {
@@ -151,7 +152,7 @@ internal fun PairingLoginDialog(
                                 modifier = Modifier
                                     .width(1.dp)
                                     .height(qrSize + 70.dp)
-                                    .background(colors.gold.copy(alpha = .18f)),
+                                    .background(NeoNeutralSurfaces.stroke),
                             )
                             Spacer(Modifier.width(24.dp))
                             PairingQrColumn(
@@ -193,8 +194,8 @@ internal fun PairingLoginDialog(
                         .widthIn(max = 560.dp)
                         .fillMaxWidth()
                         .clip(shape)
-                        .background(Color(0xFF11120E))
-                        .border(1.dp, colors.gold.copy(alpha = .42f), shape)
+                        .background(NeoNeutralSurfaces.modal)
+                        .border(1.dp, NeoNeutralSurfaces.stroke, shape)
                         .padding(
                             horizontal = if (compactHeight) 22.dp else 26.dp,
                             vertical = if (compactHeight) 12.dp else 18.dp,
@@ -514,6 +515,7 @@ private fun PairingDialogActions(
                     outlined = true,
                     glyph = Icons.Rounded.Refresh,
                     minHeightDp = actionFloorDp,
+                    neutralV5 = true,
                     modifier = Modifier
                         .focusRequester(regenerateRequester)
                         .focusProperties {
@@ -532,6 +534,7 @@ private fun PairingDialogActions(
                     outlined = true,
                     glyph = Icons.Rounded.Autorenew,
                     minHeightDp = actionFloorDp,
+                    neutralV5 = true,
                     modifier = Modifier
                         .focusRequester(retryRequester)
                         .focusProperties {
@@ -546,6 +549,7 @@ private fun PairingDialogActions(
             EntryBackAction(
                 onClick = onDismiss,
                 minHeightDp = actionFloorDp,
+                neutralV5 = true,
                 modifier = Modifier
                     .focusRequester(backRequester)
                     .onPlaced { onBackPlaced() }

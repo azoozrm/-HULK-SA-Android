@@ -86,6 +86,7 @@ import sa.hulksa.player.ui.components.EntrySwitchVisual
 import sa.hulksa.player.ui.components.ProfileAvatar
 import sa.hulksa.player.ui.components.entryPanelMaxWidthDp
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import sa.hulksa.player.ui.theme.NeoNeutralSurfaces
 
 internal data class ProfilePickerTvMetrics(
     val horizontalPaddingDp: Float,
@@ -548,6 +549,7 @@ private fun ProfilePickerFooter(
             outlined = true,
             enabled = enabled,
             minHeightDp = actionFloorDp,
+            neutralV5 = true,
         )
         EntryActionButton(
             text = "خيارات الدخول",
@@ -555,6 +557,7 @@ private fun ProfilePickerFooter(
             outlined = true,
             enabled = enabled,
             minHeightDp = actionFloorDp,
+            neutralV5 = true,
             modifier = Modifier.focusRequester(entryOptionsRequester),
         )
     }
@@ -642,8 +645,8 @@ private fun ProfileEntryOptionsPanel(
                     .fillMaxWidth()
                     .heightIn(max = maxHeight)
                     .clip(panelShape)
-                    .background(colors.surface.copy(alpha = .98f))
-                    .border(1.dp, colors.gold.copy(alpha = .30f), panelShape)
+                    .background(NeoNeutralSurfaces.modal)
+                    .border(1.dp, NeoNeutralSurfaces.stroke, panelShape)
                     .verticalScroll(rememberScrollState())
                     .padding(
                         horizontal = if (isTv) 24.dp else 18.dp,
@@ -658,6 +661,7 @@ private fun ProfileEntryOptionsPanel(
                     EntryBackAction(
                         onClick = onClose,
                         minHeightDp = actionFloorDp,
+                        neutralV5 = true,
                     )
                     Text(
                         text = "خيارات الدخول",
@@ -776,7 +780,7 @@ private fun ProfileEntryOptionsPanel(
                             modifier = Modifier
                                 .fillMaxHeight()
                                 .width(1.dp)
-                                .background(colors.line.copy(alpha = .35f)),
+                                .background(NeoNeutralSurfaces.stroke),
                         )
                         Column(modifier = Modifier.weight(1f)) {
                             body()
@@ -812,10 +816,10 @@ private fun EntryToggleRow(
             .heightIn(min = 48.dp)
             .focusRequester(focusRequester)
             .clip(shape)
-            .background(if (focused) colors.gold.copy(alpha = .08f) else colors.surfaceRaised.copy(alpha = .55f))
+            .background(NeoNeutralSurfaces.control)
             .border(
                 if (focused) 2.dp else 1.dp,
-                if (focused) colors.goldBright else Color.White.copy(alpha = .08f),
+                if (focused) colors.goldBright else NeoNeutralSurfaces.stroke,
                 shape,
             )
             .onFocusChanged { focused = it.isFocused }
@@ -870,20 +874,10 @@ private fun EntryPreferenceRow(
         modifier = modifier
             .heightIn(min = 48.dp)
             .clip(shape)
-            .background(
-                when {
-                    selected -> colors.gold.copy(alpha = .12f)
-                    focused -> colors.gold.copy(alpha = .08f)
-                    else -> colors.surfaceRaised.copy(alpha = .55f)
-                },
-            )
+            .background(NeoNeutralSurfaces.control)
             .border(
                 width = if (focused) 2.dp else 1.dp,
-                color = when {
-                    focused -> colors.goldBright
-                    selected -> colors.gold.copy(alpha = .55f)
-                    else -> Color.White.copy(alpha = .08f)
-                },
+                color = if (focused) colors.goldBright else NeoNeutralSurfaces.stroke,
                 shape = shape,
             )
             .onFocusChanged { focused = it.isFocused }
@@ -1121,7 +1115,7 @@ private fun ProfilePickerItemFrame(
             modifier = Modifier
                 .size(avatarSizeDp.dp)
                 .clip(CircleShape)
-                .background(colors.surface.copy(alpha = .72f))
+                .background(NeoNeutralSurfaces.control)
                 .border(
                     width = when {
                         focused -> focusBorderDp.dp

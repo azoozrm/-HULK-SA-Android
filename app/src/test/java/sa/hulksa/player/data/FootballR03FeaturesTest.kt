@@ -88,7 +88,8 @@ class FootballR03FeaturesTest {
                   "cachedAt":1795000000,
                   "stale":true,
                   "complete":true,
-                  "teams":[{"id":"262","name":"Al Hilal","arabicName":"الهلال"}]
+                  "allowlistHash":"76e0f987c6294264cb1a8998a7480adfb4d7d2372def703f7bf3ef144d48f94c",
+                  "teams":[{"id":"262","name":"Al Hilal","arabicName":"الهلال","competitionIds":["17"]}]
                 }
                 """.trimIndent(),
             ),

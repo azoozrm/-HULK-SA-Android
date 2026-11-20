@@ -43,7 +43,7 @@ class FootballFeedCacheStore(context: Context) {
 
     private fun readDay(dayKey: String): FootballFeedSnapshot? {
         val raw = preferences.getString(dayKeyKey(dayKey), null) ?: return null
-        return parseFootballFeed(raw, dayKey)
+        return parseFootballFeed(raw, dayKey, enforceAllowlist = true)
     }
 
     private fun prune(editor: android.content.SharedPreferences.Editor, keepDay: String) {
@@ -69,6 +69,10 @@ class FootballFeedCacheStore(context: Context) {
 data class FootballTeamCatalogCache(
     val teams: List<FootballTeam>,
     val fetchedAtEpochMs: Long,
+    val cachedAtEpochMs: Long,
+    val sourceKey: String,
+    val policyVersion: String? = null,
+    val allowlistHash: String? = null,
 )
 
 class FootballTeamCatalogStore(context: Context) {
@@ -77,27 +81,78 @@ class FootballTeamCatalogStore(context: Context) {
         Context.MODE_PRIVATE,
     )
 
-    @Synchronized
-    fun load(): FootballTeamCatalogCache? {
+    fun load(sourceKey: String): FootballTeamCatalogCache? = synchronized(sharedPreferencesLock) {
+        if (sourceKey.isBlank()) return@synchronized null
+        val storedSource = preferences.getString(KEY_SOURCE, null)?.trim().orEmpty()
+        // The cache belongs to one discovery source. A cache from another URL must not suppress
+        // the current source's fetch, even when its provider timestamp is still fresh.
+        if (storedSource.isEmpty() || storedSource != sourceKey) return@synchronized null
         val fetchedAt = preferences.getLong(KEY_FETCHED_AT, 0L)
-        val raw = preferences.getString(KEY_RAW, null) ?: return null
-        val teams = parseFootballTeamCatalog(raw) ?: return null
-        return FootballTeamCatalogCache(teams, fetchedAt)
+        val raw = preferences.getString(KEY_RAW, null) ?: return@synchronized null
+        val payload = parseFootballTeamCatalogPayload(raw) ?: return@synchronized null
+        if (!footballCatalogPolicyIdentityValid(payload.policyVersion, payload.allowlistHash)) {
+            return@synchronized null
+        }
+        FootballTeamCatalogCache(
+            teams = payload.teams,
+            fetchedAtEpochMs = fetchedAt,
+            // Provider time stays independent from the device receipt time. A missing provider
+            // timestamp remains unknown instead of borrowing the local clock.
+            cachedAtEpochMs = payload.cachedAtEpochMs,
+            sourceKey = storedSource,
+            policyVersion = payload.policyVersion,
+            allowlistHash = payload.allowlistHash,
+        )
     }
 
-    @Synchronized
-    fun save(rawJson: String, fetchedAtEpochMs: Long) {
-        if (fetchedAtEpochMs <= 0L || parseFootballTeamCatalog(rawJson) == null) return
-        preferences.edit()
-            .putString(KEY_RAW, rawJson)
-            .putLong(KEY_FETCHED_AT, fetchedAtEpochMs)
-            .commit()
+    internal fun save(
+        rawJson: String,
+        fetchedAtEpochMs: Long,
+        sourceKey: String,
+        writeToken: FootballCatalogWriteToken,
+    ) {
+        if (sourceKey.isBlank() || fetchedAtEpochMs <= 0L) return
+        if (writeToken.generation <= 0L) return
+        if (parseFootballTeamCatalog(rawJson) == null) return
+        synchronized(sharedPreferencesLock) {
+            // The accepted request/owner generation owns write ordering. Receipt time is only cache
+            // freshness metadata; it must not decide which catalog wins when clocks tie or roll back.
+            val storedSession = preferences.getString(KEY_WRITE_SESSION, null)?.trim().orEmpty()
+            val storedGeneration = preferences.getLong(KEY_WRITE_GENERATION, 0L)
+            // Within one process the session is stable and the generation strictly increases, so an
+            // equal or lower generation is an older accepted request. A different non-empty session
+            // means a new app process; no write from the previous process can still be running.
+            if (
+                storedSession.isNotEmpty() &&
+                storedSession == writeToken.sessionId &&
+                writeToken.generation <= storedGeneration
+            ) {
+                return@synchronized
+            }
+            preferences.edit()
+                .putString(KEY_RAW, rawJson)
+                .putLong(KEY_FETCHED_AT, fetchedAtEpochMs)
+                .putString(KEY_SOURCE, sourceKey)
+                .putString(KEY_WRITE_SESSION, writeToken.sessionId)
+                .putLong(KEY_WRITE_GENERATION, writeToken.generation)
+                .commit()
+        }
     }
 
     private companion object {
+        /**
+         * One lock for every store bound to the shared football catalog preferences file. An
+         * instance `@Synchronized` lock would let two ViewModels' stores (phone and TV activities)
+         * compare and commit the same record concurrently.
+         */
+        val sharedPreferencesLock = Any()
+
         const val PREFERENCES_NAME = "hulk_football_team_catalog_v1"
         const val KEY_RAW = "raw"
         const val KEY_FETCHED_AT = "fetched_at"
+        const val KEY_SOURCE = "source"
+        const val KEY_WRITE_SESSION = "write_session"
+        const val KEY_WRITE_GENERATION = "write_generation"
     }
 }
 

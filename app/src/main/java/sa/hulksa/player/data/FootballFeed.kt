@@ -126,6 +126,12 @@ fun mergeFootballMatchRows(rows: List<FootballMatch>): List<FootballMatch> {
         merged[row.providerEventId] = fresher.copy(
             competition = competition,
             aliases = (existing.aliases + row.aliases).distinct(),
+            // Channels belong to a fixture instant. A provider id reused for a new kickoff must
+            // not inherit the previous assignment.
+            broadcasters = (
+                existing.broadcasters +
+                    row.broadcasters.takeIf { row.kickoffEpochMs == existing.kickoffEpochMs }.orEmpty()
+                ).distinct(),
             providerUpdatedAtEpochMs = maxOf(
                 existing.providerUpdatedAtEpochMs ?: 0L,
                 row.providerUpdatedAtEpochMs ?: 0L,
@@ -179,6 +185,7 @@ data class FootballMatch(
     val carriedOver: Boolean = false,
     val startedAtEpochMs: Long? = null,
     val providerUpdatedAtEpochMs: Long? = null,
+    val broadcasters: List<String> = emptyList(),
 ) {
     val stableIdentity: String get() = "football:$providerEventId"
     val eventIds: Set<String> get() = (aliases + providerEventId).toSet()
@@ -269,6 +276,10 @@ data class FootballFeedUiState(
     val snapshot: FootballFeedSnapshot? = null,
     val favoriteTeams: List<FootballFavoriteTeam> = emptyList(),
     val knownTeams: List<FootballTeam> = emptyList(),
+    /** Non-null after a complete policy-verified catalog, including a valid empty catalog. */
+    val authoritativeCatalog: List<FootballTeam>? = null,
+    /** Discovery source that owns [authoritativeCatalog]; null before any authority exists. */
+    val authoritativeCatalogSourceKey: String? = null,
     val hideScores: Boolean = false,
     val matchAlerts: Map<String, FootballMatchAlertPreferences> = emptyMap(),
     val daySnapshots: Map<String, FootballFeedSnapshot> = emptyMap(),
@@ -305,6 +316,32 @@ data class FootballKickoffGeneration(
     val inbox: FootballInboxState,
     val added: List<FootballKickoffNotification>,
 )
+
+/** R04 owner-approved available competition allowlist; optional 53/47 stay disabled. */
+val FOOTBALL_ALLOWED_COMPETITION_IDS: Set<String> = setOf(
+    "17", "7", "8", "83", "90", "1", "3", "4", "5", "6",
+    "39", "40", "41", "42", "43", "44", "29",
+    "27", "68", "66", "30", "61", "58", "59", "60", "62", "63",
+)
+
+fun filterFootballSnapshotForAllowlist(snapshot: FootballFeedSnapshot): FootballFeedSnapshot {
+    fun filtered(rows: List<FootballMatch>): List<FootballMatch> =
+        rows.filter { it.competition.id in FOOTBALL_ALLOWED_COMPETITION_IDS }
+    val matches = filtered(snapshot.matches)
+    val history = filtered(snapshot.kickoffHistory)
+    val reminders = filtered(snapshot.reminderCandidates)
+    val referenced = (matches + history + reminders)
+        .flatMapTo(linkedSetOf()) { listOf(it.homeTeam.id, it.awayTeam.id) }
+    val teams = snapshot.teams.filter { team ->
+        team.id in referenced || team.competitionIds.any { it in FOOTBALL_ALLOWED_COMPETITION_IDS }
+    }
+    return snapshot.copy(
+        matches = matches,
+        teams = teams,
+        kickoffHistory = history,
+        reminderCandidates = reminders,
+    )
+}
 
 fun footballRiyadhDayKey(epochMs: Long): String =
     SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
@@ -470,6 +507,33 @@ fun mergeFootballTeamLists(vararg lists: List<FootballTeam>): List<FootballTeam>
     return merged.values.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.displayName })
 }
 
+/** A fresh filtered catalog replaces obsolete catalog-derived teams but keeps real match/favorite identities. */
+fun reconcileFootballCatalogTeams(
+    authoritativeCatalog: List<FootballTeam>,
+    matches: List<FootballMatch>,
+    favorites: List<FootballFavoriteTeam>,
+): List<FootballTeam> = mergeFootballTeamLists(
+    authoritativeCatalog,
+    footballTeamsFromMatches(matches, favorites),
+)
+
+/**
+ * Applies the catalog authority to every later feed/day publication. Once a complete verified
+ * catalog exists, an older in-flight publication may add real match/favorite identities but can
+ * never restore a removed catalog-derived team. An authoritative empty catalog is valid.
+ */
+fun reconcileFootballKnownTeams(
+    authoritativeCatalog: List<FootballTeam>?,
+    currentKnownTeams: List<FootballTeam>,
+    publishedTeams: List<FootballTeam>,
+    matches: List<FootballMatch>,
+    favorites: List<FootballFavoriteTeam>,
+): List<FootballTeam> = if (authoritativeCatalog != null) {
+    reconcileFootballCatalogTeams(authoritativeCatalog, matches, favorites)
+} else {
+    mergeFootballTeamLists(currentKnownTeams, publishedTeams)
+}
+
 fun footballTeamsFromMatches(
     matches: List<FootballMatch>,
     favoriteTeams: List<FootballFavoriteTeam> = emptyList(),
@@ -504,6 +568,185 @@ internal fun footballOwnerStillCurrent(
     expectedGeneration: Long,
     currentGeneration: Long,
 ): Boolean = active == expected && expectedGeneration == currentGeneration
+
+/** Catalog authority is account/profile-scoped and bound to the active first-party discovery URL. */
+internal fun footballCatalogOwnerKey(
+    scope: AccountProfileStateScope,
+    feedUrl: String,
+): String = "${scope.accountId}\u0000${scope.profileId}\u0000$feedUrl"
+
+/**
+ * Durable order for an accepted catalog write. The session identifies the app process; the
+ * generation is monotonic for the life of that process and never resets with an owner, profile or
+ * discovery-URL change. A process restart starts a new session, so no write from the previous
+ * process can still be running.
+ */
+internal data class FootballCatalogWriteToken(
+    val sessionId: String,
+    val generation: Long,
+)
+
+internal object FootballCatalogWriteOrder {
+    private val sessionId: String = java.util.UUID.randomUUID().toString()
+    private val nextGeneration = java.util.concurrent.atomic.AtomicLong(0L)
+
+    fun next(): FootballCatalogWriteToken =
+        FootballCatalogWriteToken(sessionId, nextGeneration.incrementAndGet())
+}
+
+/**
+ * One authority owner for the verified team catalog.
+ *
+ * The durable `teams.json` cache is bootstrap-only: it may seed an owner that has no authority yet,
+ * but it can never replace an established catalog, including a valid empty one. A network response
+ * can replace authority only when it belongs to the latest catalog request for the current owner,
+ * is not stale over an existing authority, and carries a provider cache time that is not older.
+ * A response that completes after a newer request started is obsolete and is dropped before both
+ * persistence and publication. Access is confined to the main dispatcher by the ViewModel.
+ */
+internal class FootballCatalogAuthority {
+    data class Snapshot(
+        val teams: List<FootballTeam>,
+        val cachedAtEpochMs: Long,
+        val writeToken: FootballCatalogWriteToken,
+    )
+
+    private var ownerKey: String? = null
+    private var latestRequestId: Long = 0L
+    private var publishedRequestId: Long = 0L
+    private var current: Snapshot? = null
+
+    fun snapshot(ownerKey: String): Snapshot? =
+        current.takeIf { this.ownerKey == ownerKey }
+
+    /** Adopts a new owner only when no authority exists for it; an established authority wins. */
+    fun bootstrap(
+        ownerKey: String,
+        teams: List<FootballTeam>,
+        cachedAtEpochMs: Long,
+    ): Snapshot? {
+        adoptOwner(ownerKey)
+        if (current != null) return null
+        return Snapshot(
+            teams,
+            cachedAtEpochMs.coerceAtLeast(0L),
+            FootballCatalogWriteOrder.next(),
+        ).also { current = it }
+    }
+
+    fun beginRequest(ownerKey: String): Long {
+        adoptOwner(ownerKey)
+        latestRequestId += 1
+        return latestRequestId
+    }
+
+    /** Returns the accepted snapshot, or null when the response must not be persisted/published. */
+    fun publish(
+        ownerKey: String,
+        requestId: Long,
+        teams: List<FootballTeam>,
+        cachedAtEpochMs: Long,
+        stale: Boolean,
+    ): Snapshot? {
+        if (this.ownerKey != ownerKey) return null
+        if (requestId != latestRequestId || requestId <= publishedRequestId) return null
+        val established = current
+        if (stale && established != null) return null
+        // Provider cache times are only comparable when both are known. A missing provider time
+        // stays unknown instead of being replaced by the device receipt clock.
+        if (
+            established != null &&
+            cachedAtEpochMs > 0L &&
+            established.cachedAtEpochMs > 0L &&
+            cachedAtEpochMs < established.cachedAtEpochMs
+        ) {
+            return null
+        }
+        return Snapshot(
+            teams,
+            cachedAtEpochMs.coerceAtLeast(0L),
+            FootballCatalogWriteOrder.next(),
+        ).also {
+            current = it
+            publishedRequestId = requestId
+        }
+    }
+
+    /**
+     * Production gate for a catalog response: stale/obsolete responses never reach the durable
+     * cache. The accepted snapshot is persisted before it is published to the UI.
+     */
+    suspend fun publishAndPersist(
+        ownerKey: String,
+        requestId: Long,
+        teams: List<FootballTeam>,
+        cachedAtEpochMs: Long,
+        stale: Boolean,
+        persist: suspend (Snapshot) -> Unit,
+    ): Snapshot? {
+        val accepted = publish(ownerKey, requestId, teams, cachedAtEpochMs, stale) ?: return null
+        persist(accepted)
+        // A persistence block can outlive its request (blocking IO or cancellation). Only the
+        // request that still owns the published authority may continue to the UI.
+        return accepted.takeIf {
+            this.ownerKey == ownerKey && requestId == publishedRequestId
+        }
+    }
+
+    fun reset() {
+        ownerKey = null
+        latestRequestId = 0L
+        publishedRequestId = 0L
+        current = null
+    }
+
+    private fun adoptOwner(ownerKey: String) {
+        if (this.ownerKey == ownerKey) return
+        this.ownerKey = ownerKey
+        latestRequestId = 0L
+        publishedRequestId = 0L
+        current = null
+    }
+}
+
+/**
+ * Applies a catalog authority snapshot to the current football presentation without touching the
+ * owner's favorites or real match teams.
+ */
+internal fun FootballFeedUiState.withCatalogAuthority(
+    snapshot: FootballCatalogAuthority.Snapshot,
+    sourceKey: String,
+): FootballFeedUiState = copy(
+    authoritativeCatalog = snapshot.teams,
+    authoritativeCatalogSourceKey = sourceKey,
+    knownTeams = reconcileFootballCatalogTeams(
+        snapshot.teams,
+        allMatches,
+        favoriteTeams,
+    ),
+)
+
+/**
+ * Production publication gate shared by the feed and day paths. A snapshot for the current source
+ * wins. A state that still belongs to a previous discovery source is cleared so the old catalog
+ * cannot survive a URL switch; an ordinary owner with no authority keeps its known-team list.
+ */
+internal fun FootballFeedUiState.withCatalogSource(
+    snapshot: FootballCatalogAuthority.Snapshot?,
+    sourceKey: String,
+): FootballFeedUiState = when {
+    snapshot != null -> withCatalogAuthority(snapshot, sourceKey)
+    authoritativeCatalogSourceKey != null && authoritativeCatalogSourceKey != sourceKey ->
+        withCatalogSourceCleared()
+    else -> this
+}
+
+/** Drops a catalog that belongs to another discovery source while keeping real fixture/favorites. */
+internal fun FootballFeedUiState.withCatalogSourceCleared(): FootballFeedUiState = copy(
+    authoritativeCatalog = null,
+    authoritativeCatalogSourceKey = null,
+    knownTeams = footballTeamsFromMatches(allMatches, favoriteTeams),
+)
 
 fun footballKickoffNotificationId(
     accountId: String,
@@ -591,16 +834,33 @@ fun upsertFootballAlertPreferences(
 fun resolveFootballMatch(
     current: FootballMatch,
     candidates: Iterable<FootballMatch>,
-): FootballMatch = candidates
-    .filter { candidate ->
+): FootballMatch {
+    val matching = candidates.filter { candidate ->
         candidate.stableIdentity == current.stableIdentity ||
             candidate.eventIds.any { it in current.eventIds }
     }
-    .maxWithOrNull(
+    val chosen = matching.maxWithOrNull(
         compareBy<FootballMatch> { it.providerUpdatedAtEpochMs ?: 0L }
             .thenBy { footballMatchStatusRank(it.status) },
-    )
-    ?: current
+    ) ?: current
+    // Broadcaster assignments belong to the actual fixture instant. Aliases may resolve a
+    // replacement/reschedule for display, but only observations with the same provider identity
+    // and kickoff may transport channel assignments to the chosen row.
+    val sameFixtureObservations = matching.filter {
+        it.stableIdentity == chosen.stableIdentity &&
+            it.kickoffEpochMs == chosen.kickoffEpochMs
+    }
+    val broadcasterSources = buildList {
+        if (
+            chosen.stableIdentity == current.stableIdentity &&
+            chosen.kickoffEpochMs == current.kickoffEpochMs
+        ) {
+            addAll(current.broadcasters)
+        }
+        sameFixtureObservations.forEach { addAll(it.broadcasters) }
+    }
+    return chosen.copy(broadcasters = broadcasterSources.distinct())
+}
 
 fun footballEffectiveHideScores(
     loaded: Boolean,

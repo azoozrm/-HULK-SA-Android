@@ -68,6 +68,7 @@ import sa.hulksa.player.ui.components.EntryActionButton
 import sa.hulksa.player.ui.components.EntryBackAction
 import sa.hulksa.player.ui.components.EntryNotice
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import sa.hulksa.player.ui.theme.NeoNeutralSurfaces
 
 internal const val CREDENTIAL_PROTECTION_UNAVAILABLE_MESSAGE =
     "تعذر قراءة حالة الحماية بامان"
@@ -514,8 +515,8 @@ private fun SecurityActionPanel(
         modifier = modifier
             .widthIn(max = if (isTv) 430.dp else 500.dp)
             .clip(shape)
-            .background(colors.surface.copy(alpha = .97f))
-            .border(1.dp, colors.gold.copy(alpha = .30f), shape)
+            .background(NeoNeutralSurfaces.modal)
+            .border(1.dp, NeoNeutralSurfaces.stroke, shape)
             .padding(
                 horizontal = if (isTv) 24.dp else 22.dp,
                 vertical = when {
@@ -856,8 +857,8 @@ internal fun PinPanel(
         modifier = modifier
             .widthIn(max = if (splitTv) 620.dp else if (isTv) 380.dp else 360.dp)
             .clip(shape)
-            .background(colors.surface.copy(alpha = .97f))
-            .border(1.dp, colors.gold.copy(alpha = .30f), shape)
+            .background(NeoNeutralSurfaces.modal)
+            .border(1.dp, NeoNeutralSurfaces.stroke, shape)
             .padding(
                 horizontal = when {
                     shortLandscape -> 12.dp
@@ -886,6 +887,7 @@ internal fun PinPanel(
                         onClick = onCancel,
                         minHeightDp = movieActionHeightDp(isTv = true, compactHeight = false),
                         modifier = Modifier.focusRequester(cancelFocusRequester),
+                        neutralV5 = true,
                     )
                     Text(
                         text = title,
@@ -936,7 +938,7 @@ internal fun PinPanel(
                             .clip(RoundedCornerShape(50))
                             .background(
                                 if (index < pinLength) colors.goldBright
-                                else colors.surfaceRaised,
+                                else NeoNeutralSurfaces.control,
                             )
                             .border(
                                 if (index < pinLength) 1.5.dp else 1.dp,
@@ -1177,17 +1179,17 @@ private fun PinKey(
             .clip(shape)
             .background(
                 when {
-                    !enabled -> colors.surface.copy(alpha = .55f)
-                    focused -> colors.surfaceRaised
-                    else -> colors.surfaceRaised.copy(alpha = .88f)
+                    !enabled -> NeoNeutralSurfaces.control.copy(alpha = .55f)
+                    focused -> NeoNeutralSurfaces.control
+                    else -> NeoNeutralSurfaces.card
                 },
             )
             .border(
                 if (focused) 2.dp else 1.dp,
                 when {
                     focused -> colors.goldBright
-                    !enabled -> Color.White.copy(alpha = .05f)
-                    else -> Color.White.copy(alpha = .11f)
+                    !enabled -> NeoNeutralSurfaces.stroke.copy(alpha = .55f)
+                    else -> NeoNeutralSurfaces.stroke
                 },
                 shape,
             )
@@ -1251,6 +1253,7 @@ private fun SecurityButton(
         outlined = secondary,
         danger = danger,
         minHeightDp = movieActionHeightDp(isTv = isTv, compactHeight = false),
+        neutralV5 = true,
         modifier = if (focusRequester != null) {
             modifier.focusRequester(focusRequester)
         } else {

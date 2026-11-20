@@ -279,6 +279,7 @@ import sa.hulksa.player.ui.components.HulkTextField
 import sa.hulksa.player.ui.components.LiveChannelHomeCard
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import sa.hulksa.player.ui.theme.NeoNeutralSurfaces
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -3160,6 +3161,7 @@ private fun HomeFootballSection(
                 primary = false,
                 scaleOnFocus = false,
                 trailingIcon = Icons.Rounded.Favorite,
+                neutralV5 = true,
             )
             FocusButton(
                 "عرض الكل",
@@ -3172,6 +3174,7 @@ private fun HomeFootballSection(
                 primary = false,
                 scaleOnFocus = false,
                 trailingIcon = Icons.Rounded.ChevronLeft,
+                neutralV5 = true,
             )
         }
         Spacer(Modifier.height(10.dp))
@@ -3190,7 +3193,15 @@ private fun HomeFootballSection(
                     fontSize = 11.sp,
                     modifier = Modifier.weight(1f),
                 )
-                FocusButton("تحديث", onRefresh, compact = true, primary = false, scaleOnFocus = false, trailingIcon = Icons.Rounded.Refresh)
+                FocusButton(
+                    "تحديث",
+                    onRefresh,
+                    compact = true,
+                    primary = false,
+                    scaleOnFocus = false,
+                    trailingIcon = Icons.Rounded.Refresh,
+                    neutralV5 = true,
+                )
             }
         }
         when {
@@ -3318,8 +3329,8 @@ private fun FootballEmptyDayCard(
             .fillMaxWidth()
             .heightIn(min = if (isTv) 116.dp else 128.dp)
             .clip(shape)
-            .background(colors.surface.copy(alpha = .78f))
-            .border(1.dp, colors.line.copy(alpha = .38f), shape)
+            .background(NeoNeutralSurfaces.card)
+            .border(1.dp, NeoNeutralSurfaces.stroke, shape)
             .padding(horizontal = 16.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(13.dp),
@@ -3353,6 +3364,7 @@ private fun FootballEmptyDayCard(
             primary = false,
             scaleOnFocus = false,
             trailingIcon = Icons.Rounded.Favorite,
+            neutralV5 = true,
             modifier = Modifier
                 .focusRequester(buttonRequester)
                 .onPlaced { onButtonPlaced() }
@@ -3381,8 +3393,8 @@ private fun FootballFeedStatusCard(
             .fillMaxWidth()
             .heightIn(min = if (isTv) 104.dp else 116.dp)
             .clip(shape)
-            .background(colors.surface.copy(alpha = .78f))
-            .border(1.dp, colors.line.copy(alpha = .38f), shape)
+            .background(NeoNeutralSurfaces.card)
+            .border(1.dp, NeoNeutralSurfaces.stroke, shape)
             .padding(horizontal = 16.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(13.dp),
@@ -3417,6 +3429,7 @@ private fun FootballFeedStatusCard(
                 primary = false,
                 scaleOnFocus = false,
                 trailingIcon = Icons.Rounded.Refresh,
+                neutralV5 = true,
                 modifier = Modifier
                     .then(buttonRequester?.let(Modifier::focusRequester) ?: Modifier)
                     .onPlaced { onButtonPlaced() }
@@ -10376,8 +10389,8 @@ private fun CategoryManagerDialog(
                     .width(dialogWidth)
                     .heightIn(max = dialogHeight)
                     .clip(shape)
-                    .background(colors.surface)
-                    .border(1.dp, colors.line, shape)
+                    .background(NeoNeutralSurfaces.modal)
+                    .border(1.dp, NeoNeutralSurfaces.stroke, shape)
                     .padding(horizontal = 14.dp, vertical = 12.dp)
                     .onPreviewKeyEvent { event ->
                         // While moving, consume the complete BACK sequence: the first press cancels
@@ -10546,17 +10559,16 @@ private fun LiveCategoryManagerRow(
             .clip(shape)
             .background(
                 when {
-                    moving -> colors.gold.copy(alpha = .20f)
-                    hidden -> Color(0xFF10110D)
-                    else -> Color(0xFF181914)
+                    moving -> NeoNeutralSurfaces.control
+                    else -> NeoNeutralSurfaces.card
                 },
             )
             .border(
-                width = if (showFocused) 2.dp else 1.dp,
+                width = if (showFocused || moving) 2.dp else 1.dp,
                 color = when {
                     showFocused -> colors.goldBright
-                    moving -> colors.gold.copy(alpha = .45f)
-                    else -> Color.White.copy(alpha = .07f)
+                    moving -> colors.gold.copy(alpha = .62f)
+                    else -> NeoNeutralSurfaces.stroke
                 },
                 shape = shape,
             )

@@ -67,6 +67,7 @@ import sa.hulksa.player.data.OperationsServiceConfig
 import sa.hulksa.player.data.OperationsUiState
 import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import sa.hulksa.player.ui.theme.NeoNeutralSurfaces
 
 @Composable
 fun RequiredUpdateScreen(
@@ -148,16 +149,15 @@ private fun OperationsActionButton(
         ).compactHeight,
     )
     val background = when {
-        !enabled -> colors.surfaceRaised.copy(alpha = .62f)
+        !enabled -> NeoNeutralSurfaces.control.copy(alpha = .55f)
         primary -> colors.gold
-        focused -> Color(0xFF2A281B)
-        else -> Color(0xFF151711)
+        else -> NeoNeutralSurfaces.control
     }
     val borderColor = when {
         focused && primary -> Color.Transparent
         focused -> colors.goldBright
         primary -> colors.goldBright.copy(alpha = .42f)
-        else -> colors.gold.copy(alpha = .42f)
+        else -> NeoNeutralSurfaces.stroke
     }
     val textColor = when {
         !enabled -> colors.textMuted
@@ -233,7 +233,7 @@ private fun OperationsMessagePanel(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color.White.copy(alpha = .035f), shape)
+            .background(NeoNeutralSurfaces.card, shape)
             .border(1.dp, accent.copy(alpha = .20f), shape)
             .padding(
                 horizontal = if (isTv) 19.dp else 15.dp,
@@ -356,8 +356,8 @@ private fun OperationsBlockingCard(
                 .width(cardWidth)
                 .heightIn(max = maxHeight)
                 .verticalScroll(rememberScrollState())
-                .background(colors.surfaceRaised, shape)
-                .border(if (isTv) 2.dp else 1.dp, colors.gold.copy(alpha = .72f), shape)
+                .background(NeoNeutralSurfaces.modal, shape)
+                .border(if (isTv) 2.dp else 1.dp, NeoNeutralSurfaces.stroke, shape)
                 .padding(horizontal = if (isTv) 30.dp else 19.dp, vertical = if (isTv) 28.dp else 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -522,8 +522,8 @@ fun OptionalUpdateOverlay(
                 .width(width)
                 .heightIn(max = maxHeight)
                 .verticalScroll(rememberScrollState())
-                .background(colors.surfaceRaised, shape)
-                .border(if (isTv) 2.dp else 1.dp, colors.gold.copy(alpha = .72f), shape)
+                .background(NeoNeutralSurfaces.modal, shape)
+                .border(if (isTv) 2.dp else 1.dp, NeoNeutralSurfaces.stroke, shape)
                 .padding(horizontal = if (isTv) 30.dp else 19.dp, vertical = if (isTv) 28.dp else 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -713,7 +713,7 @@ fun OperationsAnnouncementOverlay(
                 .width(width)
                 .heightIn(max = maxHeight)
                 .verticalScroll(rememberScrollState())
-                .background(colors.surfaceRaised, shape)
+                .background(NeoNeutralSurfaces.modal, shape)
                 .border(if (isTv) 2.dp else 1.dp, accent.copy(alpha = .72f), shape)
                 .padding(horizontal = if (isTv) 30.dp else 19.dp, vertical = if (isTv) 28.dp else 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -797,8 +797,8 @@ fun OperationsStatusBanner(
         Row(
             Modifier
                 .widthIn(max = if (isTv) 980.dp else 680.dp)
-                .background(Color(0xF21A180F), RoundedCornerShape(14.dp))
-                .border(1.dp, colors.gold.copy(alpha = .58f), RoundedCornerShape(14.dp))
+                .background(NeoNeutralSurfaces.modal, RoundedCornerShape(14.dp))
+                .border(1.dp, NeoNeutralSurfaces.stroke, RoundedCornerShape(14.dp))
                 .padding(horizontal = 14.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp),

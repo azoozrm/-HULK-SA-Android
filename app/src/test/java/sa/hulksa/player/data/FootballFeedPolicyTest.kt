@@ -194,7 +194,7 @@ class FootballFeedPolicyTest {
     fun `team catalog parser returns stable searchable teams`() {
         val teams = checkNotNull(
             parseFootballTeamCatalog(
-                """{"schemaVersion":1,"generatedAt":1795040000,"stale":false,"complete":true,"teams":[{"id":17,"name":"Al Hilal"},{"id":20,"name":"Al Nassr"},{"id":17,"name":"Al Hilal"}]}""",
+                """{"schemaVersion":1,"generatedAt":1795040000,"stale":false,"complete":true,"allowlistHash":"76e0f987c6294264cb1a8998a7480adfb4d7d2372def703f7bf3ef144d48f94c","teams":[{"id":"17","name":"Al Hilal","competitionIds":["17"]},{"id":"20","name":"Al Nassr","competitionIds":["17"]},{"id":"17","name":"Al Hilal","competitionIds":["17"]}]}""",
             ),
         )
 

@@ -55,6 +55,7 @@ import sa.hulksa.player.data.FootballFeedDiscovery
 import sa.hulksa.player.data.FootballFeedError
 import sa.hulksa.player.data.FootballFeedSnapshot
 import sa.hulksa.player.data.FootballFeedUiState
+import sa.hulksa.player.data.FootballCatalogAuthority
 import sa.hulksa.player.data.FOOTBALL_DEFAULT_REFRESH_SECONDS
 import sa.hulksa.player.data.FootballForegroundRefreshDecision
 import sa.hulksa.player.data.FootballFetchResult
@@ -71,8 +72,12 @@ import sa.hulksa.player.data.decideFootballForegroundRefresh
 import sa.hulksa.player.data.deleteFootballKickoff
 import sa.hulksa.player.data.footballEffectiveHideScores
 import sa.hulksa.player.data.footballFeedAllowedForProfile
+import sa.hulksa.player.data.footballCatalogOwnerKey
 import sa.hulksa.player.data.footballOwnerStillCurrent
 import sa.hulksa.player.data.footballRiyadhDayKey
+import sa.hulksa.player.data.footballTeamsFromMatches
+import sa.hulksa.player.data.reconcileFootballCatalogTeams
+import sa.hulksa.player.data.reconcileFootballKnownTeams
 import sa.hulksa.player.data.footballSnapshotCacheFresh
 import sa.hulksa.player.data.generateFootballMatchAlerts
 import sa.hulksa.player.data.markAllFootballKickoffsRead
@@ -80,6 +85,9 @@ import sa.hulksa.player.data.mergeFootballTeamLists
 import sa.hulksa.player.data.markFootballKickoffRead
 import sa.hulksa.player.data.orderFootballMatches
 import sa.hulksa.player.data.upsertFootballAlertPreferences
+import sa.hulksa.player.data.withCatalogAuthority
+import sa.hulksa.player.data.withCatalogSource
+import sa.hulksa.player.data.withCatalogSourceCleared
 import sa.hulksa.player.data.SessionOwnershipCleanupGate
 import sa.hulksa.player.data.SessionOwnershipCleanupResult
 import sa.hulksa.player.data.SessionPublicationGate
@@ -632,6 +640,7 @@ class HulkViewModel internal constructor(
     private val footballFeedCacheStore = FootballFeedCacheStore(application)
     private val footballProfileStore = FootballProfileStateStore(application)
     private val footballTeamCatalogStore = FootballTeamCatalogStore(application)
+    private val footballCatalogAuthority = FootballCatalogAuthority()
     private val operationsStore = OperationsStore(application)
     private val operationsInstaller = OperationsApkInstaller(application)
     private val operationsDeviceIsTv = application.isTelevisionDevice()
@@ -2581,16 +2590,32 @@ class HulkViewModel internal constructor(
                 val matchAlerts = withContext(Dispatchers.IO) { footballProfileStore.matchAlerts(scope) }
                 val loadedInbox = withContext(Dispatchers.IO) { footballProfileStore.inboxState(scope) }
                 var knownTeams = withContext(Dispatchers.IO) { footballProfileStore.knownTeams(scope) }
-                val catalogTeams = withContext(Dispatchers.IO) {
-                    footballTeamCatalogStore.load()?.teams.orEmpty()
+                val catalogOwnerKey = footballCatalogOwnerKey(scope, discovery.feedUrl)
+                val catalogCache = withContext(Dispatchers.IO) { footballTeamCatalogStore.load(discovery.feedUrl) }
+                // The disk catalog may seed this owner only while no authority exists. It never
+                // replaces an established catalog, including a valid authoritative empty one.
+                if (catalogCache != null) {
+                    footballCatalogAuthority.bootstrap(
+                        catalogOwnerKey,
+                        catalogCache.teams,
+                        catalogCache.cachedAtEpochMs,
+                    )
                 }
-                cached?.teams?.let { cachedTeams ->
-                    knownTeams = mergeFootballTeamLists(knownTeams, cachedTeams, catalogTeams)
+                val catalogAuthority = footballCatalogAuthority.snapshot(catalogOwnerKey)
+                if (catalogAuthority != null) {
+                    knownTeams = reconcileFootballCatalogTeams(
+                        catalogAuthority.teams,
+                        cached?.let { snapshot ->
+                            snapshot.matches + snapshot.kickoffHistory + snapshot.reminderCandidates
+                        }.orEmpty(),
+                        favorites,
+                    )
+                } else {
+                    cached?.teams?.let { cachedTeams ->
+                        knownTeams = mergeFootballTeamLists(knownTeams, cachedTeams)
+                    }
                 }
-                if (cached == null && catalogTeams.isNotEmpty()) {
-                    knownTeams = mergeFootballTeamLists(knownTeams, catalogTeams)
-                }
-                if (!isFootballOwnerCurrent(scope, generation)) return@launch
+                if (!isFootballOwnerCurrent(scope, generation, discovery)) return@launch
 
                 footballInboxMutex.withLock {
                     var current = if (footballInboxScope == scope) footballInbox else loadedInbox
@@ -2624,6 +2649,7 @@ class HulkViewModel internal constructor(
                     hideScores = hideScores,
                     matchAlerts = matchAlerts,
                     knownTeams = knownTeams,
+                    catalogOwnerKey = catalogOwnerKey,
                     error = null,
                     loading = true,
                     lastAttemptEpochMs = now,
@@ -2638,6 +2664,7 @@ class HulkViewModel internal constructor(
                         hideScores = hideScores,
                         matchAlerts = matchAlerts,
                         knownTeams = knownTeams,
+                        catalogOwnerKey = catalogOwnerKey,
                         error = null,
                         loading = false,
                         lastAttemptEpochMs = now,
@@ -2651,6 +2678,7 @@ class HulkViewModel internal constructor(
                         hideScores = hideScores,
                         matchAlerts = matchAlerts,
                         knownTeams = knownTeams,
+                        catalogOwnerKey = catalogOwnerKey,
                         error = null,
                         loading = false,
                         lastAttemptEpochMs = now,
@@ -2660,7 +2688,7 @@ class HulkViewModel internal constructor(
 
                 when (val result = footballFeedClient.fetch(discovery, day)) {
                     is FootballFetchResult.Success -> {
-                        if (!isFootballOwnerCurrent(scope, generation)) return@launch
+                        if (!isFootballOwnerCurrent(scope, generation, discovery)) return@launch
                         val attemptedAt = System.currentTimeMillis()
                         result.snapshot.retryAfterSeconds?.let { seconds ->
                             footballRetryAtEpochMs = attemptedAt + seconds * 1_000L
@@ -2714,6 +2742,7 @@ class HulkViewModel internal constructor(
                             hideScores = hideScores,
                             matchAlerts = matchAlerts,
                             knownTeams = knownTeams,
+                            catalogOwnerKey = catalogOwnerKey,
                             error = null,
                             loading = false,
                             lastAttemptEpochMs = attemptedAt,
@@ -2721,7 +2750,7 @@ class HulkViewModel internal constructor(
                     }
 
                     is FootballFetchResult.Failure -> {
-                        if (!isFootballOwnerCurrent(scope, generation)) return@launch
+                        if (!isFootballOwnerCurrent(scope, generation, discovery)) return@launch
                         val attemptedAt = System.currentTimeMillis()
                         result.retryAfterSeconds?.let { seconds ->
                             footballRetryAtEpochMs = attemptedAt + seconds * 1_000L
@@ -2733,6 +2762,7 @@ class HulkViewModel internal constructor(
                             hideScores = hideScores,
                             matchAlerts = matchAlerts,
                             knownTeams = knownTeams,
+                            catalogOwnerKey = catalogOwnerKey,
                             error = result.error,
                             loading = false,
                             lastAttemptEpochMs = attemptedAt,
@@ -2859,6 +2889,7 @@ class HulkViewModel internal constructor(
         val discovery = mutableState.value.operations.football ?: return
         if (session == null || !footballFeedAllowedForProfile(profileStore.activeProfile().kind)) return
         val scope = footballProfileStore.activeScope() ?: return
+        val catalogOwnerKey = footballCatalogOwnerKey(scope, discovery.feedUrl)
         val existing = mutableState.value.footballFeed.daySnapshots[dayKey]
         val existingFresh = footballSnapshotCacheFresh(
             existing,
@@ -2881,7 +2912,7 @@ class HulkViewModel internal constructor(
                     footballFeedCacheStore.load(dayKey)?.takeIf { it.dayKey == dayKey }
                 }
                 if (!footballDayRequestCurrent(dayKey, generation, scope, discovery)) return@launch
-                if (local != null) publishFootballDay(local, scope)
+                if (local != null) publishFootballDay(local, scope, catalogOwnerKey)
                 val now = System.currentTimeMillis()
                 val fresh = footballSnapshotCacheFresh(local, now, discovery.refreshSeconds)
                 if (!force && fresh) return@launch
@@ -2897,7 +2928,7 @@ class HulkViewModel internal constructor(
                         withContext(Dispatchers.IO) {
                             footballFeedCacheStore.save(dayKey, result.rawJson)
                         }
-                        publishFootballDay(result.snapshot, scope)
+                        publishFootballDay(result.snapshot, scope, catalogOwnerKey)
                     }
                     is FootballFetchResult.Failure -> {
                         if (!footballDayRequestCurrent(dayKey, generation, scope, discovery)) {
@@ -2957,7 +2988,11 @@ class HulkViewModel internal constructor(
         }
     }
 
-    private fun publishFootballDay(snapshot: FootballFeedSnapshot, scope: AccountProfileStateScope) {
+    private fun publishFootballDay(
+        snapshot: FootballFeedSnapshot,
+        scope: AccountProfileStateScope,
+        catalogOwnerKey: String,
+    ) {
         val favorites = mutableState.value.footballFeed.favoriteTeams
         val ordered = snapshot.copy(
             matches = orderFootballMatches(
@@ -2966,12 +3001,20 @@ class HulkViewModel internal constructor(
             ),
         )
         mutableState.update { state ->
+            val base = state.footballFeed.withCatalogSource(
+                footballCatalogAuthority.snapshot(catalogOwnerKey),
+                catalogOwnerKey,
+            )
+            val matches = base.allMatches + ordered.matches
             state.copy(
-                footballFeed = state.footballFeed.copy(
-                    daySnapshots = state.footballFeed.daySnapshots + (snapshot.dayKey to ordered),
-                    knownTeams = mergeFootballTeamLists(
-                        state.footballFeed.knownTeams,
-                        snapshot.teams,
+                footballFeed = base.copy(
+                    daySnapshots = base.daySnapshots + (snapshot.dayKey to ordered),
+                    knownTeams = reconcileFootballKnownTeams(
+                        authoritativeCatalog = base.authoritativeCatalog,
+                        currentKnownTeams = base.knownTeams,
+                        publishedTeams = snapshot.teams,
+                        matches = matches,
+                        favorites = base.favoriteTeams,
                     ),
                 ),
             )
@@ -2980,18 +3023,27 @@ class HulkViewModel internal constructor(
 
     /**
      * Verified team catalog, daily cached. The picker calls this on open so an empty match day can
-     * still search real provider teams. One bounded request set is shared across profiles.
+     * still search real provider teams. The disk cache may bootstrap this owner only while no
+     * authority exists; a catalog response must be the latest request for the current owner.
      */
     fun ensureFootballTeamCatalog(force: Boolean = false) {
         val discovery = mutableState.value.operations.football ?: return
         if (session == null || !footballFeedAllowedForProfile(profileStore.activeProfile().kind)) return
         if (footballTeamCatalogJob?.isActive == true) return
+        val scope = footballProfileStore.activeScope() ?: return
+        val catalogOwnerKey = footballCatalogOwnerKey(scope, discovery.feedUrl)
         lateinit var launchedJob: Job
         launchedJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
-                val cached = withContext(Dispatchers.IO) { footballTeamCatalogStore.load() }
-                if (cached != null) {
-                    publishFootballTeams(cached.teams)
+                val cached = withContext(Dispatchers.IO) { footballTeamCatalogStore.load(discovery.feedUrl) }
+                cached?.let { cache ->
+                    footballCatalogAuthority.bootstrap(
+                        catalogOwnerKey,
+                        cache.teams,
+                        cache.cachedAtEpochMs,
+                    )?.let { snapshot ->
+                        publishFootballCatalogAuthority(scope, catalogOwnerKey)
+                    }
                 }
                 val now = System.currentTimeMillis()
                 val fresh = cached != null &&
@@ -2999,26 +3051,42 @@ class HulkViewModel internal constructor(
                     now - cached.fetchedAtEpochMs in 0 until 24L * 60L * 60L * 1_000L
                 if (!force && fresh) return@launch
                 if (now < footballCatalogRetryAtEpochMs) return@launch
+                if (!footballCatalogOwnerCurrent(scope, discovery)) return@launch
+                val requestId = footballCatalogAuthority.beginRequest(catalogOwnerKey)
                 when (val result = footballFeedClient.fetchTeams(discovery)) {
                     is FootballTeamCatalogFetchResult.Success -> {
+                        if (footballTeamCatalogJob !== launchedJob) return@launch
+                        if (!footballCatalogOwnerCurrent(scope, discovery)) return@launch
                         result.retryAfterSeconds?.let { seconds ->
                             footballCatalogRetryAtEpochMs =
                                 System.currentTimeMillis() + seconds * 1_000L
                         }
+                        // Receipt time is local metadata only. A stale response is stored with an
+                        // already-expired receipt so the 24h local gate retries the provider;
+                        // provider cachedAt stays untouched for authority ordering.
                         val fetchedAt = if (result.stale) {
-                            // A stale complete catalog is not fresh just because Android fetched
-                            // it again. Keep the provider cache time (or an expired fallback) so
-                            // the 24h gate still retries the provider later.
-                            result.cachedAtEpochMs.takeIf { it > 0L }
-                                ?: (System.currentTimeMillis() - 24L * 60L * 60L * 1_000L)
+                            System.currentTimeMillis() - 24L * 60L * 60L * 1_000L
                         } else {
                             System.currentTimeMillis()
                         }
-                        withContext(Dispatchers.IO) {
-                            footballTeamCatalogStore.save(result.rawJson, fetchedAt)
-                        }
-                        if (mutableState.value.operations.football?.feedUrl != discovery.feedUrl) return@launch
-                        publishFootballTeams(result.teams)
+                        // Gate staleness/obsolescence before durable cache and UI publication.
+                        val accepted = footballCatalogAuthority.publishAndPersist(
+                            catalogOwnerKey,
+                            requestId,
+                            result.teams,
+                            result.cachedAtEpochMs,
+                            result.stale,
+                        ) { snapshot ->
+                            withContext(Dispatchers.IO) {
+                                footballTeamCatalogStore.save(
+                                    result.rawJson,
+                                    fetchedAt,
+                                    discovery.feedUrl,
+                                    snapshot.writeToken,
+                                )
+                            }
+                        } ?: return@launch
+                        publishFootballCatalogAuthority(scope, catalogOwnerKey)
                     }
                     is FootballTeamCatalogFetchResult.Failure -> {
                         result.retryAfterSeconds?.let { seconds ->
@@ -3035,17 +3103,32 @@ class HulkViewModel internal constructor(
         launchedJob.start()
     }
 
-    private fun publishFootballTeams(teams: List<FootballTeam>) {
-        if (teams.isEmpty() || session == null) return
+    private fun footballCatalogOwnerCurrent(
+        scope: AccountProfileStateScope,
+        discovery: FootballFeedDiscovery,
+    ): Boolean = session != null &&
+        footballProfileStore.activeScope() == scope &&
+        mutableState.value.operations.football?.feedUrl == discovery.feedUrl &&
+        footballFeedAllowedForProfile(profileStore.activeProfile().kind)
+
+    private fun publishFootballCatalogAuthority(
+        scope: AccountProfileStateScope,
+        catalogOwnerKey: String,
+    ) {
+        if (session == null) return
         if (!footballFeedAllowedForProfile(profileStore.activeProfile().kind)) return
+        if (footballProfileStore.activeScope() != scope) return
+        // Publish the authority owner's current snapshot, not a caller-held response that may have
+        // been superseded while its persistence block was running.
+        val authoritative = footballCatalogAuthority.snapshot(catalogOwnerKey) ?: return
         mutableState.update { state ->
-            val merged = mergeFootballTeamLists(state.footballFeed.knownTeams, teams)
-            state.copy(footballFeed = state.footballFeed.copy(knownTeams = merged))
+            state.copy(footballFeed = state.footballFeed.withCatalogAuthority(authoritative, catalogOwnerKey))
         }
     }
 
     private fun resetFootballFeed() {
         invalidateFootballOwner()
+        footballCatalogAuthority.reset()
         footballInbox = FootballInboxState()
         footballInboxScope = null
         mutableState.update { it.copy(footballFeed = FootballFeedUiState()) }
@@ -3071,9 +3154,10 @@ class HulkViewModel internal constructor(
     private fun isFootballOwnerCurrent(
         scope: AccountProfileStateScope,
         generation: Long,
+        discovery: FootballFeedDiscovery,
     ): Boolean {
         if (session == null || generation != footballOwnerGeneration) return false
-        if (mutableState.value.operations.football == null) return false
+        if (mutableState.value.operations.football?.feedUrl != discovery.feedUrl) return false
         return footballOwnerStillCurrent(
             expected = scope,
             active = footballProfileStore.activeScope(),
@@ -3088,6 +3172,7 @@ class HulkViewModel internal constructor(
         hideScores: Boolean,
         matchAlerts: Map<String, FootballMatchAlertPreferences>,
         knownTeams: List<FootballTeam>,
+        catalogOwnerKey: String,
         error: FootballFeedError?,
         loading: Boolean,
         lastAttemptEpochMs: Long,
@@ -3095,7 +3180,24 @@ class HulkViewModel internal constructor(
         val favoriteIds = favorites.mapTo(linkedSetOf(), FootballFavoriteTeam::teamId)
         val ordered = snapshot?.copy(matches = orderFootballMatches(snapshot.matches, favoriteIds))
         mutableState.update { state ->
-            val mergedKnownTeams = mergeFootballTeamLists(state.footballFeed.knownTeams, knownTeams)
+            // Read the authority at publication time. A catalog response that completed while the
+            // feed request was in flight always wins over the older captured team list. A state
+            // from a previous discovery source is cleared before the new source is applied.
+            val base = state.footballFeed.withCatalogSource(
+                footballCatalogAuthority.snapshot(catalogOwnerKey),
+                catalogOwnerKey,
+            )
+            val authority = base.authoritativeCatalog
+            val matches = base.allMatches + ordered?.let {
+                it.matches + it.kickoffHistory + it.reminderCandidates
+            }.orEmpty()
+            val mergedKnownTeams = reconcileFootballKnownTeams(
+                authoritativeCatalog = authority,
+                currentKnownTeams = base.knownTeams,
+                publishedTeams = knownTeams,
+                matches = matches,
+                favorites = favorites,
+            )
             // An in-flight refresh captured the old visibility; never restore it after the owner
             // toggled hide-scores while the request was active.
             val effectiveHideScores = footballEffectiveHideScores(
@@ -3110,6 +3212,8 @@ class HulkViewModel internal constructor(
                     snapshot = ordered,
                     favoriteTeams = favorites,
                     knownTeams = mergedKnownTeams,
+                    authoritativeCatalog = authority,
+                    authoritativeCatalogSourceKey = base.authoritativeCatalogSourceKey,
                     hideScores = effectiveHideScores,
                     matchAlerts = matchAlerts,
                     loadingDays = state.footballFeed.loadingDays,
@@ -3419,6 +3523,7 @@ class HulkViewModel internal constructor(
         footballInbox = FootballInboxState()
         footballInboxScope = null
         invalidateFootballOwner()
+        footballCatalogAuthority.reset()
         mutableState.update { state ->
             state.copy(
                 footballFeed = FootballFeedUiState(available = state.operations.football != null, loading = state.operations.football != null),
@@ -3921,7 +4026,13 @@ class HulkViewModel internal constructor(
                 ),
             )
         }
-        if (footballDiscoveryChanged) invalidateFootballOwner()
+        if (footballDiscoveryChanged) {
+            invalidateFootballOwner()
+            footballCatalogAuthority.reset()
+            mutableState.update { state ->
+                state.copy(footballFeed = state.footballFeed.withCatalogSourceCleared())
+            }
+        }
         wakeFootballForegroundScheduler()
         refreshNotificationState(clearPopup = false)
         if (config.football != null) {
@@ -4619,6 +4730,7 @@ class HulkViewModel internal constructor(
         pendingNotificationScanTrigger = null
         notificationUiReady = false
         invalidateFootballOwner()
+        footballCatalogAuthority.reset()
         footballInbox = FootballInboxState()
         footballInboxScope = null
         foregroundNotificationLastAttemptElapsedRealtimeMs = 0L
@@ -4901,6 +5013,7 @@ class HulkViewModel internal constructor(
             downloadPriorityMutationQueues.clear()
             presenceLifecycleOwner.logout()
             invalidateFootballOwner()
+            footballCatalogAuthority.reset()
             footballInbox = FootballInboxState()
             footballInboxScope = null
             val state = mutableState.value

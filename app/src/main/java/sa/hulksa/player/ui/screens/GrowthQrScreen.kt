@@ -58,6 +58,7 @@ import sa.hulksa.player.data.normalizeGrowthCustomQrUrl
 import sa.hulksa.player.data.resolveGrowthQrPresentation
 import sa.hulksa.player.ui.components.EntryBackAction
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import sa.hulksa.player.ui.theme.NeoNeutralSurfaces
 
 @Composable
 internal fun GrowthQrDialog(
@@ -119,8 +120,8 @@ internal fun GrowthQrDialog(
                         .widthIn(max = 720.dp)
                         .fillMaxWidth()
                         .clip(shape)
-                        .background(Color(0xFF11120E))
-                        .border(1.dp, colors.gold.copy(alpha = .42f), shape)
+                        .background(NeoNeutralSurfaces.modal)
+                        .border(1.dp, NeoNeutralSurfaces.stroke, shape)
                         .padding(horizontal = 28.dp, vertical = 20.dp),
                 ) {
                     Row(
@@ -145,7 +146,7 @@ internal fun GrowthQrDialog(
                             modifier = Modifier
                                 .width(1.dp)
                                 .height(qrSize + 20.dp)
-                                .background(colors.gold.copy(alpha = .45f)),
+                                .background(NeoNeutralSurfaces.stroke),
                         )
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             GrowthQrImage(
@@ -169,6 +170,7 @@ internal fun GrowthQrDialog(
                             minHeightDp = movieActionHeightDp(isTv = true, compactHeight = false),
                             captionColor = colors.goldBright,
                             modifier = Modifier.focusRequester(backRequester),
+                            neutralV5 = true,
                         )
                     }
                 }
@@ -185,8 +187,8 @@ internal fun GrowthQrDialog(
                         .widthIn(max = 760.dp)
                         .fillMaxWidth()
                         .clip(shape)
-                        .background(Color(0xFF11120E))
-                        .border(1.dp, colors.gold.copy(alpha = .42f), shape)
+                        .background(NeoNeutralSurfaces.modal)
+                        .border(1.dp, NeoNeutralSurfaces.stroke, shape)
                         .padding(
                             horizontal = if (compactHeight) 24.dp else 28.dp,
                             vertical = if (compactHeight) 12.dp else 18.dp,
@@ -215,6 +217,7 @@ internal fun GrowthQrDialog(
                         onClick = onDismiss,
                         minHeightDp = movieActionHeightDp(isTv = true, compactHeight = false),
                         modifier = Modifier.focusRequester(backRequester),
+                        neutralV5 = true,
                     )
                 }
             }

@@ -113,6 +113,7 @@ import sa.hulksa.player.ui.components.SeriesEpisodeCountInline
 import sa.hulksa.player.ui.components.SeriesSeasonCountInline
 import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import sa.hulksa.player.ui.theme.NeoNeutralSurfaces
 import java.util.Locale
 
 /**
@@ -1727,8 +1728,8 @@ internal fun MovieDownloadPanel(
     Column(
         modifier = modifier
             .clip(shape)
-            .background(Color(0xF711120D))
-            .border(1.dp, colors.gold.copy(alpha = .45f), shape)
+            .background(NeoNeutralSurfaces.modal)
+            .border(1.dp, NeoNeutralSurfaces.stroke, shape)
             .padding(14.dp)
             .verticalScroll(rememberScrollState()),
     ) {
@@ -1836,10 +1837,10 @@ private fun MovieDownloadPanelAction(
     Row(
         modifier = modifier
             .clip(shape)
-            .background(if (focused) Color(0xFF2A281B) else Color(0xFF151711))
+            .background(NeoNeutralSurfaces.control)
             .border(
                 width = if (focused) 2.dp else 1.dp,
-                color = if (focused) colors.goldBright else colors.gold.copy(alpha = .42f),
+                color = if (focused) colors.goldBright else NeoNeutralSurfaces.stroke,
                 shape = shape,
             )
             .focusRequester(requester)
