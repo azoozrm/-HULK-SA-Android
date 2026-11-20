@@ -270,6 +270,17 @@ data class FootballInboxState(
     val unreadCount: Int get() = notifications.count { !it.read }
 }
 
+/**
+ * Last failed attempt for one selected Riyadh day. It is kept separately from the last-good
+ * [FootballFeedSnapshot] so an unavailable or rate-limited refresh never rewrites real rows or
+ * masquerades as a valid empty day.
+ */
+data class FootballDayFailure(
+    val error: FootballFeedError,
+    val attemptedAtEpochMs: Long,
+    val retryAtEpochMs: Long = 0L,
+)
+
 data class FootballFeedUiState(
     val available: Boolean = false,
     val loading: Boolean = false,
@@ -284,6 +295,7 @@ data class FootballFeedUiState(
     val matchAlerts: Map<String, FootballMatchAlertPreferences> = emptyMap(),
     val daySnapshots: Map<String, FootballFeedSnapshot> = emptyMap(),
     val loadingDays: Set<String> = emptySet(),
+    val dayFailures: Map<String, FootballDayFailure> = emptyMap(),
     val error: FootballFeedError? = null,
     val lastAttemptEpochMs: Long = 0L,
 ) {
@@ -877,6 +889,62 @@ fun footballSnapshotCacheFresh(
     val ttlMs = refreshSeconds.coerceAtLeast(1) * 1_000L
     return nowEpochMs - snapshot.cachedAtEpochMs in 0 until ttlMs
 }
+
+/**
+ * A cached record outside its refresh window is last-good data. Mark it stale for display instead
+ * of letting an expired non-stale flag keep hiding a failed or rate-limited refresh.
+ */
+fun footballSnapshotForDisplay(
+    snapshot: FootballFeedSnapshot,
+    nowEpochMs: Long,
+    refreshSeconds: Int,
+): FootballFeedSnapshot = if (
+    snapshot.stale || footballSnapshotCacheFresh(snapshot, nowEpochMs, refreshSeconds)
+) {
+    snapshot
+} else {
+    snapshot.copy(stale = true)
+}
+
+/**
+ * A response owns its Retry-After, but another route's active cooldown must not be shortened or
+ * erased. The returned deadline is monotonic until it is actually elapsed.
+ */
+fun footballRetryAtAfterSuccess(
+    attemptedAtEpochMs: Long,
+    retryAfterSeconds: Long?,
+    currentRetryAtEpochMs: Long,
+): Long {
+    val active = currentRetryAtEpochMs.takeIf { it > attemptedAtEpochMs } ?: 0L
+    val requested = retryAfterSeconds
+        ?.takeIf { it > 0L }
+        ?.let { attemptedAtEpochMs + it * 1_000L }
+        ?: 0L
+    return maxOf(active, requested)
+}
+
+/** A failure cannot shorten an active shared cooldown; a longer Retry-After extends it. */
+fun footballRetryAtAfterFailure(
+    attemptedAtEpochMs: Long,
+    retryAfterSeconds: Long?,
+    currentRetryAtEpochMs: Long,
+): Long {
+    val active = currentRetryAtEpochMs.takeIf { it > attemptedAtEpochMs } ?: 0L
+    val requested = retryAfterSeconds
+        ?.takeIf { it > 0L }
+        ?.let { attemptedAtEpochMs + it * 1_000L }
+        ?: 0L
+    return maxOf(active, requested)
+}
+
+/**
+ * A Home publication replaces today's feed fields but owns no other day's failure. Only a real
+ * success for that day may clear its entry.
+ */
+fun footballPublishedFeedState(
+    previous: FootballFeedUiState,
+    published: FootballFeedUiState,
+): FootballFeedUiState = published.copy(dayFailures = previous.dayFailures)
 
 /** Provider/server observation freshness; app receipt time alone is not an observation. */
 fun footballSnapshotObservationFresh(

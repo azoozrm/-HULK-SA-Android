@@ -228,7 +228,6 @@ import sa.hulksa.player.data.FootballMatchStatus
 import sa.hulksa.player.data.FootballTeam
 import sa.hulksa.player.data.filterFootballTeams
 import sa.hulksa.player.data.footballRiyadhDayLabel
-import sa.hulksa.player.data.footballRiyadhTimeLabel
 import sa.hulksa.player.data.footballTeamsFromMatches
 import sa.hulksa.player.data.mergeFootballTeamLists
 import sa.hulksa.player.data.resolveFootballAlertPreferences
@@ -3152,30 +3151,58 @@ private fun HomeFootballSection(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             HomeSectionHeadingText("مباريات اليوم", isTv)
-            Spacer(Modifier.weight(1f))
-            FocusButton(
-                "ادارة فرقي",
-                { onLoadTeams(); managerVisible = true },
-                modifier = Modifier.focusRequester(managerButtonRequester),
-                compact = true,
-                primary = false,
-                scaleOnFocus = false,
-                trailingIcon = Icons.Rounded.Favorite,
-                neutralV5 = true,
-            )
-            FocusButton(
-                "عرض الكل",
-                {
-                    onLoadTeams()
-                    onOpenCenter()
-                },
-                modifier = Modifier.focusRequester(centerButtonRequester),
-                compact = true,
-                primary = false,
-                scaleOnFocus = false,
-                trailingIcon = Icons.Rounded.ChevronLeft,
-                neutralV5 = true,
-            )
+            if (isTv) {
+                Spacer(Modifier.width(4.dp))
+                FocusButton(
+                    "ادارة فرقي",
+                    { onLoadTeams(); managerVisible = true },
+                    modifier = Modifier.focusRequester(managerButtonRequester),
+                    compact = true,
+                    primary = false,
+                    scaleOnFocus = false,
+                    trailingIcon = Icons.Rounded.Favorite,
+                    neutralV5 = true,
+                )
+                FocusButton(
+                    "عرض الكل",
+                    {
+                        onLoadTeams()
+                        onOpenCenter()
+                    },
+                    modifier = Modifier.focusRequester(centerButtonRequester),
+                    compact = true,
+                    primary = false,
+                    scaleOnFocus = false,
+                    trailingIcon = Icons.Rounded.ChevronLeft,
+                    neutralV5 = true,
+                )
+                Spacer(Modifier.weight(1f))
+            } else {
+                Spacer(Modifier.weight(1f))
+                FocusButton(
+                    "ادارة فرقي",
+                    { onLoadTeams(); managerVisible = true },
+                    modifier = Modifier.focusRequester(managerButtonRequester),
+                    compact = true,
+                    primary = false,
+                    scaleOnFocus = false,
+                    trailingIcon = Icons.Rounded.Favorite,
+                    neutralV5 = true,
+                )
+                FocusButton(
+                    "عرض الكل",
+                    {
+                        onLoadTeams()
+                        onOpenCenter()
+                    },
+                    modifier = Modifier.focusRequester(centerButtonRequester),
+                    compact = true,
+                    primary = false,
+                    scaleOnFocus = false,
+                    trailingIcon = Icons.Rounded.ChevronLeft,
+                    neutralV5 = true,
+                )
+            }
         }
         Spacer(Modifier.height(10.dp))
         if (feed.stale) {
@@ -3186,12 +3213,12 @@ private fun HomeFootballSection(
             ) {
                 Icon(Icons.Outlined.Schedule, null, tint = colors.gold, modifier = Modifier.size(16.dp))
                 Text(
-                    feed.snapshot?.cachedAtEpochMs?.takeIf { it > 0L }?.let {
-                        "بيانات قديمة من اخر تحديث ${footballRiyadhTimeLabel(it)}"
-                    } ?: "بيانات قديمة من اخر تحديث ناجح",
+                    feed.snapshot?.let { footballLastSuccessLabel(it, System.currentTimeMillis()) }
+                        ?: "لا يوجد تحديث ناجح بعد",
                     color = colors.textMuted,
                     fontSize = 11.sp,
-                    modifier = Modifier.weight(1f),
+                    maxLines = 2,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
                 FocusButton(
                     "تحديث",
@@ -3202,6 +3229,7 @@ private fun HomeFootballSection(
                     trailingIcon = Icons.Rounded.Refresh,
                     neutralV5 = true,
                 )
+                Spacer(Modifier.weight(1f))
             }
         }
         when {

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -30,6 +31,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -58,6 +61,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,6 +72,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -80,9 +85,12 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import sa.hulksa.player.data.FootballAlertType
 import sa.hulksa.player.data.FootballCompetition
+import sa.hulksa.player.data.FootballDayFailure
 import sa.hulksa.player.data.FootballFavoriteTeam
+import sa.hulksa.player.data.FootballFeedError
 import sa.hulksa.player.data.FootballFeedSnapshot
 import sa.hulksa.player.data.FootballFeedUiState
 import sa.hulksa.player.data.FootballMatch
@@ -94,6 +102,7 @@ import sa.hulksa.player.data.footballRiyadhDayKey
 import sa.hulksa.player.data.footballRiyadhDayStartEpochMs
 import sa.hulksa.player.data.footballRiyadhDayLabel
 import sa.hulksa.player.data.footballRiyadhTimeLabel
+import sa.hulksa.player.data.footballSnapshotCacheFresh
 import sa.hulksa.player.data.footballTeamsFromMatches
 import sa.hulksa.player.data.mergeFootballTeamLists
 import sa.hulksa.player.data.resolveFootballAlertPreferences
@@ -160,6 +169,144 @@ internal fun footballCenterGroups(matches: List<FootballMatch>): List<Pair<Footb
             compareBy<Pair<FootballCompetition, List<FootballMatch>>> { it.first.priority }
                 .thenBy(String.CASE_INSENSITIVE_ORDER) { it.first.displayName },
         )
+
+/**
+ * The selected day's own snapshot owns the center. A Home snapshot is only a fallback for today,
+ * and a non-stale flag is not enough: an expired cache must not hide a newer stale/unavailable day.
+ */
+internal fun footballCenterSnapshotForDay(
+    daySnapshot: FootballFeedSnapshot?,
+    homeSnapshot: FootballFeedSnapshot?,
+    selectedDay: String,
+    nowEpochMs: Long,
+): FootballFeedSnapshot? {
+    val candidates = buildList {
+        daySnapshot?.takeIf { it.dayKey == selectedDay }?.let(::add)
+        homeSnapshot?.takeIf { it.dayKey == selectedDay }?.let(::add)
+    }
+    return candidates.maxWithOrNull(
+        compareBy<FootballFeedSnapshot> { snapshot ->
+            if (!snapshot.stale &&
+                footballSnapshotCacheFresh(snapshot, nowEpochMs, snapshot.refreshSeconds)
+            ) 1 else 0
+        }.thenBy { it.cachedAtEpochMs },
+    )
+}
+
+internal data class FootballCenterFailureCopy(
+    val title: String,
+    val detail: String,
+    val retryEnabled: Boolean,
+)
+
+internal fun footballRetryWaitLabel(waitSeconds: Long): String = when {
+    waitSeconds <= 0L -> ""
+    waitSeconds < 60L -> "$waitSeconds ثانية"
+    else -> "${(waitSeconds + 59L) / 60L} دقيقة"
+}
+
+private fun footballFailureBaseCopy(error: FootballFeedError?): String = when (error) {
+    FootballFeedError.RATE_LIMITED -> "المزود طلب الانتظار قبل التحديث التالي"
+    FootballFeedError.INVALID_RESPONSE -> "وصلت بيانات غير مكتملة من الخادم"
+    FootballFeedError.NOT_CONFIGURED -> "خدمة المباريات غير مفعلة"
+    FootballFeedError.UNAVAILABLE, null -> "تعذر الوصول إلى خدمة المباريات"
+}
+
+internal fun footballCenterFailureCopy(
+    failure: FootballDayFailure?,
+    nowEpochMs: Long,
+): FootballCenterFailureCopy {
+    val retryAt = failure?.retryAtEpochMs ?: 0L
+    val waitSeconds = ((retryAt - nowEpochMs + 999L) / 1_000L).coerceAtLeast(0L)
+    val base = footballFailureBaseCopy(failure?.error)
+    return FootballCenterFailureCopy(
+        title = "تعذر تحميل مباريات هذا اليوم",
+        detail = if (waitSeconds > 0L) {
+            "$base • بعد ${footballRetryWaitLabel(waitSeconds)}"
+        } else {
+            base
+        },
+        retryEnabled = waitSeconds == 0L,
+    )
+}
+
+internal data class FootballCenterEmptyCopy(
+    val title: String,
+    val detail: String?,
+)
+
+internal fun footballCenterEmptyCopy(
+    snapshot: FootballFeedSnapshot,
+    filter: FootballCenterFilter,
+): FootballCenterEmptyCopy = when {
+    snapshot.stale && snapshot.matches.isEmpty() -> FootballCenterEmptyCopy(
+        title = "تعذر تحديث مباريات اليوم",
+        detail = "لا توجد بيانات محفوظة لهذا اليوم بعد آخر تحديث ناجح",
+    )
+    snapshot.stale -> FootballCenterEmptyCopy(
+        title = "لا توجد مباريات مطابقة في آخر بيانات محفوظة",
+        detail = "البيانات قديمة؛ حدّثها لمعرفة المباريات الحالية",
+    )
+    snapshot.matches.isEmpty() -> FootballCenterEmptyCopy(
+        title = "لا توجد مباريات لهذا اليوم",
+        detail = null,
+    )
+    else -> FootballCenterEmptyCopy(
+        title = "لا توجد مباريات مطابقة",
+        detail = if (filter == FootballCenterFilter.ALL) {
+            null
+        } else {
+            "فلتر «${filter.label}» لا يطابق أي مباراة اليوم"
+        },
+    )
+}
+
+internal fun footballLastSuccessLabel(
+    snapshot: FootballFeedSnapshot,
+    nowEpochMs: Long,
+): String = "آخر تحديث ناجح: ${
+    footballRiyadhDayLabel(footballRiyadhDayKey(snapshot.cachedAtEpochMs), nowEpochMs)
+} ${footballRiyadhTimeLabel(snapshot.cachedAtEpochMs)}"
+
+/**
+ * Minimal extra scroll that keeps a focused row a real margin inside the list viewport. Positive
+ * means scroll forward. Returns zero when the row already has the requested top and bottom margin.
+ */
+internal fun footballFocusScrollDelta(
+    itemOffset: Int,
+    itemSize: Int,
+    viewportStart: Int,
+    viewportEnd: Int,
+    marginPx: Int,
+): Int {
+    val margin = marginPx.coerceAtLeast(0)
+    val top = viewportStart + margin
+    val bottom = viewportEnd - margin
+    return when {
+        itemOffset < top -> itemOffset - top
+        itemOffset + itemSize > bottom -> itemOffset + itemSize - bottom
+        else -> 0
+    }
+}
+
+internal fun footballCompetitionMarkSizeDp(
+    surface: FootballCompetitionMarkSurface,
+    isTv: Boolean,
+): Dp = when (surface) {
+    FootballCompetitionMarkSurface.HOME -> if (isTv) 24.dp else 20.dp
+    FootballCompetitionMarkSurface.CENTER -> if (isTv) 30.dp else 24.dp
+    FootballCompetitionMarkSurface.DETAILS -> if (isTv) 32.dp else 28.dp
+}
+
+internal enum class FootballCompetitionMarkSurface { HOME, CENTER, DETAILS }
+
+/** Verified provider names only, trimmed and de-duplicated; never a league-derived channel. */
+internal fun footballBroadcasterSummary(names: List<String>): String? =
+    names.map(String::trim)
+        .filter(String::isNotEmpty)
+        .distinct()
+        .takeIf { it.isNotEmpty() }
+        ?.joinToString(" • ")
 
 @Composable
 internal fun FootballCrest(
@@ -354,7 +501,10 @@ internal fun FootballHomeCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
             ) {
-                FootballCompetitionMark(match.competition, 17.dp)
+                FootballCompetitionMark(
+                    match.competition,
+                    footballCompetitionMarkSizeDp(FootballCompetitionMarkSurface.HOME, isTv),
+                )
                 Spacer(Modifier.width(5.dp))
                 Text(
                     text = match.competition.displayName,
@@ -412,16 +562,29 @@ internal fun FootballHomeCard(
                 maxLines = 1,
                 modifier = Modifier.weight(1f, fill = false),
             )
-            if (match.broadcasters.isNotEmpty()) {
-                Text(
-                    text = match.broadcasters.joinToString(" • "),
-                    color = colors.textMuted,
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.End,
+            val broadcasterSummary = footballBroadcasterSummary(match.broadcasters)
+            if (broadcasterSummary != null) {
+                Column(
                     modifier = Modifier.weight(1f),
-                )
+                    horizontalAlignment = Alignment.End,
+                ) {
+                    Text(
+                        "القناة الناقلة",
+                        color = colors.gold,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                    )
+                    Text(
+                        broadcasterSummary,
+                        color = colors.textMuted,
+                        fontSize = 10.sp,
+                        lineHeight = 12.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.End,
+                    )
+                }
             } else {
                 Spacer(Modifier.weight(1f))
             }
@@ -470,6 +633,9 @@ internal fun FootballCenterScreen(
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     val wideToolbar = adaptiveUi.screenWidthDp >= 900
+    val safeInsets = tvPageSafeInsets(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
+    // The board's top control group sits below the measured TV overscan band, not on the edge.
+    val topGutter = if (isTv) (safeInsets.verticalDp + 12f).dp else 10.dp
     var currentTimeMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LifecycleResumeEffect(Unit) {
         currentTimeMs = System.currentTimeMillis()
@@ -509,19 +675,48 @@ internal fun FootballCenterScreen(
     }
     var filter by rememberSaveable { mutableStateOf(FootballCenterFilter.ALL.name) }
     val activeFilter = FootballCenterFilter.entries.firstOrNull { it.name == filter } ?: FootballCenterFilter.ALL
-    val snapshot = listOfNotNull(
-        feed.daySnapshots[selectedDay],
-        if (selectedDay == today) feed.snapshot else null,
-    ).maxWithOrNull(
-        compareBy<FootballFeedSnapshot> { if (it.stale) 0 else 1 }
-            .thenBy { it.cachedAtEpochMs },
+    val snapshot = footballCenterSnapshotForDay(
+        daySnapshot = feed.daySnapshots[selectedDay],
+        homeSnapshot = if (selectedDay == today) feed.snapshot else null,
+        selectedDay = selectedDay,
+        nowEpochMs = currentTimeMs,
     )
+    val dayFailure = feed.dayFailures[selectedDay]
     val favoriteIds = feed.favoriteTeamIds
     val matches = remember(snapshot, activeFilter, favoriteIds) {
         footballMatchesForFilter(snapshot?.matches.orEmpty(), activeFilter, favoriteIds)
     }
     val groups = remember(matches) { footballCenterGroups(matches) }
     val listState = rememberLazyListState()
+    val density = LocalDensity.current
+    val focusMarginPx = with(density) { 6.dp.roundToPx() }
+    var focusedMatchIndex by remember { mutableStateOf<Int?>(null) }
+    val matchLazyIndices = remember(groups) {
+        buildMap<String, Int> {
+            var index = 0
+            groups.forEach { (_, group) ->
+                index += 1 // group header
+                group.forEach { match ->
+                    put(match.stableIdentity, index)
+                    index += 1
+                }
+            }
+        }
+    }
+    LaunchedEffect(focusedMatchIndex) {
+        val index = focusedMatchIndex ?: return@LaunchedEffect
+        val info = snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+        }.first { it != null } ?: return@LaunchedEffect
+        val delta = footballFocusScrollDelta(
+            itemOffset = info.offset,
+            itemSize = info.size,
+            viewportStart = listState.layoutInfo.viewportStartOffset,
+            viewportEnd = listState.layoutInfo.viewportEndOffset,
+            marginPx = focusMarginPx,
+        )
+        if (delta != 0) listState.scrollBy(delta.toFloat())
+    }
     val rowRequesters = remember { mutableMapOf<String, FocusRequester>() }
     var detailsMatch by remember { mutableStateOf<FootballMatch?>(null) }
     var returnFocusKey by remember { mutableStateOf<String?>(null) }
@@ -563,7 +758,7 @@ internal fun FootballCenterScreen(
         Modifier.fillMaxSize().background(colors.background).safeDrawingPadding(),
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = topGutter, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
@@ -668,60 +863,100 @@ internal fun FootballCenterScreen(
             }
         }
         Spacer(Modifier.height(8.dp))
-        when {
-            snapshot == null && selectedDay in feed.loadingDays ->
+        if (snapshot == null) {
+            if (selectedDay in feed.loadingDays) {
                 FootballCenterState("جاري تحميل المباريات", true)
-            snapshot == null -> FootballCenterState(
-                "تعذر تحميل مباريات هذا اليوم",
+            } else {
+                val failureCopy = footballCenterFailureCopy(dayFailure, currentTimeMs)
+                FootballCenterState(
+                    failureCopy.title,
+                    false,
+                    detail = failureCopy.detail,
+                    onRetry = { onSelectDay(selectedDay) },
+                    retryEnabled = failureCopy.retryEnabled,
+                )
+            }
+        } else if (matches.isEmpty()) {
+            val emptyCopy = footballCenterEmptyCopy(snapshot, activeFilter)
+            val failureCopy = dayFailure?.let { footballCenterFailureCopy(it, currentTimeMs) }
+            val detail = listOfNotNull(
+                emptyCopy.detail ?: if (snapshot.stale) {
+                    footballLastSuccessLabel(snapshot, currentTimeMs)
+                } else {
+                    null
+                },
+                failureCopy?.detail,
+            ).joinToString(" • ")
+            FootballCenterState(
+                emptyCopy.title,
                 false,
-                onRetry = { onSelectDay(selectedDay) },
+                detail = detail.takeIf { it.isNotBlank() },
+                onRetry = if (snapshot.stale) {
+                    { onSelectDay(selectedDay) }
+                } else {
+                    null
+                },
+                retryEnabled = failureCopy?.retryEnabled ?: true,
             )
-            matches.isEmpty() -> FootballCenterState(
-                if (snapshot.stale) "لا توجد مباريات مطابقة • بيانات قديمة" else "لا توجد مباريات مطابقة",
-                false,
-                onRetry = { onSelectDay(selectedDay) },
-            )
-            else -> Column(Modifier.fillMaxSize()) {
+        } else {
+            Column(Modifier.fillMaxSize()) {
                 if (snapshot.stale) {
-                    FootballStaleDayRow { onSelectDay(selectedDay) }
+                    val failureCopy = dayFailure?.let { footballCenterFailureCopy(it, currentTimeMs) }
+                    FootballStaleDayRow(
+                        detail = listOfNotNull(
+                            footballLastSuccessLabel(snapshot, currentTimeMs),
+                            failureCopy?.detail,
+                        ).joinToString(" • "),
+                        retryEnabled = failureCopy?.retryEnabled ?: true,
+                        onRetry = { onSelectDay(selectedDay) },
+                    )
                 }
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                groups.forEach { (competition, group) ->
-                    item(key = "group-${competition.id}") {
-                        Row(
-                            Modifier.fillMaxWidth().padding(top = 7.dp, bottom = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(7.dp),
-                        ) {
-                            FootballCompetitionMark(competition, 24.dp)
-                            Text(
-                                competition.displayName,
-                                color = colors.text,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    groups.forEach { (competition, group) ->
+                        item(key = "group-${competition.id}") {
+                            Row(
+                                Modifier.fillMaxWidth().padding(top = 7.dp, bottom = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                            ) {
+                                FootballCompetitionMark(
+                                    competition,
+                                    footballCompetitionMarkSizeDp(
+                                        FootballCompetitionMarkSurface.CENTER,
+                                        isTv,
+                                    ),
+                                )
+                                Text(
+                                    competition.displayName,
+                                    color = colors.text,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                        itemsIndexed(group, key = { _, match -> match.stableIdentity }) { _, match ->
+                            FootballCenterRow(
+                                match = match,
+                                hideScores = feed.hideScores,
+                                favoriteIds = favoriteIds,
+                                modifier = Modifier.focusRequester(requesterFor(match)),
+                                onFocused = {
+                                    focusedMatchIndex = matchLazyIndices[match.stableIdentity]
+                                },
+                                onClick = {
+                                    returnFocusKey = match.stableIdentity
+                                    returnFocusEventIds = match.eventIds
+                                    detailsMatch = match
+                                },
                             )
                         }
                     }
-                    itemsIndexed(group, key = { _, match -> match.stableIdentity }) { _, match ->
-                        FootballCenterRow(
-                            match = match,
-                            hideScores = feed.hideScores,
-                            favoriteIds = favoriteIds,
-                            modifier = Modifier.focusRequester(requesterFor(match)),
-                            onClick = {
-                                returnFocusKey = match.stableIdentity
-                                returnFocusEventIds = match.eventIds
-                                detailsMatch = match
-                            },
-                        )
-                    }
                 }
-            }
             }
         }
     }
@@ -798,6 +1033,7 @@ private fun FootballCenterRow(
     hideScores: Boolean,
     favoriteIds: Set<String>,
     modifier: Modifier = Modifier,
+    onFocused: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
@@ -816,7 +1052,10 @@ private fun FootballCenterRow(
                 NeoNeutralSurfaces.stroke,
                 shape,
             )
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -896,7 +1135,11 @@ private fun FootballTeamCenter(
 }
 
 @Composable
-private fun FootballStaleDayRow(onRetry: () -> Unit) {
+private fun FootballStaleDayRow(
+    detail: String,
+    retryEnabled: Boolean,
+    onRetry: () -> Unit,
+) {
     val colors = LocalHulkColors.current
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp),
@@ -910,19 +1153,22 @@ private fun FootballStaleDayRow(onRetry: () -> Unit) {
             modifier = Modifier.size(15.dp),
         )
         Text(
-            "بيانات قديمة من اخر تحديث ناجح",
+            detail,
             color = colors.textMuted,
             fontSize = 11.sp,
-            modifier = Modifier.weight(1f),
+            maxLines = 2,
+            modifier = Modifier.weight(1f, fill = false),
         )
         FocusButton(
             "تحديث",
             onRetry,
+            enabled = retryEnabled,
             compact = true,
             primary = false,
             scaleOnFocus = false,
             neutralV5 = true,
         )
+        Spacer(Modifier.weight(1f))
     }
 }
 
@@ -930,7 +1176,9 @@ private fun FootballStaleDayRow(onRetry: () -> Unit) {
 private fun FootballCenterState(
     text: String,
     loading: Boolean,
+    detail: String? = null,
     onRetry: (() -> Unit)? = null,
+    retryEnabled: Boolean = true,
 ) {
     val colors = LocalHulkColors.current
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -944,11 +1192,18 @@ private fun FootballCenterState(
                 tint = colors.gold,
                 modifier = Modifier.size(22.dp),
             )
-            Text(text, color = colors.textMuted, fontSize = 13.sp)
+            Column(Modifier.weight(1f, fill = false)) {
+                Text(text, color = colors.textMuted, fontSize = 13.sp)
+                if (detail != null) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(detail, color = colors.textMuted, fontSize = 11.sp)
+                }
+            }
             if (onRetry != null) {
                 FocusButton(
                     "تحديث",
                     onRetry,
+                    enabled = retryEnabled,
                     compact = true,
                     primary = false,
                     scaleOnFocus = false,
@@ -992,6 +1247,24 @@ internal fun FootballTeamManagerDialog(
     }
     val searchRequester = remember { FocusRequester() }
     val allFilterRequester = remember { FocusRequester() }
+    val gridState = rememberLazyGridState()
+    val density = LocalDensity.current
+    val focusMarginPx = with(density) { 6.dp.roundToPx() }
+    var focusedTeamIndex by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(focusedTeamIndex) {
+        val index = focusedTeamIndex ?: return@LaunchedEffect
+        val info = snapshotFlow {
+            gridState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+        }.first { it != null } ?: return@LaunchedEffect
+        val delta = footballFocusScrollDelta(
+            itemOffset = info.offset.y,
+            itemSize = info.size.height,
+            viewportStart = gridState.layoutInfo.viewportStartOffset,
+            viewportEnd = gridState.layoutInfo.viewportEndOffset,
+            marginPx = focusMarginPx,
+        )
+        if (delta != 0) gridState.scrollBy(delta.toFloat())
+    }
 
     BackHandler(onBack = onDismiss)
     LaunchedEffect(Unit) {
@@ -1130,15 +1403,18 @@ internal fun FootballTeamManagerDialog(
                 } else {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(if (isTv) 4 else 2),
+                        state = gridState,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
+                        contentPadding = PaddingValues(bottom = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        items(filtered, key = FootballTeam::id) { team ->
+                        itemsIndexed(filtered, key = { _, team -> team.id }) { index, team ->
                             val selected = team.id in selectedIds
                             FootballTeamTile(
                                 team = team,
                                 selected = selected,
+                                onFocused = { focusedTeamIndex = index },
                                 onClick = {
                                     selectedIds = if (selected) {
                                         selectedIds - team.id
@@ -1184,6 +1460,7 @@ private fun FootballTeamTile(
     team: FootballTeam,
     selected: Boolean,
     modifier: Modifier = Modifier,
+    onFocused: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
@@ -1201,7 +1478,10 @@ private fun FootballTeamTile(
                 NeoNeutralSurfaces.stroke,
                 shape,
             )
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
             .selectable(selected = selected, role = Role.Checkbox, onClick = onClick)
             .padding(9.dp),
         contentAlignment = Alignment.Center,
@@ -1270,7 +1550,10 @@ internal fun FootballMatchDetailsDialog(
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     FootballHomeTeam(match.homeTeam, 54.dp, Modifier.weight(1f), TextAlign.Start)
                     Column(Modifier.widthIn(min = 118.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        FootballCompetitionMark(match.competition, 28.dp)
+                        FootballCompetitionMark(
+                            match.competition,
+                            footballCompetitionMarkSizeDp(FootballCompetitionMarkSurface.DETAILS, isTv),
+                        )
                         Text(
                             match.competition.displayName,
                             color = colors.text,
@@ -1297,7 +1580,7 @@ internal fun FootballMatchDetailsDialog(
                     Text("القناة الناقلة", color = colors.gold, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(3.dp))
                     Text(
-                        match.broadcasters.joinToString(" • "),
+                        footballBroadcasterSummary(match.broadcasters).orEmpty(),
                         color = colors.text,
                         fontSize = 12.sp,
                         lineHeight = 16.sp,
