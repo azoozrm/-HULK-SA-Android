@@ -132,7 +132,7 @@ class FootballR03FeaturesTest {
     }
 
     @Test
-    fun `competition priority leads the non-favorite ordering`() {
+    fun `saudi competition leads then favorites then competition priority`() {
         val saudiUpcoming = match(
             id = "saudi",
             kickoff = now + 60 * 60_000L,
@@ -162,7 +162,9 @@ class FootballR03FeaturesTest {
             setOf("fav"),
         )
 
-        assertEquals(listOf("favorite", "saudi", "europe"), ordered.map(FootballMatch::providerEventId))
+        // Owner instruction (2026-11-21): Roshn/Saudi competitions always lead the cards, then the
+        // profile's favorites, then the normal competition priority and status order.
+        assertEquals(listOf("saudi", "favorite", "europe"), ordered.map(FootballMatch::providerEventId))
     }
 
     @Test

@@ -58,6 +58,46 @@ class FootballHomeOrderTest {
         assertEquals(1, ordered.count { it.providerEventId == "c" })
     }
 
+    private fun saudiMatch(
+        id: String,
+        home: String,
+        away: String,
+        kickoff: Long,
+    ) = FootballMatch(
+        providerEventId = id,
+        competition = FootballCompetition(
+            id = "17",
+            name = "Roshn Saudi League",
+            country = "Saudi Arabia",
+            arabicName = "دوري روشن السعودي",
+            priority = 10,
+        ),
+        homeTeam = FootballTeam(home, home),
+        awayTeam = FootballTeam(away, away),
+        kickoffEpochMs = kickoff,
+        status = FootballMatchStatus.UPCOMING,
+    )
+
+    @Test
+    fun `saudi competition leads even when a foreign favorite exists`() {
+        val foreignFavorite = match("f", "f1", "x", priority = 40, kickoff = 5L)
+        val saudi = saudiMatch("s", "hilal", "nassr", 90L)
+
+        val ordered = orderFootballMatches(listOf(foreignFavorite, saudi), setOf("f1"))
+
+        assertEquals(listOf("s", "f"), ordered.map(FootballMatch::providerEventId))
+    }
+
+    @Test
+    fun `saudi favorite leads inside the Saudi bucket`() {
+        val saudiOther = saudiMatch("s1", "a", "b", 10L)
+        val saudiFavorite = saudiMatch("s2", "f1", "c", 20L)
+
+        val ordered = orderFootballMatches(listOf(saudiOther, saudiFavorite), setOf("f1"))
+
+        assertEquals(listOf("s2", "s1"), ordered.map(FootballMatch::providerEventId))
+    }
+
     @Test
     fun `favorite edit reorders the same accepted rows deterministically`() {
         val before = orderFootballMatches(teams, setOf("f1"))

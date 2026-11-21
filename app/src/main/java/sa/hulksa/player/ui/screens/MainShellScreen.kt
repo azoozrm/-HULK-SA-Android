@@ -1373,7 +1373,8 @@ internal fun MainShellScreen(
     // withdrawn/absent discovery hides it again and returns an open Center to Home.
     val footballEnabled = state.operations.football != null
     val navigationEntries = destinations.filterNot { entry ->
-        (!downloadsEnabled && entry.destination == MainDestination.DOWNLOADS) ||
+        entry.destination == MainDestination.SEARCH ||
+            (!downloadsEnabled && entry.destination == MainDestination.DOWNLOADS) ||
             (!footballEnabled && entry.destination == MainDestination.FOOTBALL)
     }
     val favoriteSnapshot = CatalogFavoriteSnapshot(persisted = state.favorites)
@@ -1775,7 +1776,10 @@ private fun CinematicNavigationRail(
     val primaryEntries = entries.filterNot { it.destination == MainDestination.SETTINGS }
     val profileRequester = remember { FocusRequester() }
     val settingsRequester = destinationFocusRequesters.getValue(MainDestination.SETTINGS)
-    val selectedRequester = destinationFocusRequesters.getValue(selected)
+    // Search is a top action now, not a rail destination. Its destination can still be selected,
+    // so the rail's content-entry focus falls back to Home instead of an unattached requester.
+    val focusSelected = if (selected == MainDestination.SEARCH) MainDestination.HOME else selected
+    val selectedRequester = destinationFocusRequesters.getValue(focusSelected)
 
     TvRailSurface(
         metrics = metrics,
@@ -2491,6 +2495,7 @@ private fun CinemaHomeScreen(
                         { onToggleFavorite(featured) }, onRefresh, loading,
                         unreadNotificationCount = state.unreadNotificationCount,
                         onOpenNotifications = onOpenNotifications,
+                        onOpenSearch = { onSelectDestination(MainDestination.SEARCH) },
                         topActions = homeTopActions,
                         notificationBellModifier = homeNotificationBellModifier,
                         watchModifier = Modifier.focusRequester(homeHeroFocusRequester),
@@ -3559,6 +3564,7 @@ private fun CinemaHero(
     isLoading: Boolean,
     unreadNotificationCount: Int,
     onOpenNotifications: () -> Unit,
+    onOpenSearch: () -> Unit,
     topActions: @Composable () -> Unit,
     notificationBellModifier: Modifier = Modifier,
     watchModifier: Modifier = Modifier,
@@ -3828,6 +3834,13 @@ private fun CinemaHero(
                         Icons.Rounded.Refresh,
                         "تحديث المحتوى",
                         onRefresh,
+                        onFocused = onHeaderFocused,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    RoundAction(
+                        Icons.Rounded.Search,
+                        "البحث",
+                        onOpenSearch,
                         onFocused = onHeaderFocused,
                     )
                 }

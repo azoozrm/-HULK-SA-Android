@@ -113,6 +113,7 @@ import sa.hulksa.player.data.footballDisplaySnapshotForDay
 import sa.hulksa.player.data.footballDerivedDaySnapshot
 import sa.hulksa.player.data.footballEffectiveDayFailure
 import sa.hulksa.player.data.footballTeamsFromMatches
+import sa.hulksa.player.data.isSaudiCompetition
 import sa.hulksa.player.data.mergeFootballTeamLists
 import sa.hulksa.player.data.resolveFootballAlertPreferences
 import sa.hulksa.player.data.resolveFootballMatch
@@ -601,11 +602,14 @@ internal fun FootballHomeCard(
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
     val isFavorite = favoriteIds.any(match::involvesTeam)
+    val isSaudi = match.competition.isSaudiCompetition()
     val shape = RoundedCornerShape(16.dp)
+    // One fixed geometry for every Home card: a two-line team name must never grow the card or
+    // shift its neighbours in the rail.
     Column(
         modifier = modifier
             .width(if (isTv) 302.dp else 274.dp)
-            .heightIn(min = 142.dp)
+            .height(if (isTv) 184.dp else 176.dp)
             .clip(shape)
             .background(NeoNeutralSurfaces.card)
             .goldFocusEdge(shape = shape, visible = focused)
@@ -621,7 +625,7 @@ internal fun FootballHomeCard(
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
-        Box(Modifier.fillMaxWidth()) {
+        Box(Modifier.fillMaxWidth().height(if (isTv) 32.dp else 28.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -629,18 +633,18 @@ internal fun FootballHomeCard(
             ) {
                 FootballCompetitionMark(
                     match.competition,
-                    footballCompetitionMarkSizeDp(FootballCompetitionMarkSurface.HOME, isTv),
+                    if (isTv) 32.dp else 28.dp,
                 )
-                Spacer(Modifier.width(5.dp))
+                Spacer(Modifier.width(6.dp))
                 Text(
                     text = match.competition.displayName,
-                    color = colors.text,
-                    fontSize = 12.sp,
+                    color = if (isSaudi) colors.goldBright else colors.text,
+                    fontSize = 12.5.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.widthIn(max = if (isTv) 232.dp else 204.dp),
+                    modifier = Modifier.widthIn(max = if (isTv) 214.dp else 184.dp),
                 )
             }
             if (isFavorite) {
@@ -648,7 +652,7 @@ internal fun FootballHomeCard(
                     imageVector = Icons.Rounded.Favorite,
                     contentDescription = "فريق متابع",
                     tint = colors.gold,
-                    modifier = Modifier.align(Alignment.CenterEnd).size(13.dp),
+                    modifier = Modifier.align(Alignment.CenterEnd).size(14.dp),
                 )
             }
         }
@@ -657,23 +661,35 @@ internal fun FootballHomeCard(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            FootballHomeTeam(match.homeTeam, 46.dp, Modifier.weight(1f), TextAlign.Start)
+            FootballHomeTeam(
+                match.homeTeam,
+                if (isTv) 48.dp else 46.dp,
+                Modifier.weight(1f),
+                TextAlign.Start,
+                nameAreaHeight = 30.dp,
+            )
             Column(
                 modifier = Modifier.widthIn(min = 86.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 FootballScoreDisplay(match, hideScores, 22)
             }
-            FootballHomeTeam(match.awayTeam, 46.dp, Modifier.weight(1f), TextAlign.End)
+            FootballHomeTeam(
+                match.awayTeam,
+                if (isTv) 48.dp else 46.dp,
+                Modifier.weight(1f),
+                TextAlign.End,
+                nameAreaHeight = 30.dp,
+            )
         }
         Spacer(Modifier.height(8.dp))
         Box(
             Modifier.fillMaxWidth().height(1.dp)
                 .background(NeoNeutralSurfaces.stroke.copy(alpha = .72f)),
         )
-        Spacer(Modifier.height(6.dp))
         Column(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Row(
@@ -716,6 +732,7 @@ private fun FootballHomeTeam(
     crestSize: Dp,
     modifier: Modifier,
     textAlign: TextAlign,
+    nameAreaHeight: Dp? = null,
 ) {
     val colors = LocalHulkColors.current
     Column(
@@ -724,15 +741,28 @@ private fun FootballHomeTeam(
     ) {
         FootballCrest(team, crestSize)
         Spacer(Modifier.height(4.dp))
-        Text(
-            text = team.displayName,
-            color = colors.text,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
+        val name: @Composable () -> Unit = {
+            Text(
+                text = team.displayName,
+                color = colors.text,
+                fontSize = 12.sp,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+        }
+        if (nameAreaHeight != null) {
+            Box(
+                modifier = Modifier.height(nameAreaHeight).fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                name()
+            }
+        } else {
+            name()
+        }
     }
 }
 

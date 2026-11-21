@@ -490,6 +490,17 @@ fun footballDerivedDaySnapshot(
     )
 }
 
+/**
+ * Saudi competitions lead the football rails. The provider allowlist currently carries the Roshn
+ * Saudi League (id 17 / priority 10); a Saudi country label or the same top priority keeps any
+ * future Saudi competition in the same leading bucket.
+ */
+fun FootballCompetition.isSaudiCompetition(): Boolean =
+    id == "17" ||
+        priority == 10 ||
+        country.equals("Saudi Arabia", ignoreCase = true) ||
+        country == "السعودية"
+
 fun footballMatchSortOrder(status: FootballMatchStatus): Int = when (status) {
     FootballMatchStatus.LIVE -> 0
     FootballMatchStatus.UPCOMING -> 1
@@ -500,8 +511,8 @@ fun footballMatchSortOrder(status: FootballMatchStatus): Int = when (status) {
 }
 
 /**
- * Favorite-team fixtures lead. The rest follow competition priority (Saudi, Gulf/Arab, Europe,
- * other) and then live/upcoming/results inside each tier.
+ * Saudi competitions always lead (owner instruction, 2026-11-21), then the profile's favorite
+ * teams, then competition priority and live/upcoming/results inside each tier.
  */
 fun orderFootballMatches(
     matches: List<FootballMatch>,
@@ -509,8 +520,11 @@ fun orderFootballMatches(
 ): List<FootballMatch> =
     matches.distinctBy(FootballMatch::stableIdentity).sortedWith(
         compareBy<FootballMatch> {
-            if (favoriteTeamIds.any(it::involvesTeam)) 0 else 1
+            if (it.competition.isSaudiCompetition()) 0 else 1
         }
+            .thenBy {
+                if (favoriteTeamIds.any(it::involvesTeam)) 0 else 1
+            }
             .thenBy { it.competition.priority }
             .thenBy { footballMatchSortOrder(it.status) }
             .thenBy(FootballMatch::kickoffEpochMs)
@@ -539,10 +553,11 @@ fun footballHomeTodayMatches(
 }
 
 /**
- * Presentation-only favorite order for an accepted day record. The stored snapshot keeps its
- * source, receipt and provider times; only the rows handed to the Home rail are re-ordered with
- * the active profile's current favorite IDs. A profile switch therefore changes the rail without
- * rewriting accepted cache data or weakening a same-provider-time revalidation.
+ * Presentation-only order for an accepted day record: Saudi competitions first, then the active
+ * profile's favorite teams, then competition priority. The stored snapshot keeps its source,
+ * receipt and provider times; only the rows handed to the UI are re-ordered. A profile switch
+ * therefore changes the order without rewriting accepted cache data or weakening a
+ * same-provider-time revalidation.
  */
 fun footballFavoritesFirstSnapshot(
     snapshot: FootballFeedSnapshot?,
