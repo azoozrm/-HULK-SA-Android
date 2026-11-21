@@ -6,11 +6,12 @@ import org.junit.Test
 
 class StableMobileBottomNavigationTest {
     @Test
-    fun everyNormalCompactPhoneWidthKeepsOneRowWithAllVisibleDestinations() {
-        listOf(320, 360, 393).forEach { width ->
+    fun normalCompactPhoneWidthsKeepOneRowAndTheSmallestWidthFallsBack() {
+        listOf(360, 393).forEach { width ->
             assertEquals(1, stableMobileNavigationRows(width, downloadsEnabled = true))
             assertEquals(1, stableMobileNavigationRows(width, downloadsEnabled = false))
         }
+        assertEquals(2, stableMobileNavigationRows(320, downloadsEnabled = true))
     }
 
     @Test
@@ -28,7 +29,7 @@ class StableMobileBottomNavigationTest {
 
     @Test
     fun entryCountFollowsTheRealDownloadsAvailabilityGate() {
-        assertEquals(6, stableMobileEntryCount(downloadsEnabled = true))
-        assertEquals(5, stableMobileEntryCount(downloadsEnabled = false))
+        assertEquals(7, stableMobileEntryCount(downloadsEnabled = true))
+        assertEquals(6, stableMobileEntryCount(downloadsEnabled = false))
     }
 }

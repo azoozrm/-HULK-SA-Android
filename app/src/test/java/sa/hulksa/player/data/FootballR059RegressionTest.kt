@@ -41,6 +41,97 @@ class FootballR059RegressionTest {
         )
 
     @Test
+    fun `live-unverified server payload shows the preserved score but confirms no kickoff`() {
+        val now = 1_795_195_800_000L
+        val live = match("41").copy(
+            status = FootballMatchStatus.LIVE,
+            homeScore = 2,
+            awayScore = 1,
+            minute = 63,
+            startedAtEpochMs = now - 600_000L,
+            providerUpdatedAtEpochMs = now - 60_000L,
+        )
+        val stalePayload = snapshot(cachedAt = now, stale = true, matches = listOf(live))
+
+        assertEquals("the preserved live score stays displayable", 2, stalePayload.matches.single().homeScore)
+        assertEquals(1, stalePayload.matches.single().awayScore)
+        assertFalse(
+            "a live-unverified record is not a fresh provider observation",
+            footballSnapshotObservationFresh(stalePayload, now),
+        )
+        val generation = generateFootballMatchAlerts(
+            accountId = "account",
+            profileId = "profile",
+            favoriteTeams = listOf(FootballFavoriteTeam("258", "Al-Ahli", 1_000L)),
+            preferences = emptyMap(),
+            previous = null,
+            current = stalePayload,
+            inbox = FootballInboxState(),
+            nowEpochMs = now,
+        )
+        assertTrue("no confirmed-start alert from an unverified live payload", generation.added.isEmpty())
+    }
+
+    @Test
+    fun `a stale live-unverified candidate cannot replace a fresher accepted day`() {
+        val acceptedLive = snapshot(
+            cachedAt = 2_000L,
+            stale = false,
+            matches = listOf(
+                match("41").copy(
+                    status = FootballMatchStatus.LIVE,
+                    homeScore = 2,
+                    awayScore = 1,
+                ),
+            ),
+        ).copy(fetchedAtEpochMs = 1_900L)
+        val regressedStale = snapshot(
+            cachedAt = 2_100L,
+            stale = true,
+            matches = listOf(match("41")),
+        ).copy(fetchedAtEpochMs = 2_050L)
+
+        val acceptance = footballDayAcceptance(acceptedLive, regressedStale, 2_100L)
+
+        assertFalse("rejected: a stale regression never wins over a fresh accepted record", acceptance.accepted)
+        assertEquals(acceptedLive, acceptance.snapshot)
+        assertEquals(2, acceptance.snapshot.matches.single().homeScore)
+    }
+
+    @Test
+    fun `a fresher authoritative final result always replaces a preserved live row`() {
+        val preservedLive = snapshot(
+            cachedAt = 2_000L,
+            stale = true,
+            matches = listOf(
+                match("41").copy(
+                    status = FootballMatchStatus.LIVE,
+                    homeScore = 2,
+                    awayScore = 1,
+                ),
+            ),
+        ).copy(fetchedAtEpochMs = 1_900L)
+        val authoritativeFinal = snapshot(
+            cachedAt = 2_100L,
+            stale = false,
+            matches = listOf(
+                match("41").copy(
+                    status = FootballMatchStatus.FINISHED,
+                    homeScore = 3,
+                    awayScore = 1,
+                ),
+            ),
+        ).copy(fetchedAtEpochMs = 2_050L)
+
+        val acceptance = footballDayAcceptance(preservedLive, authoritativeFinal, 2_100L)
+
+        assertTrue(acceptance.accepted)
+        assertEquals(FootballMatchStatus.FINISHED, acceptance.snapshot.matches.single().status)
+        assertEquals(3, acceptance.snapshot.matches.single().homeScore)
+        assertFalse(acceptance.snapshot.stale)
+    }
+
+    @Test
     fun `missing or wrong-typed matches is not an authoritative empty day`() {
         assertNull(parseFootballFeed("""{"schemaVersion":1,"day":"$day","generatedAt":1795195800}""", day))
         assertNull(parseFootballFeed(feedJson("{}"), day))

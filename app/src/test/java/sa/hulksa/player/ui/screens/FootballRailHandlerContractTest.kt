@@ -36,8 +36,8 @@ class FootballRailHandlerContractTest {
     fun `owner cancels when focus leaves the row`() {
         val source = mainShellSource()
         assertTrue(source.contains("if (railFocusRevision != homeReturnRailBaseline) railFocusOwner.cancel()"))
-        assertTrue(source.contains("onFocusChanged { if (it.isFocused) railFocusOwner.cancel() }"))
-        assertFalse(source.contains("if (focusedCardKey == null) railFocusOwner.cancel()"))
+        assertTrue(source.contains("if (focusedCardKey == null) railFocusOwner.cancel()"))
+        assertTrue(source.contains("if (detailsMatch != null) railFocusOwner.cancel()"))
     }
 
     @Test

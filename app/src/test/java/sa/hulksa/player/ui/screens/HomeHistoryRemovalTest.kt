@@ -189,6 +189,54 @@ class HomeHistoryRemovalTest {
     }
 
     @Test
+    fun hiddenFootballRow_isNeverAdvertisedOrScrolledAsAContentRow() = runBlocking {
+        val order = listOf("football-matches", "continue", "downloads")
+        // The feed is available but Today has zero real cards: the football row index is -1.
+        val indexes = mapOf("football-matches" to -1, "continue" to -1, "downloads" to 1)
+
+        // Old behaviour advertised every "available" feed row; with no other surviving row the
+        // handoff picked the hidden football row and then tried scrollToItem(-1).
+        assertEquals(
+            "football-matches",
+            removalFocusTarget(order, listOf("football-matches"), "continue"),
+        )
+        assertNull(homeRowScrollIndex(indexes, "football-matches"))
+        assertEquals(1, homeRowScrollIndex(indexes, "downloads"))
+
+        val visible = homeVisibleContentRowKeys(order, indexes)
+        assertEquals(setOf("downloads"), visible)
+        assertEquals("downloads", removalFocusTarget(order, visible.toList(), "continue"))
+
+        // With no real content row left the handoff must use the Home entry, never a negative index.
+        val onlyHidden = homeVisibleContentRowKeys(
+            order,
+            mapOf("football-matches" to -1, "continue" to -1),
+        )
+        assertTrue(onlyHidden.isEmpty())
+        val target = removalFocusTarget(order, onlyHidden.toList(), "continue")
+        assertNull(target)
+        var homeEntryCalls = 0
+        var focusedRows = mutableListOf<String>()
+        val handoff = HomeEmptyRowFocusHandoff(
+            ensureRowAvailable = { rowKey -> homeRowScrollIndex(indexes, rowKey) != null },
+            focusRowFirstCard = { rowKey ->
+                focusedRows += rowKey
+                true
+            },
+            focusHomeEntry = {
+                homeEntryCalls += 1
+                true
+            },
+        )
+        assertTrue(handoff.run(target))
+        assertEquals(1, homeEntryCalls)
+        assertTrue(focusedRows.isEmpty())
+        // A hidden row handed directly to the handoff is rejected before any scroll/focus attempt.
+        assertFalse(handoff.run("football-matches"))
+        assertTrue(focusedRows.isEmpty())
+    }
+
+    @Test
     fun removalController_deliversOneSuccessAndSurvivesDuplicatePress() {
         var removeCalls = 0
         var callback: ((Boolean) -> Unit)? = null

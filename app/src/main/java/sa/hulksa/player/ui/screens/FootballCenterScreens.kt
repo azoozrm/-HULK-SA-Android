@@ -477,19 +477,46 @@ internal fun FootballCompetitionMark(
     }
 }
 
-private fun footballStatusText(match: FootballMatch, hideScores: Boolean): String = when (match.status) {
-    FootballMatchStatus.LIVE -> match.minute?.let { "مباشر $it'" } ?: "مباشر"
-    FootballMatchStatus.FINISHED -> "انتهت"
+private fun footballScoresMissing(match: FootballMatch): Boolean =
+    match.status.isStarted && (match.homeScore == null || match.awayScore == null)
+
+internal fun footballStatusText(
+    match: FootballMatch,
+    hideScores: Boolean,
+    nowEpochMs: Long,
+    stale: Boolean,
+): String = when (match.status) {
+    FootballMatchStatus.LIVE -> {
+        val live = match.minute?.let { "مباشر $it'" } ?: "مباشر"
+        if (footballScoresMissing(match)) "$live • النتيجة غير متوفرة" else live
+    }
+    FootballMatchStatus.FINISHED -> when {
+        hideScores -> "انتهت • النتيجة مخفية"
+        footballScoresMissing(match) -> "انتهت • النتيجة غير متوفرة"
+        else -> "انتهت"
+    }
     FootballMatchStatus.POSTPONED -> "مؤجلة"
     FootballMatchStatus.CANCELLED -> "ملغاة"
     FootballMatchStatus.UNRESOLVED -> "غير مؤكدة"
-    FootballMatchStatus.UPCOMING -> "لم تبدا"
+    FootballMatchStatus.UPCOMING -> when {
+        match.kickoffEpochMs > nowEpochMs -> "لم تبدا"
+        stale -> "الموعد مضى • بيانات قديمة"
+        else -> "الموعد مضى • بانتظار التحديث"
+    }
 }
 
-private fun footballDetailStatusText(match: FootballMatch): String = when (match.status) {
-    FootballMatchStatus.UPCOMING -> "مؤكدة • لم تبدا"
+internal fun footballDetailStatusText(
+    match: FootballMatch,
+    nowEpochMs: Long,
+    stale: Boolean,
+): String = when (match.status) {
+    FootballMatchStatus.UPCOMING -> when {
+        match.kickoffEpochMs > nowEpochMs -> "مؤكدة • لم تبدا"
+        stale -> "الموعد مضى • بيانات قديمة"
+        else -> "الموعد مضى • بانتظار التحديث"
+    }
     FootballMatchStatus.UNRESOLVED -> "غير مؤكدة"
-    else -> footballStatusText(match, false)
+    else -> footballStatusText(match, false, nowEpochMs, stale)
 }
 
 @Composable
@@ -531,7 +558,7 @@ private fun FootballScoreDisplay(
     ) {
         // Home is physically first in RTL, so each side keeps its own score next to its team.
         Text(
-            text = match.homeScore?.toString() ?: "-",
+            text = match.homeScore?.toString() ?: "—",
             color = colors.text,
             fontSize = fontSizeSp.sp,
             fontWeight = FontWeight.Black,
@@ -543,7 +570,7 @@ private fun FootballScoreDisplay(
             fontWeight = FontWeight.Black,
         )
         Text(
-            text = match.awayScore?.toString() ?: "-",
+            text = match.awayScore?.toString() ?: "—",
             color = colors.text,
             fontSize = fontSizeSp.sp,
             fontWeight = FontWeight.Black,
@@ -551,13 +578,12 @@ private fun FootballScoreDisplay(
     }
 }
 
-private fun footballSecondaryText(match: FootballMatch, hideScores: Boolean): String = when {
-    match.status == FootballMatchStatus.LIVE ->
-        match.minute?.let { "مباشر $it'" } ?: "مباشر"
-    match.status == FootballMatchStatus.FINISHED && hideScores -> "انتهت • النتيجة مخفية"
-    match.status == FootballMatchStatus.UPCOMING -> "لم تبدا"
-    else -> footballStatusText(match, hideScores)
-}
+private fun footballSecondaryText(
+    match: FootballMatch,
+    hideScores: Boolean,
+    nowEpochMs: Long,
+    stale: Boolean,
+): String = footballStatusText(match, hideScores, nowEpochMs, stale)
 
 @Composable
 internal fun FootballHomeCard(
@@ -565,6 +591,8 @@ internal fun FootballHomeCard(
     favoriteIds: Set<String>,
     hideScores: Boolean,
     isTv: Boolean,
+    nowEpochMs: Long,
+    stale: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
     onFocused: () -> Unit = {},
@@ -657,7 +685,7 @@ internal fun FootballHomeCard(
                     Spacer(Modifier.width(5.dp))
                 }
                 Text(
-                    text = footballSecondaryText(match, hideScores),
+                    text = footballSecondaryText(match, hideScores, nowEpochMs, stale),
                     color = if (match.status == FootballMatchStatus.LIVE) colors.goldBright else colors.textMuted,
                     fontSize = 11.sp,
                     fontWeight = if (match.status == FootballMatchStatus.LIVE) FontWeight.Bold else FontWeight.Normal,
@@ -1103,6 +1131,8 @@ internal fun FootballCenterScreen(
                                 match = match,
                                 hideScores = feed.hideScores,
                                 favoriteIds = favoriteIds,
+                                nowEpochMs = currentTimeMs,
+                                stale = snapshot.stale,
                                 modifier = Modifier.focusRequester(requesterFor(match)),
                                 onFocused = {
                                     focusedMatchKey = match.stableIdentity
@@ -1146,6 +1176,8 @@ internal fun FootballCenterScreen(
             favorites = feed.favoriteTeams,
             preferences = resolveFootballAlertPreferences(feed.matchAlerts, match),
             hideScores = feed.hideScores,
+            nowEpochMs = currentTimeMs,
+            stale = snapshot?.stale == true,
             isTv = isTv,
             onSave = { preferences -> onSaveMatchAlerts(match, preferences) },
             onDismiss = {
@@ -1196,6 +1228,8 @@ private fun FootballCenterRow(
     match: FootballMatch,
     hideScores: Boolean,
     favoriteIds: Set<String>,
+    nowEpochMs: Long,
+    stale: Boolean,
     modifier: Modifier = Modifier,
     onFocused: () -> Unit = {},
     onFocusLost: () -> Unit = {},
@@ -1241,7 +1275,7 @@ private fun FootballCenterRow(
                     Spacer(Modifier.width(4.dp))
                 }
                 Text(
-                    footballSecondaryText(match, hideScores),
+                    footballSecondaryText(match, hideScores, nowEpochMs, stale),
                     color = if (match.status == FootballMatchStatus.LIVE) colors.goldBright else colors.textMuted,
                     fontSize = 10.sp,
                     textAlign = TextAlign.Center,
@@ -1664,6 +1698,8 @@ internal fun FootballMatchDetailsDialog(
     favorites: List<FootballFavoriteTeam>,
     preferences: FootballMatchAlertPreferences?,
     hideScores: Boolean,
+    nowEpochMs: Long,
+    stale: Boolean,
     isTv: Boolean,
     onSave: (FootballMatchAlertPreferences) -> Unit,
     onDismiss: () -> Unit,
@@ -1716,9 +1752,18 @@ internal fun FootballMatchDetailsDialog(
                             fontSize = 11.sp,
                             textAlign = TextAlign.Center,
                         )
-                        Text(footballDetailStatusText(match), color = colors.textMuted, fontSize = 11.sp)
+                        Text(
+                            footballDetailStatusText(match, nowEpochMs, stale),
+                            color = colors.textMuted,
+                            fontSize = 11.sp,
+                        )
                         if (hideScores && match.status.isStarted) {
                             Text("النتيجة مخفية", color = colors.goldBright, fontSize = 10.sp)
+                        } else if (
+                            match.status.isStarted &&
+                            (match.homeScore == null || match.awayScore == null)
+                        ) {
+                            Text("النتيجة غير متوفرة", color = colors.goldBright, fontSize = 10.sp)
                         }
                     }
                     FootballHomeTeam(match.awayTeam, 54.dp, Modifier.weight(1f), TextAlign.End)

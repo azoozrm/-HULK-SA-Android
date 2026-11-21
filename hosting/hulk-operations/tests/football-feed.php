@@ -5,6 +5,8 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/lib/football-feed.php';
 require_once dirname(__DIR__) . '/lib/operations.php';
 
+$tests = 0;
+
 function football_test(bool $condition, string $message): void
 {
     global $tests;
@@ -21,7 +23,8 @@ function football_event(
     string $status,
     ?int $replacedBy = null,
     ?int $homeScore = null,
-    ?int $awayScore = null
+    ?int $awayScore = null,
+    ?int $updatedAt = null
 ): array {
     return [
         'id' => $id,
@@ -31,6 +34,7 @@ function football_event(
         'home_score' => $homeScore,
         'away_score' => $awayScore,
         'current_minute' => $status === 'live' ? 63 : null,
+        'last_updated' => $updatedAt !== null ? gmdate('c', $updatedAt) : null,
         'league' => ['id' => 17, 'name' => 'Saudi Pro League', 'country' => 'Saudi Arabia'],
         'home_team' => ['id' => 10, 'name' => 'Al Hilal'],
         'away_team' => ['id' => 20, 'name' => 'Al Nassr'],
@@ -45,6 +49,37 @@ function football_aggregate_count(string $directory, int $clock): int
     }
     $decoded = json_decode((string) file_get_contents($path), true);
     return max(0, (int) ($decoded['count'] ?? 0));
+}
+
+/** Seed the one-day league-name cache so a capped refresh can reach its date/live calls. */
+function football_seed_leagues(string $directory, int $cachedAt): void
+{
+    if (!is_dir($directory)) {
+        mkdir($directory, 0770, true);
+    }
+    file_put_contents($directory . '/leagues.json', json_encode([
+        'cachedAt' => $cachedAt,
+        'leagues' => [['id' => '17', 'name' => 'Saudi Pro League']],
+    ]));
+}
+
+function football_cleanup_directory(string $path): void
+{
+    if (!is_dir($path)) {
+        return;
+    }
+    foreach (glob($path . '/*') ?: [] as $file) {
+        if (is_file($file)) {
+            @unlink($file);
+        }
+    }
+    @rmdir($path);
+}
+
+/** Count provider URLs whose path contains the requested fragment. */
+function football_count_calls(array $calls, string $fragment): int
+{
+    return count(array_filter($calls, static fn(string $url): bool => str_contains($url, $fragment)));
 }
 
 $now = strtotime('2026-11-18T18:00:00Z');
@@ -469,6 +504,440 @@ $cleanupEmptyCache = static function (string $path): void {
 };
 $cleanupEmptyCache($emptyCacheDirectory);
 
+// Cold metadata: the two-request cap is spent on leagues + date, so the supplemental live call is
+// legitimately skipped. The date rows stay usable but must be published as live-unverified.
+$coldBudgetDirectory = sys_get_temp_dir() . '/hulk-football-cold-budget-' . bin2hex(random_bytes(4));
+$coldBudgetCalls = [];
+$coldBudgetTransport = static function (string $url, array $headers, int $timeout) use (&$coldBudgetCalls): array {
+    $coldBudgetCalls[] = $url;
+    return [
+        'status' => 200,
+        'headers' => [],
+        'body' => json_encode(['results' => [
+            football_event(31, '2026-11-18T16:00:00Z', 'upcoming'),
+        ]]),
+        'error' => null,
+    ];
+};
+$coldBudget = ops_football_build_feed(
+    array_merge($settings, ['cache_directory' => $coldBudgetDirectory]),
+    '2026-11-18',
+    $now,
+    $coldBudgetTransport
+);
+football_test($coldBudget['httpStatus'] === 200 && count($coldBudget['payload']['matches']) === 1, 'cold budget publishes usable date rows');
+football_test($coldBudget['payload']['stale'] === true, 'cold budget marks live freshness unverified');
+football_test($coldBudget['retryAfter'] === null, 'cold budget has no provider Retry-After to inherit');
+football_test(football_count_calls($coldBudgetCalls, '/leagues/') === 1, 'cold budget spends one request on league metadata');
+football_test(football_count_calls($coldBudgetCalls, '/events/?date_from') === 1, 'cold budget spends one request on the date list');
+football_test(football_count_calls($coldBudgetCalls, '/live/') === 0, 'cold budget never issues the unaffordable live call');
+$coldBudgetDay = json_decode((string) file_get_contents($coldBudgetDirectory . '/day-2026-11-18.json'), true);
+football_test(($coldBudgetDay['complete'] ?? null) === false, 'cold budget records an incomplete live-unverified day');
+$coldBudgetCached = ops_football_build_feed(
+    array_merge($settings, ['cache_directory' => $coldBudgetDirectory]),
+    '2026-11-18',
+    $now + 1,
+    $coldBudgetTransport
+);
+football_test(football_count_calls($coldBudgetCalls, '/events/') === 1, 'unverified live day is served from cache inside the refresh window');
+football_test($coldBudgetCached['payload']['stale'] === true && count($coldBudgetCached['payload']['matches']) === 1, 'cached unverified day keeps its rows and stale disclosure');
+football_cleanup_directory($coldBudgetDirectory);
+
+// Warm metadata: the date and live calls both fit, and the live 503 is a real observed failure.
+$liveFailDirectory = sys_get_temp_dir() . '/hulk-football-live-fail-' . bin2hex(random_bytes(4));
+football_seed_leagues($liveFailDirectory, $now);
+$liveFailSettings = array_merge($settings, ['cache_directory' => $liveFailDirectory]);
+$liveFailCalls = [];
+$liveFailTransport = static function (string $url, array $headers, int $timeout) use (&$liveFailCalls): array {
+    $liveFailCalls[] = $url;
+    if (str_contains($url, '/live/')) {
+        return [
+            'status' => 503,
+            'headers' => ['retry-after' => '15'],
+            'body' => '',
+            'error' => 'unavailable',
+        ];
+    }
+    return [
+        'status' => 200,
+        'headers' => [],
+        'body' => json_encode(['results' => [
+            football_event(31, '2026-11-18T16:00:00Z', 'upcoming'),
+        ]]),
+        'error' => null,
+    ];
+};
+$liveFail = ops_football_build_feed($liveFailSettings, '2026-11-18', $now, $liveFailTransport);
+football_test($liveFail['httpStatus'] === 200, 'date data survives supplemental live failure');
+football_test(count($liveFail['payload']['matches']) === 1, 'date row retained when live fails');
+football_test($liveFail['payload']['stale'] === true, 'supplemental live failure marks feed stale');
+football_test($liveFail['retryAfter'] === 15, 'live Retry-After retained');
+football_test(football_count_calls($liveFailCalls, '/events/?date_from') === 1, 'warm refresh issues exactly one date request');
+football_test(football_count_calls($liveFailCalls, '/live/') === 1, 'warm refresh actually issues and observes the live call');
+$liveFailCached = ops_football_build_feed($liveFailSettings, '2026-11-18', $now + 1, $liveFailTransport);
+football_test($liveFailCached['httpStatus'] === 200, 'cached partial-live feed is readable');
+football_test(count($liveFailCached['payload']['matches']) === 1, 'cached date row survives live cooldown');
+football_test($liveFailCached['payload']['stale'] === true, 'cached partial-live feed stays stale');
+football_test(football_count_calls($liveFailCalls, '/live/') === 1, 'shared cooldown blocks a repeat live call');
+football_test($liveFailCached['retryAfter'] === 14, 'live cooldown countdown is retained from the actual failure');
+football_cleanup_directory($liveFailDirectory);
+
+// Verified observation preservation: a date row that regresses during a live failure must not erase
+// a confirmed live score, while a later authoritative final result or correction still wins.
+$preserveDirectory = sys_get_temp_dir() . '/hulk-football-preserve-' . bin2hex(random_bytes(4));
+football_seed_leagues($preserveDirectory, $now);
+$preserveSettings = array_merge($settings, ['cache_directory' => $preserveDirectory]);
+$preservePhase = 'live';
+$preserveCalls = [];
+$preserveTransport = static function (string $url, array $headers, int $timeout) use (&$preservePhase, &$preserveCalls, $now): array {
+    $preserveCalls[] = $url;
+    if (str_contains($url, '/live/')) {
+        if ($preservePhase === 'live') {
+            return [
+                'status' => 200,
+                'headers' => [],
+                'body' => json_encode(['results' => [
+                    football_event(41, '2026-11-18T16:00:00Z', 'live', null, 2, 1, $now),
+                ]]),
+                'error' => null,
+            ];
+        }
+        if ($preservePhase === 'fail') {
+            return [
+                'status' => 503,
+                'headers' => ['retry-after' => '15'],
+                'body' => '',
+                'error' => 'unavailable',
+            ];
+        }
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['results' => []]), 'error' => null];
+    }
+    if ($preservePhase === 'live') {
+        return [
+            'status' => 200,
+            'headers' => [],
+            'body' => json_encode(['results' => [
+                football_event(41, '2026-11-18T16:00:00Z', 'upcoming', null, null, null, $now),
+                football_event(42, '2026-11-18T18:00:00Z', 'upcoming', null, null, null, $now),
+            ]]),
+            'error' => null,
+        ];
+    }
+    if ($preservePhase === 'fail') {
+        return [
+            'status' => 200,
+            'headers' => [],
+            'body' => json_encode(['results' => [
+                football_event(41, '2026-11-18T16:00:00Z', 'upcoming', null, null, null, $now),
+                football_event(42, '2026-11-18T18:00:00Z', 'finished', null, null, null, $now + 60),
+                football_event(43, '2026-11-18T19:00:00Z', 'upcoming', null, null, null, $now + 60),
+            ]]),
+            'error' => null,
+        ];
+    }
+    return [
+        'status' => 200,
+        'headers' => [],
+        'body' => json_encode(['results' => [
+            football_event(41, '2026-11-18T16:00:00Z', 'finished', null, 3, 1, $now + 90),
+            football_event(42, '2026-11-18T18:00:00Z', 'postponed', null, null, null, $now + 90),
+            football_event(43, '2026-11-18T19:00:00Z', 'upcoming', null, null, null, $now + 90),
+        ]]),
+        'error' => null,
+    ];
+};
+$confirmedLive = ops_football_build_feed($preserveSettings, '2026-11-18', $now, $preserveTransport);
+$confirmedLiveMatch = $confirmedLive['payload']['matches'][0];
+football_test($confirmedLiveMatch['status'] === 'live' && $confirmedLiveMatch['homeScore'] === 2 && $confirmedLiveMatch['awayScore'] === 1, 'confirmed live score is published from the date/live merge');
+football_test($confirmedLive['payload']['stale'] === false, 'successful live observation is complete');
+
+$preservePhase = 'fail';
+$regressed = ops_football_build_feed($preserveSettings, '2026-11-18', $now + 61, $preserveTransport);
+$regressedById = [];
+foreach ($regressed['payload']['matches'] as $match) {
+    $regressedById[$match['providerEventId']] = $match;
+}
+football_test($regressed['httpStatus'] === 200 && $regressed['payload']['stale'] === true, 'regressed date row is published as live-unverified');
+football_test($regressedById['41']['status'] === 'live', 'last verified live status survives a regressed date row');
+football_test($regressedById['41']['homeScore'] === 2 && $regressedById['41']['awayScore'] === 1, 'last verified live score survives a regressed date row');
+football_test($regressedById['41']['minute'] === 63, 'last verified live minute survives a regressed date row');
+football_test($regressedById['42']['status'] === 'finished', 'a new authoritative date status is accepted');
+football_test($regressedById['42']['homeScore'] === null && $regressedById['42']['awayScore'] === null, 'a missing score is never fabricated');
+football_test($regressedById['43']['status'] === 'upcoming', 'a genuinely new date row stays usable');
+$regressedCache = json_decode((string) file_get_contents($preserveDirectory . '/day-2026-11-18.json'), true);
+football_test(($regressedCache['complete'] ?? null) === false, 'regressed refresh records an incomplete day');
+$regressedCacheLive = null;
+foreach (($regressedCache['payload']['matches'] ?? []) as $match) {
+    if (($match['providerEventId'] ?? '') === '41') {
+        $regressedCacheLive = $match;
+    }
+}
+football_test($regressedCacheLive !== null && $regressedCacheLive['status'] === 'live' && $regressedCacheLive['homeScore'] === 2, 'day storage keeps the confirmed live observation');
+$season = json_decode((string) file_get_contents($preserveDirectory . '/season-2026.json'), true);
+$seasonLive = null;
+foreach (($season['fixtures'] ?? []) as $fixture) {
+    if (($fixture['providerEventId'] ?? '') === '41') {
+        $seasonLive = $fixture;
+    }
+}
+football_test($seasonLive !== null && $seasonLive['status'] === 'live' && $seasonLive['awayScore'] === 1, 'season index keeps the confirmed live observation');
+
+$preserveCallsBeforeCooldownRead = count($preserveCalls);
+$cooldownRead = ops_football_build_feed($preserveSettings, '2026-11-18', $now + 62, $preserveTransport);
+football_test(count($preserveCalls) === $preserveCallsBeforeCooldownRead, 'shared cooldown prevents another provider attempt');
+football_test($cooldownRead['payload']['matches'][0]['status'] === 'live' && $cooldownRead['payload']['matches'][0]['homeScore'] === 2, 'cooldown response still carries the confirmed live observation');
+
+$preservePhase = 'final';
+$authoritativeFinal = ops_football_build_feed($preserveSettings, '2026-11-18', $now + 122, $preserveTransport);
+$finalById = [];
+foreach ($authoritativeFinal['payload']['matches'] as $match) {
+    $finalById[$match['providerEventId']] = $match;
+}
+football_test($finalById['41']['status'] === 'finished' && $finalById['41']['homeScore'] === 3 && $finalById['41']['awayScore'] === 1, 'a later authoritative final result wins');
+football_test($authoritativeFinal['payload']['stale'] === false, 'recovered live refresh is complete again');
+football_test($finalById['42']['status'] === 'postponed', 'a newer terminal correction wins over an accepted status');
+football_cleanup_directory($preserveDirectory);
+
+// Observation authority: an older value cannot replace a newer one, a scoreless final stays
+// unknown, and a rescheduled occurrence inherits nothing from the previous kickoff's live tuple.
+$authorityDirectory = sys_get_temp_dir() . '/hulk-football-authority-' . bin2hex(random_bytes(4));
+football_seed_leagues($authorityDirectory, $now);
+$authoritySettings = array_merge($settings, ['cache_directory' => $authorityDirectory]);
+$liveObservedAt = strtotime('2026-11-18T17:59:00Z');
+$regressedObservedAt = strtotime('2026-11-18T18:00:00Z');
+$olderObservedAt = strtotime('2026-11-18T17:35:00Z');
+$authorityPhase = 'seed';
+$authorityTransport = static function (string $url, array $headers, int $timeout) use (
+    &$authorityPhase,
+    $liveObservedAt,
+    $regressedObservedAt,
+    $olderObservedAt,
+): array {
+    if (str_contains($url, '/live/')) {
+        if ($authorityPhase === 'fail') {
+            return [
+                'status' => 503,
+                'headers' => ['retry-after' => '15'],
+                'body' => '',
+                'error' => 'unavailable',
+            ];
+        }
+        return [
+            'status' => 200,
+            'headers' => [],
+            'body' => json_encode(['results' => [
+                football_event(41, '2026-11-18T16:00:00Z', 'live', null, 2, 1, $liveObservedAt),
+                football_event(42, '2026-11-18T17:00:00Z', 'live', null, 2, 1, $liveObservedAt),
+                football_event(43, '2026-11-18T16:00:00Z', 'live', null, 2, 1, $liveObservedAt),
+            ]]),
+            'error' => null,
+        ];
+    }
+    if ($authorityPhase === 'seed') {
+        return [
+            'status' => 200,
+            'headers' => [],
+            'body' => json_encode(['results' => [
+                football_event(41, '2026-11-18T16:00:00Z', 'upcoming', null, null, null, $liveObservedAt),
+                football_event(42, '2026-11-18T17:00:00Z', 'upcoming', null, null, null, $liveObservedAt),
+                football_event(43, '2026-11-18T16:00:00Z', 'upcoming', null, null, null, $liveObservedAt),
+            ]]),
+            'error' => null,
+        ];
+    }
+    return [
+        'status' => 200,
+        'headers' => [],
+        'body' => json_encode(['results' => [
+            football_event(41, '2026-11-18T16:00:00Z', 'live', null, 1, 1, $olderObservedAt),
+            football_event(42, '2026-11-18T17:00:00Z', 'finished', null, null, null, $regressedObservedAt),
+            football_event(43, '2026-11-18T19:00:00Z', 'upcoming', null, null, null, $regressedObservedAt),
+        ]]),
+        'error' => null,
+    ];
+};
+$authoritySeed = ops_football_build_feed($authoritySettings, '2026-11-18', $now, $authorityTransport);
+$seededById = [];
+foreach ($authoritySeed['payload']['matches'] as $match) {
+    $seededById[$match['providerEventId']] = $match;
+}
+foreach (['41', '42', '43'] as $id) {
+    football_test(
+        $seededById[$id]['status'] === 'live'
+            && $seededById[$id]['homeScore'] === 2
+            && $seededById[$id]['awayScore'] === 1
+            && $seededById[$id]['minute'] === 63,
+        'seed live observation ' . $id
+    );
+}
+
+$authorityPhase = 'fail';
+$authorityFail = ops_football_build_feed($authoritySettings, '2026-11-18', $now + 61, $authorityTransport);
+$authorityById = [];
+foreach ($authorityFail['payload']['matches'] as $match) {
+    $authorityById[$match['providerEventId']] = $match;
+}
+football_test($authorityFail['payload']['stale'] === true, 'authority case is live-unverified');
+football_test(
+    $authorityById['41']['status'] === 'live'
+        && $authorityById['41']['homeScore'] === 2
+        && $authorityById['41']['awayScore'] === 1
+        && $authorityById['41']['minute'] === 63,
+    'an older 1-1 observation cannot replace the newer 2-1 live tuple'
+);
+football_test(
+    $authorityById['41']['providerUpdatedAt'] === $liveObservedAt,
+    'the published timestamp is the selected 2-1 observation time'
+);
+football_test(
+    $authorityById['42']['status'] === 'finished'
+        && $authorityById['42']['homeScore'] === null
+        && $authorityById['42']['awayScore'] === null
+        && $authorityById['42']['minute'] === null,
+    'a scoreless final stays unknown and inherits no live minute'
+);
+football_test(
+    $authorityById['42']['providerUpdatedAt'] === $regressedObservedAt,
+    'the final result carries its own observation timestamp'
+);
+football_test(
+    $authorityById['43']['status'] === 'upcoming'
+        && $authorityById['43']['homeScore'] === null
+        && $authorityById['43']['awayScore'] === null
+        && $authorityById['43']['minute'] === null,
+    'a rescheduled occurrence inherits no live status, score or minute'
+);
+football_test(
+    $authorityById['43']['kickoffAt'] === strtotime('2026-11-18T19:00:00Z')
+        && $authorityById['43']['providerUpdatedAt'] === $regressedObservedAt,
+    'the rescheduled kickoff and its observation time are published'
+);
+
+$authorityCache = json_decode((string) file_get_contents($authorityDirectory . '/day-2026-11-18.json'), true);
+$authorityCacheById = [];
+foreach (($authorityCache['payload']['matches'] ?? []) as $match) {
+    $authorityCacheById[$match['providerEventId']] = $match;
+}
+football_test(
+    $authorityCacheById['41']['homeScore'] === 2 && $authorityCacheById['41']['providerUpdatedAt'] === $liveObservedAt,
+    'day storage keeps the selected newer live tuple and timestamp'
+);
+football_test(
+    $authorityCacheById['42']['status'] === 'finished'
+        && $authorityCacheById['42']['homeScore'] === null
+        && $authorityCacheById['42']['minute'] === null,
+    'day storage keeps the scoreless final unknown'
+);
+football_test(
+    $authorityCacheById['43']['status'] === 'upcoming'
+        && $authorityCacheById['43']['kickoffAt'] === strtotime('2026-11-18T19:00:00Z')
+        && $authorityCacheById['43']['homeScore'] === null,
+    'day storage keeps the rescheduled occurrence separate'
+);
+$authoritySeason = json_decode((string) file_get_contents($authorityDirectory . '/season-2026.json'), true);
+$authoritySeasonById = [];
+foreach (($authoritySeason['fixtures'] ?? []) as $fixture) {
+    $authoritySeasonById[$fixture['providerEventId']] = $fixture;
+}
+football_test(
+    $authoritySeasonById['41']['status'] === 'live'
+        && $authoritySeasonById['41']['homeScore'] === 2
+        && $authoritySeasonById['41']['providerUpdatedAt'] === $liveObservedAt,
+    'season index keeps the selected live observation'
+);
+football_test(
+    $authoritySeasonById['42']['status'] === 'finished'
+        && $authoritySeasonById['42']['homeScore'] === null,
+    'season index keeps the scoreless final unknown'
+);
+football_test(
+    $authoritySeasonById['43']['status'] === 'upcoming'
+        && $authoritySeasonById['43']['kickoffAt'] === strtotime('2026-11-18T19:00:00Z')
+        && $authoritySeasonById['43']['homeScore'] === null,
+    'season index keeps the rescheduled occurrence separate'
+);
+$timestamplessFinal = ops_football_carry_verified_observation(
+    [
+        'providerEventId' => '41',
+        'status' => 'finished',
+        'homeScore' => null,
+        'awayScore' => null,
+        'minute' => null,
+        'kickoffAt' => strtotime('2026-11-18T16:00:00Z'),
+        'providerUpdatedAt' => null,
+    ],
+    [
+        'providerEventId' => '41',
+        'status' => 'live',
+        'homeScore' => 2,
+        'awayScore' => 1,
+        'minute' => 63,
+        'kickoffAt' => strtotime('2026-11-18T16:00:00Z'),
+        'providerUpdatedAt' => $liveObservedAt,
+    ]
+);
+football_test(
+    $timestamplessFinal['status'] === 'finished'
+        && $timestamplessFinal['homeScore'] === null
+        && $timestamplessFinal['awayScore'] === null
+        && $timestamplessFinal['providerUpdatedAt'] === null,
+    'a timestamp-less scoreless final is still final and stays unknown'
+);
+football_cleanup_directory($authorityDirectory);
+
+// The original regression: an older schedule copy with the live request unavailable must still
+// keep the same occurrence's verified live 2-1.
+$regressionDirectory = sys_get_temp_dir() . '/hulk-football-regression-' . bin2hex(random_bytes(4));
+football_seed_leagues($regressionDirectory, $now);
+$regressionSettings = array_merge($settings, ['cache_directory' => $regressionDirectory]);
+$regressionPhase = 'live';
+$regressionTransport = static function (string $url, array $headers, int $timeout) use (&$regressionPhase, $liveObservedAt): array {
+    if (str_contains($url, '/live/')) {
+        if ($regressionPhase === 'fail') {
+            return [
+                'status' => 503,
+                'headers' => ['retry-after' => '15'],
+                'body' => '',
+                'error' => 'unavailable',
+            ];
+        }
+        return [
+            'status' => 200,
+            'headers' => [],
+            'body' => json_encode(['results' => [
+                football_event(41, '2026-11-18T16:00:00Z', 'live', null, 2, 1, $liveObservedAt),
+            ]]),
+            'error' => null,
+        ];
+    }
+    return [
+        'status' => 200,
+        'headers' => [],
+        'body' => json_encode(['results' => [
+            football_event(41, '2026-11-18T16:00:00Z', 'upcoming', null, null, null, $liveObservedAt),
+        ]]),
+        'error' => null,
+    ];
+};
+$regressionSeed = ops_football_build_feed($regressionSettings, '2026-11-18', $now, $regressionTransport);
+football_test(
+    $regressionSeed['payload']['matches'][0]['status'] === 'live'
+        && $regressionSeed['payload']['matches'][0]['homeScore'] === 2,
+    'original live tuple is accepted before the regression'
+);
+$regressionPhase = 'fail';
+$regression = ops_football_build_feed($regressionSettings, '2026-11-18', $now + 61, $regressionTransport);
+football_test($regression['httpStatus'] === 200 && $regression['payload']['stale'] === true, 'original regression is still served as live-unverified');
+football_test(
+    $regression['payload']['matches'][0]['status'] === 'live'
+        && $regression['payload']['matches'][0]['homeScore'] === 2
+        && $regression['payload']['matches'][0]['awayScore'] === 1
+        && $regression['payload']['matches'][0]['minute'] === 63
+        && $regression['payload']['matches'][0]['providerUpdatedAt'] === $liveObservedAt,
+    'an older upcoming copy keeps the same occurrence live 2-1 with its original timestamp'
+);
+football_cleanup_directory($regressionDirectory);
+
 $calls = 0;
 $transport = static function (string $url, array $headers, int $timeout) use (&$calls): array {
     $calls++;
@@ -493,10 +962,13 @@ $transport = static function (string $url, array $headers, int $timeout) use (&$
         'error' => null,
     ];
 };
+// Warm league metadata so the two-request cap proves one date + one live call, not metadata spend.
+football_seed_leagues($directory, $now);
 $first = ops_football_build_feed($settings, '2026-11-18', $now, $transport);
 football_test($first['httpStatus'] === 200, 'feed fetch succeeds');
 football_test($calls === 2, 'aggregate refresh is bounded to two requests');
 football_test(count($first['payload']['matches']) === 2, 'aggregate results merged');
+football_test($first['payload']['refreshSeconds'] === 60, 'a live today keeps the configured refresh cadence');
 football_test(football_aggregate_count($directory, $now) === 2, 'each successful request is counted exactly once');
 $second = ops_football_build_feed($settings, '2026-11-18', $now + 5, $transport);
 football_test($second['httpStatus'] === 200 && $calls === 2, 'fresh cache avoids provider calls');
@@ -516,6 +988,174 @@ $blocked = ops_football_build_feed($settings, '2026-11-18', $now + 62, $failing)
 football_test($blocked['payload']['stale'] === true, 'Retry-After window serves cache without a provider call');
 football_test($blocked['retryAfter'] === 119, 'Retry-After countdown retained');
 football_test(football_aggregate_count($directory, $now) === 3, 'failed provider attempt is counted exactly once');
+
+// Bounded reuse: settled past, stable future, idle today and a due kickoff. Every case uses the
+// injected transport/clock and the same production scheduling path.
+$settledDirectory = sys_get_temp_dir() . '/hulk-football-settled-' . bin2hex(random_bytes(4));
+football_seed_leagues($settledDirectory, $now);
+$settledSettings = array_merge($settings, ['cache_directory' => $settledDirectory]);
+$settledDateCalls = 0;
+$settledTransport = static function (string $url, array $headers, int $timeout) use (&$settledDateCalls): array {
+    if (str_contains($url, '/live/') || str_contains($url, 'country_code=SA')) {
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['results' => []]), 'error' => null];
+    }
+    $settledDateCalls++;
+    return [
+        'status' => 200,
+        'headers' => [],
+        'body' => json_encode(['results' => [
+            football_event(51, '2026-11-17T16:00:00Z', 'finished', null, 2, 0),
+        ]]),
+        'error' => null,
+    ];
+};
+$settledFirst = ops_football_build_feed($settledSettings, '2026-11-17', $now, $settledTransport);
+football_test($settledFirst['payload']['refreshSeconds'] === OPS_FOOTBALL_SETTLED_DAY_REUSE_SECONDS, 'settled past day advertises bounded reuse');
+foreach ([5, 61, 122, 1799] as $offset) {
+    $settledCached = ops_football_build_feed($settledSettings, '2026-11-17', $now + $offset, $settledTransport);
+    football_test(
+        $settledDateCalls === 1 && $settledCached['payload']['matches'][0]['homeScore'] === 2,
+        'settled past day is reused at T+' . $offset
+    );
+}
+$settledRefresh = ops_football_build_feed($settledSettings, '2026-11-17', $now + 1800, $settledTransport);
+football_test($settledDateCalls === 2, 'settled past day is revalidated exactly at the reuse ceiling');
+football_test($settledRefresh['payload']['stale'] === false, 'settled revalidation stays a fresh record');
+football_cleanup_directory($settledDirectory);
+
+$futureDirectory = sys_get_temp_dir() . '/hulk-football-future-' . bin2hex(random_bytes(4));
+football_seed_leagues($futureDirectory, $now);
+$futureSettings = array_merge($settings, ['cache_directory' => $futureDirectory]);
+$futureDateCalls = 0;
+$futureTransport = static function (string $url, array $headers, int $timeout) use (&$futureDateCalls): array {
+    if (str_contains($url, 'country_code=SA')) {
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['results' => []]), 'error' => null];
+    }
+    $futureDateCalls++;
+    return [
+        'status' => 200,
+        'headers' => [],
+        'body' => json_encode(['results' => [
+            football_event(52, '2026-11-19T16:00:00Z', 'upcoming'),
+        ]]),
+        'error' => null,
+    ];
+};
+$futureFirst = ops_football_build_feed($futureSettings, '2026-11-19', $now, $futureTransport);
+football_test($futureFirst['payload']['refreshSeconds'] === OPS_FOOTBALL_FUTURE_DAY_REUSE_SECONDS, 'stable future day advertises bounded reuse');
+$futureCached = ops_football_build_feed($futureSettings, '2026-11-19', $now + 61, $futureTransport);
+football_test($futureDateCalls === 1 && $futureCached['payload']['matches'][0]['status'] === 'upcoming', 'stable future day is reused before its ceiling');
+$futureRefresh = ops_football_build_feed($futureSettings, '2026-11-19', $now + 900, $futureTransport);
+football_test($futureDateCalls === 2 && $futureRefresh['payload']['stale'] === false, 'future day revalidates at its reuse ceiling');
+football_cleanup_directory($futureDirectory);
+
+$carryDirectory = sys_get_temp_dir() . '/hulk-football-carry-' . bin2hex(random_bytes(4));
+football_seed_leagues($carryDirectory, $now);
+$carryTransport = static function (string $url, array $headers, int $timeout) use ($now): array {
+    if (str_contains($url, 'country_code=SA')) {
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['results' => []]), 'error' => null];
+    }
+    return [
+        'status' => 200,
+        'headers' => [],
+        'body' => json_encode(['results' => [
+            football_event(52, '2026-11-19T16:00:00Z', 'upcoming'),
+            football_event(55, gmdate('c', $now - 600), 'live', null, 0, 0, $now),
+        ]]),
+        'error' => null,
+    ];
+};
+$carry = ops_football_build_feed(
+    array_merge($settings, ['cache_directory' => $carryDirectory]),
+    '2026-11-19',
+    $now,
+    $carryTransport
+);
+football_test($carry['payload']['refreshSeconds'] === 60, 'a live carryover in the history keeps the normal cadence');
+football_cleanup_directory($carryDirectory);
+
+$idleDirectory = sys_get_temp_dir() . '/hulk-football-idle-' . bin2hex(random_bytes(4));
+football_seed_leagues($idleDirectory, $now);
+$idleSettings = array_merge($settings, ['cache_directory' => $idleDirectory]);
+$idleDateCalls = 0;
+$idleTransport = static function (string $url, array $headers, int $timeout) use (&$idleDateCalls, $now): array {
+    if (str_contains($url, '/live/')) {
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['results' => []]), 'error' => null];
+    }
+    $idleDateCalls++;
+    return [
+        'status' => 200,
+        'headers' => [],
+        'body' => json_encode(['results' => [
+            football_event(53, gmdate('c', $now + 600), 'upcoming'),
+        ]]),
+        'error' => null,
+    ];
+};
+$idleFirst = ops_football_build_feed($idleSettings, '2026-11-18', $now, $idleTransport);
+football_test($idleFirst['payload']['refreshSeconds'] === OPS_FOOTBALL_IDLE_DAY_REUSE_SECONDS, 'idle today reuses at most the idle window');
+$idleCached = ops_football_build_feed($idleSettings, '2026-11-18', $now + 61, $idleTransport);
+football_test($idleDateCalls === 1 && $idleCached['payload']['matches'][0]['status'] === 'upcoming', 'idle today is reused before its ceiling');
+$idleRefresh = ops_football_build_feed($idleSettings, '2026-11-18', $now + 300, $idleTransport);
+football_test($idleDateCalls === 2 && $idleRefresh['payload']['stale'] === false, 'idle today revalidates at the idle ceiling');
+football_cleanup_directory($idleDirectory);
+
+$dueDirectory = sys_get_temp_dir() . '/hulk-football-due-' . bin2hex(random_bytes(4));
+football_seed_leagues($dueDirectory, $now);
+$dueSettings = array_merge($settings, ['cache_directory' => $dueDirectory]);
+$dueDateCalls = 0;
+$dueTransport = static function (string $url, array $headers, int $timeout) use (&$dueDateCalls, $now): array {
+    if (str_contains($url, '/live/')) {
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['results' => []]), 'error' => null];
+    }
+    $dueDateCalls++;
+    return [
+        'status' => 200,
+        'headers' => [],
+        'body' => json_encode(['results' => [
+            football_event(54, gmdate('c', $now + 59), 'upcoming'),
+        ]]),
+        'error' => null,
+    ];
+};
+$dueFirst = ops_football_build_feed($dueSettings, '2026-11-18', $now, $dueTransport);
+football_test($dueFirst['payload']['refreshSeconds'] === 59, 'a kickoff inside one interval advertises only the remaining safe freshness');
+football_test(ops_football_public_max_age($dueFirst) === 59, 'the public max-age uses the actual pre-kickoff freshness');
+$dueRefresh = ops_football_build_feed($dueSettings, '2026-11-18', $now + 61, $dueTransport);
+football_test($dueDateCalls === 2, 'a due kickoff is rechecked at the configured cadence');
+football_test($dueRefresh['payload']['matches'][0]['status'] === 'upcoming', 'due-start refresh still serves the same fixture');
+football_cleanup_directory($dueDirectory);
+
+// The exact boundary: a fixture due inside one configured interval must be revalidated at its
+// kickoff, not one full interval after the last refresh. Quota/cooldown still own their branch.
+$boundaryDirectory = sys_get_temp_dir() . '/hulk-football-boundary-' . bin2hex(random_bytes(4));
+football_seed_leagues($boundaryDirectory, $now);
+$boundarySettings = array_merge($settings, ['cache_directory' => $boundaryDirectory]);
+$boundaryDateCalls = 0;
+$boundaryTransport = static function (string $url, array $headers, int $timeout) use (&$boundaryDateCalls, $now): array {
+    if (str_contains($url, '/live/')) {
+        return ['status' => 200, 'headers' => [], 'body' => json_encode(['results' => []]), 'error' => null];
+    }
+    $boundaryDateCalls++;
+    return [
+        'status' => 200,
+        'headers' => [],
+        'body' => json_encode(['results' => [
+            football_event(56, gmdate('c', $now + 20), 'upcoming'),
+        ]]),
+        'error' => null,
+    ];
+};
+$boundaryFirst = ops_football_build_feed($boundarySettings, '2026-11-18', $now, $boundaryTransport);
+football_test($boundaryFirst['payload']['refreshSeconds'] === 20, 'a 20 s pre-kickoff window advertises 20 s');
+football_test(ops_football_public_max_age($boundaryFirst) === 20, 'public max-age is the 20 s boundary window');
+$boundaryBefore = ops_football_build_feed($boundarySettings, '2026-11-18', $now + 19, $boundaryTransport);
+football_test($boundaryDateCalls === 1 && $boundaryBefore['payload']['matches'][0]['status'] === 'upcoming', 'the last safe second still reuses the accepted row');
+football_test(ops_football_public_max_age($boundaryBefore) === 1, 'the cached response advertises only the 1 s remaining safe freshness');
+$boundaryAtKickoff = ops_football_build_feed($boundarySettings, '2026-11-18', $now + 20, $boundaryTransport);
+football_test($boundaryDateCalls === 2, 'the cache is revalidated exactly at the kickoff boundary');
+football_test(ops_football_public_max_age($boundaryAtKickoff) === 60, 'after the boundary refresh the normal cadence resumes');
+football_cleanup_directory($boundaryDirectory);
 
 football_test(OPS_FOOTBALL_DEFAULT_MAX_REQUESTS_PER_DAY === 500, 'feed default budget is 500/day');
 football_test(OPS_FOOTBALL_MAX_REQUESTS_PER_DAY === 2500, 'feed hard ceiling is 2500/day');
@@ -1790,3 +2430,5 @@ $cleanupCatalogRetry($quotaDirectory);
 
 $cleanup($directory);
 $cleanup($noCacheDirectory);
+
+fwrite(STDOUT, "PASS: {$tests} football checks\n");

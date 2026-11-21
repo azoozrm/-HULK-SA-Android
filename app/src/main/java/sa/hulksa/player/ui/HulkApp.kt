@@ -757,6 +757,7 @@ fun HulkApp(
                     StableMobileBottomNavigation(
                         selected = state.destination,
                         downloadsEnabled = state.operations.features.downloadsEnabled,
+                        footballEnabled = state.operations.football != null,
                         onSelectDestination = selectDestinationWithProfileContext,
                         homeFocusRequester = mobileHomeFocusRequester,
                         modifier = Modifier.align(Alignment.BottomCenter),

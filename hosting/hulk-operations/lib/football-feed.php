@@ -26,6 +26,12 @@ const OPS_FOOTBALL_NATIONAL_LEAGUE_IDS = [27, 68, 66, 30, 61, 58, 59, 60, 62, 63
 const OPS_FOOTBALL_DEFAULT_CATALOG_MAX_PER_DAY = 200;
 const OPS_FOOTBALL_CARRY_OVER_SECONDS = 6 * 60 * 60;
 const OPS_FOOTBALL_MAX_EVENTS = 400;
+// Bounded reuse windows for days whose content cannot change quickly. Today's live/next-kickoff
+// cadence always keeps the configured refresh interval, and the ceiling bounds corrections.
+const OPS_FOOTBALL_SETTLED_DAY_REUSE_SECONDS = 1800;
+const OPS_FOOTBALL_FUTURE_DAY_REUSE_SECONDS = 900;
+const OPS_FOOTBALL_IDLE_DAY_REUSE_SECONDS = 300;
+const OPS_FOOTBALL_DAY_REUSE_CEILING_SECONDS = 3600;
 
 function ops_football_statuses(): array
 {
@@ -1009,7 +1015,7 @@ function ops_football_cached_payload(
     ?array $allowedLeagueIds = null,
 ): array {
     $payload = is_array($cache['payload'] ?? null) ? $cache['payload'] : [];
-    $payload['stale'] = false;
+    $payload['stale'] = !($cache['complete'] ?? true);
     $payload['cachedAt'] = (int) ($cache['cachedAt'] ?? 0);
     $payload['refreshSeconds'] = $refreshSeconds;
     $payload['retryAfterSeconds'] = null;
@@ -1017,6 +1023,241 @@ function ops_football_cached_payload(
         $payload,
         $allowedLeagueIds ?? ops_football_allowed_league_ids(),
     );
+}
+
+/**
+ * Bounded server-side reuse for a day whose score/state cannot change quickly. A settled past day
+ * or a finished today reuses its accepted record for up to 30 minutes; a future day for 15 minutes;
+ * today with no live fixture and no imminent kickoff reuses at most 5 minutes, never past the next
+ * kickoff. Live or unresolved past content and any incomplete (live-unverified) record keep the
+ * configured refresh interval so due starts, active scores and recovery still refresh promptly.
+ */
+function ops_football_cache_reuse_seconds(
+    array $cache,
+    string $day,
+    int $clock,
+    int $refreshSeconds,
+): int {
+    $base = max(1, $refreshSeconds);
+    $payload = is_array($cache['payload'] ?? null) ? $cache['payload'] : [];
+    if (!($cache['complete'] ?? true)) {
+        return $base;
+    }
+    if (!is_array($payload['matches'] ?? null)) {
+        // An unreadable/legacy record is never treated as a settled day.
+        return $base;
+    }
+    $matches = $payload['matches'];
+    // A live or unresolved row anywhere in the served payload (including yesterday's carryover in
+    // kickoffHistory) needs the normal cadence regardless of the requested day.
+    foreach ([$matches, is_array($payload['kickoffHistory'] ?? null) ? $payload['kickoffHistory'] : []] as $rows) {
+        foreach ($rows as $row) {
+            $status = (string) ($row['status'] ?? 'unresolved');
+            if ($status === 'live' || $status === 'unresolved') {
+                return $base;
+            }
+        }
+    }
+    $today = ops_football_riyadh_day_key($clock);
+    if ($day < $today) {
+        foreach ($matches as $match) {
+            $status = (string) ($match['status'] ?? 'unresolved');
+            if (!in_array($status, ['finished', 'cancelled', 'postponed'], true)) {
+                return $base;
+            }
+        }
+        return max($base, min(OPS_FOOTBALL_DAY_REUSE_CEILING_SECONDS, OPS_FOOTBALL_SETTLED_DAY_REUSE_SECONDS));
+    }
+    if ($day > $today) {
+        return max($base, min(OPS_FOOTBALL_DAY_REUSE_CEILING_SECONDS, OPS_FOOTBALL_FUTURE_DAY_REUSE_SECONDS));
+    }
+    if ($matches === []) {
+        return $base;
+    }
+    $nextKickoff = null;
+    foreach ($matches as $match) {
+        $status = (string) ($match['status'] ?? 'unresolved');
+        if ($status === 'upcoming') {
+            $kickoff = (int) ($match['kickoffAt'] ?? 0);
+            if ($kickoff <= $clock) {
+                // A kickoff that has passed while the fixture is still upcoming is unresolved;
+                // it must be rechecked at the normal cadence.
+                return $base;
+            }
+            if ($nextKickoff === null || $kickoff < $nextKickoff) {
+                $nextKickoff = $kickoff;
+            }
+        }
+    }
+    if ($nextKickoff === null) {
+        return max($base, min(OPS_FOOTBALL_DAY_REUSE_CEILING_SECONDS, OPS_FOOTBALL_SETTLED_DAY_REUSE_SECONDS));
+    }
+    $untilKickoff = $nextKickoff - $clock;
+    if ($untilKickoff > 0 && $untilKickoff < $base) {
+        // A kickoff due inside one configured interval must be revalidated at that boundary, so
+        // the advertised freshness is the real remaining time, not the longer base interval.
+        return max(1, $untilKickoff);
+    }
+    return max($base, min(OPS_FOOTBALL_IDLE_DAY_REUSE_SECONDS, $untilKickoff));
+}
+
+/**
+ * True when a fixture cached while still in the future has since reached its kickoff. This forces
+ * a revalidation at the boundary instead of trusting a TTL that was issued before the kickoff.
+ */
+function ops_football_payload_crossed_kickoff(array $cache, int $clock): bool
+{
+    $cachedAt = (int) ($cache['cachedAt'] ?? 0);
+    $matches = is_array($cache['payload']['matches'] ?? null) ? $cache['payload']['matches'] : [];
+    foreach ($matches as $match) {
+        if ((string) ($match['status'] ?? '') !== 'upcoming') {
+            continue;
+        }
+        $kickoff = (int) ($match['kickoffAt'] ?? 0);
+        if ($kickoff > $cachedAt && $kickoff <= $clock) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * The single public cache freshness for a route response. It must be the result's actual safe TTL,
+ * including a shortened pre-kickoff window, never a separate constant.
+ */
+function ops_football_public_max_age(array $result): int
+{
+    return max(0, (int) ($result['refreshSeconds'] ?? 0));
+}
+
+/**
+ * Choose one observation for a fixture whose fresh authoritative date row arrived while the
+ * supplemental live list was unavailable. The same provider event can be re-observed at a newer
+ * time (accept a newer correction), at an older time (keep the newer verified observation), or
+ * with a different kickoff (a rescheduled occurrence that inherits nothing).
+ *
+ * Authority is selected as one observation: its provider timestamp labels the published row, and
+ * a live→terminal transition never fills a missing final score from an earlier live tuple.
+ */
+function ops_football_carry_verified_observation(array $fresh, array $verified): array
+{
+    $freshStatus = (string) ($fresh['status'] ?? 'unresolved');
+    $verifiedStatus = (string) ($verified['status'] ?? 'unresolved');
+    $freshKickoff = (int) ($fresh['kickoffAt'] ?? 0);
+    $verifiedKickoff = (int) ($verified['kickoffAt'] ?? 0);
+    if ($freshKickoff > 0 && $verifiedKickoff > 0 && $freshKickoff !== $verifiedKickoff) {
+        // A different kickoff is a different occurrence: never inherit status, score or minute,
+        // even though the provider event id is unchanged.
+        return $fresh;
+    }
+
+    $freshUpdated = (int) ($fresh['providerUpdatedAt'] ?? 0);
+    $verifiedUpdated = (int) ($verified['providerUpdatedAt'] ?? 0);
+    $terminals = ['finished', 'cancelled', 'postponed'];
+    $verifiedStarted = in_array($verifiedStatus, ['live', 'finished'], true);
+    $verifiedLive = $verifiedStatus === 'live';
+    $freshLive = $freshStatus === 'live';
+
+    $chooseVerified = false;
+    if ($freshStatus === 'upcoming' && $verifiedStarted) {
+        // A schedule row cannot undo an observed start for the same kickoff occurrence.
+        $chooseVerified = true;
+    } elseif ($freshStatus === 'upcoming' && in_array($verifiedStatus, ['cancelled', 'postponed'], true)) {
+        // A terminal cancellation/postponement for the same kickoff also stays terminal.
+        $chooseVerified = true;
+    } elseif ($freshLive && $verifiedStatus === 'upcoming') {
+        // A live observation outranks a schedule row regardless of the timestamp.
+        $chooseVerified = false;
+    } elseif ($freshLive && $verifiedLive) {
+        // Newer live wins; on a tie keep the higher elapsed minute, then the accepted record.
+        $chooseVerified = $freshUpdated < $verifiedUpdated
+            || ($freshUpdated === $verifiedUpdated
+                && (int) ($verified['minute'] ?? -1) > (int) ($fresh['minute'] ?? -1));
+    } elseif ($freshLive && $verifiedStatus === 'finished') {
+        // A contradictory live row may only override a finished record when it is newer.
+        $chooseVerified = $freshUpdated <= $verifiedUpdated;
+    } elseif (in_array($freshStatus, $terminals, true)) {
+        // A terminal observation is authoritative unless it is demonstrably older. A provider row
+        // without a timestamp is not "older": a finished/cancelled status still wins over an
+        // earlier live/scheduled record, but it inherits no score or minute.
+        $chooseVerified = $freshUpdated > 0 && $verifiedUpdated > 0 && $freshUpdated < $verifiedUpdated;
+    } elseif ($freshStatus === 'unresolved' && $verifiedStatus !== 'unresolved') {
+        $chooseVerified = true;
+    } else {
+        $chooseVerified = $freshUpdated < $verifiedUpdated;
+    }
+
+    $winner = $chooseVerified ? $verified : $fresh;
+    $loser = $chooseVerified ? $fresh : $verified;
+    $winnerStatus = (string) ($winner['status'] ?? 'unresolved');
+    $loserStatus = (string) ($loser['status'] ?? 'unresolved');
+
+    $result = $fresh;
+    $result['status'] = $winnerStatus;
+
+    $homeScore = $winner['homeScore'] ?? null;
+    $awayScore = $winner['awayScore'] ?? null;
+    if ($winnerStatus === 'live' && $homeScore === null && $awayScore === null && $loserStatus === 'live') {
+        // A newer live observation that omits scores keeps the last verified live tuple; a partial
+        // tuple is never mixed with an older one.
+        $homeScore = $loser['homeScore'] ?? null;
+        $awayScore = $loser['awayScore'] ?? null;
+    }
+    $result['homeScore'] = $homeScore;
+    $result['awayScore'] = $awayScore;
+
+    if ($winnerStatus === 'live') {
+        $freshMinute = is_int($fresh['minute'] ?? null) ? $fresh['minute'] : null;
+        $verifiedMinute = is_int($verified['minute'] ?? null) ? $verified['minute'] : null;
+        $minute = $freshLive && $verifiedLive
+            ? max($freshMinute ?? -1, $verifiedMinute ?? -1)
+            : ($winner['minute'] ?? null);
+        $result['minute'] = is_int($minute) && $minute >= 0 ? $minute : null;
+    } else {
+        // Terminal and scheduled rows never inherit a live minute.
+        $result['minute'] = $winner['minute'] ?? null;
+    }
+    // The published timestamp identifies the observation whose status/score was selected.
+    $result['providerUpdatedAt'] = $winner['providerUpdatedAt'] ?? null;
+    return $result;
+}
+
+/**
+ * Apply the verified-observation carry to the requested day's published rows.
+ */
+function ops_football_preserve_verified_observations(array $payload, ?array $previousPayload): array
+{
+    if ($previousPayload === null) {
+        return $payload;
+    }
+    $verified = [];
+    foreach (['matches', 'kickoffHistory'] as $key) {
+        foreach (($previousPayload[$key] ?? []) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = (string) ($row['providerEventId'] ?? '');
+            if ($id !== '' && !isset($verified[$id])) {
+                $verified[$id] = $row;
+            }
+        }
+    }
+    if ($verified === []) {
+        return $payload;
+    }
+    foreach (['matches', 'kickoffHistory'] as $key) {
+        foreach (($payload[$key] ?? []) as $index => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $previous = $verified[(string) ($row['providerEventId'] ?? '')] ?? null;
+            if ($previous === null) {
+                continue;
+            }
+            $payload[$key][$index] = ops_football_carry_verified_observation($row, $previous);
+        }
+    }
+    return $payload;
 }
 
 /**
@@ -1831,7 +2072,11 @@ function ops_football_build_team_catalog(
             'teams' => $teamList,
         ];
         $payload = ops_football_filter_catalog_payload($payload, $allowedLeagueIds);
-        ops_football_write_json($cachePath, ['cachedAt' => $clock, 'payload' => $payload]);
+        ops_football_write_json($cachePath, [
+            'cachedAt' => $clock,
+            'payload' => $payload,
+            'complete' => true,
+        ]);
         return ['httpStatus' => 200, 'payload' => $payload, 'retryAfter' => $retryAfter];
     } finally {
         flock($lock, LOCK_UN);
@@ -1918,12 +2163,24 @@ function ops_football_build_feed(
     }
 
     $cacheAge = $cache !== null ? $clock - (int) ($cache['cachedAt'] ?? 0) : PHP_INT_MAX;
-    if ($cache !== null && $cacheAge >= 0 && $cacheAge < $refreshSeconds) {
+    // The TTL was issued when this record was written; a shortened pre-kickoff window must not be
+    // re-derived from "now" or the record would go stale earlier than advertised.
+    $issuedSeconds = $cache !== null
+        ? ops_football_cache_reuse_seconds(
+            $cache,
+            $requestedDay,
+            (int) ($cache['cachedAt'] ?? $clock),
+            $refreshSeconds,
+        )
+        : $refreshSeconds;
+    $crossedKickoff = $cache !== null && ops_football_payload_crossed_kickoff($cache, $clock);
+    if ($cache !== null && $cacheAge >= 0 && $cacheAge < $issuedSeconds && !$crossedKickoff) {
+        $remainingSeconds = max(1, $issuedSeconds - $cacheAge);
         return [
             'httpStatus' => 200,
-            'payload' => ops_football_cached_payload($cache, $refreshSeconds, $allowedLeagueIds),
+            'payload' => ops_football_cached_payload($cache, $remainingSeconds, $allowedLeagueIds),
             'retryAfter' => null,
-            'refreshSeconds' => $refreshSeconds,
+            'refreshSeconds' => $remainingSeconds,
         ];
     }
 
@@ -1949,15 +2206,25 @@ function ops_football_build_feed(
         // Another worker may have refreshed while this request waited for the lock.
         $cache = ops_football_read_json($cachePath);
         $cacheAge = $cache !== null ? $clock - (int) ($cache['cachedAt'] ?? 0) : PHP_INT_MAX;
-        if ($cache !== null && $cacheAge >= 0 && $cacheAge < $refreshSeconds) {
+        $issuedSeconds = $cache !== null
+            ? ops_football_cache_reuse_seconds(
+                $cache,
+                $requestedDay,
+                (int) ($cache['cachedAt'] ?? $clock),
+                $refreshSeconds,
+            )
+            : $refreshSeconds;
+        $crossedKickoff = $cache !== null && ops_football_payload_crossed_kickoff($cache, $clock);
+        if ($cache !== null && $cacheAge >= 0 && $cacheAge < $issuedSeconds && !$crossedKickoff) {
+            $remainingSeconds = max(1, $issuedSeconds - $cacheAge);
             return [
                 'httpStatus' => 200,
-                'payload' => ops_football_cached_payload($cache, $refreshSeconds, $allowedLeagueIds),
+                'payload' => ops_football_cached_payload($cache, $remainingSeconds, $allowedLeagueIds),
                 'retryAfter' => null,
-                'refreshSeconds' => $refreshSeconds,
+                'refreshSeconds' => $remainingSeconds,
             ];
         }
-
+        $previousPayload = is_array($cache['payload'] ?? null) ? $cache['payload'] : null;
         $retryState = ops_football_read_json($retryPath) ?? [];
         $retryAfter = max(0, (int) ($retryState['until'] ?? 0) - $clock);
         if ($retryAfter > 0) {
@@ -2116,7 +2383,14 @@ function ops_football_build_feed(
             $failure = 'provider_truncated';
         }
 
-        if ($failure === null && $requestedDay === ops_football_riyadh_day_key($clock) && $remaining > 0) {
+        $liveStale = false;
+        $isToday = $requestedDay === ops_football_riyadh_day_key($clock);
+        if ($failure === null && $isToday && $remaining <= 0) {
+            // No request budget remained for the supplemental live call. Date rows are usable but
+            // their live status is unverified, so they must not be advertised as fresh-live.
+            $liveStale = true;
+        }
+        if ($failure === null && $isToday && $remaining > 0) {
             $remaining--;
             $usedRequests++;
             $liveResponse = ops_football_provider_get(
@@ -2129,7 +2403,9 @@ function ops_football_build_feed(
                 $responseClock,
             );
             if (!$liveResponse['ok']) {
-                $failure = $liveResponse['error'];
+                // The date fetch is the mandatory fixture authority. A failed supplemental live
+                // call must not discard complete current-day rows; publish them as stale instead.
+                $liveStale = true;
                 if ($liveResponse['retryAfter'] !== null) {
                     $rateLimitedFor = $liveResponse['retryAfter'];
                     $rateLimitedUntil = $liveResponse['retryUntil'] ?? null;
@@ -2223,18 +2499,39 @@ function ops_football_build_feed(
             events: array_merge($events, $reminderEvents),
             day: $requestedDay,
             now: $clock,
-            stale: false,
+            stale: $liveStale,
             cachedAt: $clock,
-            retryAfterSeconds: null,
+            retryAfterSeconds: $liveStale ? $rateLimitedFor : null,
             refreshSeconds: $refreshSeconds,
             leagueNames: $leagueNames,
             reminderDay: $reminderDay,
             allowedLeagueIds: $allowedLeagueIds,
         );
         $payload = ops_football_attach_broadcasts($payload, $broadcasts);
-        ops_football_write_json($cachePath, ['cachedAt' => $clock, 'payload' => $payload]);
+        // A supplemental live failure/no-budget must not overwrite the last verified live/final
+        // observation with an older day-schedule row for the same fixture.
+        if ($liveStale) {
+            $payload = ops_football_preserve_verified_observations($payload, $previousPayload);
+        }
+        $reuseSeconds = ops_football_cache_reuse_seconds(
+            ['payload' => $payload, 'complete' => !$liveStale],
+            $requestedDay,
+            $clock,
+            $refreshSeconds,
+        );
+        $payload['refreshSeconds'] = $reuseSeconds;
+        ops_football_write_json($cachePath, [
+            'cachedAt' => $clock,
+            'payload' => $payload,
+            'complete' => !$liveStale,
+        ]);
         ops_football_update_season_store($directory, $requestedDay, $payload, $allowedLeagueIds);
-        return ['httpStatus' => 200, 'payload' => $payload, 'retryAfter' => null, 'refreshSeconds' => $refreshSeconds];
+        return [
+            'httpStatus' => 200,
+            'payload' => $payload,
+            'retryAfter' => $liveStale ? $rateLimitedFor : null,
+            'refreshSeconds' => $reuseSeconds,
+        ];
     } finally {
         flock($lock, LOCK_UN);
         fclose($lock);

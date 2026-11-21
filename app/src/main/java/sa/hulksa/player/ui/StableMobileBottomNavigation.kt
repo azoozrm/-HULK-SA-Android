@@ -22,6 +22,7 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.SportsSoccer
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material3.Icon
@@ -59,6 +60,7 @@ private const val MOBILE_BOTTOM_NAVIGATION_MIN_SLOT_WIDTH_DP = 48
 private val stableMobileEntries = listOf(
     StableMobileEntry(MainDestination.HOME, Icons.Rounded.Home, "الرئيسية"),
     StableMobileEntry(MainDestination.LIVE, Icons.Rounded.LiveTv, "البث المباشر"),
+    StableMobileEntry(MainDestination.FOOTBALL, Icons.Rounded.SportsSoccer, "المباريات"),
     StableMobileEntry(MainDestination.MOVIES, Icons.Rounded.Movie, "الافلام"),
     StableMobileEntry(MainDestination.SERIES, Icons.Rounded.Tv, "المسلسلات"),
     StableMobileEntry(MainDestination.DOWNLOADS, Icons.Rounded.Download, "التنزيلات"),
@@ -96,16 +98,16 @@ internal fun stableMobileNavigationReservedHeight(windowWidthDp: Int, downloadsE
 internal fun StableMobileBottomNavigation(
     selected: MainDestination,
     downloadsEnabled: Boolean,
+    footballEnabled: Boolean = true,
     onSelectDestination: (MainDestination) -> Unit,
     homeFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
     if (WindowInsets.isImeVisible) return
 
-    val visibleEntries = if (downloadsEnabled) {
-        stableMobileEntries
-    } else {
-        stableMobileEntries.filterNot { it.destination == MainDestination.DOWNLOADS }
+    val visibleEntries = stableMobileEntries.filter { entry ->
+        (downloadsEnabled || entry.destination != MainDestination.DOWNLOADS) &&
+            (footballEnabled || entry.destination != MainDestination.FOOTBALL)
     }
 
     BoxWithConstraints(

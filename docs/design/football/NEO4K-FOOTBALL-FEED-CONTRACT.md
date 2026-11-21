@@ -100,7 +100,23 @@ Behaviour:
 - One refresh is shared by all devices. The refresh lock prevents parallel provider calls.
 - Cache is per Riyadh day. A successful empty day is cached and returned as `empty=true`,
   `stale=false`. A provider failure/quota/Retry-After returns the last-good payload with
-  `stale=true`, never as an empty day.
+  `stale=true`, never as an empty day. If the mandatory requested-day fetch is complete but the
+  supplemental live list fails or has no budget, the current date rows are still published with
+  `stale=true` (live freshness unverified) rather than discarded or served as `503`. That
+  live-unverified publication selects one observation per provider event **and kickoff
+  occurrence**: an older value cannot replace a newer one, a newer authoritative final result or
+  terminal correction wins, a scoreless final remains unknown, and a different kickoff (reschedule)
+  inherits no earlier status, score or minute. The published `providerUpdatedAt` is the selected
+  observation's own time. The day cache and season index receive the same rows.
+- Bounded day reuse: the accepted per-day record is served without a provider call for the
+  configured refresh interval, and additionally for a bounded window derived from the day/content:
+  a settled past day or a finished current day up to 1,800 s; a stable future day up to 900 s;
+  an idle current day at most 300 s. A kickoff due inside one configured interval shortens the
+  advertised freshness to the actual remaining time and forces revalidation at the kickoff
+  boundary. Any live/unresolved row in the served payload (including a prior-day carryover history
+  row), an incomplete/live-unverified record, or a kickoff that already passed while still
+  `upcoming` keeps the configured interval. The shared lock, per-attempt quota, Retry-After
+  deadline and 3,600 s ceiling still apply.
 - The refresh requests the previous + current day (`date_from`/`date_to`) and, only for the
   current day, the live list. That is at most two provider requests per refresh.
 - Riyadh day selection keeps the requested day plus:

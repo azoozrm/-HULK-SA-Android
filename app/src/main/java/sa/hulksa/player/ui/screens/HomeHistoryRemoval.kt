@@ -32,6 +32,20 @@ internal fun removalFocusTarget(
 }
 
 /**
+ * The Home rows that actually exist in the current LazyColumn model. The very same index that the
+ * handoff would pass to `scrollToItem` decides advertisement here, so a hidden row (index -1) can
+ * never be selected as a focus target.
+ */
+internal fun homeVisibleContentRowKeys(
+    order: List<String>,
+    rowIndexByKey: Map<String, Int>,
+): Set<String> = order.filterTo(linkedSetOf()) { (rowIndexByKey[it] ?: -1) >= 0 }
+
+/** A row can only be scrolled/focused when its real model index is non-negative. */
+internal fun homeRowScrollIndex(rowIndexByKey: Map<String, Int>, rowKey: String): Int? =
+    rowIndexByKey[rowKey]?.takeIf { it >= 0 }
+
+/**
  * One durable Home removal transaction. The controller survives card/row disposal long enough
  * to deliver the result and expose the stable focus target for the updated row model.
  */

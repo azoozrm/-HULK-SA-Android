@@ -49,6 +49,7 @@ import sa.hulksa.player.data.EpisodeNotificationPopup
 import sa.hulksa.player.data.EpisodeNotificationSubscription
 import sa.hulksa.player.data.AccountProfileStateScope
 import sa.hulksa.player.data.FootballFavoriteTeam
+import sa.hulksa.player.data.FootballAlertSaveSerializer
 import sa.hulksa.player.data.FootballFeedCacheStore
 import sa.hulksa.player.data.FootballFeedClient
 import sa.hulksa.player.data.FootballFeedDiscovery
@@ -234,6 +235,7 @@ enum class HulkScreen {
 enum class MainDestination {
     HOME,
     LIVE,
+    FOOTBALL,
     MOVIES,
     SERIES,
     FAVORITES,
@@ -937,6 +939,7 @@ class HulkViewModel internal constructor(
     private var footballCatalogRetryAtEpochMs = 0L
     private var footballCatchUpPending = false
     private val footballInboxMutex = Mutex()
+    private val footballAlertSaveSerializer = FootballAlertSaveSerializer()
     private var footballTeamCatalogJob: Job? = null
     private val footballDayJobs = mutableMapOf<String, Job>()
     private var footballDayOwnerGeneration = 0L
@@ -2904,15 +2907,17 @@ class HulkViewModel internal constructor(
     fun saveFootballMatchAlerts(match: FootballMatch, preferences: FootballMatchAlertPreferences) {
         val scope = footballProfileStore.activeScope() ?: return
         viewModelScope.launch {
-            val current = withContext(Dispatchers.IO) { footballProfileStore.matchAlerts(scope) }
-            if (footballProfileStore.activeScope() != scope) return@launch
-            val updated = upsertFootballAlertPreferences(
-                current = current,
+            val updated = footballAlertSaveSerializer.update(
+                read = {
+                    withContext(Dispatchers.IO) { footballProfileStore.matchAlerts(scope) }
+                },
+                write = { alerts ->
+                    withContext(Dispatchers.IO) { footballProfileStore.saveMatchAlerts(scope, alerts) }
+                },
                 match = match,
                 preferences = preferences,
                 nowEpochMs = System.currentTimeMillis(),
             )
-            withContext(Dispatchers.IO) { footballProfileStore.saveMatchAlerts(scope, updated) }
             if (footballProfileStore.activeScope() != scope) return@launch
             mutableState.update { state ->
                 state.copy(footballFeed = state.footballFeed.copy(matchAlerts = updated))
@@ -4153,13 +4158,11 @@ class HulkViewModel internal constructor(
             loadedCatalogs[ContentType.LIVE] ?: mutableState.value.catalogs[ContentType.LIVE],
         )
         mutableState.update { state ->
-            val safeDestination = if (
-                !config.features.downloadsEnabled && state.destination == MainDestination.DOWNLOADS
-            ) {
-                MainDestination.HOME
-            } else {
-                state.destination
-            }
+            val safeDestination = safeDestinationForOperations(
+                destination = state.destination,
+                downloadsEnabled = config.features.downloadsEnabled,
+                footballAvailable = config.football != null,
+            )
             state.copy(
                 destination = safeDestination,
                 catalogs = catalogsForDestination(safeDestination, state.catalogs),
@@ -6220,6 +6223,7 @@ class HulkViewModel internal constructor(
                 it == ContentType.MOVIE || it == ContentType.SERIES || it == ContentType.LIVE
             }
         MainDestination.LIVE -> loadedCatalogs[ContentType.LIVE] != null
+        MainDestination.FOOTBALL -> false
         MainDestination.MOVIES -> loadedCatalogs[ContentType.MOVIE] != null
         MainDestination.SERIES -> loadedCatalogs[ContentType.SERIES] != null
         MainDestination.FAVORITES,
@@ -6301,6 +6305,20 @@ internal fun tvLandscapeArtworkForHistory(
 }
 
 /**
+ * One destination-eligibility rule for Operations-driven surfaces. A destination whose feature is
+ * withdrawn returns to Home instead of rendering an unavailable screen or a dangling rail entry.
+ */
+internal fun safeDestinationForOperations(
+    destination: MainDestination,
+    downloadsEnabled: Boolean,
+    footballAvailable: Boolean,
+): MainDestination = when {
+    !downloadsEnabled && destination == MainDestination.DOWNLOADS -> MainDestination.HOME
+    !footballAvailable && destination == MainDestination.FOOTBALL -> MainDestination.HOME
+    else -> destination
+}
+
+/**
  * One catalog request plan for authenticated startup, destination entry and manual refresh.
  * Home consumes Live for its existing recommendations/history presentation, so it must load
  * and project Live through the same per-type pipeline as Movie and Series.
@@ -6313,6 +6331,7 @@ internal fun catalogTypesForDestination(destination: MainDestination): Set<Conte
             ContentType.LIVE,
         )
         MainDestination.LIVE -> setOf(ContentType.LIVE)
+        MainDestination.FOOTBALL -> emptySet()
         MainDestination.MOVIES -> setOf(ContentType.MOVIE)
         MainDestination.SERIES -> setOf(ContentType.SERIES)
         MainDestination.FAVORITES,
@@ -6355,6 +6374,7 @@ internal fun projectCatalogsForDestination(
             showHome(ContentType.LIVE)
         }
         MainDestination.LIVE -> showFull(ContentType.LIVE)
+        MainDestination.FOOTBALL -> Unit
         MainDestination.MOVIES -> showFull(ContentType.MOVIE)
         MainDestination.SERIES -> showFull(ContentType.SERIES)
         MainDestination.FAVORITES,

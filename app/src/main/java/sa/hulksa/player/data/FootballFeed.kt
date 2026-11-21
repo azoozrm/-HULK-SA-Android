@@ -521,6 +521,24 @@ fun orderFootballMatches(matches: List<FootballMatch>, favoriteTeamId: String?):
     orderFootballMatches(matches, favoriteTeamId?.let(::setOf).orEmpty())
 
 /**
+ * Home-only, exact Riyadh-Today projection. The accepted day snapshot is authoritative; rows whose
+ * kickoff belongs to another Riyadh day or that were carried in from a previous day are excluded,
+ * even when live. There is no previous-day fallback: an empty result hides the Home section.
+ */
+fun footballHomeTodayMatches(
+    daySnapshots: Map<String, FootballFeedSnapshot>,
+    nowEpochMs: Long,
+    favoriteTeamIds: Set<String> = emptySet(),
+): List<FootballMatch> {
+    val today = footballRiyadhDayKey(nowEpochMs)
+    val snapshot = daySnapshots[today] ?: return emptyList()
+    val rows = snapshot.matches.filter { match ->
+        !match.carriedOver && footballRiyadhDayKey(match.kickoffEpochMs) == today
+    }
+    return orderFootballMatches(rows, favoriteTeamIds)
+}
+
+/**
  * Presentation-only favorite order for an accepted day record. The stored snapshot keeps its
  * source, receipt and provider times; only the rows handed to the Home rail are re-ordered with
  * the active profile's current favorite IDs. A profile switch therefore changes the rail without

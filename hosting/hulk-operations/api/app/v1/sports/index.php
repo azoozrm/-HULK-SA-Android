@@ -26,7 +26,7 @@ try {
     $day = isset($_GET['day']) && is_string($_GET['day']) ? $_GET['day'] : null;
     $result = ops_football_build_feed($football, $day);
     $payload = $result['payload'];
-    $refreshSeconds = (int) $result['refreshSeconds'];
+    $refreshSeconds = ops_football_public_max_age($result);
     $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
     if (!is_string($json)) {

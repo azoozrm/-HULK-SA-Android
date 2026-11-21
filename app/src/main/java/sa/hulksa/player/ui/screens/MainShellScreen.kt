@@ -227,10 +227,9 @@ import sa.hulksa.player.data.FootballMatchAlertPreferences
 import sa.hulksa.player.data.FootballMatchStatus
 import sa.hulksa.player.data.FootballTeam
 import sa.hulksa.player.data.filterFootballTeams
-import sa.hulksa.player.data.footballDisplaySnapshotForDay
 import sa.hulksa.player.data.footballEffectiveDayFailure
 import sa.hulksa.player.data.footballRiyadhDayKey
-import sa.hulksa.player.data.footballFavoritesFirstSnapshot
+import sa.hulksa.player.data.footballHomeTodayMatches
 import sa.hulksa.player.data.footballTeamsFromMatches
 import sa.hulksa.player.data.mergeFootballTeamLists
 import sa.hulksa.player.data.resolveFootballAlertPreferences
@@ -1256,16 +1255,6 @@ internal fun MainShellScreen(
     val colors = LocalHulkColors.current
     val context = LocalContext.current
     val adaptiveUi = LocalAdaptiveUi.current
-    var footballCenterVisible by rememberSaveable { mutableStateOf(false) }
-    var footballCenterCloseRevision by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(state.destination, state.footballFeed.available) {
-        if (footballCenterVisible &&
-            (state.destination != MainDestination.HOME || !state.footballFeed.available)
-        ) {
-            footballCenterVisible = false
-            footballCenterCloseRevision += 1L
-        }
-    }
     val requestProfileSwitch = sa.hulksa.player.ui.LocalProfileSwitchRequester.current
     val useNavigationRail = adaptiveUi.navigationType == HulkNavigationType.RAIL
     val tvContentFocusRequesters = remember {
@@ -1380,10 +1369,12 @@ internal fun MainShellScreen(
     // useful for visual continuity but must never complete restoration for the newer input.
     val homeModelSettled = homeModelIsCurrent && homeModel?.isFirstFrameFallback != true
     val downloadsEnabled = state.operations.features.downloadsEnabled
-    val navigationEntries = remember(downloadsEnabled) {
-        destinations.filterNot { entry ->
-            !downloadsEnabled && entry.destination == MainDestination.DOWNLOADS
-        }
+    // The football Center is a real destination only while Operations advertises the feed; a
+    // withdrawn/absent discovery hides it again and returns an open Center to Home.
+    val footballEnabled = state.operations.football != null
+    val navigationEntries = destinations.filterNot { entry ->
+        (!downloadsEnabled && entry.destination == MainDestination.DOWNLOADS) ||
+            (!footballEnabled && entry.destination == MainDestination.FOOTBALL)
     }
     val favoriteSnapshot = CatalogFavoriteSnapshot(persisted = state.favorites)
     val resolvedIsFavorite: (ContentItem) -> Boolean = isFavorite
@@ -1485,13 +1476,14 @@ internal fun MainShellScreen(
                         .focusRestorer()
                         .focusGroup(),
                 ) {
-                    if (footballCenterVisible) {
+                    if (state.destination == MainDestination.FOOTBALL) {
                         FootballCenterScreen(
                             feed = state.footballFeed,
                             isTv = isTv,
                             onBack = {
-                                footballCenterVisible = false
-                                footballCenterCloseRevision += 1L
+                                if (state.destination == MainDestination.FOOTBALL) {
+                                    onSelectDestination(MainDestination.HOME)
+                                }
                             },
                             onToggleHideScores = {
                                 onToggleFootballHideScores(!state.footballFeed.hideScores)
@@ -1551,8 +1543,6 @@ internal fun MainShellScreen(
                         onLoadFootballTeams = onLoadFootballTeams,
                         onSetFootballTeams = onSetFootballTeams,
                         onSaveFootballMatchAlerts = onSaveFootballMatchAlerts,
-                        onOpenFootballCenter = { footballCenterVisible = true },
-                        footballCenterCloseRevision = footballCenterCloseRevision,
                         homeEntryFocusRequester = tvRailFocusRequesters[MainDestination.HOME],
                         homeRemovalInputGuard = homeRemovalInputGuard,
                         initialAllFocusRequester = tvCatalogAllFocusRequesters[state.destination],
@@ -1576,13 +1566,14 @@ internal fun MainShellScreen(
                             },
                         ),
                 ) {
-                    if (footballCenterVisible) {
+                    if (state.destination == MainDestination.FOOTBALL) {
                         FootballCenterScreen(
                             feed = state.footballFeed,
                             isTv = isTv,
                             onBack = {
-                                footballCenterVisible = false
-                                footballCenterCloseRevision += 1L
+                                if (state.destination == MainDestination.FOOTBALL) {
+                                    onSelectDestination(MainDestination.HOME)
+                                }
                             },
                             onToggleHideScores = {
                                 onToggleFootballHideScores(!state.footballFeed.hideScores)
@@ -1642,8 +1633,6 @@ internal fun MainShellScreen(
                         onLoadFootballTeams = onLoadFootballTeams,
                         onSetFootballTeams = onSetFootballTeams,
                         onSaveFootballMatchAlerts = onSaveFootballMatchAlerts,
-                        onOpenFootballCenter = { footballCenterVisible = true },
-                        footballCenterCloseRevision = footballCenterCloseRevision,
                         homeEntryFocusRequester = mobileHomeFocusRequester,
                         homeRemovalInputGuard = homeRemovalInputGuard,
                     )
@@ -1909,8 +1898,6 @@ private fun DestinationContent(
     onLoadFootballTeams: () -> Unit,
     onSetFootballTeams: (List<FootballTeam>) -> Unit,
     onSaveFootballMatchAlerts: (FootballMatch, FootballMatchAlertPreferences) -> Unit,
-    onOpenFootballCenter: () -> Unit,
-    footballCenterCloseRevision: Long,
     homeEntryFocusRequester: FocusRequester? = null,
     homeRemovalInputGuard: HomeRemovalInputGuard? = null,
     initialAllFocusRequester: FocusRequester? = null,
@@ -1922,6 +1909,7 @@ private fun DestinationContent(
     val settingsEntryFocusRequester =
         tvSettingsEntryFocusRequester ?: ownedSettingsEntryFocusRequester
     when (state.destination) {
+        MainDestination.FOOTBALL -> Unit
         MainDestination.HOME -> CinemaHomeScreen(
             state = state,
             isTv = isTv,
@@ -1952,8 +1940,6 @@ private fun DestinationContent(
             onLoadFootballTeams = onLoadFootballTeams,
             onSetFootballTeams = onSetFootballTeams,
             onSaveFootballMatchAlerts = onSaveFootballMatchAlerts,
-            onOpenFootballCenter = onOpenFootballCenter,
-            footballCenterCloseRevision = footballCenterCloseRevision,
             homeEntryFocusRequester = homeEntryFocusRequester,
             homeRemovalInputGuard = homeRemovalInputGuard,
         )
@@ -2096,8 +2082,6 @@ private fun CinemaHomeScreen(
     onLoadFootballTeams: () -> Unit,
     onSetFootballTeams: (List<FootballTeam>) -> Unit,
     onSaveFootballMatchAlerts: (FootballMatch, FootballMatchAlertPreferences) -> Unit,
-    onOpenFootballCenter: () -> Unit,
-    footballCenterCloseRevision: Long,
     homeEntryFocusRequester: FocusRequester?,
     homeRemovalInputGuard: HomeRemovalInputGuard?,
 ) {
@@ -2296,10 +2280,26 @@ private fun CinemaHomeScreen(
         persistentAnnouncement = state.operations.persistentAnnouncement,
     )
 
+    val homeFootballNow = rememberFootballClock(0L)
+    val homeFootballMatches = remember(
+        state.footballFeed.daySnapshots,
+        homeFootballNow,
+        state.footballFeed.favoriteTeamIds,
+    ) {
+        footballHomeTodayMatches(
+            daySnapshots = state.footballFeed.daySnapshots,
+            nowEpochMs = homeFootballNow,
+            favoriteTeamIds = state.footballFeed.favoriteTeamIds,
+        )
+    }
     var rowCursor = homeRowCursorStart(isTv)
     val messageRow = if (hasHomeMessages) rowCursor++ else -1
     if (homeNoticeCopy != null) rowCursor++
-    val footballRow = if (state.footballFeed.available) rowCursor++ else -1
+    val footballRow = if (state.footballFeed.available && homeFootballMatches.isNotEmpty()) {
+        rowCursor++
+    } else {
+        -1
+    }
     val continueRow = if (continueWatching.isNotEmpty()) rowCursor++ else -1
     val downloadsRow = if (activeDownloads.isNotEmpty()) rowCursor++ else -1
     val becauseRow = if (becauseYouWatched.isNotEmpty()) rowCursor++ else -1
@@ -2317,18 +2317,7 @@ private fun CinemaHomeScreen(
     )
     val initialRow = rowIndexByKey[remembered.rowKey]?.takeIf { it >= 0 } ?: 0
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialRow)
-    val availableHomeContentRows = buildSet {
-        if (state.footballFeed.available) add("football-matches")
-        if (activeDownloads.isNotEmpty()) add("downloads")
-        if (becauseYouWatched.isNotEmpty()) add("because-watched")
-        if (suggested.isNotEmpty()) add("recommended")
-        if (homeMovies.isNotEmpty()) add("recent-movies")
-        if (homeSeries.isNotEmpty()) add("recent-series")
-        if (popularMovies.isNotEmpty()) add("top-movies")
-        if (popularSeries.isNotEmpty()) add("top-series")
-        if (lastLive != null) add("last-live")
-        if (suggestedLive.isNotEmpty()) add("popular-live")
-    }
+    val availableHomeContentRows = homeVisibleContentRowKeys(HOME_CONTENT_ROW_ORDER, rowIndexByKey)
     LaunchedEffect(pendingContinueRowFocus?.id, navigationMemory, continueWatching.isEmpty(), availableHomeContentRows) {
         val request = pendingContinueRowFocus ?: return@LaunchedEffect
         if (continueWatching.isNotEmpty()) return@LaunchedEffect
@@ -2339,7 +2328,7 @@ private fun CinemaHomeScreen(
         )
         val handoff = HomeEmptyRowFocusHandoff(
             ensureRowAvailable = { rowKey ->
-                val targetIndex = rowIndexByKey[rowKey]
+                val targetIndex = homeRowScrollIndex(rowIndexByKey, rowKey)
                 if (targetIndex == null) {
                     false
                 } else {
@@ -2362,6 +2351,13 @@ private fun CinemaHomeScreen(
         }
     }
     val homeHeroFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(homeFootballMatches.isEmpty()) {
+        if (homeFootballMatches.isNotEmpty()) return@LaunchedEffect
+        if (navigationMemory.position(MainDestination.HOME).rowKey == "football-matches") {
+            navigationMemory.save(MainDestination.HOME, "hero", 0, "hero", 0)
+            withFrameNanos { runCatching { homeHeroFocusRequester.requestFocus() } }
+        }
+    }
     val homeColumnSaveFocusRequester = remember { FocusRequester() }
     // Shared by both hero-absent retry surfaces so a refresh start cannot drop focus to the rail.
     val homeRefreshFocusState = remember { HomeRefreshFocusState() }
@@ -2579,11 +2575,12 @@ private fun CinemaHomeScreen(
                 }
             }
         }
-        if (state.footballFeed.available) {
+        if (state.footballFeed.available && homeFootballMatches.isNotEmpty()) {
             item(key = "football-matches") {
                 HomeSectionPadding(isTv) {
                     HomeFootballSection(
                         feed = state.footballFeed,
+                        matches = homeFootballMatches,
                         isTv = isTv,
                         rowIndex = footballRow,
                         navigationMemory = navigationMemory,
@@ -2594,11 +2591,7 @@ private fun CinemaHomeScreen(
                         homeRestoreOwner = homeRestoreOwner,
                         firstItemFocusRequester = rowFocusRequester("football-matches"),
                         rowFocusTarget = rowFocusTarget("football-matches"),
-                        onSetTeams = onSetFootballTeams,
                         onSaveMatchAlerts = onSaveFootballMatchAlerts,
-                        onLoadTeams = onLoadFootballTeams,
-                        onOpenCenter = onOpenFootballCenter,
-                        centerCloseRevision = footballCenterCloseRevision,
                     )
                 }
             }
@@ -2960,6 +2953,7 @@ private const val HOME_FOOTBALL_RAIL_EDGE_PADDING_DP = 5
 @Composable
 private fun HomeFootballSection(
     feed: FootballFeedUiState,
+    matches: List<FootballMatch>,
     isTv: Boolean,
     rowIndex: Int,
     navigationMemory: NavigationMemoryStore,
@@ -2970,39 +2964,14 @@ private fun HomeFootballSection(
     homeRestoreOwner: HomeFocusRestoreOwner,
     firstItemFocusRequester: FocusRequester?,
     rowFocusTarget: HomeRowFocusTarget?,
-    onSetTeams: (List<FootballTeam>) -> Unit,
     onSaveMatchAlerts: (FootballMatch, FootballMatchAlertPreferences) -> Unit,
-    onLoadTeams: () -> Unit,
-    onOpenCenter: () -> Unit,
-    centerCloseRevision: Long,
 ) {
-    val homeRetryNow = rememberFootballClock(feed.nextRetryAtEpochMs)
-    val homeTodayKey = footballRiyadhDayKey(System.currentTimeMillis())
-    val homeSnapshot = footballFavoritesFirstSnapshot(
-        footballDisplaySnapshotForDay(
-            daySnapshots = feed.daySnapshots,
-            dayFailures = feed.dayFailures,
-            dayKey = homeTodayKey,
-            nowEpochMs = homeRetryNow,
-            allowOtherDayFallback = true,
-        ),
-        feed.favoriteTeamIds,
-    )
-    val homeStale = homeSnapshot?.stale == true
-    val homeSectionTitle = footballHomeSectionTitle(homeSnapshot?.dayKey, homeTodayKey, homeRetryNow)
-    val homeFailure = footballEffectiveDayFailure(
-        daySnapshots = feed.daySnapshots,
-        dayFailures = feed.dayFailures,
-        dayKey = homeTodayKey,
-    )
-    val matches = homeSnapshot?.matches.orEmpty()
+    val now = rememberFootballClock(0L)
+    val todayKey = footballRiyadhDayKey(now)
+    val todayStale = feed.daySnapshots[todayKey]?.stale == true
     val remembered = navigationMemory.position(MainDestination.HOME)
     val currentRailFocusRevision by rememberUpdatedState(railFocusRevision)
-    var managerVisible by remember { mutableStateOf(false) }
-    var managerWasVisible by remember { mutableStateOf(false) }
     var detailsMatch by remember { mutableStateOf<FootballMatch?>(null) }
-    val centerButtonRequester = remember { FocusRequester() }
-    val managerButtonRequester = remember { FocusRequester() }
     var detailsReturnRevision by remember { mutableLongStateOf(0L) }
     val itemKeys = remember(matches) { matches.map(FootballMatch::stableIdentity) }
     val restoredIndex = remember(
@@ -3050,11 +3019,8 @@ private fun HomeFootballSection(
             }
         }
     }
-    val emptyRequester = remember { FocusRequester() }
     val rowSaveFocusRequester = remember { FocusRequester() }
     val cardRequesters = remember { mutableMapOf<String, FocusRequester>() }
-    var emptyFocused by remember { mutableStateOf(false) }
-    var emptyPlaced by remember { mutableStateOf(false) }
     var restoredTargetKey by remember { mutableStateOf<String?>(null) }
     var lastOpenedMatchId by remember { mutableStateOf<String?>(null) }
     var lastOpenedEventIds by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -3068,8 +3034,11 @@ private fun HomeFootballSection(
     DisposableEffect(Unit) {
         onDispose { railFocusOwner.cancel() }
     }
-    LaunchedEffect(detailsMatch, managerVisible) {
-        if (detailsMatch != null || managerVisible) railFocusOwner.cancel()
+    LaunchedEffect(detailsMatch) {
+        if (detailsMatch != null) railFocusOwner.cancel()
+    }
+    LaunchedEffect(focusedCardKey) {
+        if (focusedCardKey == null) railFocusOwner.cancel()
     }
     LaunchedEffect(railFocusRevision) {
         if (railFocusRevision != homeReturnRailBaseline) railFocusOwner.cancel()
@@ -3104,7 +3073,7 @@ private fun HomeFootballSection(
 
     suspend fun focusRailCard(
         targetKey: () -> String?,
-        canMoveFocus: () -> Boolean = { detailsMatch == null && !managerVisible },
+        canMoveFocus: () -> Boolean = { detailsMatch == null },
     ): Boolean = focusFootballRailCard(
         targetKey = targetKey,
         locate = ::railPlacement,
@@ -3120,11 +3089,7 @@ private fun HomeFootballSection(
     )
 
     suspend fun focusRailFallback() {
-        if (focusRailCard({ currentMatches.firstOrNull()?.stableIdentity })) return
-        if (currentMatches.isEmpty() && detailsMatch == null && !managerVisible) {
-            val requester = if (emptyPlaced) emptyRequester else managerButtonRequester
-            runCatching { requester.requestFocus() }
-        }
+        focusRailCard({ currentMatches.firstOrNull()?.stableIdentity })
     }
 
     // One transition owns scrolling and focus until the keyed card is revealed. Leaving the
@@ -3162,41 +3127,18 @@ private fun HomeFootballSection(
         }
     }
 
-    DisposableEffect(
-        matches.isEmpty(),
-        feed.loading,
-        feed.error,
-        homeStale,
-        homeSnapshot?.dayKey,
-    ) {
-        emptyPlaced = false
-        emptyFocused = false
-        onDispose {
-            emptyPlaced = false
-            emptyFocused = false
-        }
-    }
-
-    val firstRequester = if (matches.isNotEmpty()) firstItemFocusRequester else emptyRequester
+    val firstRequester = firstItemFocusRequester
     SideEffect {
         val target = rowFocusTarget ?: return@SideEffect
         target.attach {
             focusHomeRowFirstCard(
                 firstCardVisible = {
-                    if (matches.isEmpty()) {
-                        emptyPlaced
-                    } else {
-                        !homeRowFirstCardNeedsReveal(rowState.layoutInfo.visibleItemsInfo.map { it.index })
-                    }
+                    !homeRowFirstCardNeedsReveal(rowState.layoutInfo.visibleItemsInfo.map { it.index })
                 },
-                revealFirstCard = { if (matches.isNotEmpty()) rowState.scrollToItem(0) },
+                revealFirstCard = { rowState.scrollToItem(0) },
                 awaitFirstCard = {
-                    if (matches.isEmpty()) {
-                        snapshotFlow { emptyPlaced }.first { it }
-                    } else {
-                        snapshotFlow { rowState.layoutInfo.visibleItemsInfo.any { it.index == 0 } }
-                            .first { it }
-                    }
+                    snapshotFlow { rowState.layoutInfo.visibleItemsInfo.any { it.index == 0 } }
+                        .first { it }
                 },
                 requestFocus = {
                     firstRequester?.let { requester ->
@@ -3205,8 +3147,7 @@ private fun HomeFootballSection(
                 },
                 awaitFocused = {
                     snapshotFlow {
-                        val firstKey = currentItemKeys.firstOrNull()
-                        if (firstKey == null) emptyFocused else focusedCardKey == firstKey
+                        focusedCardKey != null && focusedCardKey == currentItemKeys.firstOrNull()
                     }.first { it }
                 },
             )
@@ -3239,15 +3180,7 @@ private fun HomeFootballSection(
             itemKeys = itemKeys,
             allowIndexFallback = homeModelSettled,
         )
-        if (restoreIndex == null || matches.isEmpty()) {
-            snapshotFlow { emptyPlaced }.first { it }
-            if (restoreNoLongerOwned()) return@LaunchedEffect
-            if (runCatching { emptyRequester.requestFocus() }.getOrDefault(false)) {
-                navigationMemory.save(MainDestination.HOME, "football-empty", 0, "football-matches", rowIndex)
-                homeRestoreOwner.onRestored()
-            }
-            return@LaunchedEffect
-        }
+        if (restoreIndex == null) return@LaunchedEffect
         val item = matches.getOrNull(restoreIndex) ?: return@LaunchedEffect
         val itemKey = item.stableIdentity
         if (restoredTargetKey == itemKey) return@LaunchedEffect
@@ -3256,19 +3189,6 @@ private fun HomeFootballSection(
                 restoredTargetKey = itemKey
                 homeRestoreOwner.onRestored()
             }
-        }
-    }
-    LaunchedEffect(managerVisible) {
-        if (managerVisible) {
-            managerWasVisible = true
-        } else if (managerWasVisible) {
-            managerWasVisible = false
-            withFrameNanos { runCatching { managerButtonRequester.requestFocus() } }
-        }
-    }
-    LaunchedEffect(centerCloseRevision) {
-        if (centerCloseRevision > 0L) {
-            withFrameNanos { runCatching { centerButtonRequester.requestFocus() } }
         }
     }
     LaunchedEffect(detailsReturnRevision) {
@@ -3285,174 +3205,49 @@ private fun HomeFootballSection(
     }
 
     Column {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            HomeSectionHeadingText(homeSectionTitle, isTv)
-            if (isTv) {
-                Spacer(Modifier.weight(1f))
-                FocusButton(
-                    "ادارة فرقي",
-                    { onLoadTeams(); managerVisible = true },
-                    modifier = Modifier.focusRequester(managerButtonRequester)
-                        .onFocusChanged { if (it.isFocused) railFocusOwner.cancel() },
-                    compact = true,
-                    primary = false,
-                    scaleOnFocus = false,
-                    trailingIcon = Icons.Rounded.Favorite,
-                    neutralV5 = true,
-                )
-                FocusButton(
-                    "عرض الكل",
-                    {
-                        onLoadTeams()
-                        onOpenCenter()
-                    },
-                    modifier = Modifier.focusRequester(centerButtonRequester)
-                        .onFocusChanged { if (it.isFocused) railFocusOwner.cancel() },
-                    compact = true,
-                    primary = false,
-                    scaleOnFocus = false,
-                    trailingIcon = Icons.Rounded.ChevronLeft,
-                    neutralV5 = true,
-                )
-            } else {
-                Spacer(Modifier.weight(1f))
-                FocusButton(
-                    "ادارة فرقي",
-                    { onLoadTeams(); managerVisible = true },
-                    modifier = Modifier.focusRequester(managerButtonRequester)
-                        .onFocusChanged { if (it.isFocused) railFocusOwner.cancel() },
-                    compact = true,
-                    primary = false,
-                    scaleOnFocus = false,
-                    trailingIcon = Icons.Rounded.Favorite,
-                    neutralV5 = true,
-                )
-                FocusButton(
-                    "عرض الكل",
-                    {
-                        onLoadTeams()
-                        onOpenCenter()
-                    },
-                    modifier = Modifier.focusRequester(centerButtonRequester)
-                        .onFocusChanged { if (it.isFocused) railFocusOwner.cancel() },
-                    compact = true,
-                    primary = false,
-                    scaleOnFocus = false,
-                    trailingIcon = Icons.Rounded.ChevronLeft,
-                    neutralV5 = true,
-                )
-            }
-        }
+        HomeSectionHeadingText("مباريات اليوم", isTv)
         Spacer(Modifier.height(10.dp))
-        when {
-            homeSnapshot == null && feed.loading -> FootballFeedStatusCard(
-                isTv = isTv,
-                title = "جاري تحميل مباريات اليوم",
-                icon = Icons.Rounded.SportsSoccer,
-                showLoading = true,
-                buttonRequester = emptyRequester,
-                onButtonPlaced = { emptyPlaced = true },
-                onButtonFocused = { emptyFocused = true },
-            )
-            homeSnapshot == null && feed.error != null -> FootballFeedStatusCard(
-                isTv = isTv,
-                title = "تعذر تحميل مباريات اليوم",
-                body = footballFeedErrorCopy(feed.error),
-                icon = Icons.Outlined.ErrorOutline,
-                buttonRequester = emptyRequester,
-                onButtonPlaced = { emptyPlaced = true },
-                onButtonFocused = { emptyFocused = true },
-            )
-            homeStale && matches.isEmpty() -> FootballFeedStatusCard(
-                isTv = isTv,
-                title = "تعذر تحديث مباريات اليوم",
-                body = "تتم إعادة المحاولة تلقائياً",
-                icon = Icons.Outlined.ErrorOutline,
-                buttonRequester = emptyRequester,
-                onButtonPlaced = { emptyPlaced = true },
-                onButtonFocused = { emptyFocused = true },
-            )
-            homeSnapshot == null -> FootballFeedStatusCard(
-                isTv = isTv,
-                title = if (homeFailure != null) {
-                    "تعذر تحميل مباريات اليوم"
-                } else {
-                    "لا توجد بيانات محفوظة"
-                },
-                body = homeFailure?.let { footballCenterFailureCopy(it, homeRetryNow).detail }
-                    ?: "تتم إعادة المحاولة تلقائياً",
-                icon = Icons.Outlined.ErrorOutline,
-                buttonRequester = emptyRequester,
-                onButtonPlaced = { emptyPlaced = true },
-                onButtonFocused = { emptyFocused = true },
-            )
-            matches.isEmpty() -> FootballEmptyDayCard(
-                isTv = isTv,
-                favorite = feed.favoriteTeam,
-                buttonRequester = emptyRequester,
-                onButtonPlaced = { emptyPlaced = true },
-                onButtonFocused = { emptyFocused = true },
-                onOpenPicker = { onLoadTeams(); managerVisible = true },
-            )
-            else -> LazyRow(
-                state = rowState,
-                modifier = Modifier.testTag("home-row-football-matches")
-                    .saveFocusedChildOnExit(rowSaveFocusRequester)
-                    .then(footballRailKeyHandler),
-                contentPadding = PaddingValues(horizontal = HOME_FOOTBALL_RAIL_EDGE_PADDING_DP.dp, vertical = 7.dp),
-                horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 9.dp),
-            ) {
-                itemsIndexed(matches, key = { _, match -> match.stableIdentity }) { index, match ->
-                    val matchKey = match.stableIdentity
-                    var itemModifier = Modifier.focusRequester(cardRequester(match))
-                    if (index == 0 && firstItemFocusRequester != null) {
-                        itemModifier = itemModifier.focusRequester(firstItemFocusRequester)
-                    }
-                    FootballHomeCard(
-                        match = match,
-                        favoriteIds = feed.favoriteTeamIds,
-                        hideScores = feed.hideScores,
-                        isTv = isTv,
-                        modifier = itemModifier,
-                        onClick = {
-                            railFocusOwner.cancel()
-                            lastOpenedMatchId = matchKey
-                            lastOpenedEventIds = match.eventIds
-                            detailsMatch = match
-                        },
-                        onFocused = {
-                            focusedCardKey = matchKey
-                            navigationMemory.save(MainDestination.HOME, matchKey, index, "football-matches", rowIndex)
-                            homeRestoreOwner.onContentFocused(navigationMemory.position(MainDestination.HOME))
-                        },
-                        onFocusLost = {
-                            if (focusedCardKey == matchKey) focusedCardKey = null
-                        },
-                    )
+        LazyRow(
+            state = rowState,
+            modifier = Modifier.testTag("home-row-football-matches")
+                .saveFocusedChildOnExit(rowSaveFocusRequester)
+                .then(footballRailKeyHandler),
+            contentPadding = PaddingValues(horizontal = HOME_FOOTBALL_RAIL_EDGE_PADDING_DP.dp, vertical = 7.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 9.dp),
+        ) {
+            itemsIndexed(matches, key = { _, match -> match.stableIdentity }) { index, match ->
+                val matchKey = match.stableIdentity
+                var itemModifier = Modifier.focusRequester(cardRequester(match))
+                if (index == 0 && firstItemFocusRequester != null) {
+                    itemModifier = itemModifier.focusRequester(firstItemFocusRequester)
                 }
+                FootballHomeCard(
+                    match = match,
+                    favoriteIds = feed.favoriteTeamIds,
+                    hideScores = feed.hideScores,
+                    isTv = isTv,
+                    nowEpochMs = now,
+                    stale = todayStale,
+                    modifier = itemModifier,
+                    onClick = {
+                        railFocusOwner.cancel()
+                        lastOpenedMatchId = matchKey
+                        lastOpenedEventIds = match.eventIds
+                        detailsMatch = match
+                    },
+                    onFocused = {
+                        focusedCardKey = matchKey
+                        navigationMemory.save(MainDestination.HOME, matchKey, index, "football-matches", rowIndex)
+                        homeRestoreOwner.onContentFocused(navigationMemory.position(MainDestination.HOME))
+                    },
+                    onFocusLost = {
+                        if (focusedCardKey == matchKey) focusedCardKey = null
+                    },
+                )
             }
         }
     }
 
-    if (managerVisible) {
-        FootballTeamManagerDialog(
-            allTeams = mergeFootballTeamLists(
-                feed.knownTeams,
-                footballTeamsFromMatches(matches, feed.favoriteTeams),
-            ),
-            favorites = feed.favoriteTeams,
-            isTv = isTv,
-            onSave = { teams ->
-                onSetTeams(teams)
-                managerVisible = false
-            },
-            onDismiss = { managerVisible = false },
-        )
-    }
     detailsMatch?.let { opened ->
         val match = resolveFootballMatch(opened, feed.allMatches)
         FootballMatchDetailsDialog(
@@ -3460,6 +3255,8 @@ private fun HomeFootballSection(
             favorites = feed.favoriteTeams,
             preferences = resolveFootballAlertPreferences(feed.matchAlerts, match),
             hideScores = feed.hideScores,
+            nowEpochMs = now,
+            stale = todayStale,
             isTv = isTv,
             onSave = { preferences -> onSaveMatchAlerts(match, preferences) },
             onDismiss = {
@@ -3470,130 +3267,6 @@ private fun HomeFootballSection(
     }
 }
 
-@Composable
-private fun FootballEmptyDayCard(
-    isTv: Boolean,
-    favorite: FootballFavoriteTeam?,
-    buttonRequester: FocusRequester,
-    onButtonPlaced: () -> Unit,
-    onButtonFocused: () -> Unit,
-    onOpenPicker: () -> Unit,
-) {
-    val colors = LocalHulkColors.current
-    val shape = RoundedCornerShape(if (isTv) 18.dp else 16.dp)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = if (isTv) 116.dp else 128.dp)
-            .clip(shape)
-            .background(NeoNeutralSurfaces.card)
-            .border(1.dp, NeoNeutralSurfaces.stroke, shape)
-            .padding(horizontal = 16.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(13.dp),
-    ) {
-        Icon(
-            imageVector = Icons.Rounded.SportsSoccer,
-            contentDescription = null,
-            tint = colors.gold,
-            modifier = Modifier.size(if (isTv) 28.dp else 24.dp),
-        )
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = "لا توجد مباريات اليوم",
-                color = colors.text,
-                fontSize = if (isTv) 15.sp else 14.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.height(3.dp))
-            Text(
-                text = favorite?.let { "سنعرض مباريات ${it.teamName} هنا" }
-                    ?: "اختر فرقك المفضلة ليظهروا اولا في مباريات اليوم",
-                color = colors.textMuted,
-                fontSize = 11.sp,
-                lineHeight = 15.sp,
-            )
-        }
-        FocusButton(
-            "فرقي المفضلة",
-            onOpenPicker,
-            compact = true,
-            primary = false,
-            scaleOnFocus = false,
-            trailingIcon = Icons.Rounded.Favorite,
-            neutralV5 = true,
-            modifier = Modifier
-                .focusRequester(buttonRequester)
-                .onPlaced { onButtonPlaced() }
-                .onFocusChanged { if (it.isFocused) onButtonFocused() },
-        )
-    }
-}
-
-@Composable
-private fun FootballFeedStatusCard(
-    isTv: Boolean,
-    title: String,
-    icon: ImageVector,
-    body: String? = null,
-    showLoading: Boolean = false,
-    buttonRequester: FocusRequester? = null,
-    onButtonPlaced: () -> Unit = {},
-    onButtonFocused: () -> Unit = {},
-) {
-    val colors = LocalHulkColors.current
-    val shape = RoundedCornerShape(if (isTv) 18.dp else 16.dp)
-    var focused by remember { mutableStateOf(false) }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = if (isTv) 104.dp else 116.dp)
-            .clip(shape)
-            .background(NeoNeutralSurfaces.card)
-            .goldFocusEdge(shape = shape, visible = focused)
-            .border(1.dp, NeoNeutralSurfaces.stroke, shape)
-            .then(buttonRequester?.let(Modifier::focusRequester) ?: Modifier)
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onButtonFocused()
-            }
-            .onPlaced { onButtonPlaced() }
-            .focusable()
-            .padding(horizontal = 16.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(13.dp),
-    ) {
-        if (showLoading) {
-            LoadingRing(Modifier.size(if (isTv) 26.dp else 22.dp))
-        } else {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = colors.gold,
-                modifier = Modifier.size(if (isTv) 26.dp else 22.dp),
-            )
-        }
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = title,
-                color = colors.text,
-                fontSize = if (isTv) 15.sp else 14.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            if (body != null) {
-                Spacer(Modifier.height(3.dp))
-                Text(body, color = colors.textMuted, fontSize = 11.sp, lineHeight = 15.sp)
-            }
-        }
-    }
-}
-
-private fun footballFeedErrorCopy(error: FootballFeedError?): String = when (error) {
-    FootballFeedError.RATE_LIMITED -> "المزود طلب الانتظار قبل التحديث التالي"
-    FootballFeedError.INVALID_RESPONSE -> "وصلت بيانات غير مكتملة من الخادم"
-    FootballFeedError.NOT_CONFIGURED -> "خدمة المباريات غير مفعلة"
-    FootballFeedError.UNAVAILABLE, null -> "تعذر الوصول الى خدمة المباريات"
-}
 
 @Composable
 private fun ActiveDownloadsSection(
@@ -11015,6 +10688,7 @@ private data class DestinationEntry(val destination: MainDestination, val icon: 
 private val destinations = listOf(
     DestinationEntry(MainDestination.HOME, Icons.Rounded.Home, "الرئيسية"),
     DestinationEntry(MainDestination.LIVE, Icons.Rounded.LiveTv, "البث المباشر"),
+    DestinationEntry(MainDestination.FOOTBALL, Icons.Rounded.SportsSoccer, "المباريات"),
     DestinationEntry(MainDestination.MOVIES, Icons.Rounded.Movie, "الافلام"),
     DestinationEntry(MainDestination.SERIES, Icons.Rounded.Tv, "المسلسلات"),
     DestinationEntry(MainDestination.FAVORITES, Icons.Rounded.Favorite, "المفضلة"),
