@@ -595,6 +595,26 @@ class PlaybackHealthMonitorTest {
     }
 
     @Test
+    fun `sampling a deliberate short picture hold restarts the live watchdog`() {
+        val monitor = healthyLiveMonitor()
+        val still = healthySnapshot(positionMs = 700L)
+        val stalledAt = 2_000L
+        monitor.evaluate(stalledAt, still)
+
+        val pauseAt = stalledAt + LIVE_STALL_TIMEOUT_MS - 50L
+        assertEquals(
+            PlaybackHealthSignal.NONE,
+            monitor.evaluate(pauseAt, still.copy(playWhenReady = false, isPlaying = false)),
+        )
+        val resumedAt = pauseAt + 100L
+        assertEquals(PlaybackHealthSignal.NONE, monitor.evaluate(resumedAt, still))
+        assertEquals(
+            PlaybackHealthSignal.REBUFFER_STALL,
+            monitor.evaluate(resumedAt + LIVE_STALL_TIMEOUT_MS, still),
+        )
+    }
+
+    @Test
     fun `buffering progress restarts stall deadline`() {
         val monitor = healthyLiveMonitor()
         monitor.evaluate(
