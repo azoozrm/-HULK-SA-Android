@@ -404,8 +404,13 @@ internal class ArabicCommentaryOwner(
         val other = if (target === videoPlayer) commentary else videoPlayer
         val bufferedAheadMs = (target.bufferedPosition - target.currentPosition).coerceAtLeast(0L)
         val liveTarget = target.isCurrentMediaItemLive
-        if (target.playbackState != Player.STATE_READY || target.isLoading ||
-            (!liveTarget && bufferedAheadMs < result.appliedMs + 500L)
+        if (arabicCommentaryStepBlocked(
+                ready = target.playbackState == Player.STATE_READY,
+                isLive = liveTarget,
+                isLoading = target.isLoading,
+                bufferedAheadMs = bufferedAheadMs,
+                appliedMs = result.appliedMs,
+            )
         ) {
             state = state.copy(message = "انتظر تجهيز البث قبل تطبيق هذه الخطوة")
             Log.i(

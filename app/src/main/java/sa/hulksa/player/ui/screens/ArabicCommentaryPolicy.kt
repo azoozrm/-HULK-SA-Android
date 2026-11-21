@@ -86,6 +86,19 @@ internal fun arabicCommentaryDelayedSource(
     ArabicCommentarySymptom.COMMENTARY_LATE -> ArabicCommentaryDelayedSource.VIDEO
 }
 
+/**
+ * A sync step needs a READY target. At a live edge the player can be READY while it reports
+ * `isLoading` or zero buffered-ahead; only a VOD target needs real buffered room for the hold.
+ * This keeps the live-sync studio usable without weakening the VOD guard.
+ */
+internal fun arabicCommentaryStepBlocked(
+    ready: Boolean,
+    isLive: Boolean,
+    isLoading: Boolean,
+    bufferedAheadMs: Long,
+    appliedMs: Long,
+): Boolean = !ready || (!isLive && (isLoading || bufferedAheadMs < appliedMs + 500L))
+
 internal fun arabicCommentaryDelayFor(
     delays: ArabicCommentaryDelays,
     source: ArabicCommentaryDelayedSource,

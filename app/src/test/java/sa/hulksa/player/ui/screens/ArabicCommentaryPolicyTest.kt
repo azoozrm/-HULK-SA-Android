@@ -372,4 +372,68 @@ class ArabicCommentaryPolicyTest {
             .onFailure { rejected = true }
         assertTrue(rejected)
     }
+
+    @Test
+    fun `live sync steps accept a ready edge even while the player reports loading`() {
+        // The live edge is commonly READY with isLoading=true and zero buffered-ahead. Blocking on
+        // those fields made every sync step fail on the owner TV.
+        assertFalse(
+            arabicCommentaryStepBlocked(
+                ready = true,
+                isLive = true,
+                isLoading = true,
+                bufferedAheadMs = 0L,
+                appliedMs = 1_000L,
+            ),
+        )
+        assertFalse(
+            arabicCommentaryStepBlocked(
+                ready = true,
+                isLive = true,
+                isLoading = false,
+                bufferedAheadMs = 0L,
+                appliedMs = 5_000L,
+            ),
+        )
+        assertTrue(
+            arabicCommentaryStepBlocked(
+                ready = false,
+                isLive = true,
+                isLoading = false,
+                bufferedAheadMs = 30_000L,
+                appliedMs = 1_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun `vod sync steps still require loading-free buffered room`() {
+        assertTrue(
+            arabicCommentaryStepBlocked(
+                ready = true,
+                isLive = false,
+                isLoading = true,
+                bufferedAheadMs = 30_000L,
+                appliedMs = 1_000L,
+            ),
+        )
+        assertTrue(
+            arabicCommentaryStepBlocked(
+                ready = true,
+                isLive = false,
+                isLoading = false,
+                bufferedAheadMs = 1_000L,
+                appliedMs = 1_000L,
+            ),
+        )
+        assertFalse(
+            arabicCommentaryStepBlocked(
+                ready = true,
+                isLive = false,
+                isLoading = false,
+                bufferedAheadMs = 2_000L,
+                appliedMs = 1_000L,
+            ),
+        )
+    }
 }
